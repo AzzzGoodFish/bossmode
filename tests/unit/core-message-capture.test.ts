@@ -38,15 +38,15 @@ it("explicit empty IDs and FYI remain empty even when textual mentions say @all"
   const mention=vi.fn();stops.push(initRouter({mention}));
   const message=postMessage("capture-room","user","@all not dispatched",["all"],{mentionMemberIds:[],needResponse:[],needResponseMemberIds:[]});
   await flush();expect(mention).not.toHaveBeenCalled();
-  expect(captures.getCapture("capture-room",message.id)?.snapshot).toMatchObject({targets:{ordinary:[],urgent:[],dm:[]},needResponse:[]});
+  expect(captures.getCapture("capture-room",message.id)?.snapshot).toMatchObject({targets:{ordinary:[],dm:[]},needResponse:[]});
 });
 
-it("splits urgent/ordinary targets once, excludes self and preserves the original reply context",async()=>{
-  const mention=vi.fn(),urgent=vi.fn();stops.push(initRouter({mention,urgent}));
-  postMessage("capture-room","Alpha","@Beta later !Gamma now !Alpha self",["Beta","Gamma","Alpha"],{senderMemberId:"mem_a",mentionMemberIds:["mem_b","mem_c","mem_a"],urgentMentions:["Gamma","Alpha"],urgentMentionMemberIds:["mem_c","mem_a"],needResponse:[],needResponseMemberIds:[]});
-  await flush();expect(mention).toHaveBeenCalledTimes(1);expect(urgent).toHaveBeenCalledTimes(1);
-  expect(mention.mock.calls[0][1]).toBe("mem_b");expect(urgent.mock.calls[0][1]).toBe("mem_c");
-  expect(urgent.mock.calls[0][2]).toMatchObject({senderName:"Alpha",senderOrigin:"member",deliveryKind:"urgent",needResponse:[],needResponseMemberIds:[]});
+it("routes ordinary targets once, excludes self and preserves the original reply context",async()=>{
+  const mention=vi.fn();stops.push(initRouter({mention}));
+  postMessage("capture-room","Alpha","@Beta later and @Alpha self",["Beta","Alpha"],{senderMemberId:"mem_a",mentionMemberIds:["mem_b","mem_a"],needResponse:[],needResponseMemberIds:[]});
+  await flush();expect(mention).toHaveBeenCalledTimes(1);
+  expect(mention.mock.calls[0][1]).toBe("mem_b");
+  expect(mention.mock.calls[0][2]).toMatchObject({senderName:"Alpha",senderOrigin:"member",deliveryKind:"ordinary",needResponse:[],needResponseMemberIds:[]});
 });
 
 it("DM user delivery goes through the same capture/router and own replies never reactivate the member",async()=>{
@@ -77,12 +77,12 @@ it("a member chat call cannot post into another member's DM",async()=>{
   expect(readMessages("dm:mem_b")).toEqual([]);
 });
 
-it("self urgent is silent and an optional normal callback can accept an urgent target",async()=>{
+it("self mentions are silent and other targets keep the ordinary path",async()=>{
   const mention=vi.fn();stops.push(initRouter({mention}));
-  postMessage("capture-room","Alpha","!Alpha",["Alpha"],{senderMemberId:"mem_a",mentionMemberIds:["mem_a"],urgentMentionMemberIds:["mem_a"]});
+  postMessage("capture-room","Alpha","@Alpha",["Alpha"],{senderMemberId:"mem_a",mentionMemberIds:["mem_a"]});
   await flush();expect(mention).not.toHaveBeenCalled();
-  postMessage("capture-room","Beta","!Alpha",["Alpha"],{senderMemberId:"mem_b",mentionMemberIds:["mem_a"],urgentMentionMemberIds:["mem_a"]});
-  await flush();expect(mention).toHaveBeenCalledTimes(1);expect(mention.mock.calls[0][2].deliveryKind).toBe("urgent");
+  postMessage("capture-room","Beta","@Alpha ping",["Alpha"],{senderMemberId:"mem_b",mentionMemberIds:["mem_a"]});
+  await flush();expect(mention).toHaveBeenCalledTimes(1);expect(mention.mock.calls[0][2].deliveryKind).toBe("ordinary");
 });
 
 it("message/debt settlement rolls back together and only the stable own-chat sender settles debt",async()=>{

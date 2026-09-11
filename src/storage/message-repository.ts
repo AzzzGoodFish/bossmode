@@ -6,7 +6,6 @@ import type { SearchOptions, SearchResult } from "../workspace/message-store.js"
 
 const lists = {
   mentions: ["mention", "label"], mentionMemberIds: ["mention", "id"],
-  urgentMentions: ["urgent", "label"], urgentMentionMemberIds: ["urgent", "id"],
   needResponse: ["response", "label"], needResponseMemberIds: ["response", "id"],
 } as const;
 type Row = { position: number; scope_id: string; id: string; seq: number | null; ts: number; sender: string; sender_member_id: string | null; content: string; type: RoomMessage["type"] | null; extra_json: string };
@@ -16,11 +15,16 @@ export type MessagePageOptions = { limit?: number; before?: string; around?: str
 function hydrate(db: Database, row: Row): RoomMessage {
   const {fields:extra,presentLists:present} = JSON.parse(row.extra_json) as {fields:Record<string,unknown>;presentLists:string[]};
   const result: RoomMessage = { ...extra, id: row.id, ts: row.ts, sender: row.sender, content: row.content, mentions: [] };
+  // Retired fields (`!name` urgent gesture, 2026-09-11) are never surfaced, even
+  // for rows written before the retirement.
+  delete (result as unknown as Record<string, unknown>).urgentMentions;
+  delete (result as unknown as Record<string, unknown>).urgentMentionMemberIds;
   if (row.seq !== null) result.seq = row.seq;
   if (row.sender_member_id !== null) result.senderMemberId = row.sender_member_id;
   if (row.type !== null) result.type = row.type;
   const values = db.all<{ kind: string; value_kind: string; value: string }>("SELECT kind,value_kind,value FROM message_mentions WHERE scope_id=? AND message_id=? ORDER BY ordinal", row.scope_id,row.id);
   for (const key of present as (keyof typeof lists)[]) {
+    if (!(key in lists)) continue; // retired list field — ignored on read
     const [kind, valueKind] = lists[key];
     result[key] = values.filter(v => v.kind === kind && v.value_kind === valueKind).map(v => v.value);
   }
@@ -40,6 +44,9 @@ function insert(db: Database, scopeId: string, message: RoomMessage): void {
   const { id,seq,ts,sender,senderMemberId,content,type,replyTo,...extra } = message;
   const listFields = Object.keys(lists).filter(key => key in extra);
   for (const key of listFields) delete (extra as Record<string, unknown>)[key];
+  // Retired fields are dropped on write (including historical imports).
+  delete (extra as Record<string, unknown>).urgentMentions;
+  delete (extra as Record<string, unknown>).urgentMentionMemberIds;
   db.run(`INSERT INTO messages(scope_id,id,seq,ts,sender,sender_member_id,origin,content,content_lower,type,extra_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,scopeId,id,seq ?? null,ts,sender,senderMemberId ?? null,senderMemberId ? "member" : sender === "user" ? "user" : sender === "system" ? "system" : "unresolved",content,content.toLowerCase(),type ?? null,JSON.stringify({fields:extra,presentLists:listFields}));
   for (const key of listFields as (keyof typeof lists)[]) {
     const [kind,valueKind] = lists[key];

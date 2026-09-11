@@ -41,7 +41,7 @@ describe("chat tool contract", () => {
     writeFileSync(source, "must not be copied");
     const copy = vi.spyOn(attachments, "processAgentAttachments");
     const activate = vi.fn();
-    const stop = initRouter({ mention: activate, urgent: activate });
+    const stop = initRouter({ mention: activate });
     const debts = new ReplyObligationRepository(fixture.db);
     const before = loadScopeMessages(scope);
     const rejected: Array<[string, unknown]> = [

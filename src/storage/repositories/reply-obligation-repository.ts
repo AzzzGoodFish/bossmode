@@ -31,7 +31,7 @@ export class ReplyObligationRepository {
       const { capture: stored } = new DeliveryRepository(tx).captureMessage(capture, at);
       const s = stored.snapshot;
       if (s.messageType !== "chat" || s.needResponse?.length === 0) return { opened: 0 };
-      const targets = new Map([...s.targets.ordinary, ...s.targets.urgent, ...s.targets.dm].map(actor => [actor.actorKey, actor]));
+      const targets = new Map([...s.targets.ordinary, ...s.targets.dm].map(actor => [actor.actorKey, actor]));
       const required = s.origin === "user"
         ? new Set(targets.keys())
         : new Set((s.needResponse ?? []).map(actor => actor.actorKey));

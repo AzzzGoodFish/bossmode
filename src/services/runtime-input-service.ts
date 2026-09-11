@@ -51,7 +51,7 @@ export function acceptControlInput(scopeValue:string,memberId:string,payload:Pre
   const capture:CapturedMessage={scopeId,messageId,snapshot:{
     message:{id:messageId,sender:"system",content:payload.prompt,mentions:[]},
     context:{control:true,trigger:payload.trigger},origin:"system",messageType:"chat",senderActorKey:null,senderMemberId:null,
-    targets:{ordinary:deliveryKind==="ordinary"?[actor]:[],urgent:[],dm:deliveryKind==="dm"?[actor]:[]},
+    targets:{ordinary:deliveryKind==="ordinary"?[actor]:[],dm:deliveryKind==="dm"?[actor]:[]},
     needResponse:replyExpected?[actor]:[],
   }};
   return db.transaction(()=>{

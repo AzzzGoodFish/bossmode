@@ -124,8 +124,7 @@ describe("self-only update_profile", () => {
       expect(router.parseMentionMemberIds(`@${next}`, roster)).toEqual([f.own.id]);
       expect(router.parseMentionMemberIds(`@${f.own.name}`, roster)).toEqual([f.peer.id]);
       expect(router.parseMentionMemberIds(`\`@all\` @${next}-unknown`, roster)).toEqual([]);
-      expect(router.parseUrgentMentionMemberIds(`!${next}`, roster)).toEqual([f.own.id]);
-      expect(router.parseUrgentMentionMemberIds(`word!${next}`, roster)).toEqual([]);
+      expect(router.parseMentions(`!${next} and word!${next}`, [next])).toEqual([]);
       expect(router.parseMentions("@foo`bar`", ["foo", "foo`bar`"])).toEqual(["foo`bar`"]);
       expect(router.parseMentions("`@foo`", ["foo"])).toEqual([]);
       postMessage(f.room.id, "user", "old name now targets another member", [f.own.name], { mentionMemberIds: [f.peer.id] });

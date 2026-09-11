@@ -244,7 +244,6 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                       grouped={grouped}
                       isMarkdown={msg.sender !== "user" && msg.sender !== "system"}
                       mentions={msg.mentions}
-                      urgentMentions={msg.urgentMentions}
                       members={members}
                       loginName={getUsername()}
                       roomId={roomId}

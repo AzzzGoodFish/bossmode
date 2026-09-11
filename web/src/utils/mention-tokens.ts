@@ -1,19 +1,18 @@
 /**
- * Mention token splitting + three-tier pills (Design: mention-highlight v2,
- * fish-approved 2026-08-04).
+ * Mention token splitting + two-tier pills (mention-highlight v2; updated
+ * 2026-09-11 — the `!name` urgent gesture and its blocked-red tier retired).
  *
  * Tiers (existing tokens only, zero new):
  * - `@member` queued activation → accent pill
  * - `@<loginName>` (@me, same judgement as unread mentioned) → amber pill
- * - `!member` urgent interrupt → blocked-red pill
  *
- * Rules mirror the backend parser: only real member names are tinted (an @/!
- * followed by a non-member is plain text); `!` needs a left boundary so
- * "Hello!pm" never fires; code spans/links are excluded by the callers (the
- * remark plugin never visits them; the plain-text path has no code concept).
+ * Rules mirror the backend parser: only real member names are tinted (an @
+ * followed by a non-member is plain text); code spans/links are excluded by
+ * the callers (the remark plugin never visits them; the plain-text path has no
+ * code concept).
  */
 
-export type MentionTier = "member" | "self" | "urgent";
+export type MentionTier = "member" | "self";
 
 export interface MentionTokenPart {
   text: string;
@@ -23,7 +22,6 @@ export interface MentionTokenPart {
 export const MENTION_PILL_CLASSES: Record<MentionTier, string> = {
   member: "bg-accent-dim text-accent-ink rounded px-[3px] py-px font-medium",
   self: "bg-think-dim text-think rounded px-[3px] py-px font-semibold",
-  urgent: "bg-blocked-dim text-blocked rounded px-[3px] py-px font-semibold",
 };
 
 const LEGAL_NAME_CHAR = "[\\w.-]";
@@ -32,7 +30,7 @@ const LEGAL_NAME_CHAR = "[\\w.-]";
  * Strip markdown code segments (inline `…` + fenced blocks) as same-length
  * whitespace — offsets stay stable so match ranges map back to the original
  * text. Mirror of src/shared/mention-text.ts (web cannot import src/shared);
- * parity is locked by tests. Code is literal text: a backticked @/! never tints.
+ * parity is locked by tests. Code is literal text: a backticked @ never tints.
  */
 export function stripCodeSegments(text: string): string {
   return text
@@ -47,54 +45,33 @@ function escapeRegex(value: string): string {
 export interface MentionTokenOptions {
   /** Names eligible for highlighting — persisted mention snapshot, or the room roster fallback, plus the user's login name. */
   names: string[];
-  /** `!` urgent targets (persisted snapshot). A `!name` only tints red when the name is in this set — otherwise plain text. */
-  urgentNames?: string[];
   /** Human user's login name → "self" (amber) tier for `@<loginName>`. */
   loginName?: string | null;
 }
 
 /**
- * Split text into plain and mention parts. A token is `@name` or `!name`;
- * membership decides whether it tints at all, the prefix + snapshots decide the tier.
+ * Split text into plain and mention parts. A token is `@name`; membership
+ * decides whether it tints at all, the login name decides the self tier.
  */
 export function splitMentionTokens(content: string, opts: MentionTokenOptions): MentionTokenPart[] {
   if (!content) return [];
   const names = [...new Set(opts.names.map((n) => n.trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
   if (names.length === 0) return [{ text: content }];
-  const urgent = new Set(opts.urgentNames ?? []);
   const loginName = opts.loginName || undefined;
 
-  // The left-boundary rule applies to `!` only ("Hello!pm" must not fire);
-  // `@` keeps the long-standing behavior (no left constraint — the backend
-  // parser works the same way). Boundary is captured, not lookbehind, to keep
-  // parity with older JS targets.
   const scan = stripCodeSegments(content);
   const nameAlt = names.map(escapeRegex).join("|");
-  const bangRe = `(^|[^\\w!])(!)(${nameAlt})(?!${LEGAL_NAME_CHAR})`;
   const atRe = `(@)(${nameAlt})(?!${LEGAL_NAME_CHAR})`;
-  const matcher = new RegExp(`${bangRe}|${atRe}`, "g");
+  const matcher = new RegExp(atRe, "g");
 
   const parts: MentionTokenPart[] = [];
   let cursor = 0;
   for (let match = matcher.exec(scan); match; match = matcher.exec(scan)) {
-    const isBang = match[2] === "!";
-    const boundary = isBang ? match[1] : "";
-    const prefix = isBang ? "!" : "@";
-    const name = (isBang ? match[3] : match[5]) as string;
-    const tokenStart = match.index + boundary.length;
+    const name = match[2] as string;
+    const tokenStart = match.index;
     if (tokenStart > cursor) parts.push({ text: content.slice(cursor, tokenStart) });
-    let tier: MentionTier | undefined;
-    if (prefix === "!") {
-      // A `!` before a non-urgent name is plain text (parser never fired either).
-      if (urgent.has(name)) tier = "urgent";
-    } else {
-      tier = loginName && name === loginName ? "self" : "member";
-    }
-    if (tier) {
-      parts.push({ text: `${prefix}${name}`, tier });
-    } else {
-      parts.push({ text: match[0].slice(boundary.length) });
-    }
+    const tier: MentionTier = loginName && name === loginName ? "self" : "member";
+    parts.push({ text: `@${name}`, tier });
     cursor = match.index + match[0].length;
   }
   if (cursor < content.length) parts.push({ text: content.slice(cursor) });

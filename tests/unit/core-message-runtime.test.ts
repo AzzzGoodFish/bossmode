@@ -8,7 +8,7 @@ import {DeliveryRepository} from "../../src/storage/repositories/delivery-reposi
 import {getDatabase} from "../../src/storage/database.js";
 setupTestWorkspace();
 
-it("room @all keeps working members undisturbed, including mixed @all/urgent text",async()=>{
+it("room @all keeps working members undisturbed; `!name` stays plain text",async()=>{
   const server=await createTestServer();let release:undefined|(()=>void);
   try{
     resetMocks();const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Broadcast admission",["busy-broadcast","idle-broadcast"]);
@@ -22,7 +22,6 @@ it("room @all keeps working members undisturbed, including mixed @all/urgent tex
     expect(mockAbortFn).not.toHaveBeenCalled();
     const body=JSON.parse(response.body);const message=body.message??body;
     const capture=new DeliveryRepository(getDatabase()).getCapture(room.id,message.id)!;
-    expect(capture.snapshot.targets.urgent).toEqual([]);
     expect(capture.snapshot.targets.ordinary.map(actor=>actor.actorKey)).toEqual(room.globalMemberIds);
   }finally{release?.();await closeTestServer(server);}
 });
@@ -34,7 +33,7 @@ it("HTTP DM posting captures one recipient and invokes the runtime only once",as
     const response=await jsonRequest(server.port,"POST",`/api/dm/${id}/messages`,{token,body:{content:"Direct request"}});expect(response.status,response.body).toBe(200);
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));await new Promise<void>(resolve=>setImmediate(resolve));expect(mockPromptFn).toHaveBeenCalledTimes(1);
     const message=JSON.parse(response.body).message;
-    expect(new DeliveryRepository(getDatabase()).getCapture(`dm:${id}`,message.id)?.snapshot).toMatchObject({origin:"user",targets:{ordinary:[],urgent:[],dm:[{actorKey:id,memberId:id}]}});
+    expect(new DeliveryRepository(getDatabase()).getCapture(`dm:${id}`,message.id)?.snapshot).toMatchObject({origin:"user",targets:{ordinary:[],dm:[{actorKey:id,memberId:id}]}});
   }finally{await closeTestServer(server);}
 });
 

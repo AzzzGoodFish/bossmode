@@ -839,9 +839,6 @@ export interface RoomMessage {
   content: string;
   mentions: string[];
   mentionMemberIds?: string[];
-  /** `!name` urgent-interrupt targets (subset of mentions) — name snapshots + ids. */
-  urgentMentions?: string[];
-  urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event" | "topic_event";
   /** Historical task_event payload (task feature retired 2026-09-11) — kept only so old messages still parse. */

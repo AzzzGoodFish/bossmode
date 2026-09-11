@@ -5,16 +5,10 @@ import { useDraft } from "../hooks/useDraft";
 import { useUpload } from "../hooks/useUpload";
 import { AttachmentUploader } from "./AttachmentUploader";
 
-/**
- * Detect an open mention menu at the cursor. `@` keeps the long-standing
- * behavior; `!` shares the menu interaction (fish 2026-08-05) with the
- * parser's left-boundary rule — "Hello!" never pops the menu.
- */
-export function detectMentionTrigger(textBeforeCursor: string): { trigger: "@" | "!"; filter: string } | null {
+/** Detect an open @ mention menu at the cursor. */
+export function detectMentionTrigger(textBeforeCursor: string): { trigger: "@"; filter: string } | null {
   const atMatch = textBeforeCursor.match(/@([\w-]*)$/);
   if (atMatch) return { trigger: "@", filter: atMatch[1].toLowerCase() };
-  const bangMatch = textBeforeCursor.match(/(?:^|[^\w!])!([\w-]*)$/);
-  if (bangMatch) return { trigger: "!", filter: bangMatch[1].toLowerCase() };
   return null;
 }
 
@@ -52,9 +46,6 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionIdx, setMentionIdx] = useState(0);
-  // Which gesture opened the member menu — @ (queued mention, offers "all")
-  // or ! (urgent interrupt, members only — `!all` is not a thing).
-  const [mentionTrigger, setMentionTrigger] = useState<"@" | "!">("@");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -142,7 +133,6 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
     const cursorPos = inputRef.current?.selectionStart || text.length;
     const hit = detectMentionTrigger(text.slice(0, cursorPos));
     if (hit) {
-      setMentionTrigger(hit.trigger);
       setShowMentions(true);
       setMentionFilter(hit.filter);
     } else {
@@ -154,9 +144,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
     const cursorPos = inputRef.current?.selectionStart || value.length;
     const textBeforeCursor = value.slice(0, cursorPos);
     const textAfterCursor = value.slice(cursorPos);
-    const replaced = mentionTrigger === "!"
-      ? textBeforeCursor.replace(/![\w-]*$/, `!${name} `)
-      : textBeforeCursor.replace(/@[\w-]*$/, `@${name} `);
+    const replaced = textBeforeCursor.replace(/@[\w-]*$/, `@${name} `);
     setValue(replaced + textAfterCursor);
     setShowMentions(false);
     inputRef.current?.focus();
@@ -201,7 +189,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
     el.style.overflowY = scrollH > 200 ? "auto" : "hidden";
   }, [value]);
 
-  const mentionChoices = mentionTrigger === "!" ? members : ["all", ...members];
+  const mentionChoices = ["all", ...members];
   const filteredMembers = mentionChoices.filter((m) =>
     m.toLowerCase().startsWith(mentionFilter),
   );
@@ -257,7 +245,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
-                <span className="font-mono">{mentionTrigger}{name}</span>
+                <span className="font-mono">@{name}</span>
                 {name === "all" ? (
                   <span className={`ml-2 text-xs ${active ? "text-accent-ink/80" : "text-ink-4"}`}>activate all members</span>
                 ) : memberHints[name] ? (

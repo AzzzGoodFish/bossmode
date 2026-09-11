@@ -1,7 +1,7 @@
 import type { Database } from "../database.js";
 
 export type DeliveryJson = null | boolean | number | string | DeliveryJson[] | { [key: string]: DeliveryJson };
-export type DeliveryKind = "ordinary" | "urgent" | "dm";
+export type DeliveryKind = "ordinary" | "dm";
 export interface DeliveryActor { actorKey: string; memberId: string | null }
 export interface CapturedDeliverySnapshot {
   /** Original delivered bytes as JSON values, including historical labels/attachments.
@@ -89,7 +89,7 @@ function validateCapture(c: CapturedMessage): string {
     }
   };
   if (!s.targets) throw new Error("Captured targets are required");
-  for (const kind of ["ordinary", "urgent", "dm"] as const) validateActors(s.targets[kind]);
+  for (const kind of ["ordinary", "dm"] as const) validateActors(s.targets[kind]);
   if (s.needResponse !== null) validateActors(s.needResponse);
   return deliveryJson(s);
 }
@@ -97,7 +97,7 @@ export function deliveryKeyParams(key: DeliveryKey): [string, string, string, De
   deliveryText(key.scopeId, "scope ID");
   deliveryText(key.messageId, "message ID");
   deliveryText(key.targetActorKey, "target actor key");
-  if (!["ordinary", "urgent", "dm"].includes(key.deliveryKind)) throw new Error("Invalid delivery kind");
+  if (!["ordinary", "dm"].includes(key.deliveryKind)) throw new Error("Invalid delivery kind");
   return [key.scopeId, key.messageId, key.targetActorKey, key.deliveryKind];
 }
 
@@ -113,7 +113,7 @@ export class DeliveryRepository {
       const scope = tx.get<{kind: string}>("SELECT kind FROM scopes WHERE id=?", capture.scopeId);
       if (!scope) throw new Error("Captured delivery scope does not exist");
       const targets = capture.snapshot.targets;
-      if (scope.kind === "dm" ? targets.ordinary.length > 0 || targets.urgent.length > 0 : targets.dm.length > 0) {
+      if (scope.kind === "dm" ? targets.ordinary.length > 0 : targets.dm.length > 0) {
         throw new Error("Delivery kind does not match scope");
       }
       const old = tx.get<{snapshot_json: string}>("SELECT snapshot_json FROM delivery_captures WHERE scope_id=? AND message_id=?", capture.scopeId, capture.messageId);

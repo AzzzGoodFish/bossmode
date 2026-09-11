@@ -18,8 +18,6 @@ interface MessageBubbleProps {
   isMarkdown?: boolean;
   /** Parsed room-member name snapshots. An empty array means no activated mentions. */
   mentions?: string[];
-  /** `!name` urgent targets (persisted snapshot) → blocked-red pill tier. */
-  urgentMentions?: string[];
   /** Room roster — fallback highlight source when no snapshot exists. */
   members?: string[];
   /** Human user's login name → amber "@me" pill tier. */
@@ -92,7 +90,7 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 }
 
 export function MessageBubble({
-  sender, senderMemberId, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply,
+  sender, senderMemberId, content, time, fullTime, grouped = false, isMarkdown = false, mentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -178,7 +176,6 @@ export function MessageBubble({
             content={content}
             isMarkdown={isMarkdown}
             mentions={mentions}
-            urgentMentions={urgentMentions}
             members={members}
             loginName={loginName}
             bubbleBg={bubbleBg}
@@ -190,7 +187,7 @@ export function MessageBubble({
           />
         ) : (
           <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
-            {isMarkdown ? <Markdown content={content} mentions={mentions} urgentMentions={urgentMentions} members={members} loginName={loginName} /> : <MentionText content={content} mentions={mentions} urgentMentions={urgentMentions} members={members} loginName={loginName} />}
+            {isMarkdown ? <Markdown content={content} mentions={mentions} members={members} loginName={loginName} /> : <MentionText content={content} mentions={mentions} members={members} loginName={loginName} />}
           </div>
         )}
 
@@ -219,12 +216,11 @@ function legacyToAttachment(a: { originalName: string; path: string }): RenderAt
 
 /** Render message body bubble + lightweight attachment cards. */
 function MessageWithAttachments({
-  content, isMarkdown, mentions, urgentMentions, members, loginName, bubbleBg, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
+  content, isMarkdown, mentions, members, loginName, bubbleBg, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview,
 }: {
   content: string;
   isMarkdown: boolean;
   mentions?: string[];
-  urgentMentions?: string[];
   members?: string[];
   loginName?: string | null;
   bubbleBg: string;
@@ -249,7 +245,7 @@ function MessageWithAttachments({
     <div className="max-w-full">
       {hasBody && (
         <div className={`${bubbleBg} border rounded-lg px-3 py-2 text-sm text-ink-1 break-words leading-relaxed inline-block max-w-full`}>
-          {isMarkdown ? <Markdown content={bodyText} mentions={mentions} urgentMentions={urgentMentions} members={members} loginName={loginName} /> : <MentionText content={bodyText} mentions={mentions} urgentMentions={urgentMentions} members={members} loginName={loginName} />}
+          {isMarkdown ? <Markdown content={bodyText} mentions={mentions} members={members} loginName={loginName} /> : <MentionText content={bodyText} mentions={mentions} members={members} loginName={loginName} />}
         </div>
       )}
 
@@ -438,10 +434,9 @@ export function mentionTextParts(content: string, mentions?: string[]): MentionT
   return parts.length ? parts : [{ text: content, highlighted: false }];
 }
 
-function MentionText({ content, mentions, urgentMentions, members, loginName }: { content: string; mentions?: string[]; urgentMentions?: string[]; members?: string[]; loginName?: string | null }) {
+function MentionText({ content, mentions, members, loginName }: { content: string; mentions?: string[]; members?: string[]; loginName?: string | null }) {
   const parts = splitMentionTokens(content, {
     names: mentionNameSet(mentions, members, loginName),
-    urgentNames: urgentMentions ?? [],
     loginName,
   });
   return (

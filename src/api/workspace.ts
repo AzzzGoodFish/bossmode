@@ -11,7 +11,7 @@ import { clearCurrentSession, clearCurrentSessions } from "../workspace/session-
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
-import { parseMentionMemberIds, parseMentions, parseUrgentMentionMemberIds, parseUrgentMentions } from "../communication/router.js";
+import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
@@ -384,20 +384,15 @@ addRoute("POST", "/api/rooms/:id/messages", async (req, res, params) => {
     return;
   }
 
-  // Parse @ mentions from content
+  // Parse @ mentions from content (`!name` is plain text — gesture retired 2026-09-11)
   const roomMembers = roomStore.getRoomMembers(params.id);
-  const urgentMentions = parseUrgentMentions(content, roomMembers.map((member) => member.name));
-  const urgentMentionMemberIds = parseUrgentMentionMemberIds(content, roomMembers);
-  // ! targets merge into mentions/mentionMemberIds — unread, highlight and
-  // mention stats share one list (fish 2026-08-04).
-  const mentions = [...new Set([...parseMentions(content, roomMembers.map((member) => member.name)), ...urgentMentions])];
-  const mentionMemberIds = [...new Set([...parseMentionMemberIds(content, roomMembers), ...urgentMentionMemberIds])];
+  const mentions = parseMentions(content, roomMembers.map((member) => member.name));
+  const mentionMemberIds = parseMentionMemberIds(content, roomMembers);
 
   // Post via message-bus (writes + broadcasts + notifies router listeners)
   const extra = {
     mentionMemberIds,
     ...(replyTo ? { replyTo } : {}),
-    ...(urgentMentions.length > 0 ? { urgentMentions, urgentMentionMemberIds } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(artifacts.length > 0 ? { artifacts } : {}),
   };

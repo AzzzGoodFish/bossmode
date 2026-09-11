@@ -31,7 +31,7 @@ function capture(messageId = "msg-1", scopeId = "r"): CapturedMessage {
     message: { id: messageId, sender: "user", content: "@all !Old Name original", mentions: ["all"], attachments: [{path:"original.txt"}] },
     context: { banner: "original reply context", nested: [1, true, null] },
     origin: "user", messageType: "chat", senderActorKey: null, senderMemberId: null,
-    targets: { ordinary: scopeId.startsWith("dm:") ? [] : [oldActor, modernActor], urgent: [], dm: scopeId.startsWith("dm:") ? [oldActor] : [] },
+    targets: { ordinary: scopeId.startsWith("dm:") ? [] : [oldActor, modernActor], dm: scopeId.startsWith("dm:") ? [oldActor] : [] },
     needResponse: null,
   } };
 }
@@ -49,7 +49,7 @@ function ownReply(id: string, scopeId = "r", actor = oldActor): CapturedMessage 
   const c = capture(id, scopeId);
   Object.assign(c.snapshot, { origin: "member", senderActorKey: actor.actorKey, senderMemberId: actor.memberId });
   c.snapshot.message.sender = "Old Name";
-  c.snapshot.targets = { ordinary: [], urgent: [], dm: [] };
+  c.snapshot.targets = { ordinary: [], dm: [] };
   return c;
 }
 function restart() {
@@ -132,11 +132,10 @@ describe("captured routing acceptance", () => {
     expect(deliveries.getCapture("r", c.messageId)?.snapshot.message.content).toContain("Old Name");
     expect(() => accept(c, "Old Name")).toThrow(/not a captured target/);
   });
-  it("keeps ordinary, urgent, DM and room/topic scope receipts distinct", () => {
-    const c = capture(); c.snapshot.targets.urgent = [oldActor];
+  it("keeps ordinary, DM and room/topic scope receipts distinct", () => {
+    const c = capture();
     expect(accept(c).accepted).toBe(true);
-    expect(accept(c, oldActor.actorKey, "urgent").accepted).toBe(true);
-    expect(accept(c, oldActor.actorKey, "urgent").accepted).toBe(false);
+    expect(accept(c).accepted).toBe(false);
     expect(accept(capture("msg-1", "topic:t")).accepted).toBe(true);
     expect(accept(capture("msg-1", "dm:scope-local-123")).accepted).toBe(true);
     const bad = capture("wrong-kind"); bad.snapshot.targets.dm = [oldActor];
@@ -147,7 +146,7 @@ describe("captured routing acceptance", () => {
     const cases = [
       (c: CapturedMessage) => { c.snapshot.targets.ordinary[0].actorKey = ""; },
       (c: CapturedMessage) => { c.snapshot.targets.ordinary[0].memberId = undefined as any; },
-      (c: CapturedMessage) => { c.snapshot.targets.urgent = undefined as any; },
+      (c: CapturedMessage) => { (c.snapshot.targets as any).dm = undefined; },
       (c: CapturedMessage) => { c.snapshot.targets.ordinary.push(oldActor); },
       (c: CapturedMessage) => { c.snapshot.context = {fn: (() => {}) as any}; },
       (c: CapturedMessage) => { c.snapshot.context = {bad: NaN}; },
@@ -204,8 +203,8 @@ describe("per-message reply obligations", () => {
     c.messageId = "explicit"; c.snapshot.message.id = "explicit"; c.snapshot.needResponse = [oldActor];
     expect(replies.openForCapturedMessage(c, 1).opened).toBe(type === "chat" ? 2 : 0);
   });
-  it("member FYI and self-targets do not open debt, urgent alone does not manufacture debt", () => {
-    const c = ownReply("fyi"); c.snapshot.targets.urgent = [oldActor, modernActor];
+  it("member FYI and self-targets do not open debt", () => {
+    const c = ownReply("fyi"); c.snapshot.targets.ordinary = [oldActor, modernActor];
     expect(replies.openForCapturedMessage(c, 1)).toEqual({opened:0});
     const explicit = structuredClone(c); explicit.messageId = "self"; explicit.snapshot.message.id = "self";
     explicit.snapshot.needResponse = [oldActor, modernActor];
@@ -250,7 +249,7 @@ describe("durable queued input state", () => {
     const repeated = queue.enqueue({...key(),payload:{context:capture().snapshot.context,prompt:"captured input"},trigger:"mention"}, 99);
     expect(repeated).toEqual({enqueued:false,input:item});
     expect(() => queue.enqueue({...key(),payload:{prompt:"changed"},trigger:"mention"}, 99)).toThrow(/Conflicting queued/);
-    expect(() => queue.enqueue({...key(),payload:item.payload,trigger:"urgent"}, 99)).toThrow(/Conflicting queued/);
+    expect(() => queue.enqueue({...key(),payload:item.payload,trigger:"system"}, 99)).toThrow(/Conflicting queued/);
     expect(queue.listPending()).toEqual([item]);
     expect(item.status).toBe("pending");
     expect(item.executionAttemptId).toBeNull();

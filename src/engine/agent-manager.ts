@@ -24,7 +24,7 @@ import * as sessionStore from "../workspace/session-store.js";
 import { mainSessionDirectory } from "../workspace/member-session-paths.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
-import { parseMentions, parseUrgentMentions, initRouter } from "../communication/router.js";
+import { initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
 import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
@@ -112,7 +112,7 @@ function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string
   return messages.filter((message) => !isSystemNoticeHiddenFromMembers(message));
 }
 
-/** Last visible message that mentions this member (the @/! that fired the
+/** Last visible message that mentions this member (the @ that fired the
  * activation); -1 when nothing mentions (steer/system activations). */
 function isOwnMessage(message: RoomMessage, memberId: string, memberName: string): boolean {
   return message.senderMemberId !== undefined ? message.senderMemberId === memberId
@@ -122,9 +122,9 @@ function isOwnMessage(message: RoomMessage, memberId: string, memberName: string
 function lastMentionTriggerIndex(messages: RoomMessage[], memberName: string, memberId: string): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (Array.isArray(message.mentionMemberIds) || Array.isArray(message.urgentMentionMemberIds)) {
-      if (message.mentionMemberIds?.includes(memberId) || message.urgentMentionMemberIds?.includes(memberId)) return i;
-    } else if (!memberId.startsWith("mem_") && (message.mentions?.includes(memberName) || message.urgentMentions?.includes(memberName))) return i;
+    if (Array.isArray(message.mentionMemberIds)) {
+      if (message.mentionMemberIds.includes(memberId)) return i;
+    } else if (!memberId.startsWith("mem_") && message.mentions?.includes(memberName)) return i;
   }
   return -1;
 }
@@ -1370,7 +1370,6 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
   const active=instances.get(instanceKey(scope,memberId));
   const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
   const broadcast=!scope.includes(":")&&Array.isArray(ctx.capture.snapshot.message.mentions)&&ctx.capture.snapshot.message.mentions.includes("all");
-  const urgent=ctx.deliveryKind==="urgent";
   const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
   const scopeAllowed=memberHasScopeAccess(scope,memberId);
   const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
@@ -1381,20 +1380,19 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
     prepared=prepareScopeInput(scope,memberId,ctx,ctx.capture);
     if(!prepared)throw new Error("Captured message has no executable input");
     const payload={...prepared.payload};
-    if(busy&&!active!.compacting)payload.prompt=`${urgent?`[INTERRUPTED] Your previous turn was aborted by an urgent message from ${ctx.senderName}. Verify partial work before continuing.`:INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
+    if(busy&&!active!.compacting)payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
     return payload;
-  },{placement:urgent||(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
+  },{placement:(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
   if(receipt.input.status!=="pending"){
     return;
   }
   if(receipt.accepted&&busy&&!active!.compacting){
-    interruptAcceptedInput(scope,active!,urgent?"urgent_interrupt":"message_interrupt");
-    if(urgent)postMessage(scope,"system",`Member "${active!.agentName}"'s current turn was aborted by an urgent message from ${ctx.senderName}.`);
+    interruptAcceptedInput(scope,active!,"message_interrupt");
   }
   void pumpRuntimeInputs(scope,memberId).catch(error=>logger.error("router","accepted input execution failed",{scopeId:scope,memberId,error:String(error)}));
 }
 
-async function activateControl(scope:string,memberId:string,ctx?:ReplyContext,urgent=false):Promise<void>{
+async function activateControl(scope:string,memberId:string,ctx?:ReplyContext):Promise<void>{
   if(!memberRuntimeAllowed(memberId))return;
   const prepared=prepareScopeInput(scope,memberId,ctx);
   if(!prepared){
@@ -1404,8 +1402,8 @@ async function activateControl(scope:string,memberId:string,ctx?:ReplyContext,ur
   const active=instances.get(instanceKey(scope,memberId));
   const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
   if(busy&&!active!.compacting)prepared.payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${prepared.payload.prompt}`;
-  const {input}=acceptControlInput(scope,memberId,prepared.payload,prepared.replyExpected,urgent||busy?"front":"tail",prepared.onAccepted);
-  if(busy&&!active!.compacting)interruptAcceptedInput(scope,active!,urgent?"urgent_interrupt":"message_interrupt");
+  const {input}=acceptControlInput(scope,memberId,prepared.payload,prepared.replyExpected,busy?"front":"tail",prepared.onAccepted);
+  if(busy&&!active!.compacting)interruptAcceptedInput(scope,active!,"message_interrupt");
   const running=pumpRuntimeInputs(scope,memberId);
   if(!busy&&!active?.compacting)await waitForInputSettlement(input,running);else void running.catch(error=>logger.error("agent","control input failed",{memberId,error:String(error)}));
 }
@@ -1938,7 +1936,7 @@ function emitAgentLocalEvent(
 /** Manual compaction as ONE explicit conversation action (steer-removal §2):
  * room and DM address the live instance by its real scopeId — no
  * more room-path shortcuts. The operation marks the lifecycle busy BEFORE the
- * first await, so ordinary and urgent messages queue (they never cancel it);
+ * first await, so ordinary messages queue (they never cancel it);
  * explicit Stop stays the one canceller, including in the window between the
  * old prompt settling and compaction actually starting. Shell processes are
  * never killed — blocking shell waits are settled so the member's turn can
@@ -2037,29 +2035,6 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"explicit stop");
   logger.info("agent", "aborted", { member: memberName, memberId, roomId });
   return { ok: true, action: "aborted" };
-}
-
-/**
- * Urgent `!name` gesture (fish 2026-08-04): interrupt the target and deliver
- * the message immediately as a new turn.
- * - no live instance / fully idle → same straight-through as @ (nothing to
- *   abort, no banner)
- * - working → abort with Stop's primitive, but KEEP queued steered inputs
- *   (interruption, not a full stop); the urgent payload goes to the FRONT of
- *   the queue so it becomes the new turn the moment the aborted turn settles;
- *   payload carries the interrupt banner so the member knows its turn was cut
- *   (activation-source transparency — no illusion of continuing)
- * - compacting / dispatch-busy → not safely abortable; queue front, no banner,
- *   compaction is never hard-killed
- * A sender=system room notice records every interrupt (user-visible; members
- * never see system notices per the rc.5 filter).
- */
-export async function interruptAgent(roomId:string,memberRef:string,urgentByName:string,ctx?:ReplyContext):Promise<{ok:boolean;action:string}>{
-  const member=resolveRoomMember(roomId,memberRef);if(!member)return {ok:false,action:"not_found"};
-  const active=instances.get(instanceKey(roomId,member.id));
-  const action=active?.compacting?"queued_front":active?.status==="working"?"interrupted":"activated";
-  await activateControl(roomId,member.id,ctx,true);
-  return {ok:true,action};
 }
 
 // -- Instance management --
@@ -2383,7 +2358,7 @@ function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:st
 
 /** Single mention-router wiring for production server + acceptance tests (canonical room:/dm: scopes only). */
 export function wireMentionRouter():()=>void{
-  return initRouter({mention:admitCapturedActivation,urgent:admitCapturedActivation});
+  return initRouter({mention:admitCapturedActivation});
 }
 
 

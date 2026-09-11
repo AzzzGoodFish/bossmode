@@ -155,8 +155,6 @@ interface MarkdownProps {
   content: string;
   /** Persisted mention snapshot; only members the router activated tint. */
   mentions?: string[];
-  /** `!name` urgent targets (persisted snapshot) → blocked-red tier. */
-  urgentMentions?: string[];
   /** Room roster fallback when no snapshot exists. */
   members?: string[];
   /** Human user's login name → amber "@me" tier. */
@@ -179,12 +177,12 @@ interface MdNode {
 const SKIP_TYPES = new Set(["code", "inlineCode", "link", "linkReference", "definition", "html"]);
 
 /**
- * remark plugin: split @/! mention tokens out of text nodes into pill spans.
+ * remark plugin: split @ mention tokens out of text nodes into pill spans.
  * Works on the mdast text level, so markdown structure (and code) is untouched.
  * The span is emitted via the mdast data.hName escape hatch (remark-rehype
  * honors it on any node).
  */
-export function remarkMentionPills(opts: { names: string[]; urgentNames: string[]; loginName?: string | null }) {
+export function remarkMentionPills(opts: { names: string[]; loginName?: string | null }) {
   const walk = (node: MdNode): void => {
     if (!node.children || SKIP_TYPES.has(node.type)) return;
     const next: MdNode[] = [];
@@ -216,12 +214,12 @@ export function remarkMentionPills(opts: { names: string[]; urgentNames: string[
   return () => (tree: MdNode) => walk(tree);
 }
 
-export function Markdown({ content, mentions, urgentMentions, members, loginName }: MarkdownProps) {
+export function Markdown({ content, mentions, members, loginName }: MarkdownProps) {
   const names = mentionNameSet(mentions, members, loginName);
   const plugin = useMemo(
-    () => remarkMentionPills({ names, urgentNames: urgentMentions ?? [], loginName }),
+    () => remarkMentionPills({ names, loginName }),
     // Names are stable per message render; join for a cheap memo key.
-    [names.join("\0"), (urgentMentions ?? []).join("\0"), loginName],
+    [names.join("\0"), loginName],
   );
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly, remarkAutolinkFix, plugin]} components={components}>

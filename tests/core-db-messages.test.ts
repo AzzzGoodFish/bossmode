@@ -34,9 +34,9 @@ afterEach(async () => { await flush(); fixture.close(); });
 describe("authoritative message transactions",() => {
   it("commits message, sequence, all literal target IDs, reply and intent atomically in every scope",() => {
     for (const scope of ["room","dm:mem_old","topic:t"]) {
-      const msg = appendMessage(scope,{...input,urgentMentions:["target"],urgentMentionMemberIds:["mem_target"],needResponse:["target"],needResponseMemberIds:["mem_target"],replyTo:{messageId:"historic",seq:9}});
+      const msg = appendMessage(scope,{...input,needResponse:["target"],needResponseMemberIds:["mem_target"],replyTo:{messageId:"historic",seq:9}});
       expect(msg.seq).toBe(1); expect(readMessages(scope)).toEqual([msg]);
-      expect(db.get<{n:number}>("SELECT COUNT(*) n FROM message_mentions WHERE scope_id=?",scope)!.n).toBe(6);
+      expect(db.get<{n:number}>("SELECT COUNT(*) n FROM message_mentions WHERE scope_id=?",scope)!.n).toBe(4);
       expect(db.get<{next_seq:number}>("SELECT next_seq FROM scope_sequences WHERE scope_id=?",scope)!.next_seq).toBe(2);
     }
     expect(db.get<{n:number}>("SELECT COUNT(*) n FROM outbox")!.n).toBe(3);
@@ -124,7 +124,7 @@ describe("history, search and cursors",() => {
     expect(db.get<{n:number}>("SELECT COUNT(*) n FROM outbox")!.n).toBe(0);
   });
   it("strictly preserves raw metadata, missing seq, snapshots and full unbounded historical content",() => {
-    const raw: RoomMessage = {id:"raw-id",ts:123,sender:"old",content:"数据".repeat(200000),mentions:[],needResponse:[],urgentMentionMemberIds:[],replyTo:{messageId:"gone",seq:27},attachments:[{id:"a",originalName:"old.txt",storedName:"a.txt",mimeType:"text/plain",size:3} as any]};
+    const raw: RoomMessage = {id:"raw-id",ts:123,sender:"old",content:"数据".repeat(200000),mentions:[],needResponse:[],replyTo:{messageId:"gone",seq:27},attachments:[{id:"a",originalName:"old.txt",storedName:"a.txt",mimeType:"text/plain",size:3} as any]};
     importMessage(db,"room",raw); expect(readMessages("room")).toEqual([raw]);
     expect(() => importMessage(db,"room",raw)).toThrow();
     importMessageNextSequence(db,"room",80); expect(appendMessage("room",input).seq).toBe(80);

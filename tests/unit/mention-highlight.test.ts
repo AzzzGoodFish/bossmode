@@ -1,5 +1,6 @@
 /**
- * Mention highlight three tiers (designer mention-highlight v2, fish-approved).
+ * Mention highlight two tiers (mention-highlight v2; the `!name` urgent tier
+ * retired 2026-09-11).
  *
  * Locks the token splitter (tiers + boundaries) and the remark plugin's mdast
  * transform (pill spans in text, never inside code/links).
@@ -10,58 +11,56 @@ import { remarkMentionPills } from "../../web/src/components/Markdown";
 
 const OPTS = {
   names: ["pm", "qa", "fish"],
-  urgentNames: ["pm"],
   loginName: "fish",
 };
 
-describe("splitMentionTokens — three tiers", () => {
-  it("@member → member tier, @loginName → self tier, !member (snapshotted) → urgent tier", () => {
+describe("splitMentionTokens — two tiers", () => {
+  it("@member → member tier, @loginName → self tier; `!name` is plain text", () => {
     const parts = splitMentionTokens("@qa please review, @fish 看一下, !pm 立刻停下", OPTS);
     const tinted = parts.filter((p) => p.tier);
     expect(tinted).toEqual([
       { text: "@qa", tier: "member" },
       { text: "@fish", tier: "self" },
-      { text: "!pm", tier: "urgent" },
     ]);
+    expect(parts.map((p) => p.text).join("")).toBe("@qa please review, @fish 看一下, !pm 立刻停下");
   });
 
-  it("! before a non-urgent name stays plain text (parser never fired)", () => {
-    const parts = splitMentionTokens("!qa 没快照", { names: ["qa"], urgentNames: [] });
+  it("`!name` never tints, glued or standing", () => {
+    const parts = splitMentionTokens("!qa 没快照", { names: ["qa"] });
     expect(parts.every((p) => !p.tier)).toBe(true);
     expect(parts.map((p) => p.text).join("")).toBe("!qa 没快照");
+    expect(splitMentionTokens("Hello!pm", { names: ["pm"] }).every((p) => !p.tier)).toBe(true);
+    expect(splitMentionTokens("wow!!pm", { names: ["pm"] }).every((p) => !p.tier)).toBe(true);
   });
 
-  it("Hello!pm never fires; @ keeps its no-left-boundary behavior", () => {
-    expect(splitMentionTokens("Hello!pm", { names: ["pm"], urgentNames: ["pm"] }).every((p) => !p.tier)).toBe(true);
-    expect(splitMentionTokens("wow!!pm", { names: ["pm"], urgentNames: ["pm"] }).every((p) => !p.tier)).toBe(true);
+  it("@ keeps its no-left-boundary behavior", () => {
     // @ matches without a left boundary (long-standing router-consistent behavior)
     expect(splitMentionTokens("mail@pm", { names: ["pm"] }).some((p) => p.tier === "member")).toBe(true);
   });
 
   it("non-member names never tint; full-width ！ never fires", () => {
-    expect(splitMentionTokens("@ghost 和 !ghost", { names: ["pm"], urgentNames: ["pm"] }).every((p) => !p.tier)).toBe(true);
-    expect(splitMentionTokens("！pm 全角", { names: ["pm"], urgentNames: ["pm"] }).every((p) => !p.tier)).toBe(true);
+    expect(splitMentionTokens("@ghost 和 !ghost", { names: ["pm"] }).every((p) => !p.tier)).toBe(true);
+    expect(splitMentionTokens("！pm 全角", { names: ["pm"] }).every((p) => !p.tier)).toBe(true);
   });
 
   it("pill classes come from existing tokens only", () => {
     expect(MENTION_PILL_CLASSES.member).toContain("bg-accent-dim");
     expect(MENTION_PILL_CLASSES.self).toContain("bg-think-dim");
-    expect(MENTION_PILL_CLASSES.urgent).toContain("bg-blocked-dim");
   });
 });
 
 describe("splitMentionTokens — code is literal", () => {
-  it("backticked @/! never tints on the plain-text path (user messages)", () => {
-    const parts = splitMentionTokens("对照 `!pm` 与 `@qa` 均应字面", OPTS);
+  it("backticked @ never tints on the plain-text path (user messages)", () => {
+    const parts = splitMentionTokens("对照 `@pm` 与 `@qa` 均应字面", OPTS);
     expect(parts.every((p) => !p.tier)).toBe(true);
     // original text preserved byte-for-byte (strip is whitespace-only)
-    expect(parts.map((p) => p.text).join("")).toBe("对照 `!pm` 与 `@qa` 均应字面");
+    expect(parts.map((p) => p.text).join("")).toBe("对照 `@pm` 与 `@qa` 均应字面");
   });
 
   it("fenced blocks never tint; tokens outside code still do", () => {
-    const fenced = splitMentionTokens("```\n!pm\n@qa\n```\nreal !pm", OPTS);
+    const fenced = splitMentionTokens("```\n@pm\n@qa\n```\nreal @qa", OPTS);
     const tinted = fenced.filter((p) => p.tier);
-    expect(tinted).toEqual([{ text: "!pm", tier: "urgent" }]);
+    expect(tinted).toEqual([{ text: "@qa", tier: "member" }]);
   });
 
   it("backend and web stripCodeSegments are byte-identical", async () => {
@@ -84,7 +83,7 @@ describe("mentionNameSet", () => {
 });
 
 describe("remarkMentionPills mdast transform", () => {
-  const pluginOpts = { names: ["pm", "qa", "fish"], urgentNames: ["pm"], loginName: "fish" };
+  const pluginOpts = { names: ["pm", "qa", "fish"], loginName: "fish" };
 
   function transform(tree: any): any {
     remarkMentionPills(pluginOpts)()(tree);
@@ -99,12 +98,11 @@ describe("remarkMentionPills mdast transform", () => {
     const kids = tree.children[0].children;
     const pills = kids.filter((k: any) => k.data?.hName === "span");
     expect(pills.map((p: any) => [p.value, p.data.hProperties["data-mention-tier"]])).toEqual([
-      ["!pm", "urgent"],
       ["@qa", "member"],
       ["@fish", "self"],
     ]);
-    // non-mention text preserved around the pills
-    expect(kids.filter((k: any) => !k.data).map((k: any) => k.value).join("")).toBe(" stop,  later,  看");
+    // non-mention text preserved around the pills (bang text stays plain)
+    expect(kids.filter((k: any) => !k.data).map((k: any) => k.value).join("")).toBe("!pm stop,  later,  看");
   });
 
   it("never tints inside code spans, code blocks, or links", () => {

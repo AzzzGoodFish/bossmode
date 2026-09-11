@@ -113,8 +113,8 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
       expect(prompt).not.toHaveBeenCalled();
       expect(pendingRuntimeInputCount(owner)).toBe(1);
       if (kind !== "dm") {
-        addMessage(roomId, { ...message, content: "urgent follow-up" });
-        await manager.interruptAgent(roomId, memberId, "user");
+        addMessage(roomId, { ...message, content: "follow-up while compacting" });
+        await manager.activateAgent(roomId, memberId);
         expect(abort).not.toHaveBeenCalled();
         expect(pendingRuntimeInputCount(owner)).toBe(2);
       }

@@ -455,11 +455,8 @@ export interface RoomMessage {
   sender: string; // member name snapshot or "user" (legacy) or "system"
   senderMemberId?: string;
   content: string;
-  mentions: string[]; // member name snapshots (@ and ! targets alike — unread/highlight share one list)
+  mentions: string[]; // member name snapshots (@ targets — unread/highlight share one list)
   mentionMemberIds?: string[];
-  /** `!name` urgent-interrupt targets (subset of mentions). Name snapshots + ids, same dual as mentions/mentionMemberIds. */
-  urgentMentions?: string[];
-  urgentMentionMemberIds?: string[];
   ts: number;
   type?: "task_event" | "knowledge_event" | "topic_event";
   /** Historical task_event payload (task feature retired 2026-09-11) — kept only so old stored messages still type-check. */

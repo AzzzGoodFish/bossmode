@@ -34,23 +34,18 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
     const prepared = JSON.parse(JSON.stringify(input)) as MessageInput;
     if (!prepared.type && !isDm) {
       if (prepared.mentionMemberIds === undefined) prepared.mentionMemberIds = ids(undefined, prepared.mentions);
-      if (prepared.urgentMentionMemberIds === undefined) prepared.urgentMentionMemberIds = ids(undefined, prepared.urgentMentions);
     }
     if (prepared.needResponse !== undefined && prepared.needResponseMemberIds === undefined) prepared.needResponseMemberIds = ids(undefined, prepared.needResponse);
     const message = appendMessageInTransaction(db, scopeId, prepared);
     const sender = message.senderMemberId ? actor(message.senderMemberId) : null;
     const origin: CapturedDeliverySnapshot["origin"] = sender ? "member" : message.sender === "user" ? "user" : message.sender === "system" ? "system" : "unresolved";
     const messageType: CapturedDeliverySnapshot["messageType"] = message.type === "task_event" ? "task_event" : message.type === "knowledge_event" ? "knowledge_event" : message.type ? "notification" : "chat";
-    const targets: CapturedDeliverySnapshot["targets"] = { ordinary: [], urgent: [], dm: [] };
+    const targets: CapturedDeliverySnapshot["targets"] = { ordinary: [], dm: [] };
     if (messageType === "chat") {
       if (isDm) {
         if (origin === "user") targets.dm = [actor(scopeId.slice(3))];
       } else {
-        const captured = ids(message.mentionMemberIds, message.mentions).filter(id => id !== sender?.actorKey);
-        // Existing broadcast precedence: @all is not an urgent interruption.
-        const urgent = new Set(message.mentions.includes("all") ? [] : ids(message.urgentMentionMemberIds, message.urgentMentions));
-        targets.ordinary = captured.filter(id => !urgent.has(id)).map(actor);
-        targets.urgent = captured.filter(id => urgent.has(id)).map(actor);
+        targets.ordinary = ids(message.mentionMemberIds, message.mentions).filter(id => id !== sender?.actorKey).map(actor);
       }
     }
     const needResponse = message.needResponseMemberIds !== undefined || message.needResponse !== undefined

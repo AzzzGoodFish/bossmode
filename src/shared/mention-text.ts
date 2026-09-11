@@ -3,8 +3,8 @@
  * text, replacing them with same-length whitespace so offsets stay stable.
  *
  * Used before mention parsing/rendering: code is literal text, never a command
- * — a `!name` or `@name` inside backticks must not activate, interrupt, or
- * tint (designer alignment blocker, architect ruling 2026-08-04).
+ * — an `@name` inside backticks must not activate or tint (designer alignment
+ * blocker, architect ruling 2026-08-04).
  */
 export function stripCodeSegments(text: string): string {
   return text
