@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase, type Database } from "../storage/database.js";
 import { MembersRepository } from "../storage/repositories/members.js";
+import { documentContentMeta, insertInitialDocument } from "../storage/document-repository.js";
 import { ConversationsRepository } from "../storage/repositories/conversations.js";
 import { prepareMemberSshCredential, syncMemberBirthAssets } from "./member-birth-assets.js";
 import { SshCredentialsRepository } from "../storage/repositories/workspace-settings.js";
@@ -176,7 +177,7 @@ export function createMember(input: CreateMemberInput): MemberRecord {
   return createMemberWithPersona(input, "");
 }
 
-/** All owned assets are prepared before the single identity/settings commit. */
+/** All owned assets are prepared before the single identity/document/settings commit. */
 export function createMemberWithPersona(input: CreateMemberInput, persona: string,
   prepareMetadata?: (record: MemberRecord) => (db: Database) => void,
 ): MemberRecord {
@@ -216,12 +217,14 @@ export function createMemberWithPersona(input: CreateMemberInput, persona: strin
     mkdirSync(join(memberDir(id), "memory"));
     writeMemberProfileSkeleton(id);
     writeFileSync(join(memberDir(id), "persona.md"), persona, "utf8");
+    const personaMeta = documentContentMeta(persona);
     const ssh = prepareMemberSshCredential(id);
     const commitMetadata = prepareMetadata?.(rec);
     if (commitMetadata && (typeof commitMetadata !== "function" || commitMetadata.constructor.name === "AsyncFunction")) throw new Error("member_metadata_commit_must_be_synchronous");
     syncMemberBirthAssets(memberDir(id));
-    getDatabase().transaction(() => {
+    getDatabase().transaction(db => {
       insertRecord(rec);
+      insertInitialDocument(db, { path: `members/${id}/persona.md`, layer: "persona", memberId: id }, personaMeta);
       ensureDefaultRegistry(id);
       new SshCredentialsRepository(getDatabase()).importKey(id, ssh);
       if (commitMetadata) getDatabase().transaction(commitMetadata);

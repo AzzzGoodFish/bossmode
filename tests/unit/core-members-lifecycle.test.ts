@@ -9,6 +9,7 @@ import { settingsMigration } from "../../src/storage/schema/settings.js";
 import { conversationsMigration } from "../../src/storage/schema/conversations.js";
 import { executionMigration } from "../../src/storage/schema/execution.js";
 import { memberArchivesMigration } from "../../src/storage/schema/member-archives.js";
+import { assetsMigration } from "../../src/storage/schema/assets.js";
 import * as registry from "../../src/workspace/member-registry.js";
 import * as profile from "../../src/workspace/member-profile.js";
 import * as wizard from "../../src/workspace/member-archive.js";
@@ -44,7 +45,7 @@ vi.mock("node:fs", async original => {
     },
   };
 });
-const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, memberArchivesMigration];
+const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, assetsMigration, memberArchivesMigration];
 function reopen(): void {
   db.close(); db = openDatabase(join(root, "bossmode.db")); applyStorageMigrations(db, migrations); bindDatabase(db);
 }
@@ -153,13 +154,15 @@ describe("explicit member authority and birth", () => {
     expect(() => registry.importMemberRecord(record("mem_import","Other"))).toThrow(/UNIQUE/);
     expect(registry.getMember("mem_import")?.name).toBe("Imported");
   });
-  it.each(["workspace_registries","ssh_credentials"])("does not swallow %s DB birth failures or leave a partial member", table => {
+  it.each(["memory_documents","workspace_registries","ssh_credentials"])("does not swallow %s DB birth failures or leave a partial member", table => {
     db.exec(`CREATE TRIGGER fail_birth BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT,'injected birth failure'); END;`);
     expect(() => registry.createMember({name:"Failure"})).toThrow("injected birth failure");
     expect(registry.listMembers()).toEqual([]);
     expect(db.all("SELECT * FROM scopes")).toEqual([]);
     expect(db.all("SELECT * FROM workspace_registries")).toEqual([]);
     expect(db.all("SELECT * FROM ssh_credentials")).toEqual([]);
+    expect(db.all("SELECT * FROM memory_documents")).toEqual([]);
+    expect(db.all("SELECT * FROM memory_document_history")).toEqual([]);
     expect(readdirSync(join(root,"members"))).toEqual([]);
   });
   it("never clobbers a preexisting newly allocated path", () => {

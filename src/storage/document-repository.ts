@@ -84,6 +84,16 @@ export function listDocumentHistory(db: Database, path: string): DocumentHistory
       actorType: row.actorType ?? undefined, actorMemberId: row.actorMemberId ?? undefined, actorName: row.actorName ?? undefined }));
 }
 
+/** SQL-only initial ownership for a durably prepared body. The caller includes this strict
+ * insert in its creation transaction; birth has no historical revision or invented actor. */
+export function insertInitialDocument(db: Database, identity: DocumentIdentity,
+  meta: Pick<PrinciplesMeta, "contentHash" | "contentLength">): void {
+  validateDocumentPath(identity.path);
+  db.run(`INSERT INTO memory_documents (path, layer, member_id, scope_id, revision, content_hash, content_length)
+    VALUES (?, ?, ?, ?, 0, ?, ?)`, identity.path, identity.layer, identity.memberId ?? null,
+    identity.scopeId ?? null, meta.contentHash, meta.contentLength);
+}
+
 function putDocument(db: Database, identity: DocumentIdentity, meta: PrinciplesMeta): void {
   assertDocumentIdentity(getDocument(db, identity.path), identity);
   db.run(`INSERT INTO memory_documents (path, layer, member_id, scope_id, revision, content_hash, content_length,
