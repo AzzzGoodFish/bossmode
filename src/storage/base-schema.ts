@@ -1,6 +1,8 @@
 import type { StorageMigration } from "./database.js";
 
-/** Shared cross-domain keys. Domain schemas must not redefine these tables. */
+/** Shared cross-domain keys. Domain schemas must not redefine these tables.
+ * 'topic' stays in the scopes CHECK for schema stability (fish #19358): the retired kind is
+ * cleaned by core-topic-retirement-v1 and no runtime path creates new topic scopes. */
 export const baseStorageMigration: StorageMigration = {
   id: "core-base-v1",
   sql: `
@@ -15,8 +17,6 @@ CREATE TABLE storage_upgrade_files (
   retire INTEGER NOT NULL CHECK (retire IN (0,1)),
   retired_at INTEGER
 );
--- 'topic' scopes are retired (fish #19358): the kind stays in the CHECK so legacy rows remain
--- valid until the core-topic-retirement-v1 cleanup deletes them; no runtime path creates new ones.
 CREATE TABLE scopes (
   id TEXT NOT NULL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('room', 'dm', 'topic')),

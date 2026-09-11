@@ -1,6 +1,8 @@
 import type { StorageMigration } from "../database.js";
 
-/** Run on the parent's staging database: the old tasks table was a projection. */
+/** Run on the parent's staging database: the old tasks table was a projection.
+ * The topic tables below stay for schema stability (fish #19358): rows are emptied by
+ * core-topic-retirement-v1; no runtime path writes there anymore. */
 export const conversationsMigration: StorageMigration = {
   id: "core-conversations-v1",
   sql: `
@@ -49,8 +51,6 @@ CREATE TABLE room_rule_docs (
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   position INTEGER NOT NULL, path TEXT NOT NULL, PRIMARY KEY(room_id,position)
 );
--- Retired topic feature (fish #19358): tables remain for schema stability and are emptied by the
--- core-topic-retirement-v1 migration; no runtime path writes here anymore.
 CREATE TABLE topics (
   id TEXT NOT NULL PRIMARY KEY,
   scope_id TEXT NOT NULL UNIQUE REFERENCES scopes(id) ON DELETE CASCADE,
