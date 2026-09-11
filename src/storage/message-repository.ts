@@ -126,7 +126,7 @@ export function searchMessageFacts(scopeId: string, opts: SearchOptions = {}): S
   }
   const params: unknown[] = [scopeId]; let where = "scope_id=?";
   if (opts.query) { where += " AND instr(content_lower,?)>0"; params.push(opts.query.toLowerCase()); }
-  for (const [column,op,value] of [["sender","=",opts.from],["ts",">=",opts.after],["ts","<",opts.before],["type","=",opts.type]] as const) {
+  for (const [column,op,value] of [["sender","=",opts.from],["sender_member_id","=",opts.fromMemberId],["ts",">=",opts.after],["ts","<",opts.before],["type","=",opts.type]] as const) {
     if (value !== undefined && value !== "") { where += ` AND ${column}${op}?`; params.push(value); }
   }
   const total = db.get<{ n: number }>(`SELECT COUNT(*) n FROM messages WHERE ${where}`,...params)!.n;

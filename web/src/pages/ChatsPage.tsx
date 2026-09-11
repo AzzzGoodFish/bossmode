@@ -1,4 +1,4 @@
-import { useMemberProfileRevision } from "../hooks/useMemberProfileRevision";
+import { useMemberProfileRevision, useCurrentMemberName } from "../hooks/useMemberProfileRevision";
 /**
  * ChatsPage — unified conversation list (0.20 landing view).
  *
@@ -69,6 +69,7 @@ export function ChatsPage({ onOpenDm, onOpenRoom }: {
 
 function ChatRow({ chat: c, last, onOpen }: { chat: ChatEntry; last: boolean; onOpen: () => void }) {
   const working = c.status === "working";
+  const sender = useCurrentMemberName(c.lastMessage?.senderMemberId, c.lastMessage?.sender ?? "");
   return (
     <button
       type="button"
@@ -97,7 +98,7 @@ function ChatRow({ chat: c, last, onOpen }: { chat: ChatEntry; last: boolean; on
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className={`text-[12px] truncate ${c.unreadCount > 0 ? "text-ink-1 font-medium" : "text-ink-3"}`}>
-            {c.lastMessage ? previewText(c.lastMessage.sender, c.lastMessage.text) : "No messages yet"}
+            {c.lastMessage ? previewText(sender, c.lastMessage.text) : "No messages yet"}
           </span>
           {working && <span className="text-[10.5px] text-onair font-medium shrink-0">● working</span>}
           {c.mentioned && (

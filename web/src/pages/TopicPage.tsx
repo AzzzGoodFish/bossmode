@@ -125,12 +125,12 @@ function useTopicStream(roomId: string, topicId: string | null) {
   return { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage };
 }
 
-function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
+function resolveTopicQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; senderMemberId?: string; excerpt?: string } | undefined {
   if (!msg.replyTo) return undefined;
   const target = messages.find((m) => m.id === msg.replyTo!.messageId) ?? messages.find((m) => m.seq === msg.replyTo!.seq);
   if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
   const firstLine = String(target.content || "").split("\n").find((l) => l.trim()) ?? "";
-  return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
+  return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, senderMemberId: target.senderMemberId, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
 }
 
 export function TopicPage({
@@ -158,7 +158,7 @@ export function TopicPage({
   const { topic, messages, notFound, send, endTopic, topicStatusByName, roomStatusByName, contextUsage, setContextUsage } = useTopicStream(roomId, topicId);
   const [topicRailOpen, toggleTopicRail] = useTopicRailOpen(roomId);
   const { topics: roomTopics, activeCount: topicActiveCount } = useRoomTopics(roomId);
-  const [quote, setQuote] = useState<{ seq: number; messageId: string; sender: string; excerpt: string } | null>(null);
+  const [quote, setQuote] = useState<{ seq: number; messageId: string; sender: string; senderMemberId?: string; excerpt: string } | null>(null);
   const [ending, setEnding] = useState(false);
   const [creating, setCreating] = useState(false);
   const [roomName, setRoomName] = useState("room");
@@ -318,6 +318,7 @@ export function TopicPage({
                     <MessageBubble
                       key={m.id}
                       sender={m.sender}
+                      senderMemberId={m.senderMemberId}
                       content={m.content}
                       time={time}
                       fullTime={d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -333,7 +334,7 @@ export function TopicPage({
                       onReply={!closed && m.sender !== "system" ? () => setQuote({
                         seq: m.seq ?? 0,
                         messageId: m.id,
-                        sender: m.sender === "user" ? "you" : m.sender,
+                        sender: m.sender === "user" ? "you" : m.sender, senderMemberId: m.senderMemberId,
                         excerpt: (m.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "",
                       }) : undefined}
                     />

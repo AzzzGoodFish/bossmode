@@ -1,3 +1,4 @@
+import { MemberName } from "./MemberName";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Search, X } from "lucide-react";
 import type { MessageSearchResult, RoomMessage } from "../api/client";
@@ -5,7 +6,7 @@ import { searchMessages } from "../api/client";
 
 interface MessageSearchBarProps {
   roomId: string;
-  members: string[];
+  members: Array<{id: string; name: string}>;
   onJumpToMessage: (messageId: string) => void;
   onClose: () => void;
 }
@@ -61,7 +62,7 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
       undefined;
     searchMessages(roomId, {
       query: q || undefined,
-      from: from || undefined,
+      fromMemberId: from || undefined,
       after: typeof afterMs === "number" ? afterMs : undefined,
       limit: 50,
     })
@@ -114,7 +115,7 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
         >
           <option value="">All senders</option>
           {members.map((m) => (
-            <option key={m} value={m}>{m}</option>
+            <option key={m.id} value={m.id}><MemberName memberId={m.id} recordedName={m.name} /></option>
           ))}
         </select>
         {/* Date range filter */}
@@ -172,7 +173,7 @@ function MessageResult({ msg, query, onJump }: { msg: RoomMessage; query: string
       className="w-full text-left px-3 py-2 hover:bg-surface-2/50 border-b border-line-soft cursor-pointer"
     >
       <div className="flex items-center gap-2 mb-0.5">
-        <span className="text-xs font-semibold text-ink-2">{msg.sender}</span>
+        <span className="text-xs font-semibold text-ink-2"><MemberName memberId={msg.senderMemberId} recordedName={msg.sender} /></span>
         <span className="text-[10px] text-ink-4 tabular-nums">{formatTs(msg.ts)}</span>
       </div>
       <div className="text-xs text-ink-3 leading-relaxed truncate">

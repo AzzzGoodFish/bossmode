@@ -1,3 +1,4 @@
+import { useMemberIdentityDirectory } from "../hooks/useMemberIdentityDirectory";
 import { publishMemberProfileChanged, currentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
@@ -212,6 +213,8 @@ export function Layout({ onLogout, username }: LayoutProps) {
   const { connected, reconnecting, subscribeRoom, unsubscribeRoom } = useWebSocket({
     onEvent: handleWsEvent,
   });
+
+  useMemberIdentityDirectory(connected);
 
   // Subscribe to ALL rooms for cross-room unread detection
   const subscribedRoomsRef = useRef(new Set<string>());

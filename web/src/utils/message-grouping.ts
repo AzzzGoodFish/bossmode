@@ -18,7 +18,9 @@ export const GROUP_INTERVAL_MS = 5 * 60 * 1000;
 export function isGroupedWithPrev(prev: RoomMessage | null, current: RoomMessage): boolean {
   if (!prev) return false;
   if (prev.type || current.type) return false;
-  if (prev.sender !== current.sender) return false;
+  if (prev.senderMemberId || current.senderMemberId) {
+    if (!prev.senderMemberId || prev.senderMemberId !== current.senderMemberId) return false;
+  } else if (prev.sender !== current.sender) return false;
   if (current.ts - prev.ts > GROUP_INTERVAL_MS) return false;
   if (!isSameLocalDate(prev.ts, current.ts)) return false;
   return true;

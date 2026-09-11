@@ -33,6 +33,10 @@ export class MembersRepository {
     const row = this.db.get<MemberRow>("SELECT * FROM members WHERE name_key=? AND archived_at IS NULL", key);
     return row ? decode(row) : null;
   }
+  /** Current canonical labels for retained identities, including archived members. */
+  listIdentities(): Array<{id: string; name: string}> {
+    return this.db.all<{id: string; name: string}>("SELECT id,name FROM members ORDER BY id");
+  }
   list(): MemberRecord[] { return this.db.all<MemberRow>("SELECT * FROM members WHERE archived_at IS NULL").map(decode); }
   insert(record: MemberRecord): void {
     this.db.run("INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",

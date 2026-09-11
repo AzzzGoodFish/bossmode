@@ -742,6 +742,7 @@ addRoute("GET", "/api/rooms/:id/messages/search", async (req, res, params) => {
   const opts: messageStore.SearchOptions = {
     query: url.searchParams.get("query") || undefined,
     from: url.searchParams.get("from") || undefined,
+    fromMemberId: url.searchParams.get("fromMemberId") || undefined,
     after: url.searchParams.get("after") ? parseInt(url.searchParams.get("after")!, 10) : undefined,
     before: url.searchParams.get("before") ? parseInt(url.searchParams.get("before")!, 10) : undefined,
     limit: url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined,

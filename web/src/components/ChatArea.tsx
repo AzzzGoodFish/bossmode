@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, BookOpen, FileText, Plus, Pencil, ArrowRight, Trash2, Eye, MessagesSquare, ArrowDown } from "lucide-react";
 import type { RoomMessage, TaskEventMeta, KnowledgeEventMeta, TopicEventMeta, RoomMessageAttachment } from "../api/client";
 import { getTopicMessages } from "../api/client";
+import { MemberName } from "./MemberName";
 import { MessageBubble } from "./MessageBubble";
 import { MessageSearchBar } from "./MessageSearchBar";
 import type { MessageArtifactPreviewState, ChatAttachmentPreviewState } from "./ArtifactPreviewPanel";
@@ -19,6 +20,7 @@ interface ChatAreaProps {
   searchOpen?: boolean;
   onCloseSearch?: () => void;
   members?: string[];
+  memberIdentities?: Array<{id: string; name: string}>;
   onNavigateToTask?: (taskId: string) => void;
   onPreviewArtifact?: (preview: MessageArtifactPreviewState) => void;
   onPreviewAttachment?: (preview: ChatAttachmentPreviewState) => void;
@@ -34,7 +36,7 @@ interface ChatAreaProps {
 }
 
 
-export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, onNavigateToTask, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
+export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, onLoadOlder, searchOpen, onCloseSearch, members, memberIdentities = [], onNavigateToTask, onPreviewArtifact, onPreviewAttachment, activeArtifactPreview, activeAttachmentPreview, onJumpToMessage, onReturnToLatest, inHistoryView, onReplyMessage, onCreateTopicFromMessage, onOpenTopic }: ChatAreaProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // W1-3 (assistant-ui ScrollToBottom, fish-picked 2026-08-20): scroll pill state.
   const [atBottom, setAtBottom] = useState(true);
@@ -176,7 +178,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
       {searchOpen && roomId && (
         <MessageSearchBar
           roomId={roomId}
-          members={members ?? []}
+          members={memberIdentities}
           onJumpToMessage={scrollToMessage}
           onClose={() => onCloseSearch?.()}
         />
@@ -239,6 +241,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
                   ) : (
                     <MessageBubble
                       sender={msg.sender}
+                      senderMemberId={msg.senderMemberId}
                       content={msg.content}
                       time={time}
                       fullTime={fullTime}
@@ -303,7 +306,7 @@ export function ChatArea({ messages, roomName, roomId, hasMore, loadingOlder, on
 }
 
 /** Resolve a quote reply target against the loaded window — sender/first-line excerpt when present, seq-only fallback (jump still works via fetch-around). */
-function resolveQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
+function resolveQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number; messageId: string; sender?: string; senderMemberId?: string; excerpt?: string } | undefined {
   if (!msg.replyTo) return undefined;
   const target = messages.find((m) => m.id === msg.replyTo!.messageId) ?? messages.find((m) => m.seq === msg.replyTo!.seq);
   if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
@@ -311,7 +314,7 @@ function resolveQuote(messages: RoomMessage[], msg: RoomMessage): { seq: number;
   return {
     seq: msg.replyTo.seq,
     messageId: msg.replyTo.messageId,
-    sender: target.sender === "user" ? "you" : target.sender,
+    sender: target.sender === "user" ? "you" : target.sender, senderMemberId: target.senderMemberId,
     excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine,
   };
 }
@@ -353,7 +356,7 @@ function TopicEventCard({ meta, roomId, onOpen, onJumpToAnchor }: { meta: TopicE
             {fullMessages === null && <div className="text-[11px] text-ink-4">Loading…</div>}
             {fullMessages && fullMessages.length === 0 && <div className="text-[11px] text-ink-4">No messages.</div>}
             {fullMessages?.map((m) => (
-              <div key={m.id} className="text-xs text-ink-2"><span className="font-semibold text-ink-1">{m.sender === "user" ? "you" : m.sender}</span>：{m.content}</div>
+              <div key={m.id} className="text-xs text-ink-2"><span className="font-semibold text-ink-1"><MemberName memberId={m.senderMemberId} recordedName={m.sender === "user" ? "you" : m.sender} /></span>：{m.content}</div>
             ))}
           </div>
         )}

@@ -832,6 +832,14 @@ export interface RoomMessageAttachment {
   previewType: AttachmentPreviewType;
 }
 
+export interface MemberIdentity { id: string; name: string }
+
+export async function getMemberIdentities(signal?: AbortSignal): Promise<MemberIdentity[]> {
+  const result = await apiFetch<{members: MemberIdentity[]}>("/api/members/identities", {signal});
+  if (!Array.isArray(result.members)) throw new Error("Invalid member identity response");
+  return result.members;
+}
+
 export interface RoomMessage {
   id: string;
   seq?: number;
@@ -926,11 +934,12 @@ export interface MessageSearchResult {
 
 export async function searchMessages(
   roomId: string,
-  opts: { query?: string; from?: string; after?: number; before?: number; limit?: number; offset?: number },
+  opts: { query?: string; from?: string; fromMemberId?: string; after?: number; before?: number; limit?: number; offset?: number },
 ): Promise<MessageSearchResult> {
   const qs = new URLSearchParams();
   if (opts.query) qs.set("query", opts.query);
   if (opts.from) qs.set("from", opts.from);
+  if (opts.fromMemberId) qs.set("fromMemberId", opts.fromMemberId);
   if (opts.after !== undefined) qs.set("after", String(opts.after));
   if (opts.before !== undefined) qs.set("before", String(opts.before));
   if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
@@ -1570,7 +1579,7 @@ export interface ChatEntry {
   title: string;
   memberId?: string;
   roomId?: string;
-  lastMessage?: { sender: string; text: string; ts: number } | null;
+  lastMessage?: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
   unreadCount: number;
   mentioned: boolean;
   status?: string;
@@ -1582,7 +1591,7 @@ export interface TopicChatEntry {
   topicId: string;
   title: string;
   status: "active" | "closed";
-  lastMessage?: { sender: string; text: string; ts: number } | null;
+  lastMessage?: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
   unreadCount: number;
   mentioned: boolean;
   anyWorking: boolean;

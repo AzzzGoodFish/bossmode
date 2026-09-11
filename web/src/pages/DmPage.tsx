@@ -41,7 +41,7 @@ export function DmPage({ memberId, onBack }: {
   const [messages, setMessages] = useState<DmMessage[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [replyQuote, setReplyQuote] = useState<{ seq: number; messageId: string; sender: string; excerpt: string } | null>(null);
+  const [replyQuote, setReplyQuote] = useState<{ seq: number; messageId: string; sender: string; senderMemberId?: string; excerpt: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [models, setModels] = useState<AvailableModelOption[]>([]);
@@ -303,6 +303,7 @@ export function DmPage({ memberId, onBack }: {
                     {showDateSep && <DateSeparator ts={msg.ts} />}
                     <MessageBubble
                       sender={msg.sender}
+                      senderMemberId={msg.senderMemberId}
                       content={msg.content}
                       time={time}
                       fullTime={fullTime}
@@ -319,7 +320,7 @@ export function DmPage({ memberId, onBack }: {
                       onReply={msg.sender !== "system" ? () => setReplyQuote({
                         seq: msg.seq ?? 0,
                         messageId: msg.id,
-                        sender: msg.sender === "user" ? "you" : msg.sender,
+                        sender: msg.sender === "user" ? "you" : msg.sender, senderMemberId: msg.senderMemberId,
                         excerpt: (msg.content || "").split("\n").find((l) => l.trim())?.slice(0, 60) ?? "",
                       }) : undefined}
                     />
@@ -353,12 +354,12 @@ export function DmPage({ memberId, onBack }: {
 }
 
 /** Resolve a quote target against loaded DM messages (plan-reply-to-v1). */
-function resolveDmQuote(messages: DmMessage[], msg: DmMessage): { seq: number; messageId: string; sender?: string; excerpt?: string } | undefined {
+function resolveDmQuote(messages: DmMessage[], msg: DmMessage): { seq: number; messageId: string; sender?: string; senderMemberId?: string; excerpt?: string } | undefined {
   if (!msg.replyTo) return undefined;
   const target = messages.find((m) => m.id === msg.replyTo!.messageId) ?? messages.find((m) => m.seq === msg.replyTo!.seq);
   if (!target) return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId };
   const firstLine = String(target.content || "").split("\n").find((l) => l.trim()) ?? "";
-  return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
+  return { seq: msg.replyTo.seq, messageId: msg.replyTo.messageId, sender: target.sender === "user" ? "you" : target.sender, senderMemberId: target.senderMemberId, excerpt: firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine };
 }
 
 /** No-model guidance as a STREAM card, not page chrome (fish 2026-08-25: "pick

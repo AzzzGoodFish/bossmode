@@ -145,6 +145,11 @@ export function listMembers(): MemberRecord[] {
   return repository().list().sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Narrow display directory; never reads configuration or persona files. */
+export function listMemberIdentities(): Array<{id: string; name: string}> {
+  return repository().listIdentities();
+}
+
 export function getMember(id: string): MemberRecord | null {
   return repository().get(id);
 }

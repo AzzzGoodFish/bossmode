@@ -13,7 +13,8 @@ export function readAllMessages(...args: Parameters<typeof readMessages>): RoomM
 
 export interface SearchOptions {
   query?: string;    // case-insensitive substring on content
-  from?: string;     // sender filter (exact match)
+  from?: string;     // recorded sender label (exact match)
+  fromMemberId?: string; // stable sender identity, independent of name snapshots
   after?: number;    // ts >= after (epoch ms)
   before?: number;   // ts < before (epoch ms)
   limit?: number;    // default 50, max 500

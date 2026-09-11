@@ -10,6 +10,7 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import {
   listMembers,
+  listMemberIdentities,
   getMember,
   createMember,
   updateMember,
@@ -73,10 +74,10 @@ function errCode(err: unknown): { status: number; error: string; message: string
   return { status: 500, error: "internal", message: msg };
 }
 
-function summarizeMessage(m: RoomMessage | undefined): { sender: string; text: string; ts: number } | null {
+function summarizeMessage(m: RoomMessage | undefined): { sender: string; senderMemberId?: string; text: string; ts: number } | null {
   if (!m) return null;
   const text = (m.content || "").replace(/\s+/g, " ").trim().slice(0, 140);
-  return { sender: m.sender, text, ts: m.ts };
+  return { sender: m.sender, ...(m.senderMemberId ? {senderMemberId: m.senderMemberId} : {}), text, ts: m.ts };
 }
 
 /** Unread/mention for the human user (not member agent cursors). Exported for tests. */
@@ -128,7 +129,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
       scopeId: string;
       kind: "dm" | "room";
       title: string;
-      lastMessage: { sender: string; text: string; ts: number } | null;
+      lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
       unreadCount: number;
       mentioned: boolean;
       status: string;
@@ -137,7 +138,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
         topicId: string;
         title: string;
         status: "active" | "closed";
-        lastMessage: { sender: string; text: string; ts: number } | null;
+        lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
         unreadCount: number;
         mentioned: boolean;
         anyWorking: boolean;
@@ -326,6 +327,10 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
 
 addRoute("GET", "/api/members", async (_req, res) => {
   sendJson(res, 200, { members: listMembers().map(publicMember) });
+});
+
+addRoute("GET", "/api/members/identities", async (_req, res) => {
+  sendJson(res, 200, { members: listMemberIdentities() });
 });
 
 addRoute("GET", "/api/members/archive-list", async (_req, res) => {

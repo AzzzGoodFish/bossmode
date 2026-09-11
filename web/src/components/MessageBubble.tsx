@@ -1,3 +1,4 @@
+import { useCurrentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useEffect } from "react";
 import { FileText, FileCode, Image as ImageIcon, Eye, Download, X, CornerUpLeft, MessagesSquare, Copy, Check } from "lucide-react";
 import { copyText } from "../utils/clipboard";
@@ -9,6 +10,7 @@ import { inferAttachmentPreviewType } from "../../../src/shared/attachments";
 
 interface MessageBubbleProps {
   sender: string;
+  senderMemberId?: string;
   content: string;
   time?: string;
   fullTime?: string;
@@ -28,7 +30,7 @@ interface MessageBubbleProps {
   onPreviewAttachment?: (messageId: string, attachments: RoomMessageAttachment[], selectedIndex: number) => void;
   activeAttachmentPreview?: { messageId: string; storedFilename: string } | null;
   /** Quote reply (plan-reply-to-v1): resolved target for the quote block. */
-  quote?: { seq: number; messageId: string; sender?: string; excerpt?: string };
+  quote?: { seq: number; messageId: string; sender?: string; senderMemberId?: string; excerpt?: string };
   onJumpToMessage?: (messageId: string) => void;
   /** Hover action bar (prototype topic-threads-v1 spec ①): reply + create topic. */
   onReply?: () => void;
@@ -91,7 +93,7 @@ function parseContentSegments(content: string): Array<{ type: "text"; text: stri
 }
 
 export function MessageBubble({
-  sender, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply, onCreateTopic,
+  sender, senderMemberId, content, time, fullTime, grouped = false, isMarkdown = false, mentions, urgentMentions, members, loginName, roomId, messageId, attachments, onPreviewAttachment, activeAttachmentPreview, quote, onJumpToMessage, onReply, onCreateTopic,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -106,6 +108,8 @@ export function MessageBubble({
   };
   const isUser = sender === "user";
   const isSystem = sender === "system";
+  const currentName = useCurrentMemberName(isUser || isSystem ? undefined : senderMemberId, sender);
+  const quoteName = useCurrentMemberName(quote?.senderMemberId, quote?.sender ?? "message");
 
   if (isSystem) {
     return (
@@ -120,7 +124,7 @@ export function MessageBubble({
   const avatarText = isUser ? "text-accent-ink" : "text-ink-2";
   const nameColor = isUser ? "text-accent-ink" : "text-ink-1";
   const bubbleBg = isUser ? "bg-accent-dim border-accent/15" : "bg-surface-2/60 border-line-soft";
-  const displayName = isUser ? "you" : sender;
+  const displayName = isUser ? "you" : currentName;
 
   const hasAttachments = ATTACHMENT_RE_M.test(content) || (attachments?.length ?? 0) > 0;
 
@@ -168,7 +172,7 @@ export function MessageBubble({
             className={`block max-w-[460px] mb-1.5 text-left border-l-2 border-accent bg-accent-dim/60 rounded-r-lg px-2.5 py-1 ${onJumpToMessage ? "cursor-pointer hover:bg-accent-dim" : "cursor-default"}`}
           >
             <span className="text-[12px] text-ink-3">
-              <span className="font-semibold text-accent-ink">{quote.sender ?? "message"}</span>
+              <span className="font-semibold text-accent-ink">{quoteName}</span>
               <span className="font-mono text-[10px] text-ink-4 ml-1.5">#{quote.seq}</span>
               {quote.excerpt && <span className="block truncate">{quote.excerpt}</span>}
             </span>

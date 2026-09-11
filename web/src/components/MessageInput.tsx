@@ -1,3 +1,4 @@
+import { useCurrentMemberName } from "../hooks/useMemberProfileRevision";
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type DragEvent, type ClipboardEvent } from "react";
 import { Paperclip, CornerUpLeft, X, MessageSquarePlus } from "lucide-react";
 import { useDraft } from "../hooks/useDraft";
@@ -34,7 +35,7 @@ interface MessageInputProps {
   uploadScope?: string;
   placeholder?: string;
   /** Active quote reply (topic-threads-v1 spec ①): strip above the input, cancelable. */
-  quote?: { seq: number; sender: string; excerpt: string } | null;
+  quote?: { seq: number; sender: string; senderMemberId?: string; excerpt: string } | null;
   /** Topic-creation mode (topic-threads v2 spec ①): room composer only — toggle button left of the textarea; one-shot, the sent message opens the topic. */
   topicMode?: { active: boolean; onToggle: () => void };
   onClearQuote?: () => void;
@@ -48,6 +49,7 @@ function clipboardFilename(): string {
 }
 
 export function MessageInput({ onSend, members, memberHints = {}, disabled, roomId, onError, draftKey, hideMentions = false, hideAttachments = false, uploadScope, placeholder, quote, onClearQuote, topicMode }: MessageInputProps) {
+  const quoteName = useCurrentMemberName(quote?.senderMemberId, quote?.sender ?? "message");
   const [value, setValue, clearDraft] = useDraft(draftKey !== undefined ? draftKey : roomId ? `room:${roomId}` : null);
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
@@ -223,7 +225,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
         <div className="flex items-center gap-2 mb-2 pl-2.5 pr-2 py-1.5 border-l-2 border-accent bg-accent-dim/60 rounded-r-lg">
           <CornerUpLeft size={12} className="text-accent-ink shrink-0" />
           <span className="text-xs text-ink-2 truncate">
-            Reply to <span className="font-semibold text-accent-ink">{quote.sender}</span>
+            Reply to <span className="font-semibold text-accent-ink">{quoteName}</span>
             <span className="font-mono text-[10px] text-ink-4 ml-1">#{quote.seq}</span>
             <span className="text-ink-3">：{quote.excerpt}</span>
           </span>
