@@ -6,7 +6,7 @@ import {openDatabase,applyStorageMigrations,type Database} from "../../src/stora
 import {coreStorageMigrations} from "../../src/storage/migrations.js";
 import {discoverLegacyInventory} from "../../src/storage/legacy-inventory.js";
 import {importLegacyDocuments} from "../../src/storage/upgrade-documents.js";
-import {getDocument,listDocumentHistory} from "../../src/storage/document-repository.js";
+import {getDocument,listDocumentHistory,documentContentMeta,documentSnapshotPath} from "../../src/storage/document-repository.js";
 import type {UpgradeImportContext} from "../../src/storage/upgrade-runner.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
@@ -73,4 +73,26 @@ it("rejects missing historical content rather than substituting the current body
 it("rejects legacy subject keys that collide at a sanitized asset path",async()=>{
  const {ctx,entries}=setup({"rooms/room-one/memory/mainline-meta.json":JSON.stringify({members:{"a/b":{revision:1},"a?b":{revision:2}}})});
  await expect(importLegacyDocuments(ctx,entries,[])).rejects.toThrow("Ambiguous document ownership");
+});
+
+it.each([true,false])("reuses only exact history-owned snapshots already published before cutover (%s)",async exact=>{
+ const path="members/mem_one/persona.md",content="original revision";
+ const snapshot=documentSnapshotPath(path,documentContentMeta(content).contentHash);
+ const {ctx,entries,staged}=setup({[path]:"current",[snapshot]:exact?content:"different", "members/mem_one/memory/persona-history.jsonl":JSON.stringify({content,ts:1})+"\n"});
+ const live=join(ctx.root,snapshot);mkdirSync(dirname(live),{recursive:true});writeFileSync(live,exact?content:"different");
+ const stage=ctx.stageAsset;ctx.stageAsset=(name,bytes)=>{if(ctx.sourceFiles.includes(name))throw new Error("cannot stage a source");stage(name,bytes)};
+ if(exact){await importLegacyDocuments(ctx,entries,[]);expect(listDocumentHistory(ctx.db,path)[0].snapshotPath).toBe(snapshot);expect(staged.has(snapshot)).toBe(false)}
+ else await expect(importLegacyDocuments(ctx,entries,[])).rejects.toThrow(/snapshot|Snapshot/);
+});
+it("reuses published snapshots for sanitized legacy room-document owners on retry",async()=>{
+ const content="original revision",path="rooms/room-one/memory/members/old_name/principles.md";
+ const snapshot=documentSnapshotPath(path,documentContentMeta(content).contentHash);
+ const {ctx,entries,staged}=setup({
+  "rooms/room-one/memory/principles-history.jsonl":JSON.stringify({scope:"member",memberId:"old/name",content,ts:1,actorType:"member"})+"\n",
+  [snapshot]:content,
+ });
+ const live=join(ctx.root,snapshot);mkdirSync(dirname(live),{recursive:true});writeFileSync(live,content);
+ await importLegacyDocuments(ctx,entries,[]);
+ expect(listDocumentHistory(ctx.db,path).map(r=>r.snapshotPath)).toEqual([snapshot]);
+ expect(staged.has(snapshot)).toBe(false);
 });

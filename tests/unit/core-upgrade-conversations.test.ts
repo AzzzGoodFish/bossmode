@@ -92,3 +92,29 @@ it("does not cut over when a later malformed line follows committed staging batc
  await expect(prepareStorageUpgrade({root,formatVersion:1,migrations:coreStorageMigrations,collectLegacySources:async()=>entries,importData:async ctx=>{await importLegacyConversations(ctx,entries);},validate:async()=>{throw new Error("must not validate");}})).rejects.toThrow();
  expect(existsSync(join(root,"bossmode.db"))).toBe(false);expect(existsSync(join(root,"rooms/room-one/room.json"))).toBe(true);
 });
+
+it("quarantines terminated malformed runtime events with exact bytes and original ordinals",async()=>{
+ const path="rooms/room-one/agent-events/old-label.jsonl";
+ const bad='{"type":"tool_end","result":"truncated{"type":"agent_end"}\r\n';
+ const {ctx,entries}=setup({[path]:JSON.stringify({type:"agent_start",ts:1})+"\n\n"+bad+JSON.stringify({type:"agent_end",ts:3})+"\n"});
+ await importLegacyConversations(ctx,entries);
+ const events=ctx.db.all<{id:string;payload_json:string}>("SELECT id,payload_json FROM agent_events ORDER BY seq");
+ expect(events.map(x=>JSON.parse(x.payload_json).type)).toEqual(["agent_start","agent_end"]);
+ expect(events[0].id).toMatch(/:1$/);expect(events[1].id).toMatch(/:3$/);
+ const stored=ctx.db.get<{value:string}>("SELECT value FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'");
+ const quarantined=JSON.parse(stored!.value);
+ expect(quarantined).toMatchObject({path,ordinal:2,lineNumber:3,reason:"invalid-json"});
+ expect(Buffer.from(quarantined.rawBase64,"base64")).toEqual(Buffer.from(bad));
+ expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
+});
+it.each(["messages", "agent-events/old-label"])("still rejects malformed messages and unterminated event tails (%s)",async(kind)=>{
+ const {ctx,entries}=setup({[`rooms/room-one/${kind}.jsonl`]:'{"broken":'});
+ await expect(importLegacyConversations(ctx,entries)).rejects.toThrow("unterminated-jsonl-line");
+ expect(ctx.db.all("SELECT * FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'")).toEqual([]);
+});
+
+it("does not quarantine malformed chat messages or valid JSON with invalid event schema",async()=>{
+ const {ctx,entries}=setup({"rooms/room-one/messages.jsonl":'{"broken":\n'});
+ await expect(importLegacyConversations(ctx,entries)).rejects.toThrow("invalid-json");
+ expect(ctx.db.all("SELECT * FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'")).toEqual([]);
+});

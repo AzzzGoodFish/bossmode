@@ -4,6 +4,29 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.24.1] — 2026-09-11
+
+### Fixed
+- Upgrade startup imports members whose current persona lived in `memory/persona.md` before the `member.md` profile layout existed. Exact persona bytes and history are preserved, and a renewed same-name conflict with a real mixed profile is still rejected.
+- Upgrade startup imports every readable legacy runtime event and preserves unreadable lines exactly — raw bytes and hash, plus source path and position — in a SQL quarantine record. This matches the old reader that skipped such lines, instead of failing the entire upgrade; message, configuration and SDK session files remain strict and unchanged.
+- An upgrade retried after an interruption reuses already-published historical document snapshots only when their ownership, path and bytes match, so a second startup no longer fails on its own published assets. Source files are synced without being rewritten.
+
+## [0.24.0] — 2026-09-11
+
+### Release
+- Promotes the accepted 0.24.0-rc.3 runtime to the stable 0.24.0 release; no additional runtime, dependency or storage-format changes.
+- SQLite owns core application metadata, with automatic backup, validated migration and retirement during ordinary startup. Persona, memory, attachment, skill/extension bodies and SDK session files remain files.
+- Rooms select existing Contacts by stable member ID. Members use their own profiles rather than live agent templates, and the `chat` tool accepts only message and optional attachments.
+- Durable input/reply state, explicit SDK execution boundaries and actual resource teardown preserve the accepted session, stop/reload and topic-fork behavior.
+- Historical chat authors follow current names by stable ID without rewriting message snapshots; mention menus use current titles without retired-template fallbacks.
+
+## [0.24.0-rc.3] — 2026-09-11
+
+### Fixed
+- Historical chat authors with a stable member ID display the member's current name in rooms, DMs, topics, search results, quotes, composer previews, expanded discussions and conversation previews. Initial loading, live profile changes and reconnection refresh share the same identity directory; retained archived identities remain displayable.
+- Sender filtering and message grouping use stable IDs where available, so reusing an old name cannot assign historical messages to another member. Unknown/no-ID authors retain their recorded label. Stored sender snapshots, message and mention text, quote anchors and SDK history are unchanged.
+- Room and topic mention suggestions display the member's current title instead of a retired agent-template label. Editing or clearing a title updates an open menu; empty titles have no template/name fallback. Mention insertion and routing are unchanged.
+
 ## [0.24.0-rc.2] — 2026-09-11
 
 ### Changed

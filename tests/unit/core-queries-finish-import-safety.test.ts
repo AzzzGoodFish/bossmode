@@ -6,7 +6,6 @@ import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/stora
 import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
 import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
 import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { openDatabase } from "../../src/storage/database.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });
@@ -15,12 +14,13 @@ function write(root: string, path: string, body: string) { const file = join(roo
 const event = (n: number) => ({ type: "message_end", ts: 1000 + n, usage: { inputTokens: n, outputTokens: n * 2, cacheRead: n * 3, cacheWrite: n * 4, cost: n * 0.25 }, model: "p/m" });
 const jsonl = (values: object[]) => values.map(v => JSON.stringify(v)).join("\n") + "\n";
 
-it.each(["room", "dm:mem_one", "topic:one"])("leaves prior DB facts and original files unchanged after a late corrupt %s event batch, then retries cutover", async scope => {
+it.each(["room", "dm:mem_one", "topic:one"])("preserves an unreadable %s event line in SQL quarantine and imports the readable history exactly once", async scope => {
   fixture.db.exec("CREATE TABLE retained_fact(value TEXT); INSERT INTO retained_fact VALUES('authoritative')");
   const root = fixture.root;
   const path = scope.startsWith("topic:") ? "rooms/room/topics/one/agent-events/historic.jsonl" : `rooms/${scope}/agent-events/historic.jsonl`;
   const good = jsonl(Array.from({ length: 130 }, (_, i) => event(i + 1)));
-  const file = write(root, path, good + "{corrupt}\n");
+  const source = good + "{corrupt}\n";
+  const file = write(root, path, source);
   fixture.db.close();
   let entries: LegacySourceEntry[] = [];
   const options = {
@@ -29,29 +29,27 @@ it.each(["room", "dm:mem_one", "topic:one"])("leaves prior DB facts and original
     importData: async (ctx: UpgradeImportContext) => { await importLegacyConversations(ctx, entries); },
     validate: async () => {},
   };
-  await expect(prepareStorageUpgrade(options)).rejects.toThrow("invalid-json");
-  expect(readFileSync(file, "utf8")).toBe(good + "{corrupt}\n");
-  const original = openDatabase(fixture.path);
-  expect(original.get("SELECT value FROM retained_fact")).toEqual({ value: "authoritative" });
-  expect(original.all("SELECT * FROM agent_events")).toEqual([]);
-  expect(original.all("SELECT * FROM token_usage_daily")).toEqual([]);
-  expect(original.get("SELECT value FROM storage_meta WHERE key='core-authority'")).toBeUndefined();
-  original.close();
-  // The failed staging DB has committed its first batch; none of it was published.
-  const staged = openDatabase(join(root, "upgrades/staging.sqlite"));
-  expect(staged.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 128 }); staged.close();
-  writeFileSync(file, good);
+  // The old runtime skipped unreadable lines; import keeps every readable execution
+  // and preserves the exact skipped line instead of failing the whole upgrade.
   const result = await prepareStorageUpgrade(options);
   expect(result.migrated).toBe(true);
   expect(result.db.get("SELECT value FROM retained_fact")).toEqual({ value: "authoritative" });
   expect(result.db.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 130 });
   expect(result.db.get("SELECT SUM(input_tokens) input,SUM(turns) turns FROM token_usage_daily")).toEqual({ input: 8515, turns: 130 });
   expect(result.db.all("SELECT * FROM outbox")).toEqual([]);
+  const quarantine = result.db.all<{ value: string }>("SELECT value FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'");
+  expect(quarantine).toHaveLength(1);
+  const record = JSON.parse(quarantine[0].value);
+  expect(record).toMatchObject({ path, ordinal: 131, reason: "invalid-json" });
+  expect(Buffer.from(record.rawBase64, "base64").toString()).toBe("{corrupt}\n");
+  const backup = result.db.get<{ backup_path: string }>("SELECT backup_path FROM storage_upgrade_files WHERE path=?", path)!;
+  expect(readFileSync(join(root, backup.backup_path), "utf8")).toBe(source);
   expect(existsSync(file)).toBe(false);
   result.db.close();
   const again = await prepareStorageUpgrade(options);
   expect(again.migrated).toBe(false);
   expect(again.db.get("SELECT COUNT(*) n FROM agent_events")).toEqual({ n: 130 });
+  expect(again.db.all("SELECT * FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'")).toHaveLength(1);
   again.db.close();
 });
 

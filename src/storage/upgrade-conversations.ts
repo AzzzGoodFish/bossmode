@@ -2,7 +2,7 @@ import {createHash} from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import type {Database} from "./database.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
-import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
+import {readLegacyJson,readLegacyJsonl,readLegacyEventJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import {archiveRawRetiredSource} from "./task-retirement.js";
@@ -188,7 +188,15 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   if(e.kind==="agent-events"){
    const source=eventSource(e,options);let bytes=0;let count=0;
    const flush=()=>{ctx.db.transaction(tx=>importEventRows(tx,source));completed+=source.rows.length;source.rows=[];bytes=0;ctx.progress(completed);};
-   for await(const row of readLegacyJsonl(ctx.sourceRoot,e)){
+   for await(const row of readLegacyEventJsonl(ctx.sourceRoot,e,invalid=>{
+    // Import diagnostics are not business events or execution intent. Keep all
+    // bytes, including CR/LF, and original coordinates without inventing an actor.
+    const key=`legacy-invalid-event-v1:${sourceHash(e.path)}:${invalid.ordinal}`;
+    const value=JSON.stringify({path:e.path,ordinal:invalid.ordinal,lineNumber:invalid.lineNumber,reason:"invalid-json",rawBase64:invalid.raw.toString("base64"),sha256:createHash("sha256").update(invalid.raw).digest("hex")});
+    const prior=ctx.db.get<{value:string}>("SELECT value FROM storage_meta WHERE key=?",key);
+    if(prior&&prior.value!==value)throw new Error(`Conflicting invalid event source: ${e.path}:${invalid.ordinal}`);
+    if(!prior)ctx.db.run("INSERT INTO storage_meta(key,value) VALUES(?,?)",key,value);
+   })){
     const proof=options.eventProvenance?.(e,row.ordinal);
     if(proof!==undefined&&(typeof proof!=="string"||!proof.trim()))throw new Error(`Invalid legacy event provenance: ${e.path}:${row.ordinal}`);
     source.rows.push({...row,proof});count++;bytes+=Buffer.byteLength(JSON.stringify(row.value));

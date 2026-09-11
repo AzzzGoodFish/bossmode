@@ -126,11 +126,19 @@ describe("historical JSONL import and SQL queries", () => {
     expect(readAllMessages("room-a")).toHaveLength(130);
   });
 
-  it("corrupt historical agent events reject import instead of silently dropping an execution", async () => {
+  it("corrupt historical agent events import the surrounding executions and preserve the exact skipped line", async () => {
     const body = '{"type":"agent_start","ts":1}\n{"type":"tool_start","partial\n{"type":"agent_end","ts":3}\n';
-    write(eventPath, body);
-    await expect(upgrade()).rejects.toThrow("invalid-json");
-    assertOriginalUntouched(eventPath, body);
+    const file = write(eventPath, body);
+    await importAndBind();
+    expect(loadEventsFromDisk("room-a", "legacy-unresolved:pm").map(e => e.type)).toEqual(["agent_start", "agent_end"]);
+    const rows = upgraded!.db.all<{ value: string }>("SELECT value FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'");
+    expect(rows).toHaveLength(1);
+    const quarantined = JSON.parse(rows[0].value);
+    expect(quarantined).toMatchObject({ path: eventPath, ordinal: 2, lineNumber: 2, reason: "invalid-json" });
+    expect(Buffer.from(quarantined.rawBase64, "base64").toString()).toBe('{"type":"tool_start","partial\n');
+    const backup = upgraded!.db.get<{ backup_path: string }>("SELECT backup_path FROM storage_upgrade_files WHERE path=?", eventPath)!;
+    expect(readFileSync(join(fixture.root, backup.backup_path), "utf8")).toBe(body);
+    expect(existsSync(file)).toBe(false);
   });
 
   it("valid event history retains order under an unresolved owner, never the current same-name member", async () => {

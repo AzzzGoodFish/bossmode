@@ -1,9 +1,10 @@
 import {readFileSync} from "node:fs";
 import {isDeepStrictEqual} from "node:util";
+import {dirname} from "node:path";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import type {MemberSourceImport} from "./upgrade-members.js";
 import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
-import {managedPath,requireRegularFile} from "./upgrade-files.js";
+import {managedPath,requireRegularFile,syncFile,syncDirectoryChain} from "./upgrade-files.js";
 import {ensureImportedScope} from "./upgrade-conversations.js";
 import {documentContentMeta,importDocument,type DocumentImport,type DocumentIdentity,type ImportedDocumentHistory} from "./document-repository.js";
 import type {PrinciplesMeta} from "../shared/types.js";
@@ -15,6 +16,8 @@ function object(value:unknown,path:string):Record<string,any>{
 function text(bytes:Uint8Array,path:string):string{
  try{return new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new Error(`Invalid document UTF-8: ${path}`);}
 }
+/** Legacy writers replaced every character outside this set when deriving filesystem owner segments. */
+const safeSegment=(value:string)=>value.replace(/[^a-zA-Z0-9._-]/g,"_");
 /** Pre-Principles prompt supplements recorded metadata, never historical bodies
  * (prompt-supplement-store before 1094dd7). Retire that obsolete bookkeeping in
  * the one-time upgrade; the source remains in the upgrade backup. Do not invent
@@ -50,7 +53,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
  const roomDocument=(e:LegacySourceEntry,owner?:string)=>{
   if(owner!==undefined&&(typeof owner!=="string"||!owner))throw new Error(`Invalid document owner: ${e.path}`);
   const root=`rooms/${e.path.split("/")[1]}`;
-  const safe=owner?.replace(/[^a-zA-Z0-9._-]/g,"_");
+  const safe=owner===undefined?undefined:safeSegment(owner);
   const path=e.layout==="copy-forward"
    ?owner?`${root}/${e.layer==="mainline"?"mainlines":"prompt-supplements"}/members/${safe}.md`:`${root}/prompt-supplements/room.md`
    :owner?`${root}/memory/members/${safe}/${e.layer}.md`:`${root}/memory/room-principles.md`;
@@ -94,7 +97,24 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   // Legacy readers presented missing current bodies as empty. Materialize that
   // empty asset, never an earlier historical revision, for the new reference.
   if(!bodies.has(p.identity.path))ctx.stageAsset(p.identity.path,Buffer.alloc(0));
-  importDocument(ctx.db,ctx,p);ctx.progress(++completed);
+  importDocument(ctx.db,{stageAsset(path,bytes){
+   if(!ctx.sourceFiles.includes(path)){ctx.stageAsset(path,bytes);return;}
+   // importDocument derives this exact path from the proven document identity
+   // and historical body hash. Retry may have already published that snapshot.
+   const source=entries.find(e=>e.path===path);
+   const ownerMatches=source!==undefined&&(source.memberId??source.ownerKey)===p.identity.memberId;
+   const derivedOwner=p.identity.memberId===undefined?undefined:safeSegment(p.identity.memberId);
+   const sanitizedOwnerMatches=source!==undefined&&derivedOwner!==undefined&&(source.memberId??source.ownerKey)===derivedOwner;
+   if(!source||source.kind!=="document-snapshot"||source.retire||source.layer!==p.identity.layer
+    ||!(ownerMatches||sanitizedOwnerMatches)||scope(source.scopeId)!==p.identity.scopeId){
+    throw new Error(`Unverified historical snapshot ownership: ${path}`);
+   }
+   const file=managedPath(ctx.sourceRoot,path);requireRegularFile(file);
+   if(!readFileSync(file).equals(Buffer.from(bytes)))throw new Error(`Historical snapshot differs: ${path}`);
+   const live=managedPath(ctx.root,path);requireRegularFile(live);
+   if(!readFileSync(live).equals(Buffer.from(bytes)))throw new Error(`Historical snapshot changed: ${path}`);
+   syncFile(live);syncDirectoryChain(dirname(live),ctx.root);
+  }},p);ctx.progress(++completed);
  }
  // Existing content-addressed snapshots remain assets, not legacy metadata.
  for(const e of entries.filter(e=>e.kind==="document-snapshot")){check(e);consumed.add(e.path);}
