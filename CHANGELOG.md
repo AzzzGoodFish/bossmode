@@ -4,6 +4,32 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.25.0-rc.2] — 2026-09-13
+
+### Release
+- Supersedes 0.25.0-rc.1 and contains all of its changes and upgrade behavior (see below).
+
+### Changed
+- Removed two leftover UI elements from retired features: the room header's lone "Chat" segmented control (the shell of the old Chat/Tasks switch, with its dead view state) and the sidebar's bottom "All chats" entry (which duplicated the conversation list). Presentation-only; no behavior, storage or data change.
+
+## [0.25.0-rc.1] — 2026-09-11
+
+### Changed
+- The Task feature is retired. On the first ordinary startup, existing task data is exported to `~/.bossmode/archive/task-retirement-<date>/` with a SHA256 manifest, then the task tables are dropped. Historical `task_event` messages remain readable as plain-text cards.
+- The Contacts page, member import, factory agent seeding and live agent-template management are retired; room creation and invitations select existing members by stable ID. The member archive-on-fire flow is unchanged.
+- Chat is the only response channel: a turn that ends without a `chat` call delivers nothing and records a system notice. The `chat` tool accepts only `message` and optional `attachments` (`need_response` and `reply_to` are removed).
+- The Topic feature is retired outright (no archive): topic data and topic session files are deleted in one migration transaction, with room/DM chat untouched. Historical topic cards render as plain text.
+- The member prompt is restructured into four segments — Member, Working Principles, Communication, Environment — with updated communication rules (increment-only replies, mention discipline, report once).
+- Background tasks are retired, including the `background_start`, `background_status`, `background_wait` and `background_cancel` tools. On upgrade, `background_tasks` rows, terminal notifications and member background-task directories are discarded — no archive; in-flight tasks are dropped.
+- The `recall` and `memorize` tools are retired; memory maintenance uses `read`, `edit` and `write_memory` directly.
+- The `!name` urgent interrupt is retired: `!name` is plain text with no activation, interrupt or system notice, and no historical field migration.
+
+### Upgrade
+- One-click: ordinary startup performs all upgrade work automatically — supported legacy data is imported with an automatic backup, then the three retirement migrations run in order (Task export/archive and drop, Topic delete, Background drop and session-file cleanup). No separate migration command is required; an interrupted upgrade resumes on the next start.
+
+### Fixed
+- Upgrading from 0.24.x no longer refuses to start: comment lines accidentally added inside two already-applied migration SQL strings had changed their checksums. The SQL bytes are restored exactly; a frozen-checksum test now guards every applied migration, and the merge gate runs a real old-database upgrade.
+
 ## [0.24.1] — 2026-09-11
 
 ### Fixed
