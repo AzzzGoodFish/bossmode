@@ -4,6 +4,15 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.25.0] — 2026-09-13
+
+### Release
+- Promotes the accepted 0.25.0-rc.2 runtime to the stable 0.25.0 release; no additional runtime, dependency or storage-format changes.
+- Retires the Task, Contacts/member-import, Topic, background-task and `!name` interrupt features, plus the chat final-text fallback; retired data is archived or removed as described below while historical messages stay readable.
+- The member prompt uses the four-segment structure (Member, Working Principles, Communication, Environment) with the updated communication rules.
+- Upgrade is one-click and failure-safe: ordinary startup backs up, imports and migrates automatically, and an interrupted upgrade resumes on the next start.
+- Removes the two leftover UI controls flagged in review: the room header's lone "Chat" segmented control and the sidebar's "All chats" entry.
+
 ## [0.25.0-rc.2] — 2026-09-13
 
 ### Release
