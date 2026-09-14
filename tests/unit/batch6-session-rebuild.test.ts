@@ -28,8 +28,8 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let reloading: Promise<unknown> | undefined;
     try {
       const manager = await import("../../src/engine/agent-manager.js");
-      const { saveSession, getSessions } = await import("../../src/workspace/session-store.js");
-      saveSession(roomId, memberId, { runtime: "pi-cli", sessionId: "retained-session" });
+      const { saveCurrentSession, getCurrentSession } = await import("../../src/workspace/session-store.js");
+      saveCurrentSession(memberId, { runtime: "pi-cli", sessionId: "retained-session" });
       // An empty room builds an idle instance, not an invented human instruction.
       await manager.activateAgent(roomId, memberId);
       const instance = manager.getAgentInstanceForScope(scopeId, memberId)!;
@@ -47,7 +47,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
       const rebuilt = manager.getAgentInstanceForScope(scopeId, memberId);
       expect(rebuilt).toBeTruthy();
       expect(rebuilt).not.toBe(instance);
-      expect(getSessions(roomId, memberId)[memberId]).toMatchObject({ sessionId: "retained-session" });
+      expect(getCurrentSession(memberId)).toMatchObject({ sessionId: "retained-session" });
     } finally {
       releaseCleanup();
       try { await reloading; } finally { await closeTestServer(ts); }

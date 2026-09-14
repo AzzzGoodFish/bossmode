@@ -8,7 +8,7 @@ import {
 import { MockRuntime } from "../helpers/mock-runtime.js";
 import { readConfig, writeConfig } from "../../src/shared/config.js";
 import { activateAgent, shutdownAll } from "../../src/engine/agent-manager.js";
-import { mainSessionDirectory, saveSession, getSessions } from "../../src/workspace/session-store.js";
+import { mainSessionDirectory, saveCurrentSession, getCurrentSession } from "../../src/workspace/session-store.js";
 import { updateMemberIdentity } from "../../src/workspace/member-registry.js";
 
 setupTestWorkspace();
@@ -21,7 +21,7 @@ describe("agent-manager SQL session resume toggle", () => {
       const token = await loginAndGetToken(server.port);
       const room = await createMockRoom(server.port, token, `Resume ${sessionResume}`, [`resume-${sessionResume}`]);
       const id = room.globalMemberIds![0];
-      const directory = mainSessionDirectory(id, `room:${room.id}`);
+      const directory = mainSessionDirectory(id);
       mkdirSync(directory, { recursive: true });
       const manager = SessionManager.create(getTestWorkspace().root, directory);
       manager.appendMessage({ role: "user", content: "retained requirement", timestamp: Date.now() });
@@ -29,7 +29,7 @@ describe("agent-manager SQL session resume toggle", () => {
       const sessionFile = manager.getSessionFile()!;
       const sessionId = manager.getSessionId();
       const history = readFileSync(sessionFile, "utf8");
-      saveSession(room.id, id, { runtime: "pi-cli", sessionId, sessionFile });
+      saveCurrentSession(id, { runtime: "pi-cli", sessionId, sessionFile });
       updateMemberIdentity(id, { name: `renamed-${sessionResume}` });
       writeConfig({ ...readConfig(), runtime: sessionResume === undefined ? {} : { sessionResume } });
       getTestWorkspace().reopen();
@@ -41,7 +41,7 @@ describe("agent-manager SQL session resume toggle", () => {
       expect(args.member.name).toBe(`renamed-${sessionResume}`);
       expect(args.resumeSession).toEqual(sessionResume === false ? undefined : { sessionId, sessionFile });
       await shutdownAll();
-      expect(getSessions(room.id, id)[id]).toMatchObject({ sessionId, sessionFile });
+      expect(getCurrentSession(id)).toMatchObject({ sessionId, sessionFile });
       expect(readFileSync(sessionFile, "utf8")).toBe(history);
       expect(SessionManager.open(sessionFile).getSessionId()).toBe(sessionId);
     } finally { await closeTestServer(server); }

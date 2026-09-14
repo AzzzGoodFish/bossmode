@@ -15,7 +15,7 @@ import {
 import { getMember, updateMember } from "../../src/workspace/member-registry.js";
 import { memberProfilePath } from "../../src/workspace/member-profile.js";
 import { getRuntimeStateEntry } from "../../src/workspace/runtime-state.js";
-import { getSessions } from "../../src/workspace/session-store.js";
+import { getCurrentSession } from "../../src/workspace/session-store.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { TemplateRepository } from "../../src/storage/repositories/templates.js";
 import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";
@@ -93,7 +93,7 @@ describe("current runtime does not depend on historical agent templates", () => 
           mkdirSync(args.sessionDir!, { recursive: true });
           writeFileSync(file, "retained SDK history\n");
           args.onSessionChanged?.({ sessionId: "fixture-session", sessionFile: file });
-          expect(getSessions(scope, id)[id]?.sessionFile).toBe(file);
+          expect(getCurrentSession(id)?.sessionFile).toBe(file);
           const teardown = vi.spyOn(instance!.handle, "destroyAndWait");
           expect(await reloadMemberSession(scope, id, "template-independent reload")).toEqual({ queued: false, rebuilt: true });
           expect(teardown).toHaveBeenCalledOnce();

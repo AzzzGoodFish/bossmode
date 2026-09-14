@@ -5,6 +5,7 @@ import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-stora
 import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/storage/database.js";
 import { baseStorageMigration } from "../../src/storage/base-schema.js";
 import { executionMigration } from "../../src/storage/schema/execution.js";
+import { memberSessionsMigration } from "../../src/storage/schema/member-sessions.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
@@ -19,8 +20,8 @@ let db: Database;
 vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => sandbox}));
 const owner = "mem_owner";
 const other = "mem_other";
-function sessionFile(scope = "rooms/r", member = owner, filename = "session.jsonl"): string {
-  const path = join(sandbox, "members", member, "sessions", "2026-09-09", scope, filename);
+function sessionFile(member = owner, filename = "session.jsonl"): string {
+  const path = join(sandbox, "members", member, "sessions", "2026-09-09", "main", filename);
   mkdirSync(dirname(path), {recursive: true});
   writeFileSync(path, '{"type":"session","id":"sdk-id"}\n');
   return path;
@@ -29,7 +30,7 @@ function restart(): void {
   const path = db.path;
   db.close();
   db = openDatabase(path);
-  applyStorageMigrations(db, [baseStorageMigration, executionMigration]);
+  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration]);
   bindDatabase(db);
 }
 beforeEach(() => {
@@ -40,7 +41,7 @@ beforeEach(() => {
   const path = join(sandbox, "bossmode.db");
   createLegacyMemberStorageFixture(path);
   db = openDatabase(path);
-  applyStorageMigrations(db, [baseStorageMigration, executionMigration]);
+  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration]);
   bindDatabase(db);
   for (const [id, name] of [[owner,"Alice"], [other,"Bob"]]) {
     db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,'test','{}',1,1)", id, name, name.toLowerCase());
@@ -56,102 +57,112 @@ afterEach(async () => {
   rmSync(sandbox, {recursive:true, force:true});
 });
 
-describe("DB session associations, unchanged SDK files", () => {
+describe("DB member sessions, unchanged SDK files", () => {
   it("stores normalized descriptors, no current.json; reopening/reset never changes SDK bytes", () => {
     const file = sessionFile();
     const bytes = readFileSync(file);
-    sessions.saveCurrentSession(owner, "room:r", {runtime:"pi-sdk",sessionId:"sdk-id",sessionFile:file});
-    expect(db.get("SELECT scope_id,file_reference,reference_kind FROM current_sessions")).toEqual({scope_id:"r",file_reference:"sessions/2026-09-09/rooms/r/session.jsonl",reference_kind:"member-relative"});
+    sessions.saveCurrentSession(owner, {runtime:"pi-sdk",sessionId:"sdk-id",sessionFile:file});
+    expect(db.get("SELECT member_id,file_reference,reference_kind FROM current_sessions")).toEqual({member_id:owner,file_reference:"sessions/2026-09-09/main/session.jsonl",reference_kind:"member-relative"});
     expect(existsSync(join(sandbox,"members",owner,"sessions","current.json"))).toBe(false);
     restart();
-    expect(sessions.getSessions("r", owner)[owner]).toEqual({runtime:"pi-sdk",sessionId:"sdk-id",sessionFile:file});
-    sessions.clearCurrentSessions(owner,["room:r"]);
-    expect(sessions.getCurrentSession(owner,"r")).toBeUndefined();
+    expect(sessions.getCurrentSession(owner)).toEqual({runtime:"pi-sdk",sessionId:"sdk-id",sessionFile:file});
+    sessions.clearCurrentSession(owner);
+    expect(sessions.getCurrentSession(owner)).toBeUndefined();
     expect(readFileSync(file)).toEqual(bytes);
   });
-  it("keeps room/DM ownership separate, stable over rename and reuse", () => {
-    for (const scope of ["r",`dm:${owner}`]) sessions.saveCurrentSession(owner,scope,{runtime:"pi-sdk",sessionId:scope});
+  it("keeps one row per member: a later save replaces the earlier session", () => {
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"first"});
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"second"});
+    expect(sessions.getCurrentSession(owner)?.sessionId).toBe("second");
+    expect(db.all("SELECT sdk_session_id FROM current_sessions")).toEqual([{sdk_session_id:"second"}]);
+  });
+  it("keeps members independent and stable over rename", () => {
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"owner-session"});
+    sessions.saveCurrentSession(other,{runtime:"pi-sdk",sessionId:"other-session"});
     db.run("UPDATE members SET name='Renamed',name_key='renamed' WHERE id=?",owner);
     db.run("UPDATE members SET name='Alice',name_key='alice' WHERE id=?",other);
-    expect(sessions.getCurrentSession(other,"r")).toBeUndefined();
-    expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe("r");
-    sessions.clearCurrentSession(owner,"r");
-    expect(sessions.getCurrentSession(owner,`dm:${owner}`)?.sessionId).toBe(`dm:${owner}`);
-    expect(() => sessions.saveCurrentSession(other,`dm:${owner}`,{runtime:"pi-sdk"})).toThrow(/belong/);
-    expect(() => sessions.saveCurrentSession("Alice","r",{runtime:"pi-sdk"})).toThrow(/member ID/);
-    expect(() => sessions.saveCurrentSession(owner,"room:missing",{runtime:"pi-sdk"})).toThrow(/scope_not_found/);
+    expect(sessions.getCurrentSession(owner)?.sessionId).toBe("owner-session");
+    expect(sessions.getCurrentSession(other)?.sessionId).toBe("other-session");
+    sessions.clearCurrentSession(owner);
+    expect(sessions.getCurrentSession(owner)).toBeUndefined();
+    expect(sessions.getCurrentSession(other)?.sessionId).toBe("other-session");
+    expect(() => sessions.saveCurrentSession("Alice",{runtime:"pi-sdk"})).toThrow(/Unknown execution member ID/);
+    expect(() => sessions.saveCurrentSession("mem_absent",{runtime:"pi-sdk"})).toThrow(/Unknown execution member ID/);
   });
-  it("rejects wrong-scope, symlink, escaped, and missing references", () => {
+  it("rejects retired layouts, symlink, escaped, and missing references", () => {
     const file = sessionFile();
-    expect(() => sessions.saveCurrentSession(owner,`dm:${owner}`,{runtime:"pi-sdk",sessionFile:file})).toThrow(/outside/);
-    expect(() => sessions.saveCurrentSession("../escape","r",{runtime:"pi-sdk",sessionFile:file})).toThrow(/Invalid member/);
+    const retiredLayout = join(sandbox,"members",owner,"sessions","2026-09-09","rooms","r","one.jsonl");
+    mkdirSync(dirname(retiredLayout),{recursive:true});writeFileSync(retiredLayout,"{}\n");
+    expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:retiredLayout})).toThrow(/outside the member session store/);
+    expect(() => sessions.saveCurrentSession("../escape",{runtime:"pi-sdk",sessionFile:file})).toThrow(/Invalid member/);
     const link = join(dirname(file),"link.jsonl"); symlinkSync(file,link);
-    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:link})).toThrow(/symlink/);
+    expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:link})).toThrow(/symlink/);
     const absent = join(dirname(file),"missing.jsonl");
-    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:absent}); // SDK may prepare before first append.
-    expect(() => sessions.getCurrentSession(owner,"r")).toThrow(/is missing/);
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:absent}); // SDK may prepare before first append.
+    expect(() => sessions.getCurrentSession(owner)).toThrow(/is missing/);
     const outside = join(sandbox,"outside"); mkdirSync(outside);
     const escape = join(sandbox,"members",owner,"sessions","2026-09-10"); symlinkSync(outside,escape);
-    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:join(escape,"rooms/r/a.jsonl")})).toThrow(/escapes/);
+    expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:join(escape,"main","a.jsonl")})).toThrow(/escapes/);
   });
   it("imports exact timestamps and legacy SDK references without moving or mirroring history", () => {
     const file = join(sandbox,"rooms/r/pi-sessions/old.jsonl"); mkdirSync(dirname(file),{recursive:true});writeFileSync(file,"old-sdk-bytes\n");
     const repo = new SessionRepository(db);
-    repo.importAssociation({memberId:owner,scopeId:"room:r",referenceKind:"legacy-absolute",createdAt:123,updatedAt:456,
+    repo.importAssociation({memberId:owner,referenceKind:"legacy-absolute",createdAt:123,updatedAt:456,
       session:{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file}});
-    expect(repo.get(owner,"r")).toMatchObject({createdAt:123,updatedAt:456});
-    expect(sessions.getCurrentSession(owner,"r")?.sessionFile).toBe(file);
-    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file});
-    expect(repo.get(owner,"r")).toMatchObject({referenceKind:"legacy-absolute",createdAt:123});
+    expect(repo.get(owner)).toMatchObject({createdAt:123,updatedAt:456});
+    expect(sessions.getCurrentSession(owner)?.sessionFile).toBe(file);
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file});
+    expect(repo.get(owner)).toMatchObject({referenceKind:"legacy-absolute",createdAt:123});
     expect(readFileSync(file,"utf8")).toBe("old-sdk-bytes\n");
     expect(db.all("SELECT name FROM sqlite_master WHERE name LIKE '%session%' AND type='table'")).toEqual([{name:"current_sessions"}]);
   });
   it("keeps real SDK create/open/context/fork behavior file-backed across DB reopen", async () => {
     const {SessionManager} = await import("@earendil-works/pi-coding-agent");
-    const dir = sessions.mainSessionDirectory(owner,"room:r");mkdirSync(dir,{recursive:true});
+    const dir = sessions.mainSessionDirectory(owner);mkdirSync(dir,{recursive:true});
     const manager=SessionManager.create(sandbox,dir);
     manager.appendMessage({role:"user",content:[{type:"text",text:"original user context"}]} as any);
     manager.appendMessage({role:"assistant",content:[{type:"text",text:"original answer"}]} as any);
     const file=manager.getSessionFile()!;
     const bytes=readFileSync(file);
     const context=JSON.stringify(manager.buildSessionContext());
-    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionId:manager.getSessionId(),sessionFile:file});
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:manager.getSessionId(),sessionFile:file});
     restart();
-    const association=sessions.getCurrentSession(owner,"r")!;
+    const association=sessions.getCurrentSession(owner)!;
     const opened=SessionManager.open(association.sessionFile!,dir,sandbox);
     expect(opened.getSessionId()).toBe(manager.getSessionId());
     expect(JSON.stringify(opened.buildSessionContext())).toBe(context);
-    const dmDir=sessions.mainSessionDirectory(owner,`dm:${owner}`);mkdirSync(dmDir,{recursive:true});
-    const fork=SessionManager.forkFrom(file,sandbox,dmDir);
+    const fork=SessionManager.forkFrom(file,sandbox,dir);
     expect(JSON.stringify(fork.buildSessionContext())).toBe(context);
-    sessions.saveCurrentSession(owner,`dm:${owner}`,{runtime:"pi-sdk",sessionId:fork.getSessionId(),sessionFile:fork.getSessionFile()});
-    fork.appendMessage({role:"user",content:[{type:"text",text:"dm-only continuation"}]} as any);
-    fork.appendMessage({role:"assistant",content:[{type:"text",text:"dm answer"}]} as any);
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:fork.getSessionId(),sessionFile:fork.getSessionFile()!});
+    fork.appendMessage({role:"user",content:[{type:"text",text:"continuation"}]} as any);
+    fork.appendMessage({role:"assistant",content:[{type:"text",text:"answer"}]} as any);
     expect(readFileSync(file)).toEqual(bytes);
-    sessions.clearCurrentSession(owner,`dm:${owner}`);
+    expect(sessions.getCurrentSession(owner)?.sessionId).toBe(fork.getSessionId());
+    sessions.clearCurrentSession(owner);
     expect(existsSync(fork.getSessionFile()!)).toBe(true);
-    expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe(manager.getSessionId());
+    expect(sessions.getCurrentSession(owner)).toBeUndefined();
   });
   it("rejects malformed pure-import archive references and non-file SDK references", () => {
     const repo=new SessionRepository(db);
-    expect(() => repo.importAssociation({memberId:owner,scopeId:"r",referenceKind:"member-relative",createdAt:1,updatedAt:2,
-      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/rooms/other/wrong.jsonl"}})).toThrow(/owned scope/);
-    const fake=join(sandbox,"members",owner,"sessions/2026-09-09/rooms/r/directory.jsonl");mkdirSync(fake,{recursive:true});
-    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionFile:fake})).toThrow(/not a file/);
+    expect(() => repo.importAssociation({memberId:owner,referenceKind:"member-relative",createdAt:1,updatedAt:2,
+      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/rooms/other/wrong.jsonl"}})).toThrow(/does not match the member session archive/);
+    const fake=join(sandbox,"members",owner,"sessions/2026-09-09/main/directory.jsonl");mkdirSync(fake,{recursive:true});
+    expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:fake})).toThrow(/not a file/);
   });
   it("does not read legacy current.json on get or preserve it as a shadow", () => {
-    const file=sessionFile();const legacy=join(sandbox,"members",owner,"sessions","current.json");
+    const legacyDir=join(sandbox,"members",owner,"sessions"); mkdirSync(legacyDir,{recursive:true});
+    const legacy=join(legacyDir,"current.json");
     writeFileSync(legacy,"broken");
-    expect(sessions.getCurrentSession(owner,"r")).toBeUndefined();
-    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk"});
+    expect(sessions.getCurrentSession(owner)).toBeUndefined();
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk"});
     expect(readFileSync(legacy,"utf8")).toBe("broken");
   });
   it("rolls back failed association writes with no file mutation or successful fallback", () => {
     const file=sessionFile();
-    sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionId:"first",sessionFile:file});
+    sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"first",sessionFile:file});
     db.exec("CREATE TRIGGER reject_session BEFORE UPDATE ON current_sessions BEGIN SELECT RAISE(ABORT,'injected'); END");
-    expect(() => sessions.saveCurrentSession(owner,"r",{runtime:"pi-sdk",sessionId:"second",sessionFile:file})).toThrow(/injected/);
-    expect(sessions.getCurrentSession(owner,"r")?.sessionId).toBe("first");
+    expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"second",sessionFile:file})).toThrow(/injected/);
+    expect(sessions.getCurrentSession(owner)?.sessionId).toBe("first");
   });
 });
 

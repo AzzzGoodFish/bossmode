@@ -7,7 +7,6 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../foundation/logger.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as memberRegistry from "../workspace/member-registry.js";
-import { clearCurrentSession, clearCurrentSessions } from "../workspace/session-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
@@ -119,9 +118,6 @@ addRoute("DELETE", "/api/rooms/:id", async (_req, res, params) => {
   if (!room) {
     sendJson(res, 404, { error: "Room not found" });
     return;
-  }
-  for (const member of room.roomMembers ?? []) {
-    if (member.sourceMemberId) clearCurrentSession(member.sourceMemberId, `room:${params.id}`);
   }
   roomStore.deleteRoom(params.id);
   sendJson(res, 200, { ok: true });
@@ -563,15 +559,6 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params)
       globalMemberId = g?.id;
     }
   } catch { /* ignore */ }
-
-  if (globalMemberId) {
-    try {
-      clearCurrentSessions(globalMemberId, [`room:${params.id}`]);
-    } catch (err) {
-      sendJson(res, 500, { error: "Member current-session cleanup failed", memberId: globalMemberId, detail: String(err) });
-      return;
-    }
-  }
 
   const removed = roomStore.removeRoomMemberByRef(params.id, params.memberRef, { globalMemberId });
   if (!removed.ok) {

@@ -1,5 +1,5 @@
 import {afterEach,expect,it} from "vitest";
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync} from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync,existsSync} from "node:fs";
 import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {openDatabase,applyStorageMigrations,type Database} from "../../src/storage/database.js";
@@ -21,12 +21,15 @@ function setup(files:Record<string,unknown>){
  const ctx:UpgradeImportContext={db,root,sourceRoot,previousDatabase:undefined,sourceFiles:entries.map(e=>e.path),legacy:true,progress(){},stageAsset(){throw new Error("unexpected staging");}};
  return {ctx,entries};
 }
-it("imports application associations without reading or changing SDK history",()=>{
+it("quarantines legacy per-scope session sources without opening their SDK files",()=>{
  const session={runtime:"pi",sessionId:"sdk-id",sessionFile:"sessions/2026-09-09/rooms/room-one/sdk.jsonl"};
  const {ctx,entries}=setup({"members/mem_one/sessions/current.json":{"room:room-one":session}});
  const file=join(ctx.root,"members/mem_one",session.sessionFile);mkdirSync(dirname(file),{recursive:true});const body="SDK-owned bytes, deliberately not parsed by the importer\r\n";writeFileSync(file,body);
  expect(importLegacyExecution(ctx,entries).size).toBe(1);
- expect(new SessionRepository(ctx.db).get("mem_one","room-one")?.session).toEqual(session);
+ // Member-centric sessions (① A1/A3): the legacy association is never revived;
+ // the SDK file stays byte-identical and the source is kept as a quarantine record.
+ expect(new SessionRepository(ctx.db).get("mem_one")).toBeUndefined();
+ expect(ctx.db.get<{reason:string;record_json:string}>("SELECT reason,record_json FROM execution_import_ambiguities WHERE domain='session'")).toMatchObject({reason:"retired-scope-session-generation",record_json:JSON.stringify(session)});
  expect(readFileSync(file,"utf8")).toBe(body);expect(entries.some(e=>e.path.endsWith(".jsonl"))).toBe(false);
 });
 it("does not revive retired room sessions when a current map is explicitly empty",()=>{
@@ -49,11 +52,17 @@ it("retires background task sources: consumed, never imported, table gone",()=>{
  expect(consumed.has(path)).toBe(true);
  expect(ctx.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='background_tasks'")).toBeUndefined();
 });
-it("rejects conflicting canonical associations and escaped file references",()=>{
+it("keeps conflicting legacy scope keys as separate quarantine records, never canonical associations",()=>{
  const {ctx,entries}=setup({"members/mem_one/sessions/current.json":{"room:room-one":{runtime:"pi",sessionId:"one"},"room-one":{runtime:"pi",sessionId:"two"}}});
- expect(()=>importLegacyExecution(ctx,entries)).toThrow("Conflicting execution source");
+ expect(importLegacyExecution(ctx,entries).size).toBe(1);
+ expect(ctx.db.all("SELECT source_key FROM execution_import_ambiguities WHERE domain='session' ORDER BY source_key"))
+   .toEqual([{source_key:"room-one"},{source_key:"room:room-one"}]);
+ expect(new SessionRepository(ctx.db).get("mem_one")).toBeUndefined();
 });
-it("rejects path traversal rather than opening an arbitrary file",()=>{
+it("never resolves a legacy session file path, so traversal strings stay inert",()=>{
  const {ctx,entries}=setup({"members/mem_one/sessions/current.json":{"room:room-one":{runtime:"pi",sessionFile:"../../outside.jsonl"}}});
- expect(()=>importLegacyExecution(ctx,entries)).toThrow(/canonical|root/);
+ expect(importLegacyExecution(ctx,entries).size).toBe(1);
+ expect(existsSync(join(ctx.root,"outside.jsonl"))).toBe(false);
+ expect(new SessionRepository(ctx.db).get("mem_one")).toBeUndefined();
+ expect(ctx.db.get<{reason:string}>("SELECT reason FROM execution_import_ambiguities WHERE domain='session'")).toMatchObject({reason:"retired-scope-session-generation"});
 });

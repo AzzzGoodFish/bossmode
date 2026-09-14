@@ -64,22 +64,22 @@ describe("execution metadata isolation and transactional failures", () => {
     expect(runtime.readRuntimeState(`dm:${owners[0]}`)).toEqual({});
   });
 
-  it("preserves session creation time and atomically rolls back a multi-scope clear", () => {
+  it("preserves session creation time and atomically rolls back a clear", () => {
     const repo = new SessionRepository(fixture.db);
-    for (const id of owners) for (const scope of ["r", `dm:${id}`]) {
-      repo.importAssociation({memberId: id, scopeId: scope, session: {runtime: "pi-sdk", sessionId: `${scope}:${id}`},
+    for (const id of owners) {
+      repo.importAssociation({memberId: id, session: {runtime: "pi-sdk", sessionId: id},
         referenceKind: "member-relative", createdAt: 10, updatedAt: 20});
     }
     vi.spyOn(Date, "now").mockReturnValue(30);
-    sessions.saveCurrentSession(owners[0], "room:r", {runtime: "pi-sdk", sessionId: "replacement"});
-    expect(repo.get(owners[0], "r")).toMatchObject({createdAt: 10, updatedAt: 30});
-    fixture.db.exec(`CREATE TRIGGER reject_clear BEFORE DELETE ON current_sessions WHEN OLD.scope_id='dm:mem_one' BEGIN SELECT RAISE(ABORT,'clear blocked'); END`);
-    expect(() => sessions.clearCurrentSessions(owners[0], ["r", `dm:${owners[0]}`])).toThrow("clear blocked");
-    expect(sessions.getCurrentSession(owners[0], "r")?.sessionId).toBe("replacement");
+    sessions.saveCurrentSession(owners[0], {runtime: "pi-sdk", sessionId: "replacement"});
+    expect(repo.get(owners[0])).toMatchObject({createdAt: 10, updatedAt: 30});
+    fixture.db.exec(`CREATE TRIGGER reject_clear BEFORE DELETE ON current_sessions WHEN OLD.member_id='${owners[0]}' BEGIN SELECT RAISE(ABORT,'clear blocked'); END`);
+    expect(() => sessions.clearCurrentSession(owners[0])).toThrow("clear blocked");
+    expect(sessions.getCurrentSession(owners[0])?.sessionId).toBe("replacement");
     fixture.db.exec("DROP TRIGGER reject_clear");
-    sessions.clearCurrentSessions(owners[0], ["r", `dm:${owners[0]}`]);
-    expect(sessions.getCurrentSession(owners[0], `dm:${owners[0]}`)).toBeUndefined();
-    expect(sessions.getCurrentSession(owners[1], "r")?.sessionId).toBe(`r:${owners[1]}`);
+    sessions.clearCurrentSession(owners[0]);
+    expect(sessions.getCurrentSession(owners[0])).toBeUndefined();
+    expect(sessions.getCurrentSession(owners[1])?.sessionId).toBe(owners[1]);
   });
 
   it("keeps member and user positions independent across room and both DMs, including null/zero and backward patches", () => {
@@ -135,9 +135,9 @@ describe("execution metadata isolation and transactional failures", () => {
 
   it("propagates closed storage errors from session/runtime/cursor reads and writes instead of returning empty success", () => {
     fixture.db.close();
-    for (const read of [() => sessions.getCurrentSession(owners[0], "r"), () => runtime.readRuntimeState("room:r"),
+    for (const read of [() => sessions.getCurrentSession(owners[0]), () => runtime.readRuntimeState("room:r"),
       () => cursors.getUserReadCursor("room:r")]) expect(read).toThrow(/initialized|closed/);
-    for (const write of [() => sessions.saveCurrentSession(owners[0], "r", {runtime: "pi-sdk"}),
+    for (const write of [() => sessions.saveCurrentSession(owners[0], {runtime: "pi-sdk"}),
       () => runtime.setContractFingerprint("r", owners[0], "unsaved", 1),
       () => cursors.setUserReadCursor("room:r", {seq: 0})]) expect(write).toThrow(/initialized|closed/);
   });

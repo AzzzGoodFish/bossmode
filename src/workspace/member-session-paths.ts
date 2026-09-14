@@ -1,9 +1,12 @@
 import { join } from "node:path";
 import { memberDir } from "./member-profile.js";
 
-export function mainSessionDirectory(memberId: string, scope: string, startedAt = new Date()): string {
+/**
+ * Member-level session directory (① A2): a member has one session across all
+ * chats — `members/<id>/sessions/<day>/main/`. The pi session file itself is
+ * unchanged; only its owning directory loses the per-scope split.
+ */
+export function mainSessionDirectory(memberId: string, startedAt = new Date()): string {
   const day = startedAt.toISOString().slice(0, 10);
-  if (/^room:[^/]+$/.test(scope)) return join(memberDir(memberId), "sessions", day, "rooms", scope.slice(5));
-  if (scope === `dm:${memberId}`) return join(memberDir(memberId), "sessions", day, "dm");
-  throw new Error(`Invalid member session scope: ${scope}`);
+  return join(memberDir(memberId), "sessions", day, "main");
 }

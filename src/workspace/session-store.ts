@@ -6,37 +6,23 @@ import { getDatabase } from "../storage/database.js";
 import { SessionRepository } from "../storage/repositories/session-repository.js";
 import type { AgentSession } from "../shared/types.js";
 
-export type MainScopeId = `room:${string}` | `dm:${string}`;
 function repository(): SessionRepository { return new SessionRepository(getDatabase()); }
 const SAFE_ID = /^[^/:\\]+$/;
+/** Member session files live under `sessions/<day>/main/` (① A2). */
+const MEMBER_SESSION_PATTERN = /^sessions\/\d{4}-\d{2}-\d{2}\/main\/[^/]+\.jsonl$/;
 
-function canonicalScope(scope: string, memberId: string): MainScopeId {
+function validateMemberId(memberId: string): void {
   if (!SAFE_ID.test(memberId) || memberId === "." || memberId === "..") throw new Error(`Invalid member ID: ${memberId}`);
-  if (!scope.includes(":")) {
-    if (!SAFE_ID.test(scope)) throw new Error(`Invalid member session scope: ${scope}`);
-    return `room:${scope}`;
-  }
-  const split = scope.indexOf(":");
-  const kind = scope.slice(0, split);
-  const id = scope.slice(split + 1);
-  if (!SAFE_ID.test(id) || !["room", "dm"].includes(kind)) throw new Error(`Invalid member session scope: ${scope}`);
-  if (kind === "dm" && id !== memberId) throw new Error(`DM session scope does not belong to member ${memberId}`);
-  return scope as MainScopeId;
 }
-function validateSession(scope: MainScopeId, value: unknown): AgentSession {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid session entry for ${scope}`);
+function validateSession(memberId: string, value: unknown): AgentSession {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid session entry for member ${memberId}`);
   const session = value as AgentSession;
-  if (typeof session.runtime !== "string" || !session.runtime) throw new Error(`Invalid runtime for ${scope}`);
-  if (session.sessionId !== undefined && typeof session.sessionId !== "string") throw new Error(`Invalid sessionId for ${scope}`);
+  if (typeof session.runtime !== "string" || !session.runtime) throw new Error(`Invalid runtime for member ${memberId}`);
+  if (session.sessionId !== undefined && typeof session.sessionId !== "string") throw new Error(`Invalid sessionId for member ${memberId}`);
   if (session.sessionFile !== undefined && (typeof session.sessionFile !== "string" || isAbsolute(session.sessionFile))) {
-    throw new Error(`Invalid relative sessionFile for ${scope}`);
+    throw new Error(`Invalid relative sessionFile for member ${memberId}`);
   }
   return session;
-}
-function scopePathPattern(scope: MainScopeId): RegExp {
-  const escaped = scope.slice(scope.indexOf(":") + 1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tail = scope.startsWith("room:") ? `rooms/${escaped}` : "dm";
-  return new RegExp(`^sessions/\\d{4}-\\d{2}-\\d{2}/${tail}/[^/]+\\.jsonl$`);
 }
 function existingRealPath(path: string): string {
   let current = path;
@@ -47,11 +33,11 @@ function existingRealPath(path: string): string {
   }
   return realpathSync(current);
 }
-function archiveRelativePath(memberId: string, scope: MainScopeId, file: string): string {
+function archiveRelativePath(memberId: string, file: string): string {
   const root = realpathSync(memberDir(memberId));
   const absolute = resolve(file);
   const rel = relative(root, absolute).split(sep).join("/");
-  if (!scopePathPattern(scope).test(rel)) throw new Error(`Session file is outside the ${scope} archive: ${file}`);
+  if (!MEMBER_SESSION_PATTERN.test(rel)) throw new Error(`Session file is outside the member session store: ${file}`);
   const realParent = existingRealPath(dirname(absolute));
   if (realParent !== root && !realParent.startsWith(root + sep)) throw new Error(`Session archive path escapes member directory: ${file}`);
   if (existsSync(absolute)) {
@@ -64,9 +50,11 @@ function archiveRelativePath(memberId: string, scope: MainScopeId, file: string)
 }
 
 export { mainSessionDirectory } from "./member-session-paths.js";
-export function getCurrentSession(memberId: string, scopeValue: string): AgentSession | undefined {
-  const scope = canonicalScope(scopeValue, memberId);
-  const association = repository().get(memberId, scope);
+
+/** The member's one session across every chat (① A1: key is the member alone). */
+export function getCurrentSession(memberId: string): AgentSession | undefined {
+  validateMemberId(memberId);
+  const association = repository().get(memberId);
   const session = association?.session;
   if (!session?.sessionFile) return session;
   const absolute = association!.referenceKind === "legacy-absolute"
@@ -79,38 +67,28 @@ export function getCurrentSession(memberId: string, scopeValue: string): AgentSe
     if (!lstatSync(absolute).isFile() || !realpathSync(absolute).startsWith(root + sep)) {
       throw new Error(`Legacy session reference escapes data root: ${absolute}`);
     }
-  } else archiveRelativePath(memberId, scope, absolute);
+  } else archiveRelativePath(memberId, absolute);
   if (!existsSync(absolute)) throw new Error(`Session file referenced by database is missing: ${absolute}`);
   return { ...session, sessionFile: absolute };
 }
 
-export function saveCurrentSession(memberId: string, scopeValue: string, sessionValue: AgentSession): void {
-  const scope = canonicalScope(scopeValue, memberId);
-  const session = { ...validateSession(scope, { ...sessionValue, sessionFile: undefined }) };
+export function saveCurrentSession(memberId: string, sessionValue: AgentSession): void {
+  validateMemberId(memberId);
+  const session = { ...validateSession(memberId, { ...sessionValue, sessionFile: undefined }) };
   let referenceKind: "member-relative" | "legacy-absolute" = "member-relative";
   if (sessionValue.sessionFile) {
-    const previous = repository().get(memberId, scope);
+    const previous = repository().get(memberId);
     if (previous?.referenceKind === "legacy-absolute" && previous.session.sessionFile === sessionValue.sessionFile) {
-      getCurrentSession(memberId, scope); // Revalidate the imported file before keeping its reference.
+      getCurrentSession(memberId); // Revalidate the imported file before keeping its reference.
       session.sessionFile = sessionValue.sessionFile;
       referenceKind = "legacy-absolute";
-    } else session.sessionFile = archiveRelativePath(memberId, scope, sessionValue.sessionFile);
+    } else session.sessionFile = archiveRelativePath(memberId, sessionValue.sessionFile);
   }
   const now = Date.now();
-  repository().importAssociation({memberId, scopeId: scope, session, referenceKind, createdAt: now, updatedAt: now});
-}
-export function clearCurrentSessions(memberId: string, scopeValues: string[]): void {
-  repository().clear(memberId, scopeValues.map(scope => canonicalScope(scope, memberId)));
+  repository().importAssociation({memberId, session, referenceKind, createdAt: now, updatedAt: now});
 }
 
-export function clearCurrentSession(memberId: string, scopeValue: string): void {
-  clearCurrentSessions(memberId, [scopeValue]);
+export function clearCurrentSession(memberId: string): void {
+  validateMemberId(memberId);
+  repository().clear(memberId);
 }
-export const deleteCurrentSession = clearCurrentSession;
-export function getSessions(scope: string, memberId: string): Record<string, AgentSession> {
-  const session = getCurrentSession(memberId, scope);
-  return session ? { [memberId]: session } : {};
-}
-export function saveSession(scope: string, memberId: string, session: AgentSession): void { saveCurrentSession(memberId, scope, session); }
-export function clearSession(scope: string, memberId: string, _runtime: string): void { clearCurrentSession(memberId, scope); }
-export function deleteSessionEntry(scope: string, memberId: string): void { clearCurrentSession(memberId, scope); }

@@ -102,7 +102,7 @@ describe("explicit historical identity import, not recurring name/marker repair"
 });
 
 describe("historical execution metadata uses stable IDs, explicit imports and source time", () => {
-  it("consumes retired topic sources without import while room/DM associations keep exact source times", async () => {
+  it("quarantines legacy per-scope sessions while runtime checkpoints keep exact source times", async () => {
     seedMember();
     const session = {runtime: "pi-sdk", sessionId: "historical-sdk-id"};
     const checkpoint = {contractFingerprint: "historical", contractVersion: 4, driftNotified: 5,
@@ -118,19 +118,23 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
     importLegacyExecution(ctx, entries);
     // Topic feature retired (fish #19358): topic sources and topic-scoped keys are
     // consumed by the source-retire flow, never imported — no topic scopes,
-    // sessions, checkpoints or cursors survive an upgrade.
+    // checkpoints or cursors survive an upgrade.
     expect(consumed.has("rooms/r/topics/t/topic.json")).toBe(true);
     fixture.reopen();
+    // Member-centric sessions (① A1/A3): legacy per-scope associations are a retired
+    // generation — preserved as quarantine records, never resumed as live sessions.
+    expect(fixture.db.all("SELECT * FROM current_sessions")).toEqual([]);
+    expect(fixture.db.all("SELECT source_key,reason FROM execution_import_ambiguities WHERE domain='session' ORDER BY source_key"))
+      .toEqual([{source_key:"dm:mem_one",reason:"retired-scope-session-generation"},
+        {source_key:"room:r",reason:"retired-scope-session-generation"}]);
     for (const scope of ["room:r", "dm:mem_one"]) {
-      expect(new SessionRepository(fixture.db).get(member.id, scope)).toMatchObject({session, createdAt: 123000, updatedAt: 123000});
       expect(new RuntimeRepository(fixture.db).get(scope, member.id)).toEqual(checkpoint);
     }
     expect(fixture.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();
-    expect(fixture.db.get("SELECT 1 FROM current_sessions WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
     expect(fixture.db.get("SELECT 1 FROM runtime_checkpoints WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
     expect(fixture.db.all("SELECT updated_at FROM runtime_checkpoints")).toEqual(Array(2).fill({updated_at: 123000}));
-    expect(fixture.db.get("SELECT source_key,reason,record_json FROM execution_import_ambiguities")).toEqual({
-      source_key: "room:r:pm", reason: "unresolved-runtime-owner", record_json: JSON.stringify({contractFingerprint: "ambiguous"})});
+    expect(fixture.db.all("SELECT source_key,reason,record_json FROM execution_import_ambiguities WHERE domain='runtime'")).toEqual([
+      {source_key: "room:r:pm", reason: "unresolved-runtime-owner", record_json: JSON.stringify({contractFingerprint: "ambiguous"})}]);
   });
 
   it("aborts explicit malformed current.json import rather than treating corruption as empty", () => {

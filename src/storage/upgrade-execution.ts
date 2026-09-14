@@ -1,24 +1,21 @@
-import {existsSync} from "node:fs";
 import {isDeepStrictEqual} from "node:util";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import {readLegacyJson,type LegacySourceEntry} from "./legacy-inventory.js";
-import {SessionRepository} from "./repositories/session-repository.js";
 import {RuntimeRepository} from "./repositories/runtime-repository.js";
 import {executionScopeId,importExecutionAmbiguity} from "./repositories/execution-identity.js";
 import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js";
-import {managedPath,requireRegularFile} from "./upgrade-files.js";
-import type {AgentSession} from "../shared/types.js";
 
 function object(value:unknown,path:string):Record<string,any>{
  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy execution object: ${path}`);
  return value as Record<string,any>;
 }
-/** rc.28/current-member generation. Retired room sessions are preserved as historical
- * records, never used to revive an intentionally cleared/absent current association.
- * No SDK history is opened, copied, rewritten or replayed by this adapter. */
+/** rc.28/current-member generation. Member-centric sessions (① A1/A3): legacy
+ * per-scope associations are a retired generation, quarantined as historical
+ * records and never resumed. No SDK history is opened, copied, rewritten or
+ * replayed by this adapter. */
 export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[]):Set<string>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();
- const sessions=new SessionRepository(ctx.db);const runtime=new RuntimeRepository(ctx.db);
+ const runtime=new RuntimeRepository(ctx.db);
  const seen=new Map<string,unknown>();
  const unique=(key:string,value:unknown)=>{
   if(!seen.has(key)){seen.set(key,value);return true;}
@@ -35,16 +32,12 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
   if(!ctx.sourceFiles.includes(e.path))throw new Error(`Unsnapshotted execution source: ${e.path}`);
   const data=object(readLegacyJson(ctx.sourceRoot,e),e.path);const at=Math.trunc(e.mtimeMs);
   if(e.kind==="current-sessions"){
+   // Member-centric sessions (① A1/A3): one session per member across all chats.
+   // Legacy per-scope associations are a retired generation — preserved here as
+   // historical records, never resumed; the startup upgrade archives their files.
    for(const [key,value]of Object.entries(data)){
     if(retiredTopicScope(key))continue; // topic scope retired (fish #19358)
-    if(!known(e.memberId)){quarantine(e,key,"session",value,"unresolved-current-session-owner");continue;}
-    const scope=ensureImportedScope(ctx.db,key);const session=object(value,e.path) as AgentSession;
-    if(session.sessionFile!==undefined){
-     if(typeof session.sessionFile!=="string")throw new Error("Invalid current session file reference");
-     const file=managedPath(ctx.root,`members/${e.memberId}/${session.sessionFile}`);
-     if(existsSync(file))requireRegularFile(file);
-    }
-    if(unique(`session:${e.memberId}:${scope}`,session))sessions.importAssociation({memberId:e.memberId,scopeId:scope,session,referenceKind:"member-relative",createdAt:at,updatedAt:at});
+    quarantine(e,key,"session",value,"retired-scope-session-generation");
    }
   }else if(e.kind==="old-sessions"){
    for(const [key,value]of Object.entries(data))quarantine(e,key,"session",value,"retired-room-session-generation");

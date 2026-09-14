@@ -11,11 +11,17 @@ export function executionScopeId(scope: string): string {
   return key;
 }
 
-/** Exact stable-ID lookup only. Never turn a legacy display name into a current owner. */
-export function assertExecutionOwner(db: Database, memberId: string, scopeValue: string): string {
+/** Member-only identity check for member-level state (sessions, status). */
+export function assertExecutionMember(db: Database, memberId: string): string {
   if (!memberId || [".", ".."].includes(memberId) || /[/\\:\0]/.test(memberId) || !db.get("SELECT id FROM members WHERE id=?", memberId)) {
     throw new Error(`Unknown execution member ID: ${memberId}`);
   }
+  return memberId;
+}
+
+/** Exact stable-ID lookup only. Never turn a legacy display name into a current owner. */
+export function assertExecutionOwner(db: Database, memberId: string, scopeValue: string): string {
+  assertExecutionMember(db, memberId);
   const scopeId = executionScopeId(scopeValue);
   const scope = db.get<{kind: string; member_id: string | null}>("SELECT kind,member_id FROM scopes WHERE id=?", scopeId);
   if (!scope) throw new Error(`scope_not_found: ${scopeValue}`);

@@ -10,6 +10,7 @@ import { conversationsMigration } from "../../src/storage/schema/conversations.j
 import { executionMigration } from "../../src/storage/schema/execution.js";
 import { memberArchivesMigration } from "../../src/storage/schema/member-archives.js";
 import { assetsMigration } from "../../src/storage/schema/assets.js";
+import { memberSessionsMigration } from "../../src/storage/schema/member-sessions.js";
 import * as registry from "../../src/workspace/member-registry.js";
 import * as profile from "../../src/workspace/member-profile.js";
 import * as wizard from "../../src/workspace/member-archive.js";
@@ -44,7 +45,7 @@ vi.mock("node:fs", async original => {
     },
   };
 });
-const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, assetsMigration, memberArchivesMigration];
+const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, assetsMigration, memberArchivesMigration, memberSessionsMigration];
 function reopen(): void {
   db.close(); db = openDatabase(join(root, "bossmode.db")); applyStorageMigrations(db, migrations); bindDatabase(db);
 }
@@ -192,16 +193,16 @@ describe("durable quiescent archive and recovery", () => {
     const historical = {id:"old-local",roomId:"r",name:"old label",sourceAgent:"general",sourceMemberId:m.id,createdAt:1,updatedAt:2};
     conversations.upsertRoom({id:"r",name:"Room",createdAt:1,members:["historical label"],globalMemberIds:[m.id,other.id],
       roomMembers:[historical],promptLeaderMemberId:m.id,promptLeaderGlobalMemberId:m.id});
-    const session = "sessions/2026-09-09/rooms/r/sdk.jsonl";
+    const session = "sessions/2026-09-09/main/sdk.jsonl";
     file(join(registry.memberDir(m.id),session),'{"type":"session","id":"unchanged"}\r\n');
-    new SessionRepository(db).importAssociation({memberId:m.id,scopeId:"r",referenceKind:"member-relative",createdAt:1,updatedAt:2,
+    new SessionRepository(db).importAssociation({memberId:m.id,referenceKind:"member-relative",createdAt:1,updatedAt:2,
       session:{runtime:"pi-sdk",sessionId:"unchanged",sessionFile:session}});
     const logicalSnapshot = `members/${m.id}/history/persona/hash.md`; file(join(root,logicalSnapshot),"historical E bytes");
     const result = await service().archive(m.id,{confirm:true});
     expect(registry.getMember(m.id)).toBeNull();
     expect(new MembersRepository(db).getRetained(m.id)).toEqual(m);
     expect(() => db.run("DELETE FROM members WHERE id=?",m.id)).toThrow(/FOREIGN KEY/);
-    expect(new SessionRepository(db).get(m.id,"r")?.session.sessionFile).toBe(session);
+    expect(new SessionRepository(db).get(m.id)?.session.sessionFile).toBe(session);
     expect(readFileSync(resolveMemberArtifactPath(db,root,m.id,session),"utf8")).toContain("unchanged");
     expect(readFileSync(resolveMemberDocumentPath(db,root,m.id,logicalSnapshot),"utf8")).toBe("historical E bytes");
     expect(conversations.getRoom("r")).toMatchObject({globalMemberIds:[other.id],roomMembers:[historical],members:["historical label"]});

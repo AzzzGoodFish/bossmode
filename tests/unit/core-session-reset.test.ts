@@ -19,9 +19,9 @@ it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and
     updateMemberIdentity(id,{name:other}); // legal ID-shaped name, not ownership
     const files:string[]=[];
     for(const member of [id,other]){
-      const directory=sessions.mainSessionDirectory(member,`room:${room.id}`);mkdirSync(directory,{recursive:true});
+      const directory=sessions.mainSessionDirectory(member);mkdirSync(directory,{recursive:true});
       const file=join(directory,"retained.jsonl");writeFileSync(file,`SDK history ${member}\n`);files.push(file);
-      sessions.saveSession(room.id,member,{runtime:"pi-cli",sessionId:member,sessionFile:file});
+      sessions.saveCurrentSession(member,{runtime:"pi-cli",sessionId:member,sessionFile:file});
       runtime.setContractFingerprint(`room:${room.id}`,member,"retained",1);
       runtime.markStaleMounts(`room:${room.id}`,member,["skills"]);
       rooms.setCursor(room.id,member,`cursor-${member}`);
@@ -34,10 +34,10 @@ it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and
     expect(()=>resetAgentSession(room.id,id)).toThrow("reset-fault");expect(snapshot()).toEqual(before);
     db.exec("DROP TRIGGER reset_fault");
     expect(resetAgentSession(room.id,id)).toMatchObject({ok:true});
-    expect(sessions.getSessions(room.id,id)[id]).toBeUndefined();
+    expect(sessions.getCurrentSession(id)).toBeUndefined();
     expect(runtime.getRuntimeStateEntry(`room:${room.id}`,id)).toEqual({});
     expect(rooms.getCursors(room.id)[id]).toBeNull();
-    expect(sessions.getSessions(room.id,other)[other]?.sessionId).toBe(other);
+    expect(sessions.getCurrentSession(other)?.sessionId).toBe(other);
     expect(runtime.getRuntimeStateEntry(`room:${room.id}`,other)).toMatchObject({contractFingerprint:"retained"});
     expect(rooms.getCursors(room.id)[other]).toBe(`cursor-${other}`);
     expect(files.map(file=>readFileSync(file,"utf8"))).toEqual([`SDK history ${id}\n`,`SDK history ${other}\n`]);

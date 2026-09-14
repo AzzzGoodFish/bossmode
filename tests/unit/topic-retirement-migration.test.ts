@@ -19,7 +19,7 @@ let root: string;
 let db: Database | undefined;
 const withoutRetirement = () => coreStorageMigrations.filter((m) =>
   m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1"
-  && m.id !== "core-background-retirement-v1");
+  && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"); // pre-retirement schema: the member-session reshape lands after these
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "topic-retire-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });
@@ -30,7 +30,10 @@ function scopeTables(database: Database): string[] {
     .filter((name) => database.all<{ name: string }>(`PRAGMA table_info(${name})`).some((c) => c.name === "scope_id"))
     // background_tasks is dropped by its own retirement migration
     // (core-background-retirement-v1); its removal is covered there.
-    .filter((name) => name !== "background_tasks");
+    .filter((name) => name !== "background_tasks")
+    // current_sessions loses its scope column to the member-session reshape
+    // (core-member-session-v1); the topic-row check for it is asserted directly.
+    .filter((name) => name !== "current_sessions");
 }
 
 /** Dynamic ownership scan: every table carrying scope_id + the special keys. */
@@ -52,7 +55,6 @@ function mainChatValues(database: Database) {
     messages: database.all("SELECT * FROM messages WHERE scope_id NOT LIKE 'topic:%' ORDER BY scope_id,seq"),
     seqs: database.all("SELECT * FROM scope_sequences WHERE scope_id NOT LIKE 'topic:%' ORDER BY scope_id"),
     cursors: database.all("SELECT * FROM read_cursors WHERE scope_id NOT LIKE 'topic:%' ORDER BY scope_id,kind,actor_key"),
-    sessions: database.all("SELECT * FROM current_sessions WHERE scope_id NOT LIKE 'topic:%' ORDER BY member_id,scope_id"),
     events: database.all("SELECT * FROM agent_events WHERE scope_id NOT LIKE 'topic:%' ORDER BY scope_id,owner_key,seq"),
     usage: database.all("SELECT * FROM token_usage_daily WHERE room_id NOT LIKE 'topic:%' ORDER BY room_id,member_id,date,model"),
   };
@@ -76,7 +78,7 @@ function seed(database: Database): void {
   database.run("INSERT INTO read_cursors(scope_id,kind,actor_key,value,updated_at) VALUES('r1','member','mem_m1','room-msg',10)");
   database.run("INSERT INTO read_cursors(scope_id,kind,actor_key,value,updated_at) VALUES('topic:t1','member','mem_m1','topic-msg',11)");
   database.run("INSERT INTO read_cursors(scope_id,kind,actor_key,value,updated_at) VALUES('topic:t1','user','user','topic-msg',12)");
-  new SessionRepository(database).importAssociation({ memberId: "mem_m1", scopeId: "r1", session: { runtime: "pi-sdk" }, referenceKind: "member-relative", createdAt: 1, updatedAt: 1 });
+  database.run("INSERT INTO current_sessions(member_id,scope_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at) VALUES('mem_m1','r1','pi-sdk',NULL,NULL,'member-relative',1,1)");
   database.run("INSERT INTO current_sessions(member_id,scope_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at) VALUES('mem_m1','topic:t1','pi-sdk',NULL,NULL,'member-relative',1,1)");
   new RuntimeRepository(database).importEntry("r1", "mem_m1", { contractFingerprint: "room" }, 5);
   database.run("INSERT INTO runtime_checkpoints(scope_id,member_id,contract_fingerprint,updated_at) VALUES('topic:t1','mem_m1','topic',6)");
@@ -108,6 +110,8 @@ describe("core-topic-retirement-v1", () => {
 
     expect(topicRowCounts(db)).toEqual(zeroes(beforeTopic));
     expect(mainChatValues(db)).toEqual(beforeChat);
+    // The member-session reshape (① A1/A3) carries no legacy per-scope row over.
+    expect(db.all("SELECT * FROM current_sessions")).toEqual([]);
     expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
 
     // Idempotent: re-application records nothing and deletes nothing further.
@@ -170,6 +174,9 @@ describe("upgrade path end to end (prepareStorageUpgrade)", () => {
     expect(first.migrated).toBe(true);
     expect(topicRowCounts(first.db)).toEqual(zeroes(beforeTopic));
     expect(mainChatValues(first.db)).toEqual(beforeChat);
+    // Member-centric sessions (① A1/A3): the legacy per-scope rows are gone and
+    // the files stay in place until the startup archive step moves them.
+    expect(first.db.all("SELECT * FROM current_sessions")).toEqual([]);
     expect(first.db.all("PRAGMA foreign_key_check")).toEqual([]);
 
     // Session cleanup is a startup step, not part of the DB cutover — the upgrade alone leaves files.

@@ -1026,10 +1026,10 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
       keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
-      sessionDir = mainSessionDirectory(memberId, dmScopeId);
-      const savedSession = sessionStore.getSessions(dmScopeId, memberId)[memberId];
+      sessionDir = mainSessionDirectory(memberId);
+      const savedSession = sessionStore.getCurrentSession(memberId);
       resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
-      onSessionChanged = (session) => { if (canPublishSession()) sessionStore.saveSession(dmScopeId, memberId, { runtime: member.runtime, ...session }); };
+      onSessionChanged = (session) => { if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session }); };
       logLabel = "dmAgentCreated";
       errLabel = "dm";
       const dmKey = key;
@@ -1102,16 +1102,15 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       } catch {
         sessionResumeEnabled = true;
       }
-      const sessions = sessionStore.getSessions(ref.roomId, memberId);
-      const savedSession = sessions[memberId];
+      const savedSession = sessionStore.getCurrentSession(memberId);
       resumeSession = (sessionResumeEnabled && savedSession)
         ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
         : undefined;
       if (resumeSession) {
-        logger.info("agent", "resumeSession", { member: member.name, runtime: member.runtime, sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile });
+        logger.info("agent", "resumeSession", { member: member.name, runtime: member.runtime, sessionId: resumeSession.sessionId, sessionFile: resumeSession.sessionFile });
       }
       cwd = activeWorkspaceRoot(memberId);
-      sessionDir = mainSessionDirectory(memberId, `room:${ref.roomId}`);
+      sessionDir = mainSessionDirectory(memberId);
       roomMembers = r.members;
       keyRoomId = ref.roomId;
       logLabel = "agentCreated";
@@ -1120,7 +1119,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       const roomMemberName = () => currentRuntimeName(memberId, member.name);
       onSessionChanged = (session) => {
         if (!canPublishSession()) return;
-        sessionStore.saveSession(ref.roomId, memberId, {
+        sessionStore.saveCurrentSession(memberId, {
           runtime: member.runtime,
           sessionId: session.sessionId,
           sessionFile: session.sessionFile,
@@ -2125,14 +2124,13 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const key = instanceKey(scopeId, memberId);
   const instance = instances.get(key);
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
-  const runtime = instance?.handle.runtimeName || "pi-cli";
 
   destroyInstance(scopeId, memberId, {preservePending:true});
   clearActivationSource(scopeId, memberId);
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
     cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");
-    sessionStore.clearSession(scopeId, memberId, runtime);
+    sessionStore.clearCurrentSession(memberId);
     clearRuntimeStateEntry(scopeId, memberId);
     if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
     emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId,

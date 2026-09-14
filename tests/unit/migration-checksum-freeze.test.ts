@@ -38,6 +38,7 @@ const FROZEN: Record<string, string> = {
   "core-task-retirement-v1": "4581f58c3c016c485193607aa480002fdc6f776f1acbb1d22c01d88d4f096f67",
   "core-topic-retirement-v1": "8f62b96fee80b6381d139c53219200305e56c471acd4b186769478ad907f9255",
   "core-background-retirement-v1": "f5a86b854abe4cda1772a0240a85a96734936581474061251fc102279b6bfe03",
+  "core-member-session-v1": "9c45b7aeb976bfe823ecd95936cd00fa1b65a6a2635f2fc9bf2c8155c1289b5b",
 };
 
 describe("migration checksum freeze", () => {

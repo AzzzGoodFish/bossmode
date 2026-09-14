@@ -239,7 +239,7 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       mkdirSync(roomDir, { recursive: true });
       const pmMemberId = room.globalMemberIds![0];
       const memberSessions = join(getTestBossmodeDir(), "members", pmMemberId, "sessions");
-      const archiveDir = join(memberSessions, "2026-09-08", "rooms", room.id);
+      const archiveDir = join(memberSessions, "2026-09-08", "main");
       mkdirSync(archiveDir, { recursive: true });
       writeFileSync(join(archiveDir, "session.jsonl"), "{}\n");
       writeFileSync(join(memberSessions, "current.json"), JSON.stringify({
@@ -250,12 +250,12 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       const retiredCursors = readFileSync(join(roomDir, "cursors.json"), "utf8");
       const sessions = await import("../../src/workspace/session-store.js");
       const rooms = await import("../../src/workspace/room-store.js");
-      sessions.saveCurrentSession(pmMemberId, room.id, { runtime: "mock", sessionId: "session-123", sessionFile: join(archiveDir, "session.jsonl") });
+      sessions.saveCurrentSession(pmMemberId, { runtime: "mock", sessionId: "session-123", sessionFile: join(archiveDir, "session.jsonl") });
       rooms.setCursor(room.id, pmMemberId, "msg-123");
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });
       expect(res.status).toBe(200);
       expect(JSON.parse(res.body)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
-      expect(sessions.getCurrentSession(pmMemberId, room.id)).toBeUndefined();
+      expect(sessions.getCurrentSession(pmMemberId)).toBeUndefined();
       expect(rooms.getCursors(room.id)[pmMemberId]).toBeNull();
       expect(readFileSync(join(memberSessions, "current.json"), "utf8")).toBe(retiredSessions);
       expect(readFileSync(join(roomDir, "cursors.json"), "utf8")).toBe(retiredCursors);

@@ -24,14 +24,15 @@ let memberId: string;
 let runtime: MockRuntime;
 let saved: { sessionId: string; sessionFile: string };
 
-function retainSession(id: string, scope: string) {
-  const directory = sessionStore.mainSessionDirectory(id, scope);
+/** One member session (① A1/A2): `members/<id>/sessions/<day>/main/`, no scope. */
+function retainSession(id: string) {
+  const directory = sessionStore.mainSessionDirectory(id);
   mkdirSync(directory, { recursive: true });
   const manager = SessionManager.create(fixture.root, directory);
   manager.appendMessage({ role: "user", content: "retained requirement", timestamp: Date.now() });
   manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "retained answer" }], api: "openai-completions", provider: "mock", model: "model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() });
   const session = { sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()! };
-  sessionStore.saveSession(scope, id, { runtime: "pi-cli", ...session });
+  sessionStore.saveCurrentSession(id, { runtime: "pi-cli", ...session });
   return session;
 }
 
@@ -45,7 +46,7 @@ beforeEach(() => {
   stampGlobalMemberIds(roomId, [memberId], memberId);
   const message = addMessage(roomId, { sender: "user", content: "hello", mentions: [] });
   setCursor(roomId, memberId, message.id);
-  saved = retainSession(memberId, `room:${roomId}`);
+  saved = retainSession(memberId);
   runtime = new MockRuntime("pi-cli");
   const registry = new RuntimeRegistry();
   registry.register(runtime);
@@ -66,6 +67,16 @@ describe("resetAgentSession", () => {
     expect(create.mock.calls[0][0].resumeSession).toEqual(enabled ? saved : undefined);
   });
 
+  it("resumes the member's one session from any chat", async () => {
+    const create = vi.spyOn(runtime, "createAgent");
+    await activateAgent(roomId, memberId);
+    expect(create.mock.calls[0][0].resumeSession).toEqual(saved);
+    await shutdownAll();
+    // Same member, private chat: the session is member-level, so it resumes there too.
+    await buildMemberAgentSession(memberId, `dm:${memberId}`);
+    expect(create.mock.calls.at(-1)![0].resumeSession).toEqual(saved);
+  });
+
   it("does not resume another owner's session after taking their old display name", async () => {
     updateMemberIdentity(memberId, { name: "renamed-owner" });
     const other = createMember({ name: "pm", agentTemplate: "general", model: "mock/model", credentialId: "cred-test" });
@@ -74,16 +85,16 @@ describe("resetAgentSession", () => {
     await activateAgent(roomId, "pm");
     expect(create.mock.calls[0][0].member.id).toBe(other.id);
     expect(create.mock.calls[0][0].resumeSession).toBeUndefined();
-    expect(sessionStore.getSessions(roomId, memberId)[memberId]).toMatchObject(saved);
+    expect(sessionStore.getCurrentSession(memberId)).toMatchObject(saved);
   });
 
   it("explicit reset clears a missing-file reference without reading it", () => {
     rmSync(saved.sessionFile);
-    expect(() => sessionStore.getSessions(roomId, memberId)).toThrow("referenced by database is missing");
-    const read = vi.spyOn(sessionStore, "getSessions");
+    expect(() => sessionStore.getCurrentSession(memberId)).toThrow("referenced by database is missing");
+    const read = vi.spyOn(sessionStore, "getCurrentSession");
     expect(resetAgentSession(roomId, memberId)).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
     expect(read).not.toHaveBeenCalled();
-    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
+    expect(sessionStore.getCurrentSession(memberId)).toBeUndefined();
   });
 
   it("destroys instance, clears SQL session and cursor, emits the visible event, and retains SDK history", async () => {
@@ -93,7 +104,7 @@ describe("resetAgentSession", () => {
     const result = resetAgentSession(roomId, memberId);
     expect(result).toEqual({ ok: true, message: "Session reset. Next activation will start fresh." });
     expect(destroy).toHaveBeenCalledTimes(1);
-    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
+    expect(sessionStore.getCurrentSession(memberId)).toBeUndefined();
     expect(getCursors(roomId)[memberId]).toBeNull();
     expect(loadEventsFromDisk(roomId, memberId)).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "system", text: result.message }),
@@ -105,31 +116,29 @@ describe("resetAgentSession", () => {
     expect(readFileSync(saved.sessionFile, "utf8")).toBe(history);
   });
 
-  it("preserves the full dm scope for non-room reset state and events", () => {
+  it("reset from a private chat clears the member session and leaves room cursor state alone", () => {
     const scope = `dm:${memberId}`;
-    const retained = retainSession(memberId, scope);
     const roomCursor = getCursors(roomId)[memberId];
     resetAgentSession(scope, memberId);
-    expect(sessionStore.getSessions(scope, memberId)).toEqual({});
-    expect(sessionStore.getSessions(roomId, memberId)[memberId]).toMatchObject(saved);
+    expect(sessionStore.getCurrentSession(memberId)).toBeUndefined();
     expect(getCursors(roomId)[memberId]).toBe(roomCursor);
     expect(loadEventsFromDisk(scope, memberId)).toEqual(expect.arrayContaining([expect.objectContaining({ type: "system", text: "Session reset. Next activation will start fresh." })]));
     const status = expect.objectContaining({ type: "agent:status", roomId: scope, memberId, status: "inactive" });
     expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(scope, "pm", status);
-    expect(readFileSync(retained.sessionFile, "utf8")).toContain("retained requirement");
+    expect(readFileSync(saved.sessionFile, "utf8")).toContain("retained requirement");
   });
 
   it("reset targets the stable owner, never a different owner whose ID equals its display name", () => {
     const other = createMember({ name: "other", agentTemplate: "general" });
     stampGlobalMemberIds(roomId, [memberId, other.id], memberId);
-    const otherSaved = retainSession(other.id, `room:${roomId}`);
+    const otherSaved = retainSession(other.id);
     const message = addMessage(roomId, { sender: "user", content: "other cursor", mentions: [] });
     setCursor(roomId, other.id, message.id);
     updateMemberIdentity(memberId, { name: other.id });
     resetAgentSession(roomId, memberId);
-    expect(sessionStore.getSessions(roomId, memberId)).toEqual({});
+    expect(sessionStore.getCurrentSession(memberId)).toBeUndefined();
     expect(getCursors(roomId)[memberId]).toBeNull();
-    expect(sessionStore.getSessions(roomId, other.id)[other.id]).toMatchObject(otherSaved);
+    expect(sessionStore.getCurrentSession(other.id)).toMatchObject(otherSaved);
     expect(getCursors(roomId)[other.id]).toBe(message.id);
   });
 });

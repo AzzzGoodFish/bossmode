@@ -58,8 +58,8 @@ it.each(["room","dm"])("reset rejects a delayed %s creator's old session publica
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,`References ${kind}`,[`reference-${kind}`]);const id=room.globalMemberIds![0];
     const scope=kind==="dm"?`dm:${id}`:`room:${room.id}`;
     const sessions=await import("../../src/workspace/session-store.js");
-    const directory=sessions.mainSessionDirectory(id,scope);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
-    sessions.saveSession(scope,id,{runtime:"pi-cli",sessionId:"old",sessionFile:file});
+    const directory=sessions.mainSessionDirectory(id);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
+    sessions.saveCurrentSession(id,{runtime:"pi-cli",sessionId:"old",sessionFile:file});
     const runtime=getRegistry()!.get("pi-cli")!;const original=runtime.createAgent.bind(runtime);
     let entered=false;const gate=new Promise<void>(resolve=>release=resolve);
     const create=vi.spyOn(runtime,"createAgent").mockImplementationOnce(async args=>{
@@ -68,7 +68,7 @@ it.each(["room","dm"])("reset rejects a delayed %s creator's old session publica
     });
     const creating=buildMemberAgentSession(id,scope);await vi.waitFor(()=>expect(entered).toBe(true));
     resetAgentSession(kind==="room"?room.id:scope,id);release();expect(await creating).toBeNull();
-    expect(sessions.getSessions(scope,id)[id]).toBeUndefined();expect(existsSync(file)).toBe(true);
+    expect(sessions.getCurrentSession(id)).toBeUndefined();expect(existsSync(file)).toBe(true);
     expect(await buildMemberAgentSession(id,scope)).toBeTruthy();expect(create.mock.calls[1][0].resumeSession).toBeUndefined();
   }finally{release?.();vi.restoreAllMocks();await closeTestServer(server);}
 });
@@ -94,11 +94,11 @@ it("shutdown preserves final session metadata from an already owned run",async()
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Final session metadata",["final-session"]);const id=room.globalMemberIds![0];
     const runtime=getRegistry()!.get("pi-cli")!;const create=vi.spyOn(runtime,"createAgent");
     await buildMemberAgentSession(id,`room:${room.id}`);
-    const sessions=await import("../../src/workspace/session-store.js");const directory=sessions.mainSessionDirectory(id,`room:${room.id}`);
+    const sessions=await import("../../src/workspace/session-store.js");const directory=sessions.mainSessionDirectory(id);
     mkdirSync(directory,{recursive:true});const file=join(directory,"final.jsonl");writeFileSync(file,"retained SDK history\n");
     const stopping=shutdownAll();
     create.mock.calls[0][0].onSessionChanged?.({sessionId:"final",sessionFile:file});
-    await stopping;expect(sessions.getSessions(room.id,id)[id]?.sessionId).toBe("final");
+    await stopping;expect(sessions.getCurrentSession(id)?.sessionId).toBe("final");
   }finally{vi.restoreAllMocks();await closeTestServer(server);}
 });
 
