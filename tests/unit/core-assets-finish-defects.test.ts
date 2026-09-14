@@ -27,9 +27,9 @@ describe.each(["room", "dm"] as const)("hidden reply target in %s", kind => {
     const scope = kind === "room" ? room.id : `dm:${member.id}`;
     const target = addMessage(scope, { sender: "system", content: hidden, mentions: [] });
     addMessage(scope, { sender: "user", content: "Visible reply", mentions: [], replyTo: { messageId: target.id, seq: target.seq! } });
-    rows = await handleToolCallback("query_room_messages", scope, member.id, {}) as QueryRow[];
+    rows = await handleToolCallback("chat_read", scope, member.id, {}) as QueryRow[];
     inline = renderQueryRowsForMember(rows);
-    const result = await handleToolCallback("query_room_messages", scope, member.id, { output: "file" }) as { path: string };
+    const result = await handleToolCallback("chat_read", scope, member.id, { output: "file" }) as { path: string };
     try { file = readFileSync(result.path, "utf8"); }
     finally { rmSync(result.path); }
   });

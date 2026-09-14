@@ -46,25 +46,59 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
 }
 
 /**
- * Cross-scope read (0.20.0 flagship): resolve the optional `scope` parameter
- * of read tools to a target runtime scope key (plain room id or dm:<id>).
- * Default (absent/empty) = current scope. Anything else goes through the
- * shared membership check — failures return an explicit error, never a
- * silent fallback to the current scope.
+ * Batch 3 (member-centric tools): resolve an explicit chat target (`to` /
+ * `chat`) to a runtime scope key — plain room id or dm:<memberId>. Accepts
+ * scope-id literals ('room:<id>' / 'dm:<memberId>'), raw room ids, exact
+ * (case-insensitive) room names — ambiguous names return the candidates — and
+ * 'user' for the caller's own DM with the user. Missing/empty keeps the
+ * current scope: a transitional default until member-level routing (batch 1)
+ * lands. Failures return an explicit error, never a silent fallback.
  */
-function resolveReadTarget(
+function resolveChatTarget(
   currentRoomId: string,
   actor: { id: string; name: string },
-  scopeParam: unknown,
+  ref: unknown,
 ): { ok: true; roomId: string } | { ok: false; error: string } {
-  if (scopeParam === undefined || scopeParam === null || String(scopeParam).trim() === "") return { ok: true, roomId: currentRoomId };
-  const scopeId = String(scopeParam).trim();
+  const value = ref === undefined || ref === null ? "" : String(ref).trim();
+  if (!value) return { ok: true, roomId: currentRoomId };
+  if (value === "user" || value === "dm" || value === actor.id) return { ok: true, roomId: `dm:${actor.id}` };
+  if (value.startsWith("dm:") || value.startsWith("room:")) {
+    try {
+      const access = assertMemberScopeAccess(actor.id, value);
+      return { ok: true, roomId: access.kind === "dm" ? `dm:${access.memberId}` : access.roomId };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+  // Raw room id first, then the current room's name, then the member's room list.
   try {
-    const access = assertMemberScopeAccess(actor.id, scopeId);
-    if (access.kind === "dm") return { ok: true, roomId: `dm:${access.memberId}` };
-    return { ok: true, roomId: access.roomId };
-  } catch (err: any) {
-    return { ok: false, error: err?.message || String(err) };
+    const access = assertMemberScopeAccess(actor.id, `room:${value}`);
+    if (access.kind === "room") return { ok: true, roomId: access.roomId };
+  } catch { /* fall through to name match */ }
+  const lower = value.toLowerCase();
+  const currentRoom = currentRoomId.startsWith("dm:") ? null : roomStore.getRoom(currentRoomId);
+  if (currentRoom && currentRoom.name.toLowerCase() === lower) return { ok: true, roomId: currentRoomId };
+  const named = listRoomsForMember(actor.id).filter((room) => room.name.toLowerCase() === lower);
+  if (named.length === 1) return { ok: true, roomId: named[0].id };
+  if (named.length > 1) {
+    return { ok: false, error: `Multiple chats named "${value}": ${named.map((room) => `room:${room.id}`).join(", ")} — use the chat id.` };
+  }
+  return { ok: false, error: `Chat not found: ${value} — use chat_list to see your chats.` };
+}
+
+/** Display label for a chat scope key (room name / DM label). */
+function chatScopeLabel(scopeId: string): string {
+  if (scopeId.startsWith("dm:")) return "Direct message with user";
+  return roomStore.getRoom(scopeId)?.name || scopeId;
+}
+
+/** Compact description (first line, capped) from a room's principles content. */
+function chatDescriptionOf(roomId: string, max = 120): string {
+  try {
+    const line = (principlesStore.readPrinciples(roomId, "room")?.content || "").split("\n").map((part) => part.trim()).find(Boolean) || "";
+    return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  } catch {
+    return "";
   }
 }
 
@@ -195,19 +229,48 @@ export async function handleToolCallback(
   logger.info("callback", "tool-callback", { tool, room: roomId, agent: actorName() });
 
   switch (tool) {
-    case "update_profile": {
+    case "profile_read": {
+      if (!context?.memberId?.startsWith("mem_")) return { ok: false, error: "A trusted database member ID is required to read a profile", code: "invalid_caller" };
+      const member = getMember(context.memberId);
+      if (!member) return { ok: false, error: "Member not found", code: "not_found" };
+      return { ok: true, member: { id: member.id, name: member.name, description: member.title ?? "" } };
+    }
+    case "profile_update": {
       if (!context?.memberId?.startsWith("mem_")) return { ok: false, error: "A trusted database member ID is required to update a profile", code: "invalid_caller" };
+      // Batch 3: tool fields are name / description; description maps onto the
+      // member title storage until the profile rename (batch 4) lands.
+      const unknownKey = Object.keys(params ?? {}).find((key) => key !== "name" && key !== "description");
+      if (unknownKey !== undefined) {
+        return {
+          ok: false,
+          code: "invalid_profile",
+          error: unknownKey === "title"
+            ? "The profile field is now called 'description'. Use name and/or description."
+            : `Unknown profile field: ${unknownKey}. Only name and description are editable.`,
+        };
+      }
+      const input: { name?: unknown; title?: unknown } = {};
+      if (params?.name !== undefined) input.name = params.name;
+      if (params?.description !== undefined) input.title = params.description;
       const { updateProfileForMember } = await import("./member-profile-update.js");
-      try { return { ok: true, ...updateProfileForMember(context.memberId, params) }; }
+      try {
+        const result = updateProfileForMember(context.memberId, input);
+        return {
+          ok: true,
+          member: { id: result.memberId, name: result.name, description: result.title ?? "" },
+          changed: result.changed,
+          ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+        };
+      }
       catch (error) {
         const e = error as Error & { code?: string };
         const known = ["invalid_profile", "name_taken", "not_found"].includes(e.code || "");
         return { ok: false, code: known ? e.code : "persistence_failed", error: known ? e.message : "Profile could not be saved. No identity change was committed." };
       }
     }
-    case "chat": {
-      const unknownParam = Object.keys(params ?? {}).find((key) => key !== "message" && key !== "attachments");
-      if (unknownParam !== undefined) return { ok: false, error: `Unknown chat parameter: ${unknownParam}` };
+    case "chat_send": {
+      const unknownParam = Object.keys(params ?? {}).find((key) => key !== "to" && key !== "message" && key !== "attachments");
+      if (unknownParam !== undefined) return { ok: false, error: `Unknown chat_send parameter: ${unknownParam}` };
 
       // 2026-09-04 pm order / designer incident: a model deep in a full context
       // sent chat with an empty string twice and the tool happily posted both.
@@ -218,10 +281,18 @@ export async function handleToolCallback(
         return { ok: false, error: "message must be a non-empty string — re-send your chat message with the text included" };
       }
 
+      // Explicit target (batch 3): `to` resolves to a chat the member may write;
+      // missing/empty keeps the current chat until member-level routing lands.
+      const sendActor = context?.memberId ? boundActor() : resolveMemoryActor(roomId, actorRef);
+      if (!sendActor) return { ok: false, error: "Current member is not in this room" };
+      const target = resolveChatTarget(roomId, sendActor, params?.to);
+      if (!target.ok) return { ok: false, error: target.error };
+      const targetRoomId = target.roomId;
+
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
-      const rosterId = chatScopeRoomId(roomId) || roomId;
+      const rosterId = chatScopeRoomId(targetRoomId) || targetRoomId;
       const room = roomStore.getRoom(rosterId);
-      const roomMembers = roomId.startsWith("dm:") ? [] : roomStore.getRoomMembers(rosterId);
+      const roomMembers = targetRoomId.startsWith("dm:") ? [] : roomStore.getRoomMembers(rosterId);
       const senderMember = context?.memberId ? boundActor() : roomStore.resolveRoomMemberRef(rosterId, actorRef);
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [] };
       const { mentions, mentionMemberIds } = info;
@@ -230,7 +301,7 @@ export async function handleToolCallback(
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const attachRoomId = chatScopeRoomId(roomId) || roomId;
+        const attachRoomId = chatScopeRoomId(targetRoomId) || targetRoomId;
         const outcomes = await processAgentAttachments(attachRoomId, params.attachments.map(String));
         const errors: string[] = [];
         for (const o of outcomes) {
@@ -253,45 +324,57 @@ export async function handleToolCallback(
         }
       }
 
-      // 0.20 DM scope: single scope-routed egress (dm store + broadcast + listeners).
-      if (typeof roomId === "string" && roomId.startsWith("dm:")) {
+      // DM target: single scope-routed egress (dm store + broadcast + listeners).
+      if (targetRoomId.startsWith("dm:")) {
         const dmMeta = messageMeta({ attachments });
-        postMessage(roomId, actorName(), message, [], { ...dmMeta, senderMemberId: actorRef });
-        return { ok: true };
+        postMessage(targetRoomId, actorName(), message, [], { ...dmMeta, senderMemberId: actorRef });
+        return { ok: true, chat: { id: targetRoomId, kind: "dm", name: chatScopeLabel(targetRoomId) } };
       }
 
       // Room message via message-bus (writes + broadcasts + notifies listeners)
       // Mention activation is handled by router listener via message-bus.
       const meta = messageMeta({ attachments, senderMemberId: senderMember?.id, senderName: actorName(), mentionMemberIds, mentions });
-      if (meta) postMessage(roomId, actorName(), message, mentions, meta);
-      else postMessage(roomId, actorName(), message, mentions);
+      if (meta) postMessage(targetRoomId, actorName(), message, mentions, meta);
+      else postMessage(targetRoomId, actorName(), message, mentions);
 
-      return { ok: true };
+      return { ok: true, chat: { id: targetRoomId, kind: "room", name: chatScopeLabel(targetRoomId) } };
     }
-    case "query_room_messages": {
-      const qActor = resolveMemoryActor(roomId, actorRef);
+    case "chat_read":
+    case "chat_search": {
+      const isSearch = tool === "chat_search";
+      const qActor = resolveMemoryActor(roomId, actorRef) ?? (context?.memberId ? { id: context.memberId, name: actorName() } : null);
       if (!qActor) return { ok: false, error: "Current member is not in this room" };
-      const target = resolveReadTarget(roomId, qActor, params?.scope);
-      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'scope' (e.g. 'room:<id>' or 'dm:<memberId>')" };
+      if (params?.scope !== undefined) return { ok: false, error: "unknown parameter 'scope' — use 'chat' (e.g. 'bossmode dev' or 'room:<id>')" };
+      if (params?.target_scope !== undefined) return { ok: false, error: "unknown parameter 'target_scope' — use 'chat'" };
+      if (params?.type !== undefined) return { ok: false, error: "unknown parameter 'type' — message-type filters are not part of chat_read/chat_search" };
+      const target = resolveChatTarget(roomId, qActor, params?.chat);
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
+
+      // Split-tool discipline: read never searches text, search always does.
+      const queryText = params?.query !== undefined ? String(params.query) : "";
+      if (isSearch && !queryText.trim()) return { ok: false, error: "query is required — provide the text to search for" };
+      if (!isSearch && queryText.trim()) return { ok: false, error: "chat_read does not take a query — use chat_search to find messages by text" };
+      if (!isSearch && params?.from !== undefined) return { ok: false, error: "chat_read does not take 'from' — use chat_search for sender filters" };
+      if (isSearch && params?.from_seq !== undefined) return { ok: false, error: "chat_search does not take 'from_seq' — use chat_read to read a window" };
+      if (isSearch && params?.around_seq !== undefined) return { ok: false, error: "chat_search does not take 'around_seq' — use chat_read to open a hit's context" };
+      if (isSearch && params?.output !== undefined) return { ok: false, error: "chat_search does not take 'output' — use chat_read (output: \"file\") for full windows" };
+
       const limit = Math.max(1, Math.min(params?.limit ?? 50, 500));
       const searchOpts: messageStore.SearchOptions = {
-        query: params?.query ? String(params.query) : undefined,
-        from: params?.from ? String(params.from) : undefined,
+        query: isSearch ? queryText : undefined,
+        from: isSearch && params?.from ? String(params.from) : undefined,
         after: params?.after !== undefined ? parseTimeArg(String(params.after)) : undefined,
         before: params?.before !== undefined ? parseTimeArg(String(params.before)) : undefined,
-        type: params?.type ? String(params.type) : undefined,
-        aroundSeq: params?.around_seq !== undefined ? Number(params.around_seq) : undefined,
+        aroundSeq: !isSearch && params?.around_seq !== undefined ? Number(params.around_seq) : undefined,
         limit,
       };
-      const fromSeq = params?.from_seq !== undefined ? Number(params.from_seq) : undefined;
+      const fromSeq = !isSearch && params?.from_seq !== undefined ? Number(params.from_seq) : undefined;
 
       // No search filters — keep original fast path (latest N messages)
       const hasFilter = searchOpts.query || searchOpts.from ||
         searchOpts.after !== undefined || searchOpts.before !== undefined ||
-        searchOpts.type !== undefined || searchOpts.aroundSeq !== undefined ||
-        fromSeq !== undefined;
+        searchOpts.aroundSeq !== undefined || fromSeq !== undefined;
 
       let messages: RoomMessage[];
       if (targetRoomId.startsWith("dm:")) {
@@ -313,7 +396,7 @@ export async function handleToolCallback(
 
       // Read-to-clear (hybrid spec msg:#14818): any successful read of THIS
       // member's own room advances the delivery cursor to the furthest message
-      // seen — the unread hint disappears on the next activation. Cross-scope
+      // seen — the unread hint disappears on the next activation. Cross-chat
       // reads and DM (which has no backlog semantics) never touch the cursor.
       if (!targetRoomId.startsWith("dm:") && targetRoomId === roomId && messages.length > 0) {
         let maxSeq = -1;
@@ -326,6 +409,17 @@ export async function handleToolCallback(
           }
         }
         if (maxMsg) roomStore.setCursor(roomId, qActor.id, maxMsg.id);
+      }
+
+      if (isSearch) {
+        // Hit list: compact references (seq / sender / time / snippet), newest first.
+        const hits: QueryRow[] = messages.map((m) => ({
+          sender: m.sender,
+          content: excerptForReply(m.content, 200),
+          ts: m.ts,
+          seq: m.seq,
+        }));
+        return hits;
       }
 
       // Member-view rows (built once, shared by both output modes):
@@ -342,12 +436,12 @@ export async function handleToolCallback(
           base.attachments = readAttachments;
         }
         if (m.replyTo) {
-          const target = scopeById.get(m.replyTo.messageId) || byId.get(m.replyTo.messageId);
+          const replyTarget = scopeById.get(m.replyTo.messageId) || byId.get(m.replyTo.messageId);
           base.replyTo = {
             seq: m.replyTo.seq,
             messageId: m.replyTo.messageId,
-            ...(target && !isSystemNoticeHiddenFromMembers(target)
-              ? { sender: target.sender, excerpt: excerptForReply(target.content) }
+            ...(replyTarget && !isSystemNoticeHiddenFromMembers(replyTarget)
+              ? { sender: replyTarget.sender, excerpt: excerptForReply(replyTarget.content) }
               : { unavailable: true }),
           };
         }
@@ -356,10 +450,10 @@ export async function handleToolCallback(
 
       // File output mode: write markdown file and return path (avoids 25K truncation)
       if (params?.output === "file") {
-        const filePath = join(tmpdir(), `bossmode-search-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
+        const filePath = join(tmpdir(), `bossmode-chat-read-${targetRoomId.replace(":", "-") .slice(0, 12)}-${randomUUID().slice(0, 8)}.md`);
         const content = renderMessagesAsMarkdown(rows, searchOpts);
         writeFileSync(filePath, content, "utf-8");
-        logger.info("callback", "query_room_messages:file", { path: filePath, count: messages.length });
+        logger.info("callback", "chat_read:file", { path: filePath, count: messages.length });
         return { ok: true, path: filePath, count: messages.length, format: "markdown" };
       }
 
@@ -367,22 +461,66 @@ export async function handleToolCallback(
       // member-view renderer (renderQueryRowsForMember) so both modes match.
       return rows;
     }
-    case "list_scopes": {
-      const actor = resolveMemoryActor(roomId, actorRef);
+    case "chat_list": {
+      const actor = resolveMemoryActor(roomId, actorRef) ?? (context?.memberId ? { id: context.memberId, name: actorName() } : null);
       if (!actor) return { ok: false, error: "Current member is not in this room" };
-      const rooms = listRoomsForMember(actor.id).map((r) => ({ scope: `room:${r.id}`, name: r.name }));
-      return { ok: true, scopes: [...rooms, { scope: `dm:${actor.id}`, name: "Direct message with user" }] };
+      const rooms = listRoomsForMember(actor.id).map((r) => ({
+        id: `room:${r.id}`,
+        kind: "room" as const,
+        name: r.name,
+        description: chatDescriptionOf(r.id),
+      }));
+      const chats = [...rooms, { id: `dm:${actor.id}`, kind: "dm" as const, name: "Direct message with user", description: "" }];
+      const q = String(params?.query ?? "").trim().toLowerCase();
+      const filtered = q
+        ? chats.filter((chat) => chat.name.toLowerCase().includes(q) || chat.description.toLowerCase().includes(q))
+        : chats;
+      const total = filtered.length;
+      const offset = Math.max(0, Number(params?.offset ?? 0) || 0);
+      const limit = Math.max(1, Math.min(Number(params?.limit ?? 50) || 50, 500));
+      const page = filtered.slice(offset, offset + limit);
+      return { ok: true, chats: page, count: page.length, total };
     }
-    case "member_status": {
-      // Room-scope read-only live status (same source as the member panel lamp).
-      const statusRoomId = chatScopeRoomId(roomId) || roomId;
-      const room = roomStore.getRoom(statusRoomId);
-      if (!room) return { ok: false, error: "Room not found" };
-      const { getRoomMemberStatusReport } = await import("./agent-manager.js");
-      const memberRef = params?.member !== undefined ? String(params.member).trim() : "";
-      const report = getRoomMemberStatusReport(statusRoomId, memberRef || undefined);
-      if (!report) return { ok: false, error: `Member not found: ${memberRef}` };
-      return { ok: true, members: report };
+    case "chat_info": {
+      const actor = resolveMemoryActor(roomId, actorRef) ?? (context?.memberId ? { id: context.memberId, name: actorName() } : null);
+      if (!actor) return { ok: false, error: "Current member is not in this room" };
+      const ref = params?.chat !== undefined ? String(params.chat).trim() : "";
+      if (!ref) return { ok: false, error: "chat is required — pass a chat id or name (see chat_list)" };
+      const target = resolveChatTarget(roomId, actor, ref);
+      if (!target.ok) return { ok: false, error: target.error };
+      if (target.roomId.startsWith("dm:")) {
+        return { ok: true, chat: { id: target.roomId, kind: "dm", name: "Direct message with user", counterpart: "user" } };
+      }
+      const room = roomStore.getRoom(target.roomId);
+      if (!room) return { ok: false, error: "Chat not found" };
+      const members = roomStore.getRoomMembers(target.roomId).map((m) => ({ id: m.id || m.name, name: m.name }));
+      return {
+        ok: true,
+        chat: {
+          id: `room:${target.roomId}`,
+          kind: "room",
+          name: room.name,
+          description: (principlesStore.readPrinciples(target.roomId, "room")?.content || "").trim().slice(0, 500),
+          members,
+        },
+      };
+    }
+    case "member_info": {
+      const { resolveMemberRef } = await import("../workspace/member-registry.js");
+      const ref = params?.member !== undefined ? String(params.member).trim() : "";
+      if (!ref) return { ok: false, error: "member is required — pass a name or id (see member_list)" };
+      const member = resolveMemberRef(ref);
+      if (!member) return { ok: false, error: `Member not found: ${ref} — use member_list to see members.` };
+      // Transitional live status (batch 1 moves status to member level): same
+      // source as the member panel — working if any scope is working.
+      let status = "idle";
+      try {
+        const am = await import("./agent-manager.js");
+        const workingScopes = am.getMemberActiveScopes(member.id);
+        const dmLive = am.getScopeLiveStatus(`dm:${member.id}`);
+        status = workingScopes.length > 0 || dmLive === "working" ? "working" : "idle";
+      } catch { /* runtime cold — idle */ }
+      return { ok: true, member: { id: member.id, name: member.name, description: member.title ?? "", status } };
     }
     case "workspace_list":
     case "workspace_create":
@@ -538,124 +676,120 @@ export async function handleToolCallback(
         defaults: { timeoutMinutes: WAIT_DEFAULT_TIMEOUT_MIN, maxTimeoutMinutes: WAIT_MAX_TIMEOUT_MIN },
       };
     }
-    case "list_members": {
-      // Global member directory (DM tool surface). Returns id/name/template for invite flows.
+    case "member_list": {
+      // Global member directory (gateway tool). id/name/description for member refs.
       const { listMembers } = await import("../workspace/member-registry.js");
-      const q = String(params?.query || "").trim().toLowerCase();
-      let members = listMembers().map((m) => ({
-        id: m.id,
-        name: m.name,
-        agentTemplate: m.agentTemplate,
-        model: m.global.model ?? null,
-      }));
+      const q = String(params?.query ?? "").trim().toLowerCase();
+      let members = listMembers().map((m) => ({ id: m.id, name: m.name, description: m.title ?? "" }));
       if (q) {
         members = members.filter((m) =>
           m.name.toLowerCase().includes(q)
           || m.id.toLowerCase().includes(q)
-          || m.agentTemplate.toLowerCase().includes(q),
+          || m.description.toLowerCase().includes(q),
         );
       }
-      return { ok: true, members, count: members.length };
+      const total = members.length;
+      const offset = Math.max(0, Number(params?.offset ?? 0) || 0);
+      const limit = Math.max(1, Math.min(Number(params?.limit ?? 50) || 50, 500));
+      const page = members.slice(offset, offset + limit);
+      return { ok: true, members: page, count: page.length, total };
     }
-    case "create_room": {
-      // DM tool: creator becomes leader; invite by global member id.
-      const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
+    case "chat_create": {
+      // Group chat: creator becomes leader; invite by global member id.
+      if (params?.cwd !== undefined) return { ok: false, error: "unknown parameter 'cwd' — chats no longer bind a working directory" };
+      if (params?.memberIds !== undefined) return { ok: false, error: "unknown parameter 'memberIds' — use 'members' (member ids)" };
+      if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
+      const { getMember } = await import("../workspace/member-registry.js");
       const creator = getMember(actorRef);
       if (!creator) return { ok: false, error: `Creator member not found: ${actorName()}` };
 
       const name = String(params?.name || "").trim();
       if (!name) return { ok: false, error: "name is required" };
-      const cwd = String(params?.cwd || "").trim() || undefined; // Batch 7 P3: rooms no longer bind a cwd
-      if (cwd && !existsSync(cwd)) return { ok: false, error: `Directory does not exist: ${cwd}` };
-
-      const inviteIds: string[] = Array.isArray(params?.memberIds)
-        ? params.memberIds.map(String).filter(Boolean)
+      const inviteIds: string[] = Array.isArray(params?.members)
+        ? params.members.map(String).filter(Boolean)
         : [];
       // Creator always in the room.
       const allIds = Array.from(new Set([creator.id, ...inviteIds]));
-      const invitees = allIds.map((id) => {
-        const m = getMember(id);
-        if (!m) throw new Error(`Unknown member id: ${id}`);
-        return m;
-      });
+      const missing = allIds.filter((id) => !getMember(id));
+      if (missing.length > 0) return { ok: false, error: `Unknown member id: ${missing.join(", ")}` };
+      const invitees = allIds.map((id) => getMember(id)!);
 
       let room;
       try {
         // DB members already have validated identities. Do not materialize
         // room-local drafts with the retired ASCII-only name validation.
-        room = roomStore.createRoom(name, cwd, allIds, undefined, { promptLeaderMemberId: creator.id });
+        room = roomStore.createRoom(name, undefined, allIds, undefined, { promptLeaderMemberId: creator.id });
       } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };
       }
 
-      const principles = typeof params?.principles === "string" ? params.principles.trim() : "";
-      if (principles) {
+      const description = typeof params?.description === "string" ? params.description.trim() : "";
+      if (description) {
         try {
           principlesStore.writePrinciples({
             roomId: room.id,
             scope: "room",
-            content: principles,
+            content: description,
             actor: { type: "member", memberId: creator.id, name: creator.name },
-            reason: "create_room initial principles",
+            reason: "chat_create initial description",
             operation: "write",
           });
         } catch (err: any) {
           return {
             ok: true,
-            roomId: room.id,
-            name: room.name,
-            leader: creator.name,
+            chat: { id: `room:${room.id}`, kind: "room", name: room.name },
             members: invitees.map((m) => ({ id: m.id, name: m.name })),
-            warning: `Room created but principles write failed: ${err?.message || err}`,
+            warning: `Chat created but description write failed: ${err?.message || err}`,
           };
         }
       }
 
       return {
         ok: true,
-        roomId: room.id,
-        name: room.name,
-        cwd: room.cwd,
-        leader: creator.name,
-        leaderMemberId: creator.id,
+        chat: { id: `room:${room.id}`, kind: "room", name: room.name },
         members: invitees.map((m) => ({ id: m.id, name: m.name })),
-        scopeId: `room:${room.id}`,
       };
     }
-    case "edit_room": {
-      const { findMemberByName, getMember, listMembers } = await import("../workspace/member-registry.js");
+    case "chat_edit": {
+      if (params?.roomId !== undefined) return { ok: false, error: "unknown parameter 'roomId' — use 'chat' (a chat id or name)" };
+      if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
+      if (params?.addMemberIds !== undefined || params?.removeMemberIds !== undefined) return { ok: false, error: "unknown parameter — use 'add_members' / 'remove_members' (member ids)" };
+      const { getMember } = await import("../workspace/member-registry.js");
       const actorGlobal = getMember(actorRef);
       if (!actorGlobal) return { ok: false, error: `Member not found: ${actorName()}` };
 
-      const rawTarget = String(params?.roomId || roomId || "").trim();
-      const targetRoomId = chatScopeRoomId(rawTarget) || rawTarget;
-      if (!targetRoomId) return { ok: false, error: "roomId is required" };
+      const ref = params?.chat !== undefined ? String(params.chat).trim() : "";
+      if (!ref) return { ok: false, error: "chat is required — pass a chat id or name (see chat_list)" };
+      const target = resolveChatTarget(roomId, { id: actorGlobal.id, name: actorGlobal.name }, ref);
+      if (!target.ok) return { ok: false, error: target.error };
+      if (target.roomId.startsWith("dm:")) return { ok: false, error: "chat_edit edits group chats — a private chat has nothing to edit" };
+      const targetRoomId = target.roomId;
       const room = roomStore.getRoom(targetRoomId);
-      if (!room) return { ok: false, error: "Room not found" };
+      if (!room) return { ok: false, error: "Chat not found" };
 
       const actorLocal = roomStore.resolveRoomMemberRef(targetRoomId, actorRef);
       if (!actorLocal) {
-        return { ok: false, error: "not_room_member", message: "You must be a member of this room to edit it" };
+        return { ok: false, error: "not_room_member", message: "You must be a member of this chat to edit it" };
       }
 
       if (typeof params?.name === "string" && params.name.trim()) {
         const renamed = roomStore.updateRoomName(targetRoomId, params.name.trim());
-        if (!renamed) return { ok: false, error: "Failed to rename room" };
+        if (!renamed) return { ok: false, error: "Failed to rename chat" };
       }
 
-      if (typeof params?.principles === "string") {
+      if (typeof params?.description === "string") {
         principlesStore.writePrinciples({
           roomId: targetRoomId,
           scope: "room",
-          content: params.principles,
+          content: params.description,
           actor: { type: "member", memberId: actorLocal.id, name: actorLocal.name },
-          reason: String(params?.reason || "edit_room principles update"),
+          reason: "chat_edit description update",
           operation: "write",
         });
       }
 
       // Invite additions
-      const addIds: string[] = Array.isArray(params?.addMemberIds) ? params.addMemberIds.map(String) : [];
+      const addIds: string[] = Array.isArray(params?.add_members) ? params.add_members.map(String) : [];
       const added: string[] = [];
       for (const id of addIds) {
         const g = getMember(id);
@@ -669,7 +803,7 @@ export async function handleToolCallback(
       }
 
       // Removals (keep scope memory assets — only membership)
-      const removeIds: string[] = Array.isArray(params?.removeMemberIds) ? params.removeMemberIds.map(String) : [];
+      const removeIds: string[] = Array.isArray(params?.remove_members) ? params.remove_members.map(String) : [];
       const removed: string[] = [];
       for (const id of removeIds) {
         if (id === actorGlobal.id) continue; // don't remove self via this tool
@@ -682,11 +816,9 @@ export async function handleToolCallback(
       const updated = roomStore.getRoom(targetRoomId);
       return {
         ok: true,
-        roomId: targetRoomId,
-        name: updated?.name || room.name,
+        chat: { id: `room:${targetRoomId}`, kind: "room", name: updated?.name || room.name },
         added,
         removed,
-        members: (updated?.members || room.members),
       };
     }
     default:

@@ -1,6 +1,6 @@
 import type { coreFixture } from "../helpers/core-fixture.js";
 /**
- * fish No.16834: query_room_messages returns attachments per message
+ * fish No.16834: chat_read returns attachments per message
  * ({originalFilename, path}); markdown export appends Attachment lines;
  * missing file → "unavailable". Room / DM scopes.
  */
@@ -53,7 +53,7 @@ afterEach(() => {
   fixture.close();
 });
 
-describe("query_room_messages attachments", () => {
+describe("chat_read attachments", () => {
   it("room scope: JSON carries {originalFilename, path}; markdown appends Attachment lines", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const creds = await import("../../src/engine/model-credentials.js");
@@ -77,14 +77,14 @@ describe("query_room_messages attachments", () => {
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: m.id })) as any[];
+    const rows = (await handleToolCallback("chat_read", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("report attached"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "report.md", path: join(attachDir, "abc123.md") },
     ]);
 
     // Markdown export mode
-    const fileRes = (await handleToolCallback("query_room_messages", room.id, "pm", {
+    const fileRes = (await handleToolCallback("chat_read", room.id, "pm", {
       output: "file",
     }, { memberId: m.id })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
@@ -109,13 +109,13 @@ describe("query_room_messages attachments", () => {
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: m.id })) as any[];
+    const rows = (await handleToolCallback("chat_read", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("gone file"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "ghost.md", path: "unavailable" },
     ]);
 
-    const fileRes = (await handleToolCallback("query_room_messages", room.id, "pm", {
+    const fileRes = (await handleToolCallback("chat_read", room.id, "pm", {
       output: "file",
     }, { memberId: m.id })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
@@ -141,7 +141,7 @@ describe("query_room_messages attachments", () => {
     } as any);
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", `dm:${m.id}`, "pm", {}, { memberId: m.id })) as any[];
+    const rows = (await handleToolCallback("chat_read", `dm:${m.id}`, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("dm attach"));
     expect(hit?.attachments).toEqual([
       { originalFilename: "shot.png", path: join(dmAttachDir, "dmf1.png") },

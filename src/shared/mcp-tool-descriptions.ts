@@ -1,16 +1,38 @@
 // Centralized agent tool descriptions used by agent tool definitions.
 
-export const QUERY_ROOM_MESSAGES_DESCRIPTION = `Search and retrieve messages from the current scope (or a target scope via the scope parameter — 'room:<id>' or 'dm:<memberId>', membership-checked; DM targets are served from the member-owned DM store). Without filters, returns the latest N messages (default 50). With filters, performs case-insensitive search by content, sender, or time range.
+export const CHAT_READ_DESCRIPTION = `Read an ordered window of messages from one chat.
 
-Use this tool when:
-- You need to recall what was discussed earlier (beyond your current activation context)
-- You need to find a specific decision, file path, error message, or quote
-- You're investigating a bug and need to see what was reported
-- You need to compile a summary or report of recent activity
+- chat (required): chat id or name — see chat_list.
+- Window: latest by default; from_seq / around_seq position it, before / after bound it by time, limit sizes it.
+- output: "file" writes the full window to a temp markdown file instead of returning it inline.
 
-For large result sets, set output="file" — the result is written to a temp markdown file and the path is returned. Read it with the Read tool to avoid context truncation.`;
+chat_search locates messages; read opens the context — feed a hit's seq to around_seq or from_seq.`;
 
-export const LIST_SCOPES_DESCRIPTION = `List the scopes you belong to: your rooms (scope id 'room:<id>' + name) and your DM ('dm:<your-member-id>'). Read-only; the scope ids are accepted by the scope parameter of query_room_messages.`;
+export const CHAT_SEARCH_DESCRIPTION = `Search one chat's messages by text, sender or time; returns hits (seq, sender, time, snippet), newest first.
+
+- chat (required): chat id or name — see chat_list.
+- query (required): case-insensitive text to find.
+- from / before / after / limit narrow the search.
+
+search locates; read opens the context — feed a hit's seq to chat_read around_seq or from_seq.`;
+
+export const CHAT_LIST_DESCRIPTION = `List the chats you participate in: type, name, id (and description). query filters by keyword; limit (default 50) and offset page through the list.`;
+
+export const BOSSMODE_GATEWAY_DESCRIPTION = `Bossmode capabilities beyond the hot tools. \`list\` what is available, \`describe\` one capability's parameters, then \`call\` it with \`args\`. The hot tools (chat_send, chat_read, chat_search, chat_list) are registered directly — call them directly, not through here.`;
+
+export const CHAT_INFO_DESCRIPTION = `One chat's details: name, description, and members (group chat) or counterpart (private chat). chat is an id or name.`;
+
+export const CHAT_CREATE_DESCRIPTION = `Create a group chat: name, optional description, initial members (creator included). Private chats need no creation — chat_send opens one directly.`;
+
+export const CHAT_EDIT_DESCRIPTION = `Edit a group chat: rename, update description, add or remove members by member id. Removing a member stops deliveries to them; history and memory are retained. chat is an id or name.`;
+
+export const MEMBER_LIST_DESCRIPTION = `List members: id, name, description. query filters by keyword; limit (default 50) and offset page through the list.`;
+
+export const MEMBER_INFO_DESCRIPTION = `One member's name, description and current status. member is a name or id. Read-only: never activates or notifies.`;
+
+export const PROFILE_READ_DESCRIPTION = `Read your own profile: name, description and member id.`;
+
+export const PROFILE_UPDATE_DESCRIPTION = `Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`;
 
 export const SHELL_CREATE_DESCRIPTION = `Open a persistent shell session (a real terminal) in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
 
@@ -40,17 +62,6 @@ export const WORKSPACE_EDIT_DESCRIPTION = `Apply exact-match text replacements t
 
 export const RELOAD_DESCRIPTION = `Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`;
 
-export const WAIT_DESCRIPTION = `Block until a room member posts a message, becomes idle, errors out of a turn, you are @-mentioned, or the timeout elapses.
-
-This is a synchronous wait — your turn stays open (status stays working) until one of those events. Returns the target's message body when they post, or a short status for idle/error/timeout/mention interrupt. Cursor is not advanced — @-mentions while waiting are delivered by the normal activation path (they interrupt the wait); wait only reports that it ended.
-
-If the target's turn fails (e.g. request terminated), wait wakes with reason "error" and tells you there was no output — verify status before continuing. Transient provider retries keep the target working and do not wake wait.
-
-- member (required): target member name
-- timeoutMinutes (optional): default 30, max 360
-
-Only one wait at a time. If the target is already idle, returns immediately. Prefer wait over sleeping/polling.`;
-
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
@@ -65,16 +76,31 @@ export const PARAM_DESCRIPTIONS = {
   shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
   shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with shell_read.",
   shellWaitBlockUntilMs: "Max milliseconds to wait for the exec to finish. Default 30000; 0 waits until completion.",
-  // query_room_messages
+  // chat_read / chat_search
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
   after: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')",
   before: "Only messages before this time: same format as 'after'",
-  type: "Filter by message type (e.g. 'task_event', 'knowledge_event')",
   around_seq: "Return a window of messages centered on the message with this seq (use with limit to control window size)",
   from_seq: "Return messages strictly after this seq (ascending) — reads the unread backlog the activation hint points at",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
-  scope: "Optional target scope: 'room:<id>' or 'dm:<memberId>' (membership-checked; default current scope)",
-
+  // references
+  chatRef: "Chat id or name (see chat_list).",
+  memberRef: "Member name or id (see member_list).",
+  // chat_list / member_list
+  listQuery: "Keyword filter.",
+  listLimit: "Max entries to return (default 50).",
+  listOffset: "Skip this many entries (for paging).",
+  // chat_create / chat_edit / profile
+  chatDescription: "Description text; an empty string clears it.",
+  createMembers: "Member ids to include; the creator is always included.",
+  addMembers: "Member ids to add.",
+  removeMembers: "Member ids to remove (history and memory are retained).",
+  profileName: "New member name.",
+  profileDescription: "New description; an empty string clears it.",
+  // bossmode gateway
+  gatewayAction: "One of: list, describe, call.",
+  gatewayTool: "Capability name from action \"list\".",
+  gatewayArgs: "Arguments object for the capability.",
 } as const;

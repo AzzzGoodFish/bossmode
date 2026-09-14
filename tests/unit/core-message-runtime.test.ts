@@ -80,7 +80,7 @@ it("a successful chat tool event alone cannot settle debt without a committed ow
   const server=await createTestServer();
   try{
     resetMocks();const token=await loginAndGetToken(server.port),room=await createMockRoom(server.port,token,"Reply facts",["reply-owner"]),id=room.globalMemberIds![0];
-    mockPromptFn.mockImplementation(async()=>{emitMockEvent({type:"tool_end",toolName:"chat",isError:false} as any);emitMockEvent({type:"message_end",text:"not a committed chat",stopReason:"stop"});});
+    mockPromptFn.mockImplementation(async()=>{emitMockEvent({type:"tool_end",toolName:"chat_send",isError:false} as any);emitMockEvent({type:"message_end",text:"not a committed chat",stopReason:"stop"});});
     const response=await jsonRequest(server.port,"POST",`/api/rooms/${room.id}/messages`,{token,body:{content:"@reply-owner answer"}});expect(response.status,response.body).toBe(200);
     await vi.waitFor(()=>expect(new ReplyObligationRepository(getDatabase()).listPending(room.id,id)).toEqual([]));
     // No committed own chat → nothing is published as the member; the silence note is the only signal.

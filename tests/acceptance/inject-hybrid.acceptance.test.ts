@@ -1,6 +1,6 @@
 /**
  * 注入混合制 acceptance — 两轮激活链路:
- * 激活带背 log 提示 → member 用 query_room_messages 读到即清 → 下轮激活提示消失。
+ * 激活带背 log 提示 → member 用 chat_read 读到即清 → 下轮激活提示消失。
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
@@ -62,7 +62,7 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
 
     // Read-to-clear: member queries the backlog (as its tool would)
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const res = await handleToolCallback("query_room_messages", room.id, "pm", { from_seq: 0, limit: 50 });
+    const res = await handleToolCallback("chat_read", room.id, "pm", { from_seq: 0, limit: 50 });
     expect(Array.isArray(res)).toBe(true);
     const roomStore = await import("../../src/workspace/room-store.js");
     const cursors = roomStore.getCursors(room.id);

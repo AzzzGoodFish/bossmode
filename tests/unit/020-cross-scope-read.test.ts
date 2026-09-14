@@ -4,7 +4,7 @@ import type { coreFixture } from "../helpers/core-fixture.js";
  * 不了解"): the prompt promises "read any scope you belong to (optional scope
  * parameter on query tools)" — the implementation had no such parameter.
  * Permanent assertions: cross-scope reads work with membership checks
- * (explicit errors, never silent fallback), list_scopes enumerates rooms+DM,
+ * (explicit errors, never silent fallback), chat_list enumerates rooms+DM,
  * DM prompt scope injection lists real rooms, and the members config PATCH
  * route writes through the same unified-flag authority rule as F4.
  */
@@ -73,7 +73,7 @@ describe("cross-scope reads (flagship ①)", () => {
     fixture.close();
   });
 
-  it("query_room_messages: scope param reads another member-room; violations are explicit errors", async () => {
+  it("chat_read: chat param reads another member-room; violations are explicit errors", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const messageStore = await import("../../src/workspace/message-store.js");
     messageStore.addMessage(roomA.id, { sender: "dev", mentions: [], content: "alpha-only discussion" });
@@ -82,41 +82,41 @@ describe("cross-scope reads (flagship ①)", () => {
 
     const tools = await import("../../src/engine/tools.js");
     // Cross-scope read from roomA into roomB.
-    const res = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
+    const res = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
     expect(Array.isArray(res)).toBe(true);
     expect(res.map((m) => m.content)).toEqual(["beta decision: ship it"]); // system notice filtered
 
     // Default (no scope) = current scope, unchanged.
-    const cur = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", {}, { memberId: dev.id })) as any[];
+    const cur = (await tools.handleToolCallback("chat_read", roomA.id, "dev", {}, { memberId: dev.id })) as any[];
     expect(cur.map((m) => m.content)).toEqual(["alpha-only discussion"]);
 
     // Not a member of roomC → explicit error, no silent fallback.
-    const denied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `room:${roomC.id}` }, { memberId: dev.id })) as any;
+    const denied = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: `room:${roomC.id}` }, { memberId: dev.id })) as any;
     expect(denied.ok).toBe(false);
     expect(denied.error).toMatch(/not a member/);
 
     // Nonexistent room → explicit error.
-    const missing = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "room:nope" }, { memberId: dev.id })) as any;
+    const missing = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: "room:nope" }, { memberId: dev.id })) as any;
     expect(missing.ok).toBe(false);
 
     // Another member's DM → explicit error.
-    const dmDenied = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: "dm:mem_other" }, { memberId: dev.id })) as any;
+    const dmDenied = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: "dm:mem_other" }, { memberId: dev.id })) as any;
     expect(dmDenied.ok).toBe(false);
     expect(dmDenied.error).toMatch(/own DM/);
   });
 
-  it("query_room_messages: own DM scope is readable from room and from DM (member-owned store)", async () => {
+  it("chat_read: own DM scope is readable from room and from DM (member-owned store)", async () => {
     const { dev, roomA } = await seedWorld();
     const dmStore = await import("../../src/workspace/dm-message-store.js");
     dmStore.addDmMessage(dev.id, { sender: "user", mentions: [], content: "private beta question" });
     dmStore.addDmMessage(dev.id, { sender: "dev", mentions: [], content: "private answer" });
 
     const tools = await import("../../src/engine/tools.js");
-    const fromRoom = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { scope: `dm:${dev.id}` }, { memberId: dev.id })) as any[];
+    const fromRoom = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: `dm:${dev.id}` }, { memberId: dev.id })) as any[];
     expect(fromRoom.map((m) => m.content)).toEqual(["private beta question", "private answer"]);
 
-    // From inside the DM scope itself: default reads the DM; query filter works.
-    const fromDm = (await tools.handleToolCallback("query_room_messages", `dm:${dev.id}`, "dev", { query: "question" }, { memberId: dev.id })) as any[];
+    // From inside the DM scope itself: default reads the DM; chat_search filters by text.
+    const fromDm = (await tools.handleToolCallback("chat_search", `dm:${dev.id}`, "dev", { chat: `dm:${dev.id}`, query: "question" }, { memberId: dev.id })) as any[];
     expect(fromDm.map((m) => m.content)).toEqual(["private beta question"]);
   });
 
@@ -132,24 +132,24 @@ describe("cross-scope reads (flagship ①)", () => {
   it("supported query tools reject retired target_scope without silent fallback", async () => {
     const { dev, roomA } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
-    // Retired target_scope on query_room_messages (QA's silent-fallback trap).
-    const q = (await tools.handleToolCallback("query_room_messages", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
+    // Retired target_scope on chat_read (QA's silent-fallback trap).
+    const q = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
     expect(Array.isArray(q)).toBe(false);
     expect(q.ok).toBe(false);
     expect(q.error).toMatch(/unknown parameter 'target_scope'/);
   });
 
-  it("list_scopes: rooms (id+name) + own DM; excludes non-member rooms", async () => {
+  it("chat_list: rooms (id+name) + own DM; excludes non-member rooms", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
     const tools = await import("../../src/engine/tools.js");
-    const res = (await tools.handleToolCallback("list_scopes", roomA.id, "dev", {}, { memberId: dev.id })) as any;
+    const res = (await tools.handleToolCallback("chat_list", roomA.id, "dev", {}, { memberId: dev.id })) as any;
     expect(res.ok).toBe(true);
-    const scopes = res.scopes.map((s: any) => s.scope);
+    const scopes = res.chats.map((s: any) => s.id);
     expect(scopes).toContain(`room:${roomA.id}`);
     expect(scopes).toContain(`room:${roomB.id}`);
     expect(scopes).toContain(`dm:${dev.id}`);
     expect(scopes).not.toContain(`room:${roomC.id}`);
-    const names = res.scopes.map((s: any) => s.name);
+    const names = res.chats.map((s: any) => s.name);
     expect(names).toEqual(expect.arrayContaining(["alpha", "beta"]));
   });
 

@@ -163,7 +163,7 @@ export function buildUnreadBacklogHint(backlog: RoomMessage[], opts?: { total?: 
   const range = truncated
     ? `you have ${total} unread (latest ${backlog.length}, No.${first}–No.${last})`
     : `you have ${backlog.length} unread messages (No.${first}–No.${last})`;
-  return `[Earlier in this room ${range}: ${senders}${eventClause}. Read them with query_room_messages (from_seq ${fromSeq}); reading marks them seen.]`;
+  return `[Earlier in this room ${range}: ${senders}${eventClause}. Read them with chat_read (from_seq ${fromSeq}); reading marks them seen.]`;
 }
 
 interface PendingThinkingSwitch {
@@ -477,7 +477,7 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
     if(!failed&&memberRuntimeAllowed(memberId)&&pendingRuntimeInputCount(owner)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle")))queueMicrotask(()=>{void pumpRuntimeInputs(owner.scopeId,memberId).catch(error=>logger.error("agent","input wake failed",{memberId,error:String(error)}));});
   });
 }
-const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat` tool.";
+const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat_send` tool.";
 const LENGTH_CONTINUATION_FAILED_WARNING="Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
 function isLengthStopReason(stopReason:unknown):boolean{
   if(typeof stopReason!=="string")return false;
@@ -1679,7 +1679,7 @@ export function getRoomAgentStale(roomId: string): Record<string, { mounts?: { s
   return result;
 }
 
-// -- Member status report (member_status tool) --
+// -- Member status report (member_info tool) --
 
 export interface MemberStatusEntry {
   name: string;

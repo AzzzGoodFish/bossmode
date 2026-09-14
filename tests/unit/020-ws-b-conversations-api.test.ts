@@ -40,18 +40,18 @@ describe("020 conversations / scope surface", () => {
     const { toolSurfaceForScope } = await import("../../src/engine/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
-    expect(dm.families).toEqual(expect.arrayContaining(["create_room", "list_members"]));
+    expect(dm.families).toEqual(expect.arrayContaining(["chat_create", "member_list"]));
     expect(dm.families).not.toContain("response");
     expect(dm.families).not.toContain("wait");
 
     const roomMember = toolSurfaceForScope("room:r1", { isRoomLeader: false });
-    expect(roomMember.families).toContain("wait");
-    expect(roomMember.families).not.toContain("create_room");
-    expect(roomMember.families).toContain("edit_room"); // leader gate retired
+    expect(roomMember.families).not.toContain("wait");
+    expect(roomMember.families).not.toContain("chat_create");
+    expect(roomMember.families).toContain("chat_edit"); // leader gate retired
     expect(roomMember.families).not.toContain("memory" as any);
 
     const roomLeader = toolSurfaceForScope("room:r1", { isRoomLeader: true });
-    expect(roomLeader.families).toContain("edit_room");
+    expect(roomLeader.families).toContain("chat_edit");
   });
 
   it("effective-config binds into memberRecordToConfig path via getEffectiveConfig", async () => {

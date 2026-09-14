@@ -176,7 +176,7 @@ describe("chat enforcement pending reply", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
-    expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
+    expect(handle.prompt.mock.calls[1][0]).toContain("`chat_send` tool");
     // The continuation's completed text is not delivered — no chat call was made.
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(0);
@@ -201,7 +201,7 @@ describe("chat enforcement pending reply", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
-    expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
+    expect(handle.prompt.mock.calls[1][0]).toContain("`chat_send` tool");
     const delivered = vi.mocked(bus.postMessage).mock.calls.filter((c: any[]) => c[0] === "room1" && c[1] === "developer");
     expect(delivered).toHaveLength(0);
     expect(bus.postMessage).toHaveBeenCalledWith("room1", "system", 'Member "developer" finished without replying.');

@@ -152,7 +152,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
         bus.postMessage("room1", "developer", "Uncommitted chat", [], { senderMemberId: "mem_developer" });
         throw new Error("boom");
       })).toThrow("boom");
-      handle.emit({ type: "tool_end", toolName: "chat", toolCallId: "c1", result: { ok: false, error: "boom" }, isError: true });
+      handle.emit({ type: "tool_end", toolName: "chat_send", toolCallId: "c1", result: { ok: false, error: "boom" }, isError: true });
       handle.emit({ type: "message_end", text: "chat failed but here is the result anyway", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
     });
@@ -270,7 +270,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
 
     expect(handle.prompt).toHaveBeenCalledTimes(2);
     expect(handle.prompt.mock.calls[1][0]).toContain("cut off due to output length");
-    expect(handle.prompt.mock.calls[1][0]).toContain("`chat` tool");
+    expect(handle.prompt.mock.calls[1][0]).toContain("`chat_send` tool");
     expect(memberMessages()).toHaveLength(0);
     expect(silenceNoteCalls()).toHaveLength(1);
   });

@@ -19,7 +19,7 @@ async function fixture() {
     post: (text: string) => jsonRequest(server.port, "POST", path, { token, body: { content: `@revoked ${text}` } }),
     remove: async (via: "api" | "tool" = "api") => {
       if (via === "api") expect((await jsonRequest(server.port, "DELETE", `/api/rooms/${room.id}/members/${id}`, { token })).status).toBe(200);
-      else expect(await handleToolCallback("edit_room", room.id, "controller", { roomId: room.id, removeMemberIds: [id] }, { memberId: controller })).toMatchObject({ ok: true });
+      else expect(await handleToolCallback("chat_edit", room.id, "controller", { chat: room.id, remove_members: [id] }, { memberId: controller })).toMatchObject({ ok: true });
       expect(resolveRoomMemberRef(room.id, id)).toBeNull();
     },
   };

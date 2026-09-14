@@ -1,6 +1,6 @@
 /**
  * rc.8 read-chain presentation: shared member-view renderer for
- * query_room_messages — seq header, replyTo quote, attachments; inline + file.
+ * chat_read — seq header, replyTo quote, attachments; inline + file.
  */
 import { coreFixture } from "../helpers/core-fixture.js";
 import { SettingsRepository } from "../../src/storage/repositories/settings.js";
@@ -104,7 +104,7 @@ describe("query renderer (member view)", () => {
     });
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", { limit: 1 })) as any[];
+    const rows = (await handleToolCallback("chat_read", room.id, "pm", { limit: 1 })) as any[];
     const row = rows[0];
     expect(row.seq).toBe(base.seq + 1);
     expect(row.replyTo.sender).toBe("pm");
@@ -141,7 +141,7 @@ describe("query renderer (member view)", () => {
     });
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const fileRes = (await handleToolCallback("query_room_messages", room.id, "pm", {
+    const fileRes = (await handleToolCallback("chat_read", room.id, "pm", {
       output: "file",
     })) as any;
     const md = readFileSync(fileRes.path, "utf-8");
@@ -177,8 +177,7 @@ describe("query renderer (member view)", () => {
     });
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const rows = (await handleToolCallback("query_room_messages", room.id, "pm", {
-      from: "pm",
+    const rows = (await handleToolCallback("chat_read", room.id, "pm", {
       from_seq: old.seq,
     })) as any[];
     const cross = rows.find((r) => r.content === "replying across the window");
@@ -218,7 +217,7 @@ describe("query renderer (member view)", () => {
       ],
     });
     fixture.reopen();
-    const rows = await handleToolCallback("query_room_messages", scope, member.id, {}) as import("../../src/engine/query-render.js").QueryRow[];
+    const rows = await handleToolCallback("chat_read", scope, member.id, {}) as import("../../src/engine/query-render.js").QueryRow[];
     expect(rows).toHaveLength(1);
     expect(rows[0].replyTo).toMatchObject({ messageId: foreign.id, unavailable: true });
     expect(rows[0].attachments).toEqual([
@@ -229,7 +228,7 @@ describe("query renderer (member view)", () => {
     const inline = renderQueryRowsForMember(rows);
     expect(inline).not.toContain("room-only target");
     expect(inline).toContain("original not visible in this context");
-    const result = await handleToolCallback("query_room_messages", scope, member.id, { output: "file" }) as { path: string };
+    const result = await handleToolCallback("chat_read", scope, member.id, { output: "file" }) as { path: string };
     try { expect(readFileSync(result.path, "utf8")).toContain(inline); }
     finally { rmSync(result.path); }
   });

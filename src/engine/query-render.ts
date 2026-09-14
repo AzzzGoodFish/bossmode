@@ -1,5 +1,5 @@
 /**
- * Member-view rendering for query_room_messages (fish/architect rc.8 read-chain).
+ * Member-view rendering for chat_read / chat_search (fish/architect rc.8 read-chain).
  * One renderer for both output modes: inline SDK text and markdown file export.
  * Row shape = the tool's JSON projection (seq/sender/content/ts/replyTo/attachments).
  */

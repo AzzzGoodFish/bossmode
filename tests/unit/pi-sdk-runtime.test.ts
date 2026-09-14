@@ -72,7 +72,7 @@ vi.mock("../../src/engine/model-credentials.js", () => ({
 // Live customTools factory — sole source for "bossmode" classification (no static name whitelist).
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({
   createBossmodeSdkTools: (opts: any) => { toolsFactory(opts); return [
-    { name: "query_room_messages" },
+    { name: "chat_read" },
     { name: "wait" },
     { name: "create_task" },
   ]; },
@@ -444,7 +444,7 @@ describe("PiSdkRuntime", () => {
     const session = (handle as any).session;
     const loader = createAgentSession.mock.calls[0][0].resourceLoader;
     const reload = vi.spyOn(loader, "reload");
-    activeToolNames = ["read", "query_room_messages", "web_search"];
+    activeToolNames = ["read", "chat_read", "web_search"];
     const appends = ["new environment", "  "];
     handle.refreshPrompt!({ agentPrompt: "  new identity  ", appendSystemPrompt: appends });
     appends[0] = "caller mutation";
@@ -452,7 +452,7 @@ describe("PiSdkRuntime", () => {
     expect(loader.getSystemPrompt()).toBe("new identity");
     expect(loader.getAppendSystemPrompt()).toEqual(["new environment"]);
     expect(handle.runtimeParams!.systemPrompt).toBe("new identity\n\nnew environment");
-    expect(session.setActiveToolsByName).toHaveBeenLastCalledWith(["read", "query_room_messages", "web_search"]);
+    expect(session.setActiveToolsByName).toHaveBeenLastCalledWith(["read", "chat_read", "web_search"]);
     expect(reload).not.toHaveBeenCalled();
     expect(session.reload).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
@@ -1071,7 +1071,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       reserveTokens: 1000,
       onPrompt: async (m) => {
         m.messages.push(assistantMsg(1000, [
-          { type: "toolCall", id: "call_interrupted|fc_interrupted", name: "chat", arguments: { message: "partial" } },
+          { type: "toolCall", id: "call_interrupted|fc_interrupted", name: "chat_send", arguments: { to: "room", message: "partial" } },
         ], stopReason));
         ready();
         await held;

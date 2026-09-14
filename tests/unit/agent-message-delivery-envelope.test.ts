@@ -46,7 +46,7 @@ describe("agent delivery envelope formatting", () => {
     expect(mockPromptFn).toHaveBeenCalledTimes(1);
     const sent = mockPromptFn.mock.calls[0][0] as string;
     expect(sent).toContain("you have 2 unread messages (No.101–No.102): user×1, architect×1");
-    expect(sent).toContain("query_room_messages (from_seq 100)");
+    expect(sent).toContain("chat_read (from_seq 100)");
     expect(sent).toContain("No.103");
     expect(sent).toContain("@pm status?");
     expect(sent).not.toContain("first\n");

@@ -95,21 +95,21 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
   });
 
-  it("tool surface: dm has create_room, room has wait", async () => {
+  it("tool surface: dm has chat_create family; wait family retired", async () => {
     const { toolSurfaceForScope, familyEnabled } = await import("../../src/engine/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
-    expect(dm.families).toContain("create_room");
+    expect(dm.families).toContain("chat_create");
     expect(dm.families).not.toContain("wait");
     expect(dm.families).not.toContain("memory");
 
     const room = toolSurfaceForScope("room:r1", { isRoomLeader: false });
-    expect(room.families).toContain("wait");
+    expect(room.families).not.toContain("wait");
     expect(room.families).not.toContain("memory");
-    expect(room.families).toContain("edit_room"); // any member
-    expect(room.families).not.toContain("create_room");
-    expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: false })).toBe(true);
-    expect(familyEnabled("room:r1", "edit_room", { isRoomLeader: true })).toBe(true);
+    expect(room.families).toContain("chat_edit"); // any member
+    expect(room.families).not.toContain("chat_create");
+    expect(familyEnabled("room:r1", "chat_edit", { isRoomLeader: false })).toBe(true);
+    expect(familyEnabled("room:r1", "chat_edit", { isRoomLeader: true })).toBe(true);
   });
 
   it("getEffectiveConfig is global-only (unified flags retired, batch-5b)", async () => {

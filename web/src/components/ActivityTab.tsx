@@ -648,7 +648,7 @@ function resultToText(result: unknown): string {
 
 function isMarkdownResult(toolName: string | undefined, text: string): boolean {
   if (!toolName) return false;
-  const mdTools = ["read", "read_memory", "read_file", "query_room_messages"];
+  const mdTools = ["read", "read_memory", "read_file", "chat_read", "chat_search"];
   if (mdTools.includes(toolName)) return true;
   // Heuristic: starts with markdown-ish content.
   return /^(#|\*\*|\d+\.|- |```|\|)/m.test(text.slice(0, 200));

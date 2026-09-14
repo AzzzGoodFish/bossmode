@@ -2,7 +2,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 聊天机制优化 — 注入混合制 (fish-approved spec msg:#14818):
  * 触发消息全量注入；游标到触发点之间的背 log 压成一行提示；游标只推进到
- * 触发消息（读到即清：query_room_messages 覆盖区间 → 游标推进）。
+ * 触发消息（读到即清：chat_read 覆盖区间 → 游标推进）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync } from "node:fs";
@@ -101,7 +101,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     roomStore.setCursor(room.id, pm.id, null);
 
     // Backlog read via from_seq → covers the range → cursor advances to m2
-    const res = await handleToolCallback("query_room_messages", room.id, "pm", { from_seq: 0, limit: 50 }, { memberId: pm.id });
+    const res = await handleToolCallback("chat_read", room.id, "pm", { from_seq: 0, limit: 50 }, { memberId: pm.id });
     expect(Array.isArray(res)).toBe(true);
     expect((res as any[]).length).toBe(2);
     const cursors = roomStore.getCursors(room.id);
@@ -123,7 +123,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     roomStore.setCursor(roomA.id, pm.id, null);
 
     // Reading room B from room A (cross-scope) must not clear A's backlog cursor
-    const res = await handleToolCallback("query_room_messages", roomA.id, "pm", { scope: `room:${roomB.id}`, limit: 50 }, { memberId: pm.id });
+    const res = await handleToolCallback("chat_read", roomA.id, "pm", { chat: `room:${roomB.id}`, limit: 50 }, { memberId: pm.id });
     expect(Array.isArray(res)).toBe(true);
     const cursorsA = roomStore.getCursors(roomA.id);
     expect(cursorsA[pm.id]).toBeNull();

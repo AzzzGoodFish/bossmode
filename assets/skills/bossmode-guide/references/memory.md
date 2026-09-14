@@ -27,7 +27,7 @@ project notes:
 
 ## Reading
 
-- Query authorized history as needed: `query_room_messages` for conversation
+- Query authorized history as needed: `chat_read` / `chat_search` for conversation
   history, file reads for memory and evidence dirs.
 - Reading is read-only: looking things up never modifies assets as a side
   effect. Having write tools available does not change that discipline — it is

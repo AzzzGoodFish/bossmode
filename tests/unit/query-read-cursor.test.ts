@@ -40,17 +40,17 @@ function cursorOf(): string | null {
 
 describe("history queries advance unread positions", () => {
   it("a live read advances the member's cursor (read-to-clear kept)", async () => {
-    const view = await tools.handleToolCallback("query_room_messages", roomId, "cursorbot", { limit: 10 }) as {content: string}[];
+    const view = await tools.handleToolCallback("chat_read", roomId, "cursorbot", { limit: 10 }) as {content: string}[];
     expect(view.map(row => row.content)).toEqual(["first unread message", "second unread message", "third unread message"]);
     expect(cursorOf()).not.toBeNull();
   });
 
   it("a read advances the cursor to the latest message seen; new arrivals advance it further", async () => {
-    await tools.handleToolCallback("query_room_messages", roomId, "cursorbot", { limit: 1 });
+    await tools.handleToolCallback("chat_read", roomId, "cursorbot", { limit: 1 });
     const afterFirst = cursorOf();
     expect(afterFirst).not.toBeNull();
     bus.postMessage(roomId, "user", "fourth message arrives");
-    await tools.handleToolCallback("query_room_messages", roomId, "cursorbot", { limit: 10 });
+    await tools.handleToolCallback("chat_read", roomId, "cursorbot", { limit: 10 });
     expect(cursorOf()).not.toBe(afterFirst);
   });
 });

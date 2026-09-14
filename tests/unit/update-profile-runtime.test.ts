@@ -45,7 +45,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
     await started.promise;
     const { handleToolCallback, loadScopeMessages } = await import("../../src/engine/tools.js");
     const next = `言实 ${suffix}`;
-    expect(await handleToolCallback("update_profile", room.id, own.name, { name: next, title: "Engineer" }, { memberId: own.id })).toMatchObject({ ok: true, name: next });
+    expect(await handleToolCallback("profile_update", room.id, own.name, { name: next, description: "Engineer" }, { memberId: own.id })).toMatchObject({ ok: true, member: { name: next } });
     expect(manager.getAgentStatus(room.id, own.id)).toBe("working");
     for (const scope of scopes) expect(manager.getAgentInstanceForScope(scope, own.id)!.agentName).toBe(next);
     for (const entry of built) expect(entry.handle.abort).not.toHaveBeenCalled();

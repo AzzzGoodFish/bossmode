@@ -30,7 +30,7 @@ export function isRuntimeFailureRoomMessage(message: { sender: string; content?:
  * unconfigured hints, length-continuation warnings) are user-facing only.
  * Typed task/knowledge events stay: they are organization signal members act on.
  * Applied at all three member-facing history entries (activation injection,
- * query_room_messages, DM transcript) with the same rule.
+ * chat_read, DM transcript) with the same rule.
  */
 export function isSystemNoticeHiddenFromMembers(message: { sender: string; type?: string }): boolean {
   if (message.sender !== "system") return false;

@@ -19,19 +19,23 @@ async function fixture() {
   return { registry, rooms, own, peer, room, call };
 }
 
-describe("self-only update_profile", () => {
-  it("atomically updates normalized DB identity, clears title, and preserves persona/configuration", async () => {
+describe("self-only profile_update", () => {
+  it("atomically updates normalized DB identity, clears description, and preserves persona/configuration", async () => {
     const f = await fixture();
     const path = join(getTestBossmodeDir(), "members", f.own.id, "persona.md");
     const bytes = "\uFEFF\r\n---\r\nname: literal content\r\n---\r\n  unchanged  \r\n";
     writeFileSync(path, bytes);
     const name = `言实 β ${randomUUID().slice(0, 6)}`;
-    expect(await f.call("update_profile", { name: ` ${name} `, title: " Engineer " })).toEqual({ ok: true, memberId: f.own.id, name, title: "Engineer", changed: true });
+    expect(await f.call("profile_update", { name: ` ${name} `, description: " Engineer " })).toEqual({
+      ok: true,
+      member: { id: f.own.id, name, description: "Engineer" },
+      changed: true,
+    });
     const saved = f.registry.getMember(f.own.id)!;
     expect(saved.global).toEqual(f.own.global);
-    expect(await f.call("update_profile", { name, title: "Engineer" })).toMatchObject({ changed: false });
+    expect(await f.call("profile_update", { name, description: "Engineer" })).toMatchObject({ changed: false });
     expect(f.registry.getMember(f.own.id)!.updatedAt).toBe(saved.updatedAt);
-    expect(await f.call("update_profile", { title: "" })).toMatchObject({ name, title: null, changed: true });
+    expect(await f.call("profile_update", { description: "" })).toMatchObject({ member: { name, description: "" }, changed: true });
     expect(readFileSync(path, "utf8")).toBe(bytes);
     getTestWorkspace().reopen();
     expect(f.registry.getMember(f.own.id)).toMatchObject({ name });
@@ -40,17 +44,17 @@ describe("self-only update_profile", () => {
 
   it("rejects target injection, malformed/empty patches and collisions without partial writes", async () => {
     const f = await fixture();
-    for (const patch of [{}, { memberId: f.peer.id, title: "stolen" }, { name: null }, { title: null }, { name: 4 }, { title: [] }, { name: "  " }, { name: "invalid/path", title: "bad" }, { name: "ALL" }, { name: " User " }, { name: "system" }]) {
-      expect(await f.call("update_profile", patch)).toMatchObject({ ok: false, code: "invalid_profile" });
+    for (const patch of [{}, { memberId: f.peer.id, description: "stolen" }, { name: null }, { description: null }, { name: 4 }, { description: [] }, { name: "  " }, { name: "invalid/path", description: "bad" }, { name: "ALL" }, { name: " User " }, { name: "system" }, { title: "old field" }]) {
+      expect(await f.call("profile_update", patch)).toMatchObject({ ok: false, code: "invalid_profile" });
       expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     }
-    expect(await f.call("update_profile", { name: f.peer.name.toUpperCase(), title: "partial" })).toMatchObject({ ok: false, code: "name_taken" });
+    expect(await f.call("profile_update", { name: f.peer.name.toUpperCase(), description: "partial" })).toMatchObject({ ok: false, code: "name_taken" });
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     expect(f.registry.getMember(f.peer.id)).toEqual(f.peer);
     for (const name of ["all", "USER", " System "]) expect(() => f.registry.createMember({ name })).toThrow("reserved_member_name");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    expect(await handleToolCallback("update_profile", f.room.id, f.own.name, { title: "bad" })).toMatchObject({ ok: false, code: "invalid_caller" });
-    expect(await f.call("update_profile", { title: "bad" }, `dm:${f.peer.id}`)).toMatchObject({ ok: false, code: "scope_access_denied" });
+    expect(await handleToolCallback("profile_update", f.room.id, f.own.name, { description: "bad" })).toMatchObject({ ok: false, code: "invalid_caller" });
+    expect(await f.call("profile_update", { description: "bad" }, `dm:${f.peer.id}`)).toMatchObject({ ok: false, code: "scope_access_denied" });
   });
 
   it("keeps room/DM and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
@@ -59,42 +63,42 @@ describe("self-only update_profile", () => {
     const { loadScopeMessages, handleToolCallback } = await import("../../src/engine/tools.js");
     const scopes = [f.room.id, `dm:${f.own.id}`];
     const toolSets = scopes.map(roomId => createBossmodeSdkTools({ roomId, memberId: f.own.id }));
-    await f.call("chat", { message: "historical snapshot" });
+    await f.call("chat_send", { message: "historical snapshot" });
     const originalName = f.own.name;
     const next = `New ${randomUUID().slice(0, 6)}`;
-    await f.call("update_profile", { name: next });
+    await f.call("profile_update", { name: next });
     const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
     updateProfileForMember(f.peer.id, { name: originalName });
     for (const tools of toolSets) {
-      await (tools.find(t => t.name === "chat")!.execute as any)("chat-id", { message: "after rename" });
-      const profile = await (tools.find(t => t.name === "update_profile")!.execute as any)("profile-id", { title: "Self only" });
+      await (tools.find(t => t.name === "chat_send")!.execute as any)("chat-id", { message: "after rename" });
+      const profile = await (tools.find(t => t.name === "bossmode")!.execute as any)("profile-id", { action: "call", tool: "profile_update", args: { description: "Self only" } });
       expect(JSON.stringify(profile)).toContain(f.own.id);
     }
     for (const scope of scopes) {
       const last = loadScopeMessages(scope).at(-1)!;
       expect(last.sender).toBe(next);
       expect(last.senderMemberId).toBe(f.own.id);
-      expect(await handleToolCallback("list_scopes", scope, originalName, {}, { memberId: f.own.id })).toMatchObject({ ok: true });
+      expect(await handleToolCallback("chat_list", scope, originalName, {}, { memberId: f.own.id })).toMatchObject({ ok: true });
     }
     expect(loadScopeMessages(f.room.id)[0].sender).toBe(originalName);
     expect(f.registry.getMember(f.peer.id)!.title).toBeUndefined();
-    await f.call("update_profile", { name: `${next}-again` });
+    await f.call("profile_update", { name: `${next}-again` });
     expect(await f.call("workspace_list", {})).toMatchObject({ ok: true });
-    expect(await f.call("list_scopes", {})).toMatchObject({ ok: true });
+    expect(await f.call("chat_list", {})).toMatchObject({ ok: true });
   });
 
   it("rolls back both fields when SQLite rejects the write, and one contender wins a collision", async () => {
     const f = await fixture();
     const { getDatabase } = await import("../../src/storage/database.js");
     getDatabase().exec("CREATE TEMP TRIGGER fail_profile BEFORE UPDATE ON members BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
-    try { expect(await f.call("update_profile", { name: "failed-name", title: "failed-title" })).toMatchObject({ ok: false, code: "persistence_failed" }); }
+    try { expect(await f.call("profile_update", { name: "failed-name", description: "failed-title" })).toMatchObject({ ok: false, code: "persistence_failed" }); }
     finally { getDatabase().exec("DROP TRIGGER fail_profile"); }
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     const target = `Collision-${randomUUID()}`;
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const results = await Promise.all([
-      f.call("update_profile", { name: target }),
-      handleToolCallback("update_profile", f.room.id, f.peer.name, { name: target.toUpperCase(), title: "must roll back" }, { memberId: f.peer.id }),
+      f.call("profile_update", { name: target }),
+      handleToolCallback("profile_update", f.room.id, f.peer.name, { name: target.toUpperCase(), description: "must roll back" }, { memberId: f.peer.id }),
     ]) as any[];
     expect(results.filter(r => r.ok)).toHaveLength(1);
     expect(results.filter(r => r.code === "name_taken")).toHaveLength(1);
@@ -108,7 +112,7 @@ describe("self-only update_profile", () => {
     let captured: any;
     const stop = router.initRouter({mention:(_scope,id,ctx)=>{captured={id,ctx};}});
     try {
-      await f.call("chat", { message: `@${f.peer.name} please reply` });
+      await f.call("chat_send", { message: `@${f.peer.name} please reply` });
       expect(captured).toMatchObject({ id: f.peer.id });
       const { postMessage } = await import("../../src/communication/message-bus.js");
       postMessage(f.room.id, f.own.name, "captured internal reply obligation", [f.peer.name], { senderMemberId: f.own.id, mentionMemberIds: [f.peer.id], needResponseMemberIds: [f.peer.id] });
@@ -118,7 +122,7 @@ describe("self-only update_profile", () => {
       const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
       const { waitForMember, isMemberWaiting } = await import("../../src/engine/wait-wait.js");
       const pending = waitForMember({ roomId: f.room.id, waiterMemberId: f.own.id, waiterName: f.own.name, targetMemberId: f.peer.id, targetName: f.peer.name, targetStatus: "working", timeoutMinutes: 1 });
-      await f.call("update_profile", { name: next });
+      await f.call("profile_update", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
       const roster = f.rooms.getRoomMembers(f.room.id);
       expect(router.parseMentionMemberIds(`@${next}`, roster)).toEqual([f.own.id]);
@@ -136,13 +140,16 @@ describe("self-only update_profile", () => {
     } finally { stop(); const { settleWaitOnAbort } = await import("../../src/engine/wait-wait.js"); settleWaitOnAbort(f.room.id, f.own.id); }
   });
 
-  it("creates rooms with current Unicode identity and keeps historical template tools ID-bound", async () => {
+  it("creates chats with current Unicode identity and keeps historical template tools ID-bound", async () => {
     const f = await fixture();
     const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
-    const pending = f.call("create_room", { name: "Creator race", memberIds: [f.peer.id] }, `dm:${f.own.id}`);
+    const pending = f.call("chat_create", { name: "Creator race", members: [f.peer.id] }, `dm:${f.own.id}`);
     const next = `创建者 ${randomUUID().slice(0, 6)}`;
     updateProfileForMember(f.own.id, { name: next });
-    expect(await pending).toMatchObject({ ok: true, leader: next, leaderMemberId: f.own.id });
+    const created = await pending as any;
+    expect(created).toMatchObject({ ok: true, chat: { name: "Creator race" } });
+    const createdRoomId = String(created.chat.id).replace(/^room:/, "");
+    expect(f.rooms.getRoom(createdRoomId)!.globalMemberIds).toContain(f.own.id);
     const legacyRoom = { id: "historical-room", name: "Historical room", members: ["Historical-template"], createdAt: 1,
       roomMembers: [{ id: "rm_historical", roomId: "historical-room", name: "Historical-template", sourceAgent: "developer", createdAt: 1, updatedAt: 1 }] };
     new ConversationsRepository(getTestWorkspace().db).upsertRoom(legacyRoom);
@@ -150,8 +157,8 @@ describe("self-only update_profile", () => {
     const unrelated = f.registry.createMember({ name: local.name });
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
     const tools = createBossmodeSdkTools({ roomId: legacyRoom.id, memberId: local.id });
-    await expect(tools.find(t => t.name === "chat")!.execute("legacy-chat", { message: "Existing local tool" }, undefined, undefined, undefined as any)).resolves.toBeTruthy();
-    await expect(tools.find(t => t.name === "update_profile")!.execute("legacy-profile", { title: "Do not claim DB names" }, undefined, undefined, undefined as any)).rejects.toThrow("database member ID");
+    await expect(tools.find(t => t.name === "chat_send")!.execute("legacy-chat", { message: "Existing local tool" }, undefined, undefined, undefined as any)).resolves.toBeTruthy();
+    await expect((tools.find(t => t.name === "bossmode")!.execute as any)("legacy-profile", { action: "call", tool: "profile_update", args: { description: "Do not claim DB names" } })).rejects.toThrow("database member ID");
     expect(f.registry.getMember(unrelated.id)!.title).toBeUndefined();
   });
 

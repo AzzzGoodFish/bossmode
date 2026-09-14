@@ -21,7 +21,7 @@ it("captures mention target IDs before attachment IO while refreshing the sender
   const activate = vi.fn();
   const stop = router.initRouter({mention:activate});
   try {
-    const pending = handleToolCallback("chat", room.id, own.name, { message: "@Target answer", attachments: ["simulated-IO"] }, { memberId: own.id });
+    const pending = handleToolCallback("chat_send", room.id, own.name, { message: "@Target answer", attachments: ["simulated-IO"] }, { memberId: own.id });
     expect(processAttachments).toHaveBeenCalledOnce();
     updateProfileForMember(target.id, { name: "Renamed target" });
     updateProfileForMember(reuse.id, { name: "Target" });

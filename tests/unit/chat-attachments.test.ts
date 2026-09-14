@@ -87,13 +87,13 @@ describe("chat attachment artifacts", () => {
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const room = roomStore.createRoom("Empty Chat", undefined, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
-    const rejected = await handleToolCallback("chat", room.id, "developer", {
+    const rejected = await handleToolCallback("chat_send", room.id, "developer", {
       message: "",
     }) as any;
     expect(rejected.ok).toBe(false);
     expect(rejected.error).toContain("non-empty");
 
-    const whitespace = await handleToolCallback("chat", room.id, "developer", {
+    const whitespace = await handleToolCallback("chat_send", room.id, "developer", {
       message: "   \n\t  ",
     }) as any;
     expect(whitespace.ok).toBe(false);
@@ -102,7 +102,7 @@ describe("chat attachment artifacts", () => {
     expect(messageStore.getMessages(room.id, { limit: 10 })).toHaveLength(0);
 
     // Non-empty text still works.
-    const ok = await handleToolCallback("chat", room.id, "developer", {
+    const ok = await handleToolCallback("chat_send", room.id, "developer", {
       message: "real message",
     }) as any;
     expect(ok.ok).toBe(true);
@@ -121,7 +121,7 @@ describe("chat attachment artifacts", () => {
     const missingPath = join(cwd, "missing.md");
     const room = roomStore.createRoom("Agent Missing Attach", cwd, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
-    const result = await handleToolCallback("chat", room.id, "developer", {
+    const result = await handleToolCallback("chat_send", room.id, "developer", {
       message: "should not send",
       attachments: [missingPath],
     }) as any;
@@ -151,7 +151,7 @@ describe("chat attachment artifacts", () => {
     writeFileSync(sourcePath, "<h1>Agent Note</h1>", "utf8");
     const room = roomStore.createRoom("Agent Attach", cwd, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
-    const result = await handleToolCallback("chat", room.id, "developer", {
+    const result = await handleToolCallback("chat_send", room.id, "developer", {
       message: "attached",
       attachments: [sourcePath],
     }) as any;

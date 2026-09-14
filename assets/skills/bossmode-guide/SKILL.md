@@ -12,7 +12,7 @@ Platform skill (read-only, shipped with bossmode). Use the **read** tool on this
 - Path is in your Environment segment (`Your profile: …/persona.md`).
 - The entire file is your persona: plain Markdown, without frontmatter, a schema, or required headings.
 - Your name, title, and structured member configuration live in Bossmode's database. Writing them as text in persona.md does not change those fields.
-- Use `update_profile` to change your own name or title. Names are globally unique; `all`, `user`, and `system` are reserved. An empty title clears it. Use the committed name returned by the tool immediately; old names are not aliases. Your current turn and stable member ID are preserved.
+- Use `profile_update` to change your own name or description. Names are globally unique; `all`, `user`, and `system` are reserved. An empty description clears it. Use the committed name returned by the tool immediately; old names are not aliases. Your current turn and stable member ID are preserved.
 - Grow the file with the **edit** tool when the user teaches you something lasting. Keep it under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
 - Birth state is an empty file. The first DM icebreaker is how you learn what you are for — then write it down.
 - Use the current name shown in your environment for communication; the stable member ID identifies your records and scope membership.

@@ -93,7 +93,7 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
     });
 
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const res = await handleToolCallback("chat", room.id, "pm", { message: "@qa heads up" });
+    const res = await handleToolCallback("chat_send", room.id, "pm", { message: "@qa heads up" });
     expect((res as any).ok).toBe(true);
 
     await waitFor(() => prompts.length >= 1);
@@ -105,24 +105,24 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
     expect(messages.some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying"))).toBe(false);
   });
 
-  it("④ chat exposes only message/attachments and rejects unknown parameters before posting", async () => {
+  it("④ chat_send exposes only to/message/attachments and rejects unknown parameters before posting", async () => {
     const room = await createRoomWithMembers("ftd-chat-tool", ["pm"]);
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
 
     // SDK tool surface exposes only current supported arguments.
     const chatTool = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: room.id })[0];
-    expect(chatTool.name).toBe("chat");
-    expect(Object.keys((chatTool.parameters as any).properties)).toEqual(["message", "attachments"]);
+    expect(chatTool.name).toBe("chat_send");
+    expect(Object.keys((chatTool.parameters as any).properties)).toEqual(["to", "message", "attachments"]);
     expect((chatTool.parameters as any).additionalProperties).toBe(false);
     // artifacts param removed from chat tool.
     expect(JSON.stringify(chatTool.parameters)).not.toContain("artifacts");
 
     // Obsolete arguments are rejected, not silently honored or ignored.
-    const noTarget = await handleToolCallback("chat", room.id, "pm", { message: "plain post", need_response: ["qa"] });
-    expect(noTarget).toEqual({ ok: false, error: "Unknown chat parameter: need_response" });
+    const noTarget = await handleToolCallback("chat_send", room.id, "pm", { message: "plain post", need_response: ["qa"] });
+    expect(noTarget).toEqual({ ok: false, error: "Unknown chat_send parameter: need_response" });
     expect(await roomMessages(room.id)).toEqual([]);
-    expect(await handleToolCallback("chat", room.id, "pm", { message: "plain post" })).toEqual({ ok: true });
+    expect(await handleToolCallback("chat_send", room.id, "pm", { message: "plain post" })).toMatchObject({ ok: true });
   });
 
   it("⑤ DM same rule: user DM message expects a reply → bare text is not delivered; silence note lands in the DM", async () => {

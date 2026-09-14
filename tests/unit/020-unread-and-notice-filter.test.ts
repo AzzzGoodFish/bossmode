@@ -3,7 +3,7 @@ import type { coreFixture } from "../helpers/core-fixture.js";
  * 0.20 read-cursor + system-notice eligibility (fish 2026-08-04 ruling):
  * - chats-list unread/mention counts exclude system notices and typed
  *   task/knowledge events (only real conversation badges);
- * - member-facing history reads (query_room_messages) hide runtime-failure
+ * - member-facing history reads (chat_read) hide runtime-failure
  *   system notices, same as the activation-context injection path.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -66,7 +66,7 @@ describe("unread eligibility (chats list)", () => {
   });
 });
 
-describe("query_room_messages member-visible filter", () => {
+describe("chat_read member-visible filter", () => {
   beforeEach(async () => {
     vi.resetModules();
     fixture = (await import("../helpers/core-fixture.js")).coreFixture();
@@ -97,7 +97,7 @@ describe("query_room_messages member-visible filter", () => {
     messageStore.addMessage(room.id, msg("system", "TASKEVENT-KEPT", { type: "task_event" }));
     messageStore.addMessage(room.id, msg("system", "KNOWLEDGEEVENT-KEPT", { type: "knowledge_event" }));
 
-    const result = (await handleToolCallback("query_room_messages", room.id, "pm", {}, { memberId: member.id })) as any[];
+    const result = (await handleToolCallback("chat_read", room.id, "pm", {}, { memberId: member.id })) as any[];
     const texts = result.map((m: any) => m.content).join("\n");
     expect(texts).toContain("REAL-USER-MSG");
     expect(texts).toContain("REAL-MEMBER-MSG");

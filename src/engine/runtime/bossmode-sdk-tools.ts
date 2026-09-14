@@ -1,11 +1,19 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import { buildChatToolDescription, CHAT_MESSAGE_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
+import { Type, type TSchema } from "typebox";
+import { buildChatSendToolDescription, CHAT_SEND_TO_PARAM_DESCRIPTION, CHAT_SEND_MESSAGE_PARAM_DESCRIPTION, CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
 import { renderQueryRowsForMember } from "../query-render.js";
 import {
-  QUERY_ROOM_MESSAGES_DESCRIPTION,
-  LIST_SCOPES_DESCRIPTION,
-  WAIT_DESCRIPTION,
+  CHAT_READ_DESCRIPTION,
+  CHAT_SEARCH_DESCRIPTION,
+  CHAT_LIST_DESCRIPTION,
+  BOSSMODE_GATEWAY_DESCRIPTION,
+  CHAT_INFO_DESCRIPTION,
+  CHAT_CREATE_DESCRIPTION,
+  CHAT_EDIT_DESCRIPTION,
+  MEMBER_LIST_DESCRIPTION,
+  MEMBER_INFO_DESCRIPTION,
+  PROFILE_READ_DESCRIPTION,
+  PROFILE_UPDATE_DESCRIPTION,
   RELOAD_DESCRIPTION,
   WORKSPACE_LIST_DESCRIPTION,
   WORKSPACE_CREATE_DESCRIPTION,
@@ -31,68 +39,227 @@ function truncate(text: string): string {
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
 }
 
+type CallFn = (tool: string, params: Record<string, any>, signal?: AbortSignal) => Promise<unknown>;
+
+/**
+ * Batch 3 (member-centric): gateway capabilities. Each entry is a full tool
+ * definition minus registration — `bossmode` exposes them via list/describe/call
+ * and `call` executes through the same dispatch path as a direct tool.
+ */
+interface GatewayEntry {
+  name: string;
+  label: string;
+  description: string;
+  parameters: TSchema;
+  example: Record<string, unknown>;
+  execute: (id: string, params: Record<string, any>, signal?: AbortSignal) => Promise<any>;
+}
+
+function requiredOf(schema: TSchema): string[] {
+  const required = (schema as { required?: unknown }).required;
+  return Array.isArray(required) ? required.map(String) : [];
+}
+
+function buildGatewayEntries(call: CallFn): GatewayEntry[] {
+  const entries: GatewayEntry[] = [
+    {
+      name: "chat_info",
+      label: "Chat Info",
+      description: CHAT_INFO_DESCRIPTION,
+      parameters: Type.Object({
+        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+      }, { additionalProperties: false }),
+      example: { chat: "bossmode dev" },
+      execute: async (_id, params) => {
+        const data = await call("chat_info", params) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_info failed");
+        const chat = data.chat;
+        const lines = [`${chat.name} — ${chat.kind === "room" ? "group chat" : "private chat"} (${chat.id})`];
+        if (chat.description) lines.push(chat.description);
+        if (Array.isArray(chat.members) && chat.members.length > 0) {
+          lines.push(`members: ${chat.members.map((m: any) => m.name).join(", ")}`);
+        }
+        return textResult(truncate(lines.join("\n")));
+      },
+    },
+    {
+      name: "chat_create",
+      label: "Chat Create",
+      description: CHAT_CREATE_DESCRIPTION,
+      parameters: Type.Object({
+        name: Type.String({ description: "Chat name." }),
+        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
+        members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.createMembers })),
+      }, { additionalProperties: false }),
+      example: { name: "release-notes", members: ["mem_abc123"] },
+      execute: async (_id, params) => {
+        const data = await call("chat_create", params) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_create failed");
+        const members = Array.isArray(data.members) && data.members.length > 0
+          ? ` Members: ${data.members.map((m: any) => m.name).join(", ")}.`
+          : "";
+        return textResult(`Created group chat "${data.chat.name}" (${data.chat.id}).${members}`);
+      },
+    },
+    {
+      name: "chat_edit",
+      label: "Chat Edit",
+      description: CHAT_EDIT_DESCRIPTION,
+      parameters: Type.Object({
+        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+        name: Type.Optional(Type.String({ description: "New chat name." })),
+        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
+        add_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.addMembers })),
+        remove_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.removeMembers })),
+      }, { additionalProperties: false }),
+      example: { chat: "release-notes", add_members: ["mem_abc123"] },
+      execute: async (_id, params) => {
+        const data = await call("chat_edit", params) as any;
+        if (data?.ok === false) throw new Error(data.error || data.message || "chat_edit failed");
+        const parts = [`Updated "${data.chat.name}" (${data.chat.id}).`];
+        if (Array.isArray(data.added) && data.added.length > 0) parts.push(`Added: ${data.added.join(", ")}.`);
+        if (Array.isArray(data.removed) && data.removed.length > 0) parts.push(`Removed: ${data.removed.join(", ")}.`);
+        return textResult(parts.join(" "));
+      },
+    },
+    {
+      name: "member_list",
+      label: "Member List",
+      description: MEMBER_LIST_DESCRIPTION,
+      parameters: Type.Object({
+        query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
+        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
+        offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
+      }, { additionalProperties: false }),
+      example: {},
+      execute: async (_id, params) => {
+        const data = await call("member_list", params) as any;
+        if (data?.ok === false) throw new Error(data.error || "member_list failed");
+        const members = Array.isArray(data?.members) ? data.members : [];
+        if (members.length === 0) return textResult("No members found.");
+        const lines = members.map((m: any) => `- ${m.name} (${m.id})${m.description ? ` — ${m.description}` : ""}`);
+        const total = typeof data.total === "number" ? data.total : members.length;
+        if (total > members.length) {
+          const next = Number(params.offset ?? 0) + members.length;
+          lines.push(`Showing ${members.length} of ${total}. Use offset=${next} for the next page.`);
+        }
+        return textResult(truncate(lines.join("\n")));
+      },
+    },
+    {
+      name: "member_info",
+      label: "Member Info",
+      description: MEMBER_INFO_DESCRIPTION,
+      parameters: Type.Object({
+        member: Type.String({ description: PARAM_DESCRIPTIONS.memberRef }),
+      }, { additionalProperties: false }),
+      example: { member: "qa" },
+      execute: async (_id, params) => {
+        const data = await call("member_info", params) as any;
+        if (data?.ok === false) throw new Error(data.error || "member_info failed");
+        const member = data.member;
+        const lines = [`${member.name} (${member.id}) — ${member.status}`];
+        if (member.description) lines.push(member.description);
+        return textResult(lines.join("\n"));
+      },
+    },
+    {
+      name: "profile_read",
+      label: "Profile Read",
+      description: PROFILE_READ_DESCRIPTION,
+      parameters: Type.Object({}, { additionalProperties: false }),
+      example: {},
+      execute: async (_id, params) => {
+        const data = await call("profile_read", params) as any;
+        if (data?.ok === false) throw new Error(data.error || "profile_read failed");
+        const member = data.member;
+        const lines = [`${member.name} (${member.id})`];
+        if (member.description) lines.push(member.description);
+        return textResult(lines.join("\n"));
+      },
+    },
+    {
+      name: "profile_update",
+      label: "Profile Update",
+      description: PROFILE_UPDATE_DESCRIPTION,
+      parameters: Type.Object({
+        name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileName })),
+        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileDescription })),
+      }, { additionalProperties: false }),
+      example: { description: "Backend engineer" },
+      execute: async (_id, params) => {
+        const data = await call("profile_update", params) as any;
+        // Keep structured validation/conflict details visible in SDK errors.
+        if (data?.ok === false) throw new Error(JSON.stringify(data));
+        return textResult(JSON.stringify(data));
+      },
+    },
+  ];
+  return entries;
+}
+
+function renderGatewayList(entries: GatewayEntry[]): string {
+  const lines = entries.map((entry) => `- ${entry.name} — ${entry.description.split("\n")[0]}`);
+  return `${lines.join("\n")}\nUse {action:"describe", tool:"<name>"} for one capability's parameters.`;
+}
+
+function renderGatewayDescribe(entry: GatewayEntry): string {
+  return [
+    `${entry.name}: ${entry.description}`,
+    "",
+    "parameters:",
+    JSON.stringify(entry.parameters, null, 2),
+    "",
+    `call: {"action":"call","tool":"${entry.name}","args":${JSON.stringify(entry.example)}}`,
+  ].join("\n");
+}
+
 export function createBossmodeSdkTools(opts: {
   roomId: string;
   memberId: string;
-  /** 0.20 scope kind — dm gets create_room/list_members; room gets wait/tasks. Default room. */
+  /** Retained for call-site compatibility — the tool surface no longer varies by scope kind (batch 3). */
   scopeKind?: "dm" | "room";
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
-  const scopeKind = opts.scopeKind || "room";
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
     const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
+  // ── Hot tools: registered directly (chat send/read/search/list) ──
   const tools: ToolDefinition[] = [
     defineTool({
-      name: "chat",
-      label: "Chat",
-      description: buildChatToolDescription(),
+      name: "chat_send",
+      label: "Chat Send",
+      description: buildChatSendToolDescription(),
       parameters: Type.Object({
-        message: Type.String({ description: CHAT_MESSAGE_PARAM_DESCRIPTION }),
-        attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the room's attachment store." })),
+        to: Type.String({ description: CHAT_SEND_TO_PARAM_DESCRIPTION }),
+        message: Type.String({ description: CHAT_SEND_MESSAGE_PARAM_DESCRIPTION }),
+        attachments: Type.Optional(Type.Array(Type.String(), { description: CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION })),
       }, { additionalProperties: false }),
       execute: async (_id, params) => {
-        const data = await call("chat", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Chat failed");
-        return textResult("Message sent to room.");
+        const data = await call("chat_send", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_send failed");
+        const name = data?.chat?.name ? ` to "${data.chat.name}"` : "";
+        return textResult(`Message sent${name}.`);
       },
     }),
     defineTool({
-      name: "update_profile",
-      label: "Update Profile",
-      description: "Update your own member name or title. At least one field is required. An empty title clears it. Returns the committed profile and whether it changed.",
+      name: "chat_read",
+      label: "Chat Read",
+      description: CHAT_READ_DESCRIPTION,
       parameters: Type.Object({
-        name: Type.Optional(Type.String({ description: "New member name." })),
-        title: Type.Optional(Type.String({ description: "New member title; an empty string clears it." })),
-      }, { additionalProperties: false }),
-      execute: async (_id, params) => {
-        const data = await call("update_profile", params as any) as any;
-        // Keep structured validation/conflict details visible in SDK errors.
-        if (data?.ok === false) throw new Error(JSON.stringify(data));
-        return textResult(JSON.stringify(data));
-      },
-    }),
-    defineTool({
-      name: "query_room_messages",
-      label: "Query Room Messages",
-      description: QUERY_ROOM_MESSAGES_DESCRIPTION,
-      parameters: Type.Object({
-        query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.query })),
-        from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
-        after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
-        before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
-        type: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.type })),
-        around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
+        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
         from_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.from_seq })),
+        around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
+        before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+        after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
         limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
         output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
-        scope: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.scope })),
-      }),
+      }, { additionalProperties: false }),
       execute: async (_id, params) => {
-        const data = await call("query_room_messages", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Query messages failed");
+        const data = await call("chat_read", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_read failed");
         if (data && typeof data === "object" && "path" in data) return textResult("Messages written to: " + data.path + " (count: " + data.count + ")");
         const messages = Array.isArray(data) ? data : [];
         // Member-view rendering (shared with file output): No./sender/time header,
@@ -100,18 +267,82 @@ export function createBossmodeSdkTools(opts: {
         return textResult(truncate(renderQueryRowsForMember(messages)));
       },
     }),
-
     defineTool({
-      name: "list_scopes",
-      label: "List Scopes",
-      description: LIST_SCOPES_DESCRIPTION,
-      parameters: Type.Object({}),
-      execute: async () => {
-        const data = await call("list_scopes", {}) as any;
-        if (data?.ok === false) throw new Error(data.error || "List scopes failed");
-        const scopes = Array.isArray(data?.scopes) ? data.scopes : [];
-        if (scopes.length === 0) return textResult("No scopes found.");
-        return textResult(scopes.map((s: any) => `- ${s.name} (${s.scope})`).join("\n"));
+      name: "chat_search",
+      label: "Chat Search",
+      description: CHAT_SEARCH_DESCRIPTION,
+      parameters: Type.Object({
+        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+        query: Type.String({ description: PARAM_DESCRIPTIONS.query }),
+        from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
+        before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+        after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
+        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
+      }, { additionalProperties: false }),
+      execute: async (_id, params) => {
+        const data = await call("chat_search", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_search failed");
+        const hits = Array.isArray(data) ? data : [];
+        return textResult(truncate(renderQueryRowsForMember(hits)));
+      },
+    }),
+    defineTool({
+      name: "chat_list",
+      label: "Chat List",
+      description: CHAT_LIST_DESCRIPTION,
+      parameters: Type.Object({
+        query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
+        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
+        offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
+      }, { additionalProperties: false }),
+      execute: async (_id, params) => {
+        const data = await call("chat_list", params as any) as any;
+        if (data?.ok === false) throw new Error(data.error || "chat_list failed");
+        const chats = Array.isArray(data?.chats) ? data.chats : [];
+        if (chats.length === 0) return textResult("No chats found.");
+        const lines = chats.map((c: any) => `- ${c.name} (${c.id}) [${c.kind === "room" ? "group chat" : "private chat"}]${c.description ? ` — ${c.description}` : ""}`);
+        const total = typeof data.total === "number" ? data.total : chats.length;
+        if (total > chats.length) {
+          const next = Number(params.offset ?? 0) + chats.length;
+          lines.push(`Showing ${chats.length} of ${total}. Use offset=${next} for the next page.`);
+        }
+        return textResult(truncate(lines.join("\n")));
+      },
+    }),
+    // ── Gateway: long-tail capabilities via list/describe/call ──
+    defineTool({
+      name: "bossmode",
+      label: "Bossmode",
+      description: BOSSMODE_GATEWAY_DESCRIPTION,
+      parameters: Type.Object({
+        action: Type.String({ description: PARAM_DESCRIPTIONS.gatewayAction }),
+        tool: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gatewayTool })),
+        args: Type.Optional(Type.Any({ description: PARAM_DESCRIPTIONS.gatewayArgs })),
+      }, { additionalProperties: false }),
+      execute: async (_id, params, signal) => {
+        const entries = buildGatewayEntries(call);
+        const action = String(params?.action ?? "").trim().toLowerCase();
+        if (action === "list") return textResult(truncate(renderGatewayList(entries)));
+
+        const toolName = typeof params?.tool === "string" ? params.tool.trim() : "";
+        if (action !== "describe" && action !== "call") {
+          return textResult(`[error] unknown action "${action || "(missing)"}" — use {action:"list"}, {action:"describe", tool:"<name>"} or {action:"call", tool:"<name>", args:{…}}.`);
+        }
+        const entry = entries.find((candidate) => candidate.name === toolName);
+        if (!entry) {
+          return textResult(`[error] unknown tool "${toolName || "(missing)"}" — available: ${entries.map((candidate) => candidate.name).join(", ")}. Use {action:"describe", tool:"<name>"} for parameters.`);
+        }
+        if (action === "describe") return textResult(truncate(renderGatewayDescribe(entry)));
+
+        const args = params?.args ?? {};
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
+          return textResult(`[error] "args" must be an object — call: {"action":"call","tool":"${entry.name}","args":${JSON.stringify(entry.example)}}`);
+        }
+        const missing = requiredOf(entry.parameters).filter((key) => !(key in (args as Record<string, unknown>)));
+        if (missing.length > 0) {
+          return textResult(`[error] the "${entry.name}" tool requires ${missing.map((key) => `\`${key}\``).join(", ")}.`);
+        }
+        return await entry.execute("gateway", args as Record<string, any>, signal);
       },
     }),
     // ── Batch 7 P1: workspace tools + file tool overrides (read/write/edit
@@ -260,109 +491,6 @@ export function createBossmodeSdkTools(opts: {
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("reload", params as any), null, 2))),
     }),
   ];
-
-  if (scopeKind === "room") {
-    // Room: wait for all members. Tasks already in base list above.
-    tools.push(defineTool({
-      name: "wait",
-      label: "Wait",
-      description: WAIT_DESCRIPTION,
-      parameters: Type.Object({
-        member: Type.String({ description: "Target member name to wait on" }),
-        timeoutMinutes: Type.Optional(Type.Number({ description: "Max minutes to wait (default 30, max 360)" })),
-      }),
-      execute: async (_id, params, signal) => {
-        const data = await call("wait", params as any, signal) as any;
-        if (data?.ok === false) throw new Error(data.error || "Wait failed");
-        if (data?.reason === "message") {
-          const body = typeof data.message === "string" ? data.message : "";
-          return textResult(`wait resolved: ${data.target} posted.\n\n${body}`);
-        }
-        if (data?.detail) return textResult(`wait resolved (${data.reason}): ${data.detail}`);
-        return textResult(truncate(JSON.stringify(data, null, 2)));
-      },
-    }));
-
-    tools.push(defineTool({
-      name: "member_status",
-      label: "Member Status",
-      description: "Query live runtime status of room members. Returns each member's aggregated status plus a room breakdown. Same source as the member panel status lamp. Read-only: never activates or notifies anyone.",
-      parameters: Type.Object({
-        member: Type.Optional(Type.String({ description: "Member name; omit for all room members" })),
-      }),
-      execute: async (_id, params) => {
-        const data = await call("member_status", params as any) as any;
-        if (data?.ok === false) throw new Error(data.error || "Member status failed");
-        const members = (data.members ?? []) as Array<{
-          name: string; status: string; room?: string;
-          activeScopes: Array<{ scope: string; status: string }>;
-        }>;
-        const lines = members.map((m) => {
-          const scopes = (m.activeScopes ?? []).map((s) => `${s.scope} (${s.status})`).join(", ");
-          const extra = [
-            m.room ? `room ${m.room}` : "",
-            scopes,
-          ].filter(Boolean).join(" — ");
-          return `- ${m.name}: ${m.status}${extra ? ` — ${extra}` : ""}`;
-        });
-        return textResult(lines.length ? lines.join("\n") : "No room members.");
-      },
-    }));
-  } else {
-    // DM: member directory + create/edit room (no wait/tasks in DM).
-    tools.push(
-      defineTool({
-        name: "list_members",
-        label: "List members",
-        description: "List digital employees in this Bossmode (id, name, identity template). Use before create_room invites.",
-        parameters: Type.Object({
-          query: Type.Optional(Type.String({ description: "Optional name/id/template filter" })),
-        }),
-        execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("list_members", params as any), null, 2))),
-      }),
-      defineTool({
-        name: "create_room",
-        label: "Create room",
-        description: "Create a project room. Invite members by global member id (from list_members). Optional initial room principles.",
-        parameters: Type.Object({
-          name: Type.String({ description: "Room display name" }),
-          cwd: Type.Optional(Type.String({ description: "Working directory (default: current process cwd)" })),
-          memberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite (mem_…)" })),
-          principles: Type.Optional(Type.String({ description: "Initial room principles / announcement markdown" })),
-        }),
-        execute: async (_id, params) => {
-          const data = await call("create_room", params as any) as any;
-          if (data?.ok === false) throw new Error(data.error || "create_room failed");
-          return textResult(truncate(JSON.stringify(data, null, 2)));
-        },
-      }),
-      defineTool({
-        name: "edit_room",
-        label: "Edit room",
-        description: "Rename room, update principles, add/remove members by global member id. Any room member may call this.",
-        parameters: Type.Object({
-          roomId: Type.String({ description: "Room id to edit" }),
-          name: Type.Optional(Type.String({ description: "New room name" })),
-          principles: Type.Optional(Type.String({ description: "Replace room principles markdown" })),
-          reason: Type.Optional(Type.String({ description: "Reason for principles change" })),
-          addMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to invite" })),
-          removeMemberIds: Type.Optional(Type.Array(Type.String(), { description: "Global member ids to remove (memory retained)" })),
-        }),
-        execute: async (_id, params) => {
-          const data = await call("edit_room", params as any) as any;
-          if (data?.ok === false) throw new Error(data.error || data.message || "edit_room failed");
-          return textResult(truncate(JSON.stringify(data, null, 2)));
-        },
-      }),
-    );
-
-    // Strip room-only write tools from the DM surface (reads — list_tasks,
-    // get_task — stay: they accept a target scope since 0.20.0 flagship ①).
-    const dmDeny = new Set(["wait"]);
-    for (let i = tools.length - 1; i >= 0; i--) {
-      if (dmDeny.has(tools[i].name)) tools.splice(i, 1);
-    }
-  }
 
   // Defensive normalization: TypeBox omits `required` when every property is
   // optional — valid JSON Schema (OpenAI/xAI accept it), but some
