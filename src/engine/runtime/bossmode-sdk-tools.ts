@@ -69,7 +69,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       parameters: Type.Object({
         chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
       }, { additionalProperties: false }),
-      example: { chat: "bossmode dev" },
+      example: { chat: "user" },
       execute: async (_id, params) => {
         const data = await call("chat_info", params) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_info failed");
@@ -91,7 +91,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
         description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
         members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.createMembers })),
       }, { additionalProperties: false }),
-      example: { name: "release-notes", members: ["mem_abc123"] },
+      example: { name: "<group chat name>" },
       execute: async (_id, params) => {
         const data = await call("chat_create", params) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_create failed");
@@ -112,7 +112,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
         add_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.addMembers })),
         remove_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.removeMembers })),
       }, { additionalProperties: false }),
-      example: { chat: "release-notes", add_members: ["mem_abc123"] },
+      example: { chat: "<chat id or name>", name: "<new name>" },
       execute: async (_id, params) => {
         const data = await call("chat_edit", params) as any;
         if (data?.ok === false) throw new Error(data.error || data.message || "chat_edit failed");
@@ -153,7 +153,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       parameters: Type.Object({
         member: Type.String({ description: PARAM_DESCRIPTIONS.memberRef }),
       }, { additionalProperties: false }),
-      example: { member: "qa" },
+      example: { member: "<member name or id>" },
       execute: async (_id, params) => {
         const data = await call("member_info", params) as any;
         if (data?.ok === false) throw new Error(data.error || "member_info failed");
@@ -186,7 +186,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
         name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileName })),
         description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileDescription })),
       }, { additionalProperties: false }),
-      example: { description: "Backend engineer" },
+      example: { description: "<your description>" },
       execute: async (_id, params) => {
         const data = await call("profile_update", params) as any;
         // Keep structured validation/conflict details visible in SDK errors.

@@ -115,6 +115,21 @@ describe("bossmode gateway", () => {
     expect(badArgs).toContain('"args" must be an object');
   });
 
+  it("describe examples stay environment-independent (nothing a weak model can copy as real)", async () => {
+    for (const [tool, marker] of [
+      ["chat_info", '"args":{"chat":"user"}'],
+      ["chat_create", '"args":{"name":"<group chat name>"}'],
+      ["chat_edit", '"args":{"chat":"<chat id or name>","name":"<new name>"}'],
+      ["member_info", '"args":{"member":"<member name or id>"}'],
+      ["profile_update", '"args":{"description":"<your description>"}'],
+    ] as const) {
+      const text = await run({ action: "describe", tool });
+      expect(text, tool).toContain(marker);
+      expect(text, tool).not.toMatch(/mem_[0-9a-f]{6}/);
+      expect(text, tool).not.toContain("bossmode dev");
+    }
+  });
+
   it("call routes through the dispatcher and surfaces execution errors as thrown", async () => {
     await expect((gateway.execute as any)("g", { action: "call", tool: "member_info", args: { member: "qa" } }))
       .rejects.toThrow("boom: explicit error");
