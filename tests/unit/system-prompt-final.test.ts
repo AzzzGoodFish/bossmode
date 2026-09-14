@@ -69,7 +69,7 @@ describe("buildFinalMemberSystemPrompt vs pi buildSystemPrompt", () => {
   it("plain segments + cwd line are byte-identical", () => {
     const ours = buildFinalMemberSystemPrompt(baseArgs)!;
     expect(ours).toBe(piAssemble(baseArgs));
-    expect(ours.endsWith(`\nCurrent working directory: /tmp/some-room`)).toBe(true);
+    expect(ours.endsWith(`\nCurrent working directory: /tmp/some-room\n`)).toBe(true);
   });
 
   it("cwd backslashes normalize like pi", () => {

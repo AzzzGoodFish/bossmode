@@ -74,8 +74,8 @@ export function buildFinalMemberSystemPrompt(args: FinalMemberSystemPromptArgs):
     prompt += "</project_context>\n";
   }
   // "read" is always among a member's selected tools, so pi always appends
-  // the skills section when any skills loaded.
-  prompt += formatSkillsForPrompt(skills);
-  prompt += `\nCurrent working directory: ${args.cwd.replace(/\\/g, "/")}`;
+  // the skills section when any skills loaded (pi ≥0.84 passes the reading tool).
+  prompt += formatSkillsForPrompt(skills, "read");
+  prompt += `\nCurrent working directory: ${args.cwd.replace(/\\/g, "/")}\n`;
   return prompt;
 }

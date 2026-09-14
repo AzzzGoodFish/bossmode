@@ -50,7 +50,7 @@ describe("member system-prompt preview", () => {
     // Batch 7 P1: session cwd = active workspace root (original → member dir).
     const { activeWorkspaceRoot } = await import("../../src/workspace/workspace-registry.js");
     const sessionCwd = activeWorkspaceRoot(memberId);
-    expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}`)).toBe(true);
+    expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}\n`)).toBe(true);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });

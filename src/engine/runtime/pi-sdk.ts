@@ -89,8 +89,17 @@ export class BossmodeResourceLoader implements ResourceLoader {
     return this.promptSources.systemPrompt;
   }
 
+  /** Bossmode prompt sources are in-memory (compiled per scope); there is no file backing. */
+  getSystemPromptSource(): { path: string } | undefined {
+    return undefined;
+  }
+
   getAppendSystemPrompt(): string[] {
     return [...this.promptSources.appendSystemPrompt];
+  }
+
+  getAppendSystemPromptSources(): Array<{ path: string }> {
+    return [];
   }
 }
 
