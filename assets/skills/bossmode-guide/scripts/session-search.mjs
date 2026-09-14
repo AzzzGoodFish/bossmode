@@ -86,8 +86,13 @@ async function collectFiles(directory) {
 function scopeFor(file) {
   const parts = safeRelative(file)?.split("/") || [];
   const index = parts.indexOf("sessions");
+  if (index < 0) return "unknown";
+  // `<…>/sessions/<day>/<kind>[/<id>]/<file>.jsonl`. The live layout is always
+  // `main` (one session per member); archived material keeps the retired
+  // per-scope shape, so the label still names the chat it came from.
   const kind = parts[index + 2];
   const id = parts[index + 3];
+  if (kind === "main") return "main";
   if (kind === "rooms") return `room:${id}`;
   if (kind === "dm") return `dm:${memberId}`;
   return "unknown";
@@ -184,7 +189,10 @@ const from = option("--from") ? Date.parse(option("--from")) : -Infinity;
 const to = option("--to") ? Date.parse(option("--to")) : Infinity;
 if (Number.isNaN(from) || Number.isNaN(to)) fail("--from/--to must be UTC ISO timestamps");
 const wantedScope = option("--scope");
-const roots = [resolve(root, "sessions")];
+// Live member sessions live under `sessions/<day>/main/`; retired per-scope files
+// were parked under `archive/sessions/` by the member-centric upgrade (① A3) and
+// stay searchable read-only.
+const roots = [resolve(root, "sessions"), resolve(root, "archive", "sessions")];
 const files = (await Promise.all(roots.map(collectFiles))).flat().sort();
 const start = decodeCursor();
 if (start && (start.action !== action || typeof start.file !== "string" || !Number.isInteger(start.line) || start.line < 0)) fail("invalid list/search cursor");

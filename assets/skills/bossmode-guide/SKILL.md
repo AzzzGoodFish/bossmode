@@ -52,7 +52,8 @@ For communication and decisions, search chat; for execution history, search your
 ## Archive fold (legacy notes)
 
 - If Environment shows **Legacy notes** under `…/members/<id>/archive/`, those files came from the old principles/mainline system.
-- When relevant: read → fold what is still true into `persona.md` or shared memory → **delete the archive file** once folded.
+- The same archive holds `archive/sessions/…`: session files from the retired per-chat layout, kept readable but never resumed. Leave them alone; search them with the session-search script when you need old history.
+- When relevant: read → fold what is still true into `persona.md` or shared memory → **delete the archive file** once folded (never delete `archive/sessions/`).
 - Empty archive → the legacy line disappears from Environment.
 
 ## Your MCP servers and extensions
@@ -111,7 +112,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 ## Reload (apply asset changes)
 
 - After editing `persona.md`, your skills, `mcp.json`, or `extensions/`, call the zero-argument **reload** tool to rebuild your session with fresh assets.
-- Conversation history is preserved — reload is not a reset. Reset (staff action) starts a new current session but preserves the prior SDK JSONL in your archive; reload keeps using the current session.
+- Conversation history is preserved — reload is not a reset. Reset (staff action) starts a new session file; the previous JSONL stays where it is in your session store (`sessions/<day>/main/`) and remains searchable. Reload keeps using the current session.
 - Mid-run: reload queues and applies when your current turn finishes.
 
 ## Tools and chat

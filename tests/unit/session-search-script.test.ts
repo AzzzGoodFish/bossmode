@@ -13,7 +13,7 @@ describe("session-search guide script", () => {
   it("searches records appended after the archive start day and expands the entry branch", () => {
     root = mkdtempSync(join(tmpdir(), "session-search-"));
     const member = join(root, "members", "rm_me");
-    const file = join(member, "sessions", "2026-09-07", "rooms", "room_a", "one.jsonl");
+    const file = join(member, "sessions", "2026-09-07", "main", "one.jsonl");
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, [
       '{"type":"session","id":"s","timestamp":"2026-09-07T23:00:00Z"}',
@@ -21,35 +21,50 @@ describe("session-search guide script", () => {
       '{"type":"message","id":"hit","parentId":"older","timestamp":"2026-09-08T00:01:00Z","message":{"role":"assistant","content":"中文目标"}}',
     ].join("\n") + "\n");
     const found = run("--member-dir", member, "search", "--text", "中文目标", "--from", "2026-09-08T00:00:00Z");
-    expect(found[0]).toMatchObject({ file: "sessions/2026-09-07/rooms/room_a/one.jsonl", entryId: "hit", scope: "room:room_a" });
+    expect(found[0]).toMatchObject({ file: "sessions/2026-09-07/main/one.jsonl", entryId: "hit", scope: "main" });
     const expanded = run("--member-dir", member, "expand", "--file", found[0].file, "--entry", "hit", "--before", "2");
     expect(expanded.map((record: any) => JSON.parse(record.entryChunk).id)).toEqual(["s", "older", "hit"]);
     expect(expanded.at(-1)).toMatchObject({ relation: "anchor", branch: true, entryComplete: true });
   });
 
-  it("uses the full DM scope and never searches or returns encrypted fields", () => {
+  it("labels the live member session `main` and never searches or returns encrypted fields", () => {
     root = mkdtempSync(join(tmpdir(), "session-search-"));
     const member = join(root, "members", "mem_me");
-    const file = join(member, "sessions", "2026-09-07", "dm", "one.jsonl");
+    const file = join(member, "sessions", "2026-09-07", "main", "one.jsonl");
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, '{"type":"session","id":"sid","timestamp":"2026-09-07T00:00:00Z"}\n{"type":"message","id":"e","timestamp":"2026-09-07T00:00:01Z","encrypted_content":"secret-needle","message":{"role":"toolResult","content":[{"type":"tool_result","tool_use_id":"call-1","text":"visible"}],"thinkingSignature":"hidden"}}\n');
-    expect(run("--member-dir", member, "search", "--text", "secret-needle", "--scope", "dm:mem_me")).toEqual([]);
-    const visible = run("--member-dir", member, "search", "--text", "visible", "--scope", "dm:mem_me");
-    expect(visible[0]).toMatchObject({ scope: "dm:mem_me", sessionId: "sid", role: "toolResult", toolCallId: "call-1" });
+    expect(run("--member-dir", member, "search", "--text", "secret-needle", "--scope", "main")).toEqual([]);
+    const visible = run("--member-dir", member, "search", "--text", "visible", "--scope", "main");
+    expect(visible[0]).toMatchObject({ scope: "main", sessionId: "sid", role: "toolResult", toolCallId: "call-1" });
     expect(JSON.stringify(visible)).not.toMatch(/thinkingSignature|encrypted_content|hidden|secret-needle/);
+  });
+
+  it("searches archived per-chat sessions and labels the chat they came from", () => {
+    root = mkdtempSync(join(tmpdir(), "session-search-"));
+    const member = join(root, "members", "mem_me");
+    const live = join(member, "sessions", "2026-09-07", "main", "one.jsonl");
+    mkdirSync(join(live, ".."), { recursive: true });
+    writeFileSync(live, '{"type":"session","id":"live","timestamp":"2026-09-07T00:00:00Z"}\n{"type":"message","id":"live-hit","timestamp":"2026-09-07T00:00:01Z","message":{"role":"user","content":"archived needle"}}\n');
+    const archived = join(member, "archive", "sessions", "2026-08-01", "rooms", "room_a", "old.jsonl");
+    mkdirSync(join(archived, ".."), { recursive: true });
+    writeFileSync(archived, '{"type":"session","id":"old","timestamp":"2026-08-01T00:00:00Z"}\n{"type":"message","id":"old-hit","timestamp":"2026-08-01T00:00:01Z","message":{"role":"user","content":"archived needle"}}\n');
+    const all = run("--member-dir", member, "search", "--text", "archived needle");
+    expect(all.map((row: any) => row.scope).sort()).toEqual(["main", "room:room_a"]);
+    const archivedOnly = run("--member-dir", member, "search", "--text", "archived needle", "--scope", "room:room_a");
+    expect(archivedOnly[0]).toMatchObject({ file: "archive/sessions/2026-08-01/rooms/room_a/old.jsonl", entryId: "old-hit", scope: "room:room_a" });
   });
 
   it("paginates an oversized expand entry with forward progress and reports bad lines", () => {
     root = mkdtempSync(join(tmpdir(), "session-search-"));
     const member = join(root, "members", "mem_me");
-    const file = join(member, "sessions", "2026-09-07", "rooms", "r", "one.jsonl");
+    const file = join(member, "sessions", "2026-09-07", "main", "one.jsonl");
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, [
       '{"type":"session","id":"sid","timestamp":"2026-09-07T00:00:00Z"}',
       "bad tail",
       JSON.stringify({ type: "message", id: "huge", parentId: "sid", timestamp: "2026-09-07T00:01:00Z", message: { role: "assistant", content: "中".repeat(5000) } }),
     ].join("\n") + "\n");
-    const first = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024");
+    const first = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/main/one.jsonl", "--entry", "huge", "--max-bytes", "1024");
     expect(first.some((row: any) => row.kind === "diagnostic" && row.reason === "invalid-jsonl-record")).toBe(true);
     let page = first;
     let cursor = page.at(-1).nextCursor;
@@ -58,7 +73,7 @@ describe("session-search guide script", () => {
     for (let pages = 0; cursor && pages < 100; pages++) {
       expect(seen.has(cursor)).toBe(false);
       seen.add(cursor);
-      page = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/rooms/r/one.jsonl", "--entry", "huge", "--max-bytes", "1024", "--cursor", cursor);
+      page = run("--member-dir", member, "expand", "--file", "sessions/2026-09-07/main/one.jsonl", "--entry", "huge", "--max-bytes", "1024", "--cursor", cursor);
       chunks.push(...page.filter((row: any) => row.kind === "expand" && row.relation === "anchor").map((row: any) => row.entryChunk));
       cursor = page.at(-1)?.kind === "truncated" ? page.at(-1).nextCursor : undefined;
     }
@@ -70,7 +85,7 @@ describe("session-search guide script", () => {
   it("always returns a usable cursor when the byte budget truncates output", () => {
     root = mkdtempSync(join(tmpdir(), "session-search-"));
     const member = join(root, "members", "mem_me");
-    const file = join(member, "sessions", "2026-09-07", "rooms", "r", "one.jsonl");
+    const file = join(member, "sessions", "2026-09-07", "main", "one.jsonl");
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, Array.from({ length: 20 }, (_, i) => JSON.stringify({ type: "message", id: `e${i}`, timestamp: "2026-09-07T00:00:00Z", message: { role: "user", content: `needle ${"中".repeat(100)}` } })).join("\n") + "\n");
     const first = run("--member-dir", member, "search", "--text", "needle", "--max-bytes", "1024");
