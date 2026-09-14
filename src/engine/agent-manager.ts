@@ -893,14 +893,14 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
 
   // Single message → single-message envelope.
   if (items.length === 1) {
-    return wrapRoomContextMessage(items[0].msg, roomName, items[0].role, lookup);
+    return wrapRoomContextMessage(items[0].msg, { kind: "room", id: roomId, name: roomName }, items[0].role, lookup);
   }
 
   // Multiple messages → shared transcript envelope (each message keeps its own
   // full sub-header with seq + timestamp so it can be referenced individually).
   return wrapRoomMessagesTranscript(
     items.map((i) => ({ msg: i.msg, role: i.role })),
-    roomName,
+    { kind: "room", id: roomId, name: roomName },
     lookup,
   );
 }
@@ -1322,11 +1322,14 @@ function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,c
   if(scope.startsWith("dm:")){
     const all=readAllDmMessages(memberId).filter(m=>!isSystemNoticeHiddenFromMembers(m));
     const bounded=captured?all.filter(m=>m.id!==captured.id&&(m.seq??0)<(captured.seq??Number.MAX_SAFE_INTEGER)).concat(captured):all;
-    const transcript=bounded.slice(-40).map(m=>`[${m.sender==="user"?"User":m.sender}] ${m.content}`).join("\n\n");
+    // ① D1: every delivered message carries its source chat id and sender id;
+    // this private chat is `dm:<memberId>`.
+    const dmLabel=`dm:${memberId}`;
+    const transcript=bounded.slice(-40).map(m=>m.sender==="user"?`[User] ${m.content}`:`[Member \`${m.sender}\`${m.senderMemberId?` (${m.senderMemberId})`:''}] ${m.content}`).join("\n\n");
     let prompt:string;
-    if(transcript)prompt=`You are in a private chat with the user. Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
-    else if(isBlankPersona(readMemberProfile(memberId)))prompt="You are in a private chat with the user. You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.";
-    else prompt="You are in a private chat with the user. They just opened the conversation. Greet briefly with the chat tool, or wait for their request.";
+    if(transcript)prompt=`You are in a private chat with the user (${dmLabel}). Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
+    else if(isBlankPersona(readMemberProfile(memberId)))prompt=`You are in a private chat with the user (${dmLabel}). You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.`;
+    else prompt=`You are in a private chat with the user (${dmLabel}). They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
   }
   const parent=scope;
