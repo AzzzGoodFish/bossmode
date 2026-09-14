@@ -10,11 +10,11 @@ MEMBER_DIR=/absolute/path/to/.bossmode/members/<memberId>
 
 node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" list \
   [--scope 'room:<roomId>|dm:<memberId>'] \
-  [--from '<UTC ISO>'] [--to '<UTC ISO>'] [--include-background] [--limit 50]
+  [--from '<UTC ISO>'] [--to '<UTC ISO>'] [--limit 50]
 
 node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" search \
   --text '<literal text>' [--scope '<full scopeId>'] \
-  [--from '<UTC ISO>'] [--to '<UTC ISO>'] [--include-background] \
+  [--from '<UTC ISO>'] [--to '<UTC ISO>'] \
   [--limit 50] [--max-bytes 65536]
 
 node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" expand \
@@ -22,7 +22,7 @@ node "$GUIDE_DIR/scripts/session-search.mjs" --member-dir "$MEMBER_DIR" expand \
   [--before 3] [--after 3] [--max-bytes 65536]
 ```
 
-Output is NDJSON. `list` applies `--from` and `--to` to the session start time. `search` applies them to each record time, so a session that continued across UTC days remains searchable. Background tasks are excluded unless `--include-background` is present.
+Output is NDJSON. `list` applies `--from` and `--to` to the session start time. `search` applies them to each record time, so a session that continued across UTC days remains searchable.
 
 When the last row is `{"kind":"truncated","nextCursor":"..."}`, rerun the same action and filters with `--cursor '<nextCursor>'`. Do not change the action, file, entry, or filters between pages.
 

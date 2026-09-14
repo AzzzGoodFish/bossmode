@@ -35,6 +35,12 @@ describe("mcp-tool-descriptions", () => {
     }
   });
 
+  it("has no references to retired memory tools", () => {
+    for (const desc of [QUERY_ROOM_MESSAGES_DESCRIPTION, LIST_SCOPES_DESCRIPTION]) {
+      expect(desc).not.toMatch(/read_memory|write_memory|edit_memory/);
+    }
+  });
+
   it("all param descriptions are non-empty", () => {
     for (const [key, value] of Object.entries(PARAM_DESCRIPTIONS)) {
       expect(typeof value).toBe("string");

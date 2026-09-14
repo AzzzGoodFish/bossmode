@@ -30,13 +30,12 @@ Do not dump session noise here. Prefer short, durable notes.
 
 For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read memory. See [references/sessions.md](references/sessions.md) for complete read-only session search commands, pagination, and the operator-only migration procedure.
 
-**recall / memorize flow.** Use the parameter-free tools to work the shared memory from inside a conversation. The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file; your conversation and the background child follow the same method:
+**Working it.** Use the ordinary file tools (`ls`, `read`, `write`, `edit`) — there is no separate memory tool.
 
-- Call `recall()` when the conversation leans on things you may not have at hand (decisions from earlier days, another room's outcome, the user's standing preferences). It runs a background fork of your current conversation, searches read-only — history queries and file reads, never writes, and reads never consume your unread positions — and returns the organized findings via `background_wait`.
-- Call `memorize()` at meaningful checkpoints: after a decision is made, after a repeated correction, at the end of a substantial work session — not after every exchange. It reviews the forked conversation, writes durable facts to the right layer (user memory for who the user is and how they work; this room's project folder for decisions and project state), and returns a report of exactly what changed via `background_wait`. Already-completed writes are never rolled back, so call it deliberately.
-- Both inherit your model, account, thinking level and full tool set at start time. The fork carries the conversation as it stood when you called — your latest request and every completed exchange stay in; only the in-flight start-tool call itself is excluded.
-- Authorization follows you: the child can only reach what you could reach when it runs — scopes you have since lost access to are refused, same as for you.
-- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. Before starting a replacement memorize, check what the interrupted run may already have written — completed writes are never rolled back; a recall can simply be started fresh.
+- Read when the conversation leans on things you may not have at hand: decisions from earlier days, another room's outcome, the user's standing preferences. Look at what already exists — `ls` the memory roots and the current project folder — before assuming a project name or file layout.
+- Write at meaningful checkpoints — after a decision, after a repeated correction, at the end of substantial work — not after every exchange. Put durable facts on the right layer: user memory for who the user is and how they work; the room's project folder for decisions and project state.
+- Read before you write: do not overwrite a newer conclusion with an older one, and do not duplicate a record that already exists. Keep notes short and durable, and report what you changed.
+- The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file.
 
 ## Your private skills directory
 
@@ -104,16 +103,6 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell started inside a shell (running `bash` or `ssh` inside your shell) does not emit completion markers — the outer command shows as running until the inner shell exits.
 - If a new message interrupts you mid-turn, your run is aborted and the message is processed immediately (the envelope says so). Shell commands are NOT killed: the interrupted `shell_exec` gets a tool result like "still running as exec e5 — wait for it with shell_wait". Finish handling the new message, then `shell_wait` for the original command and read its output.
 - The one-shot `bash` tool is gone; file tools and shells cover everything it did.
-
-## Background tasks (recall, memorize, and generic)
-
-- `background_start({prompt, sessionMode})` runs a prompt in a private child session of yours: same model, account, thinking level, tools and prompt as you have right now (a snapshot — later switches don't affect a running task). `sessionMode: "fork"` copies this conversation's history up to before the turn that started the task; `"new"` starts empty.
-- `recall()` and `memorize()` are the purpose-built entries — no parameters. recall searches the shared memory assets for what the current conversation needs; memorize reviews the conversation and maintains those assets, reporting exactly what it changed. Both fork by default.
-- Both return the task id and its real status immediately. You keep working; the task keeps running even when you're interrupted — a new message or a wait timeout only ends the waiting, never the task.
-- **`background_wait({taskId, blockMs?})` is the only way to receive a result.** It blocks up to blockMs (default 30000; 0 = until done) and returns the saved final text, or the explicit failure/cancel/interrupt reason. A timeout returns the task's real current status without the answer — call it again to keep waiting. Repeated waits re-read the same saved result; nothing is consumed.
-- `background_status()` lists your tasks in this scope — lifecycle facts only. `background_cancel({taskId})` requests cancellation: the task reports cancelled once it has actually stopped; finished tasks keep their terminal status and answer.
-- Service restarts do not resume tasks: unfinished ones come back as `interrupted` with the reason in the wait result. For an interrupted memorize, first check what it may already have written (completed writes are never rolled back) before running it again; a recall can simply be started fresh.
-- Records live under your member directory, filed by the UTC start date; they stay for the conversation's lifetime.
 
 ## Your MCP servers and extensions — CJS note
 

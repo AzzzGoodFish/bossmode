@@ -85,12 +85,6 @@ async function collectFiles(directory) {
 }
 function scopeFor(file) {
   const parts = safeRelative(file)?.split("/") || [];
-  if (parts[0] === "background-tasks") {
-    try {
-      const task = JSON.parse(readFileSync(resolve(file, "..", "task.json"), "utf8"));
-      return typeof task.scopeId === "string" ? task.scopeId : "unknown";
-    } catch { return "unknown"; }
-  }
   const index = parts.indexOf("sessions");
   const kind = parts[index + 2];
   const id = parts[index + 3];
@@ -191,7 +185,6 @@ const to = option("--to") ? Date.parse(option("--to")) : Infinity;
 if (Number.isNaN(from) || Number.isNaN(to)) fail("--from/--to must be UTC ISO timestamps");
 const wantedScope = option("--scope");
 const roots = [resolve(root, "sessions")];
-if (has("--include-background")) roots.push(resolve(root, "background-tasks"));
 const files = (await Promise.all(roots.map(collectFiles))).flat().sort();
 const start = decodeCursor();
 if (start && (start.action !== action || typeof start.file !== "string" || !Number.isInteger(start.line) || start.line < 0)) fail("invalid list/search cursor");
