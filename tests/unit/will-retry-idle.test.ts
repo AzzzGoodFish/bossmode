@@ -26,7 +26,6 @@ const state = vi.hoisted(() => ({
   promptImpl: vi.fn(async (_message: string) => {}),
   broadcastToAgentSubscribers: vi.fn(),
   broadcastToRoom: vi.fn(),
-  notifyMemberIdle: vi.fn(),
 }));
 
 class TestHandle {
@@ -57,14 +56,6 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: state.broadcastToRoom,
   broadcastToAgentSubscribers: state.broadcastToAgentSubscribers,
 }));
-
-vi.mock("../../src/engine/wait-wait.js", async () => {
-  const actual = await vi.importActual<typeof import("../../src/engine/wait-wait.js")>("../../src/engine/wait-wait.js");
-  return {
-    ...actual,
-    notifyMemberIdle: (...args: unknown[]) => state.notifyMemberIdle(...args),
-  };
-});
 
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import { activateAgent, getAgentStatus, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
@@ -143,7 +134,6 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     vi.mocked(bus.postMessage).mockClear();
     state.broadcastToAgentSubscribers.mockReset();
     state.broadcastToRoom.mockReset();
-    state.notifyMemberIdle.mockReset();
     await setup();
   });
 
@@ -154,7 +144,6 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
         handle.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: "Request timed out" });
         handle.emit({ type: "agent_end", willRetry: true });
         expect(getAgentStatus("room1", "mem_developer")).toBe("working");
-        expect(state.notifyMemberIdle).not.toHaveBeenCalled();
         expect(bus.postMessage).not.toHaveBeenCalledWith(
           "room1",
           "system",
@@ -173,7 +162,6 @@ describe("willRetry idle + deferred error notice + user_steer", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(getAgentStatus("room1", "mem_developer")).toBe("idle");
-    expect(state.notifyMemberIdle).toHaveBeenCalled();
     const systemFails = vi.mocked(bus.postMessage).mock.calls.filter(
       (c) => c[1] === "system" && String(c[2]).includes("request failed"),
     );

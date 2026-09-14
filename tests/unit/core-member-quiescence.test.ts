@@ -73,17 +73,14 @@ it.each(["room","dm"])("reset rejects a delayed %s creator's old session publica
   }finally{release?.();vi.restoreAllMocks();await closeTestServer(server);}
 });
 
-it("reset settles a detached member wait before archive, and cancellation forbids late registration",async()=>{
+it("reset cancels a detached member's work so the member can be archived",async()=>{
   const server=await createTestServer();
   try{
-    const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Wait retirement",["retired-waiter","wait-target"]);const [id,target]=room.globalMemberIds!;
+    const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Detached reset",["detached-member","idle-peer"]);const [id]=room.globalMemberIds!;
     const instance=(await buildMemberAgentSession(id,`room:${room.id}`))!;
-    const waits=await import("../../src/engine/wait-wait.js");const controller=new AbortController();
-    const args={roomId:room.id,waiterMemberId:id,waiterName:"retired-waiter",targetMemberId:target,targetName:"wait-target",targetStatus:"working",signal:controller.signal};
-    const waiting=waits.waitForMember(args);vi.spyOn(instance.handle,"abort").mockImplementation(()=>controller.abort());
-    vi.spyOn(instance.handle,"waitForIdle").mockImplementation(async()=>{await waiting;});
-    resetAgentSession(room.id,id);expect(await waiting).toMatchObject({reason:"mention_interrupt"});
-    expect(await waits.waitForMember(args)).toMatchObject({ok:false});expect(waits.isMemberWaiting(room.id,id)).toBe(false);
+    const abort=vi.spyOn(instance.handle,"abort");
+    resetAgentSession(room.id,id);
+    expect(abort).toHaveBeenCalled();
     const removal=await jsonRequest(server.port,"DELETE",`/api/members/${id}`,{token,body:{confirm:true}});expect(removal.status,removal.body).toBe(200);
   }finally{vi.restoreAllMocks();await closeTestServer(server);}
 });

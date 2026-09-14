@@ -50,7 +50,6 @@ import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "./model-credentials.js";
-import { notifyMemberIdle, settleWaitOnAbort, settleMemberWaits } from "./wait-wait.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
 
@@ -383,12 +382,6 @@ function transition(
   instance.status = newStatus;
   logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
   broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
-  // Notify blocking wait() callers when a member becomes idle.
-  // If the turn just failed, pass lastTurnError so wait settles with reason "error".
-  if (newStatus === "idle") {
-    const error = instance.lastTurnError || undefined;
-    try { notifyMemberIdle(roomId, instance.memberId, error ? { error } : undefined); } catch { /* ignore */ }
-  }
 }
 
 function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
@@ -2023,9 +2016,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
 
-  // Stop is the sole abort entry. If blocked in wait(), settle it SYNCHRONOUSLY first
-  // so the tool call can return mention_interrupt before the turn is torn down.
-  try { settleWaitOnAbort(roomId, memberId); } catch { /* ignore */ }
+  // Stop is the sole abort entry.
   try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
 
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
@@ -2318,11 +2309,9 @@ function wireInstanceEvents(
       const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
       instance.hadErrorInTurn = true;
       instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
-      // Wake waiters with error before tearing down (processEvent does not idle this path).
+      // Wake the runtime teardown path (processEvent does not idle this path).
       if (instance.status !== "idle") {
         transition(instance, roomId, memberName, "idle", event.type);
-      } else {
-        try { notifyMemberIdle(roomId, instance.memberId, { error: instance.lastTurnError }); } catch { /* ignore */ }
       }
       postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
       logger.warn("agent", "instance removed after unexpected exit", {
@@ -2347,7 +2336,6 @@ async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
 export async function activateDmMember(memberId:string,ctx?:ReplyContext):Promise<void>{return activateControl(`dm:${memberId}`,memberId,ctx);}
 
 function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:string):void{
-  try{settleWaitOnAbort(scopeId,instance.memberId);}catch{}
   try{settleMemberShellWaits(instance.memberId);}catch{}
   instance.handle.abort({preserveCompaction:true});
   updateDispatchState(instance,"aborting",trigger);
@@ -2364,7 +2352,6 @@ function requestInstanceStop(instance: AgentInstance,preservePending=false): voi
   const failures: unknown[] = [];
   if(!runtimeIsStopping()&&!preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"member quiescence");
   for (const stop of [
-    () => settleWaitOnAbort(instance.roomId,instance.memberId),
     () => settleMemberShellWaits(instance.memberId),
     () => updateDispatchState(instance,"aborting","quiescence"),
     () => instance.handle.abort(),
@@ -2377,7 +2364,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
   if (memberRuntimeAllowed(memberId)) throw new Error("member_admission_must_close_before_quiescence");
   const errors: unknown[] = [];
   for(const row of getDatabase().all<{scope:string}>("SELECT DISTINCT scope_id scope FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId))cancelPendingRuntimeInputs(runtimeInputOwner(row.scope,memberId),"member archived");
-  settleMemberWaits(memberId); settleMemberShellWaits(memberId);
+  settleMemberShellWaits(memberId);
   const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}
   for (const instance of instances.values()) if (instance.memberId===memberId) {
@@ -2409,7 +2396,6 @@ export async function shutdownAll(): Promise<void> {
   closeRuntimeAdmission(); shutdownRunning = true;
   shutdownSettlement = (async () => {
     const failures: unknown[] = [];
-    settleMemberWaits();
     const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
     try {await dropSftpConnectionsForMember();}catch(error){failures.push(error);}
     for (const instance of instances.values()) {

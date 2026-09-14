@@ -120,8 +120,7 @@ describe("self-only profile_update", () => {
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });
       const originalContext = captured.ctx;
       const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
-      const { waitForMember, isMemberWaiting } = await import("../../src/engine/wait-wait.js");
-      const pending = waitForMember({ roomId: f.room.id, waiterMemberId: f.own.id, waiterName: f.own.name, targetMemberId: f.peer.id, targetName: f.peer.name, targetStatus: "working", timeoutMinutes: 1 });
+      const next = `${f.own.name}-renamed`;
       await f.call("profile_update", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
       const roster = f.rooms.getRoomMembers(f.room.id);
@@ -133,11 +132,8 @@ describe("self-only profile_update", () => {
       expect(router.parseMentions("`@foo`", ["foo"])).toEqual([]);
       postMessage(f.room.id, "user", "old name now targets another member", [f.own.name], { mentionMemberIds: [f.peer.id] });
       await new Promise(resolve => setTimeout(resolve, 5));
-      expect(isMemberWaiting(f.room.id, f.own.id)).toBe(true);
-      postMessage(f.room.id, f.own.name, "target answered", [], { senderMemberId: f.peer.id });
-      expect(await pending).toMatchObject({ ok: true, reason: "message", target: f.own.name });
       expect(originalContext.needResponseMemberIds).toEqual([f.peer.id]);
-    } finally { stop(); const { settleWaitOnAbort } = await import("../../src/engine/wait-wait.js"); settleWaitOnAbort(f.room.id, f.own.id); }
+    } finally { stop(); }
   });
 
   it("creates chats with current Unicode identity and keeps historical template tools ID-bound", async () => {

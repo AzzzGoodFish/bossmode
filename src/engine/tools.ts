@@ -638,45 +638,6 @@ export async function handleToolCallback(
           : "Session rebuilt in the current scope with fresh assets (persona, skills, MCP, extensions, model config). Conversation history is preserved.",
       };
     }
-    case "wait": {
-      // 0.20: wait available to all room members (no longer leader-only).
-      // Roster from the room scope; DM scopes have no room roster.
-      const waitRosterId = chatScopeRoomId(roomId) || roomId;
-      const room = roomStore.getRoom(waitRosterId);
-      const actor = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef(waitRosterId, actorRef) : undefined;
-      if (!room || !actor) return { ok: false, error: "Room or member not found" };
-
-      const targetRef = String(params?.member || "").trim();
-      if (!targetRef) return { ok: false, error: "member is required" };
-      const target = (roomStore as any).resolveRoomMemberRef(waitRosterId, targetRef);
-      if (!target) return { ok: false, error: `Member not found: ${targetRef}` };
-      if (target.id === actor.id) return { ok: false, error: "Cannot wait on yourself" };
-
-      const { waitForMember, WAIT_DEFAULT_TIMEOUT_MIN, WAIT_MAX_TIMEOUT_MIN } = await import("./wait-wait.js");
-      const { getAgentStatus } = await import("./agent-manager.js");
-      const targetStatus = getAgentStatus(roomId, target.id);
-      const timeoutMinutes = params?.timeoutMinutes !== undefined ? Number(params.timeoutMinutes) : undefined;
-
-      // mention_interrupt does NOT abort — the @ message interrupts the
-      // working member's turn (message_interrupt admission) and is delivered
-      // as the next turn; wait only reports why it ended. Stop button is the
-      // sole abort path.
-      const outcome = await waitForMember({
-        roomId,
-        signal: context?.signal,
-        waiterMemberId: actor.id,
-        waiterName: actor.name,
-        targetMemberId: target.id,
-        targetName: target.name,
-        targetStatus,
-        timeoutMinutes,
-      });
-
-      return {
-        ...outcome,
-        defaults: { timeoutMinutes: WAIT_DEFAULT_TIMEOUT_MIN, maxTimeoutMinutes: WAIT_MAX_TIMEOUT_MIN },
-      };
-    }
     case "member_list": {
       // Global member directory (gateway tool). id/name/description for member refs.
       const { listMembers } = await import("../workspace/member-registry.js");
