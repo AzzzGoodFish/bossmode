@@ -25,7 +25,7 @@ async function setup() {
   const runtime = await ModelRuntime.create({ credentials: binding, modelsPath: null, allowModelNetwork: false });
   binding.attach(runtime);
   const refresh = vi.fn(async (credential: any) => ({
-    ...credential, access: credential.refresh + "-rotated", expires: Date.now() + 60_000,
+    ...credential, access: credential.refresh + "-rotated", expires: Date.now() + 10 * 60_000,
   }));
   runtime.models.setProvider({
     id: "test-auth", getModels: () => [],
@@ -80,6 +80,9 @@ describe("model snapshot credentials through real SDK getAuth", () => {
   });
 
   it("serializes same-account rotations and returns current when the SDK declines a second refresh", async () => {
+    // pi ≥0.83 refreshes OAuth tokens with less than five minutes of remaining validity
+    // proactively (the refresh mock therefore returns 10 minutes), so a second
+    // concurrent getAuth on the same account sees a fresh credential and does not rotate again.
     const { runtime, refresh, a } = await setup();
     const results = await Promise.all([runtime.getAuth(a), runtime.getAuth(a)]);
     expect(results.map((result) => result?.auth.apiKey)).toEqual(["A-refresh-rotated", "A-refresh-rotated"]);

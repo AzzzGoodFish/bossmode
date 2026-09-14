@@ -114,7 +114,7 @@ afterEach(async () => {
   } finally { vi.unstubAllGlobals(); fixture.close(); }
 });
 
-it.each([false, true])("real SDK control: preflight abort, re-abort at agent_start=%s, still enters the provider", async reabort => {
+it.each([false, true])("real SDK control: preflight abort, re-abort at agent_start=%s", async reabort => {
   const { session } = await create(false);
   if (reabort) session.subscribe(event => { if (event.type === "agent_start") session.agent.abort(); });
   const pending = session.prompt("offline control");
@@ -124,9 +124,25 @@ it.each([false, true])("real SDK control: preflight abort, re-abort at agent_sta
   expect(unwound).toBe(false);
   release.release();
   await pending;
-  expect(providerCalls.length).toBeGreaterThan(0);
-  expect(providerCalls[0].aborted).toBe(reabort);
-  if (!reabort) expect(toolCalls).toBe(1);
+  if (!reabort) {
+    // No re-abort: the turn proceeds normally once the preflight barrier releases.
+    expect(providerCalls.length).toBeGreaterThan(0);
+    expect(providerCalls[0].aborted).toBe(false);
+    expect(toolCalls).toBe(1);
+  } else {
+    // pi >=0.85: an abort that lands before the model request starts is honored during
+    // auth resolution (prepareRequest now forwards the run signal to getAuth), so the
+    // provider callback is never entered and the turn settles as an aborted request error.
+    // (0.82 and earlier still entered the provider here, with an already-aborted signal.)
+    expect(providerCalls).toEqual([]);
+    expect(toolCalls).toBe(0);
+    const lastMessageEntry = session.sessionManager.getBranch()
+      .filter(entry => entry.type === "message")
+      .at(-1) as { message: { role: string; stopReason?: string; errorMessage?: string } };
+    expect(lastMessageEntry.message.role).toBe("assistant");
+    expect(lastMessageEntry.message.stopReason).toBe("error");
+    expect(lastMessageEntry.message.errorMessage).toBe("This operation was aborted");
+  }
 });
 
 it.each(["before_agent_start", "input", "agent_start"] as const)("Stop during real %s barrier prevents native provider/tool work and preserves a later prompt", async event => {
