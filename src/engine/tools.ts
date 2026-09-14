@@ -11,6 +11,7 @@ import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
 import { getMember } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
+import { unknownMemberToolMessage } from "../shared/member-tool-names.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { chatScopeRoomId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import type { RoomMessage } from "../shared/types.js";
@@ -822,7 +823,7 @@ export async function handleToolCallback(
       };
     }
     default:
-      throw new Error(`Unknown tool: ${tool}`);
+      throw new Error(unknownMemberToolMessage(tool));
   }
 }
 
