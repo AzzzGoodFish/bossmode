@@ -349,12 +349,12 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       return;
     }
 
-    const { compileMemberPromptForScope } = await import("../engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../engine/prompt-compiler.js");
     const { getRoom, resolveRoomMemberRef } = await import("../workspace/room-store.js");
     const { getBossmodeDir } = await import("../shared/config.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../engine/system-prompt-final.js");
-    const { memberRecordToConfig, resolveSkills, buildDmScopeLabels } = await import("../engine/agent-manager.js");
+    const { memberRecordToConfig, resolveSkills } = await import("../engine/agent-manager.js");
     const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
     const { resolveGlobalSkillPaths } = await import("../workforce/skill-store.js");
 
@@ -390,14 +390,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         sendJson(res, 404, { error: "not_found", message: "Member not found" });
         return;
       }
-      const compiled = compileMemberPromptForScope({
-        scopeId: scopeParam,
-        memberId: m.id,
-        memberName: member.name,
-        room: null,
-        docsRoot: join(getBossmodeDir(), "memory", "projects"),
-        activeScopes: buildDmScopeLabels(m.id, scopeParam),
-      });
+      const compiled = compileMemberPrompt({ memberId: m.id, memberName: member.name, description: m.title });
       respond(compiled, {
         cwd: activeWorkspaceRoot(m.id),
         member,
@@ -420,13 +413,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       ...resolveGlobalSkillPaths(skills),
     ];
 
-    const compiled = compileMemberPromptForScope({
-      scopeId: scopeParam,
-      memberId: member.id,
-      memberName: member.name,
-      room,
-      docsRoot: join(getBossmodeDir(), "memory", "projects"),
-    });
+    const compiled = compileMemberPrompt({ memberId: member.id, memberName: member.name, description: m.title });
     respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
   } catch (err) {
     const e = errCode(err);

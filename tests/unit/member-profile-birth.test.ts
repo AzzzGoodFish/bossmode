@@ -55,7 +55,9 @@ describe("member birth skeleton", () => {
     expect(profile.body).toBe(raw);
     expect(profile.raw).toBe(raw);
     expect(profile).not.toHaveProperty("frontmatter");
-    expect(formatMemberPromptSegment(profile, "new-nova")).toBe(`# Member\n\nI am new-nova.\n\n${raw.trim()}`);
+    expect(formatMemberPromptSegment(profile, "new-nova")).toBe(`# Persona\n\nI am new-nova, an AI teammate in Bossmode.\n\n${raw.trim()}`);
+    // description (title storage) joins the identity sentence when present.
+    expect(formatMemberPromptSegment(profile, "new-nova", "Engineer")).toBe(`# Persona\n\nI am new-nova (Engineer), an AI teammate in Bossmode.\n\n${raw.trim()}`);
     updateMemberIdentity(m.id, { title: "" });
     expect(getMember(m.id)?.title).toBeUndefined();
     expect(readFileSync(memberProfilePath(m.id), "utf-8")).toBe(raw);

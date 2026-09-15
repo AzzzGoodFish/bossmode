@@ -69,18 +69,14 @@ describe("020 conversations / scope surface", () => {
     expect(eff.sources.model).toBe("global");
   });
 
-  it("dm-scope compile via compileMemberPromptForScope", async () => {
+  it("member-level compile via compileMemberPrompt (② batch 2)", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const m = reg.createMember({ name: "architect", agentTemplate: "architect" });
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPromptForScope({
-      scopeId: `dm:${m.id}`,
-      memberId: m.id,
-      memberName: "architect",
-      room: null,
-      docsRoot: join(dir, "docs"),
-    });
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const compiled = compileMemberPrompt({ memberId: m.id, memberName: "architect" });
     expect(compiled.manifestHash).toBeTruthy();
-    expect(compiled.envPrompt).toMatch(/private chat/i);
+    // One prompt for every chat: no scope marker, no private-chat line.
+    expect(compiled.envPrompt).toContain(`- You are architect (${m.id}).`);
+    expect(compiled.envPrompt).not.toMatch(/private chat/i);
   });
 });

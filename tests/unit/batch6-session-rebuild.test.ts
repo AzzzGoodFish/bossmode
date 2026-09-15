@@ -137,6 +137,8 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, "../../src/engine/agent-manager.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
-    expect(src.match(/compileMemberPromptForScope\(\{/g)?.length).toBe(2);
+    // ① batch 2 / C1: the scope-aware compiler is gone; no call site passes a scope.
+    expect(src.match(/compileMemberPromptForScope/g)).toBeNull();
+    expect(src.match(/compileMemberPrompt\(\{\s*scopeId/g)).toBeNull();
   });
 });

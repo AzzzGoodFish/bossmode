@@ -4,7 +4,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentMemberConfig, Room } from "../../src/shared/types.js";
+import type { Room } from "../../src/shared/types.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -48,10 +48,8 @@ function room(): Room {
   };
 }
 
-const member: AgentMemberConfig = { id: "mem_qa", name: "qa", type: "agent", agent: "qa", runtime: "pi-cli", thinkingLevel: "off" };
-
-describe("prompt compiler (four-segment)", () => {
-  it("assembles Member → Working Principles → Communication → Environment in order", async () => {
+describe("prompt compiler (prompt v2: Persona → How to work)", () => {
+  it("assembles Persona → Environment → Communication → Memory → Workspace → Assets, scope-free", async () => {
     const { writeMemberProfileSkeleton } = await import("../../src/workspace/member-profile.js");
     writeMemberProfileSkeleton("mem_qa");
     writeFileSync(
@@ -61,63 +59,62 @@ describe("prompt compiler (four-segment)", () => {
     );
 
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     const prompt = compiled.fullPrompt;
 
-    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
-    expect(prompt.indexOf("# Member")).toBeLessThan(prompt.indexOf("## Working Principles"));
-    expect(prompt.indexOf("## Working Principles")).toBeLessThan(prompt.indexOf("## Communication"));
-    expect(prompt.indexOf("## Communication")).toBeLessThan(prompt.indexOf("## Environment"));
-    expect(prompt).toContain("I am qa.");
+    expect(compiled.sections.map((s) => s.id)).toEqual(["persona", "environment", "communication", "memory", "workspace", "assets"]);
+    expect(prompt.indexOf("# Persona")).toBeLessThan(prompt.indexOf("## Environment"));
+    expect(prompt.indexOf("## Environment")).toBeLessThan(prompt.indexOf("## Communication"));
+    expect(prompt.indexOf("## Communication")).toBeLessThan(prompt.indexOf("## Memory"));
+    expect(prompt.indexOf("## Memory")).toBeLessThan(prompt.indexOf("## Workspace"));
+    expect(prompt.indexOf("## Workspace")).toBeLessThan(prompt.indexOf("## Assets"));
+    expect(prompt).toContain("I am qa, an AI teammate in Bossmode.");
     expect(prompt).toContain("I prefer short answers.");
-    expect(prompt).toContain("The chat tool is the only way your messages reach the room");
-    // Final-text fallback retired (2026-09-11): no auto-delivery safety net is promised.
+    // One prompt per member: no room / DM lines survive (C1 de-scope).
+    expect(prompt).not.toContain("You are in room");
+    expect(prompt).not.toContain("private chat with the user");
+    expect(prompt).toContain("You face several chats at once");
+    // Communication is code-owned; final-text fallback retired (2026-09-11).
+    expect(prompt).toContain("chat_send is the only channel");
     expect(prompt).not.toContain("safety net");
-    expect(prompt).toContain("Nothing else is delivered");
-    expect(prompt).toContain('You are in room "Prompt Lab"');
-    expect(prompt).toContain("this file IS your persona");
-    // 2026-09-11 restructure: context-first, user precedence, no acknowledgement loops, no ! interrupt.
-    expect(prompt).toContain("precedence over conflicting member requests");
-    expect(prompt).toContain("reply only if you add something");
+    expect(prompt).toContain("outrank other members' requests");
+    expect(prompt).toContain("speak only when you add something");
     expect(prompt).not.toContain("!name");
     expect(prompt).not.toContain("urgent interrupt");
+    // Working Principles retired: its content folded into Environment / Memory.
+    expect(prompt).not.toContain("## Working Principles");
     // Old assets not injected
     expect(prompt).not.toContain("## Scope Principles");
     expect(prompt).not.toContain("## Scope Mainline");
     expect(prompt).not.toContain("## Room Principles");
-    // Historical-template independence is exercised with real catalog/body damage
-    // in core-no-template-runtime.test.ts rather than an unused compiler argument.
   });
 
-  it("birth state: no persona.md → I am <name> only; platform guide present; no archive line", async () => {
+  it("birth state: no persona.md → identity only; platform guide present; no archive line", async () => {
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
-    expect(compiled.fullPrompt).toContain("I am qa.");
+    const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
+    expect(compiled.fullPrompt).toContain("I am qa, an AI teammate in Bossmode.");
     // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
     expect(compiled.fullPrompt).toMatch(/bossmode-guide/);
-    expect(compiled.fullPrompt).toMatch(/when unsure how to manage identity/);
-    expect(compiled.fullPrompt).not.toMatch(/Legacy notes/);
+    expect(compiled.fullPrompt).toMatch(/read it when unsure about identity, memory, or skills/);
+    expect(compiled.fullPrompt).not.toMatch(/history migrated from the old system/);
   });
 
-  it("DM first line variant", async () => {
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const dm = compileMemberPromptForScope({
-      scopeId: "dm:mem_qa",
-      memberId: "mem_qa",
-      memberName: "qa",
-      docsRoot: "/docs",
-    });
-    expect(dm.fullPrompt).toContain("You are in a private chat with the user.");
-    expect(dm.fullPrompt).not.toContain("shared workspace");
+  it("description joins the identity sentence; an empty description is omitted", async () => {
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const withDescription = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa", description: "Tester of prompts" });
+    expect(withDescription.fullPrompt).toContain("I am qa (Tester of prompts), an AI teammate in Bossmode.");
+    const without = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
+    expect(without.fullPrompt).toContain("I am qa, an AI teammate in Bossmode.");
+    expect(without.fullPrompt).not.toContain("I am qa (");
   });
 
   it("persona is literal Markdown; identity comes only from the current member name", async () => {
     const raw = "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n";
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), raw, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
-    const section = compiled.sections.find((s) => s.id === "member")!.content;
-    expect(section).toBe(`# Member\n\nI am qa.\n\n${raw.trim()}`);
+    const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
+    const section = compiled.sections.find((s) => s.id === "persona")!.content;
+    expect(section).toBe(`# Persona\n\nI am qa, an AI teammate in Bossmode.\n\n${raw.trim()}`);
     expect(compiled.fullPrompt).not.toContain("I am DisplayQA.");
   });
 
@@ -127,19 +124,14 @@ describe("prompt compiler (four-segment)", () => {
     ["\uFEFF\n---\nname: not-identity\n---\n\nLiteral Markdown.\n", "---\nname: not-identity\n---\n\nLiteral Markdown."],
     [" \t\r\n\uFEFF", ""],
     ["", ""],
-  ])("normalizes only the prompt boundary across room and DM (%j)", async (raw, body) => {
+  ])("normalizes only the prompt boundary (%j)", async (raw, body) => {
     const path = join(tmpDir, "members", "mem_qa", "persona.md");
     writeFileSync(path, raw, "utf-8");
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const { readMemberProfile } = await import("../../src/workspace/member-profile.js");
-    const expected = `# Member\n\nI am qa.${body ? `\n\n${body}` : ""}`;
-    for (const scopeId of ["room:room-a", "dm:mem_qa"] as const) {
-      const compiled = compileMemberPromptForScope({
-        scopeId, memberId: "mem_qa", memberName: "qa",
-        ...(scopeId.startsWith("dm:") ? {} : { room: room() }), docsRoot: "/docs",
-      });
-      expect(Buffer.from(compiled.sections.find((s) => s.id === "member")!.content)).toEqual(Buffer.from(expected));
-    }
+    const expected = `# Persona\n\nI am qa, an AI teammate in Bossmode.${body ? `\n\n${body}` : ""}`;
+    const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
+    expect(Buffer.from(compiled.sections.find((s) => s.id === "persona")!.content)).toEqual(Buffer.from(expected));
     // Reads and compilation do not trim or otherwise rewrite the file.
     expect(readMemberProfile("mem_qa").body).toBe(raw);
     expect(readMemberProfile("mem_qa").raw).toBe(raw);
@@ -150,17 +142,17 @@ describe("prompt compiler (four-segment)", () => {
     const body = "x".repeat(4500);
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
+    const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     expect(compiled.profileOverBudget).toBe(true);
     expect(compiled.fullPrompt).toContain("x".repeat(4500));
   });
 
-  it("shows archive line only when archive is non-empty", async () => {
+  it("shows the archive line only when the archive is non-empty", async () => {
     mkdirSync(join(tmpDir, "members", "mem_qa", "archive"), { recursive: true });
     writeFileSync(join(tmpDir, "members", "mem_qa", "archive", "old.md"), "legacy", "utf-8");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
-    const withArch = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
-    expect(withArch.fullPrompt).toContain("Legacy notes from the old system");
+    const withArch = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
+    expect(withArch.fullPrompt).toContain("history migrated from the old system");
     expect(withArch.fullPrompt).toContain(join(tmpDir, "members", "mem_qa", "archive"));
   });
 });

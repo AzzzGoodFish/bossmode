@@ -154,19 +154,14 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
   });
 });
 
-describe("Environment prompt line", () => {
-  it("compile includes the Current workspace line", async () => {
+describe("Workspace prompt chapter", () => {
+  it("compile carries the Workspace chapter (per-chat current-workspace line retired with prompt v2)", async () => {
     seedMemberDir();
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const compiled = compileMemberPromptForScope({
-      scopeId: `dm:${MEMBER}`,
-      memberId: MEMBER,
-      memberName: "wsbot",
-      room: null,
-      docsRoot: join(dir, "docs"),
-    });
-    expect(compiled.envPrompt).toContain("Current workspace: original");
-    expect(compiled.envPrompt).toContain("workspace_list");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const compiled = compileMemberPrompt({ memberId: MEMBER, memberName: "wsbot" });
+    expect(compiled.fullPrompt).toContain("## Workspace");
+    expect(compiled.fullPrompt).toContain("workspace_list");
+    expect(compiled.envPrompt).not.toContain("Current workspace:");
   });
 });
 

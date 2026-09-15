@@ -32,18 +32,11 @@ describe("member system-prompt preview", () => {
     expect(typeof body.contractFingerprint).toBe("string");
     expect(body.charCount).toBe(body.text.length);
 
-    // Same-process compile with the exact room-activation arguments.
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const { getRoom } = await import("../../src/workspace/room-store.js");
+    // Same-process compile with the exact member-level arguments (② batch 2).
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const { getMember } = await import("../../src/workspace/member-registry.js");
     const m = getMember(memberId)!;
-    const compiled = compileMemberPromptForScope({
-      scopeId,
-      memberId: m.id,
-      memberName: m.name,
-      room: getRoom(roomId),
-      docsRoot: join(getTestBossmodeDir(), "memory", "projects"),
-    });
+    const compiled = compileMemberPrompt({ memberId: m.id, memberName: m.name, description: m.title });
     // Final text = compiled segments + pi's trailing cwd line (byte-exact;
     // contract test in system-prompt-final.test.ts locks the full assembly).
     expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);

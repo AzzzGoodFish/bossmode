@@ -90,22 +90,14 @@ describe("environment-communication asset", () => {
   it("identity batch-1: compile no longer injects the E&C asset (Communication is code-owned)", async () => {
     const asset = await import("../../src/workspace/environment-communication-asset.js");
     asset.saveEnvironmentCommunication("## Environment\n\nCustom framing.\n");
-    const { compileMemberPrompt, compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
-    const roomCompiled = compileMemberPrompt({ room: room(), member, docsRoot: "/docs" });
-    expect(roomCompiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
-    expect(roomCompiled.fullPrompt).toContain("The chat tool is the only way your messages reach the room");
-    expect(roomCompiled.fullPrompt).not.toContain("Custom framing.");
-    expect(roomCompiled.fullPrompt).not.toContain("A colleague, not a system");
-
-    const dmCompiled = compileMemberPromptForScope({
-      scopeId: "dm:rm_qa",
-      memberId: "rm_qa",
-      memberName: "qa",
-      room: null,
-      docsRoot: "/docs",
-    });
-    expect(dmCompiled.fullPrompt).toContain("private chat with the user");
-    expect(dmCompiled.fullPrompt).not.toContain("Custom framing.");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const compiled = compileMemberPrompt({ memberId: "rm_qa", memberName: "qa" });
+    expect(compiled.sections.map((s) => s.id)).toEqual(["persona", "environment", "communication", "memory", "workspace", "assets"]);
+    expect(compiled.fullPrompt).toContain("chat_send is the only channel");
+    expect(compiled.fullPrompt).not.toContain("Custom framing.");
+    expect(compiled.fullPrompt).not.toContain("A colleague, not a system");
+    // One prompt per member: the same text serves the DM too (no scope line).
+    expect(compiled.fullPrompt).not.toContain("private chat with the user");
   });
 
   it("preserves retained user bytes and falls back on unreadable assets without overwriting them", async () => {

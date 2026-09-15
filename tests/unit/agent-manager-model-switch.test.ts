@@ -777,7 +777,7 @@ describe("agent-manager model hot switch", () => {
     expect(handles).toHaveLength(1);
     expect(first.destroyed).toBe(false);
     expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "mem_pm" }), skillNames: ["review"] });
-    expect(first.reloadCalls[0].agentPrompt).toContain("I am pm.");
+    expect(first.reloadCalls[0].agentPrompt).toContain("I am pm, an AI teammate in Bossmode.");
     expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
   });
 

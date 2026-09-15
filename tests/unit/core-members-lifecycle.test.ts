@@ -84,7 +84,7 @@ describe("explicit member authority and birth", () => {
     expect(new WorkspacesRepository(db).read(member.id)?.active).toBe("original");
     expect(new SshCredentialsRepository(db).read(member.id)?.publicKey).toMatch(/^ssh-ed25519 /);
     expect(profile.readMemberProfile(member.id).body).toBe(persona);
-    expect(profile.formatMemberPromptSegment(profile.readMemberProfile(member.id),member.name)).toBe(`# Member\n\nI am 言 实.\n\n${persona.trim()}`);
+    expect(profile.formatMemberPromptSegment(profile.readMemberProfile(member.id),member.name)).toBe(`# Persona\n\nI am 言 实, an AI teammate in Bossmode.\n\n${persona.trim()}`);
     expect(existsSync(join(registry.memberDir(member.id),"member.json"))).toBe(false);
     reopen(); expect(registry.getMember(member.id)).toEqual(member);
   });

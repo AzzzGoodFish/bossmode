@@ -26,7 +26,7 @@ import * as attachmentStore from "../workspace/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
 import { initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
-import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
+import { compileMemberPrompt } from "./prompt-compiler.js";
 import { instanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
@@ -550,10 +550,8 @@ function refreshProfileSources(instance: AgentInstance): void {
   const ref = parseScopeId(instance.scopeId)!;
   const parentId = ref.kind === "room" ? ref.roomId : undefined;
   const room = parentId ? roomStore.getRoom(parentId) : null;
-  const compiled = compileMemberPromptForScope({
-    scopeId: instance.scopeId, memberId: member.id, memberName: member.name,
-    room, docsRoot: join(getBossmodeDir(), "memory", "projects"),
-  });
+  // ① batch 2: one prompt per member — the compiler takes no scope.
+  const compiled = compileMemberPrompt({ memberId: member.id, memberName: member.name, description: member.title });
   instance.agentName = member.name;
   instance.sessionSources.member.name = member.name;
   instance.sessionSources.member.title = member.title;
@@ -1007,8 +1005,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     let onSessionChanged: ((session: { sessionId?: string; sessionFile?: string }) => void) | undefined;
     let callbacks: Parameters<typeof runtime.createAgent>[0]["callbacks"];
 
-    const docsRootPath = join(getBossmodeDir(), "memory", "projects");
-
     // ① B1: the chat whose turn is being processed right now. Callbacks and the
     // instance share this holder; runInputBatch rewrites it for every batch, so
     // one member instance serves whichever chat activated it.
@@ -1035,14 +1031,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         return null;
       }
       const dmScopeId = scopeId;
-      compiled = compileMemberPromptForScope({
-        scopeId: dmScopeId,
-        memberId,
-        memberName: member.name,
-        room: null,
-        docsRoot: docsRootPath,
-        activeScopes: buildDmScopeLabels(memberId, dmScopeId),
-      });
+      compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
       setContractFingerprint(dmScopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(dmScopeId, memberId);
       skills = resolveSkills(member);
@@ -1111,7 +1100,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
         return null;
       }
-      compiled = compileMemberPrompt({ room: r, member, docsRoot: docsRootPath });
+      compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
       setContractFingerprint(`room:${ref.roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
       clearStaleMounts(`room:${ref.roomId}`, memberId);
       skills = resolveSkills(member);
@@ -2119,8 +2108,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     // fingerprint+version and clear stale markers so the UI doesn't show
     // a false "needs reload" badge for a member that will auto-pick-up.
     try {
-      const docsRoot = join(getBossmodeDir(), "memory", "projects");
-      const compiled = compileMemberPrompt({ room, member, docsRoot });
+      const compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
       setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     } catch { /* compile failed — best effort */ }
     clearStaleMounts(`room:${roomId}`, memberId);
@@ -2131,8 +2119,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   }
   if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
 
-  const docsRootPath = join(getBossmodeDir(), "memory", "projects");
-  const compiled = compileMemberPrompt({ room, member, docsRoot: docsRootPath });
+  const compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
   const skills = resolveSkills(member);
   const skillPaths = [
     ...resolveGlobalSkillPaths(skills),

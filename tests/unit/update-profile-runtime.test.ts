@@ -60,7 +60,10 @@ it("renames a running member across room/DM without abort; next prompt refreshes
     expect(built[0].handle.refreshPrompt).toHaveBeenCalledWith(expect.objectContaining({ agentPrompt: expect.stringContaining(next) }));
     await manager.activateAgent(room.id, peer.id, { senderName: "peer", needResponseMemberIds: [] });
     const peerHandle = built.find(e => e.opts.member.id === peer.id)!.handle;
-    expect(JSON.stringify(peerHandle.refreshPrompt.mock.calls)).toContain(next);
+    // Prompt v2: the roster line is gone — a peer's refresh no longer carries
+    // another member's new name; it refreshes its own member-level prompt.
+    expect(peerHandle.refreshPrompt).toHaveBeenCalled();
+    expect(JSON.stringify(peerHandle.refreshPrompt.mock.calls)).not.toContain(next);
     // ① B1: one runtime per member — the DM build reuses the room instance,
     // so only two creations happen (own room + peer).
     expect(runtime.createAgent).toHaveBeenCalledTimes(2);

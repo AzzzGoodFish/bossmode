@@ -85,8 +85,8 @@ export function readMemberProfile(memberId: string): MemberProfile {
 }
 
 /** Identity is supplied by the registry, never parsed from persona text. */
-export function formatMemberPromptSegment(profile: MemberProfile, currentName: string): string {
-  const identity = `# Member\n\nI am ${currentName}.`;
+export function formatMemberPromptSegment(profile: MemberProfile, currentName: string, description?: string): string {
+  const identity = `# Persona\n\nI am ${currentName}${description ? ` (${description})` : ""}, an AI teammate in Bossmode.`;
   // Match the previous prompt boundary without changing stored Markdown or
   // interpreting any of its content as metadata.
   const body = profile.body.trim();

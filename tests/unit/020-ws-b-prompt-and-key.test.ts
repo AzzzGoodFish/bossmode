@@ -38,9 +38,9 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(instanceKey("mem_x")).toBe("mem_x");
   });
 
-  it("compileMemberPromptForScope (room) is four-segment Member → Working Principles → Communication → Environment", async () => {
+  it("compileMemberPrompt (② batch 2) is Persona → Environment → Communication → Memory → Workspace → Assets", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
 
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     // Grow persona body beyond birth skeleton.
@@ -50,22 +50,14 @@ describe("020 WS-B prompt + instanceKey", () => {
       "utf-8",
     );
 
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const created = roomStore.createRoom("Test Room", undefined, []);
-    roomStore.stampGlobalMemberIds(created.id, [member.id], member.id);
-    const room = roomStore.getRoom(created.id)!;
-    const compiled = compileMemberPromptForScope({
-      scopeId: `room:${room.id}`,
-      memberId: member.id,
-      memberName: "architect",
-      room,
-      docsRoot: join(dir, "docs"),
-    });
+    const compiled = compileMemberPrompt({ memberId: member.id, memberName: "architect" });
 
     const ids = compiled.sections.filter((s) => s.included).map((s) => s.id);
-    expect(ids).toEqual(["member", "working-principles", "communication", "environment"]);
-    expect(compiled.envPrompt).toContain('room "Test Room"');
-    expect(compiled.fullPrompt).toContain("The chat tool is the only way");
+    expect(ids).toEqual(["persona", "environment", "communication", "memory", "workspace", "assets"]);
+    // One prompt per member: no room / DM lines, no scope markers.
+    expect(compiled.envPrompt).not.toContain("room \"");
+    expect(compiled.envPrompt).not.toContain("private chat");
+    expect(compiled.fullPrompt).toContain("chat_send is the only channel");
     expect(compiled.fullPrompt).not.toContain("[room]");
     expect(compiled.fullPrompt).toContain("I am careful.");
     // Old assets no longer injected (batch 1).
@@ -73,24 +65,18 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(compiled.fullPrompt).not.toContain("## Room Principles");
   });
 
-  it("compileMemberPromptForScope (dm) uses private-chat environment line", async () => {
+  it("compileMemberPrompt (dm-side member) shares one scope-free prompt", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
-    const { compileMemberPromptForScope } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
 
     const member = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const compiled = compileMemberPromptForScope({
-      scopeId: `dm:${member.id}`,
-      memberId: member.id,
-      memberName: "pm",
-      room: null,
-      docsRoot: join(dir, "docs"),
-      activeScopes: [`dm:${member.id}`],
-    });
+    const compiled = compileMemberPrompt({ memberId: member.id, memberName: "pm" });
 
-    expect(compiled.envPrompt).toContain("private chat");
-    expect(compiled.fullPrompt).toMatch(/In a DM every\s+user message reaches you directly/);
+    expect(compiled.envPrompt).toContain("- You are pm (");
+    expect(compiled.envPrompt).not.toContain("private chat");
+    expect(compiled.fullPrompt).toMatch(/In a DM you don't need @/);
     expect(compiled.fullPrompt).not.toContain("[room]");
-    expect(compiled.sections.map((s) => s.id)).toEqual(["member", "working-principles", "communication", "environment"]);
+    expect(compiled.sections.map((s) => s.id)).toEqual(["persona", "environment", "communication", "memory", "workspace", "assets"]);
   });
 
   it("tool surface: dm has chat_create family; wait family retired", async () => {

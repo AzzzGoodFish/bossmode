@@ -84,7 +84,7 @@ describe("current runtime does not depend on historical agent templates", () => 
           liveInstance = instance;
           const built = create.mock.calls.at(-1)![0];
           expect(built.member.id).toBe(id);
-          expect(built.agentPrompt).toBe(`# Member\n\nI am ${getMember(id)!.name}.\n\n${raw.trim()}`);
+          expect(built.agentPrompt).toBe(`# Persona\n\nI am ${getMember(id)!.name}, an AI teammate in Bossmode.\n\n${raw.trim()}`);
           expect(built.skillNames).toEqual([]);
           expect(built.skillPaths).toEqual([]);
 
@@ -96,7 +96,7 @@ describe("current runtime does not depend on historical agent templates", () => 
           } else {
             // The reuse path does not re-run createAgent: the member-owned
             // persona still renders for this chat.
-            expect(previewText).toContain(`I am ${getMember(id)!.name}.`);
+            expect(previewText).toContain(`I am ${getMember(id)!.name}, an AI teammate in Bossmode.`);
           }
 
           // Preserve real session metadata publication and reload teardown.
@@ -132,7 +132,7 @@ describe("current runtime does not depend on historical agent templates", () => 
           const instance = getAgentInstanceForScope(scope, id)!;
           const refresh = vi.fn();
           instance.handle.refreshPrompt = refresh;
-          expect(instance.sessionSources.compiled.agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
+          expect(instance.sessionSources.compiled.agentPrompt).toBe(`# Persona\n\nI am ${renamed.name}, an AI teammate in Bossmode.`);
           const creationsBefore = create.mock.calls.length;
           if (scope.startsWith("dm:")) await activateDmMember(id);
           else {
@@ -144,7 +144,7 @@ describe("current runtime does not depend on historical agent templates", () => 
             // refreshes the single instance and clears the member's dirty flag,
             // so the second chat reuses the already-refreshed identity.
             await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-            expect(refresh.mock.calls[0][0].agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
+            expect(refresh.mock.calls[0][0].agentPrompt).toBe(`# Persona\n\nI am ${renamed.name}, an AI teammate in Bossmode.`);
           } else {
             expect(refresh).not.toHaveBeenCalled();
           }
@@ -155,14 +155,14 @@ describe("current runtime does not depend on historical agent templates", () => 
           const preview = await jsonRequest(server.port, "GET", `/api/members/${id}/system-prompt?scope=${encodeURIComponent(scope)}`, { token });
           expect(preview.status, preview.body).toBe(200);
           expect(JSON.parse(preview.body).text).not.toContain("Literal persona.");
-          expect(JSON.parse(preview.body).text).toContain(`I am ${renamed.name}.`);
+          expect(JSON.parse(preview.body).text).toContain(`I am ${renamed.name}, an AI teammate in Bossmode.`);
         }
         expect(mockPromptFn).toHaveBeenCalledTimes(2);
         expect(create).toHaveBeenCalledTimes(creationsBeforeRefresh);
         for (const scope of scopes) {
           expect(await reloadMemberSession(scope, id, "empty persona reload")).toEqual({ queued: false, rebuilt: true });
           expect(create.mock.calls.at(-1)![0]).toMatchObject({
-            agentPrompt: `# Member\n\nI am ${renamed.name}.`, skillNames: [], skillPaths: [],
+            agentPrompt: `# Persona\n\nI am ${renamed.name}, an AI teammate in Bossmode.`, skillNames: [], skillPaths: [],
           });
         }
         expect(readFileSync(memberProfilePath(id), "utf8")).toBe("");
