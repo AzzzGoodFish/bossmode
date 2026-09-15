@@ -2,19 +2,19 @@ import {awaitResourceClose} from "./resource-close.js";
 import { memberRuntimeAllowed } from "./runtime-admission.js";
 /**
  * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
- * shells. A shell is a real PTY (node-pty locally, an ssh2 channel for ssh
- * workspaces) — cwd/env/long-running processes survive across tool calls.
- * Members own their shells (cross-scope); state is memory-only — a daemon
+ * terminals. A terminal is a real PTY (node-pty locally, an ssh2 channel for
+ * ssh workspaces) — cwd/env/long-running processes survive across tool calls.
+ * Members own their terminals (cross-scope); state is memory-only — a daemon
  * restart empties the list and stale references fail honestly.
  *
  * Completion protocol (fish: no command wrapping): the shell init sets
  * `stty -echo`, an empty PS1, and appends an OSC 133;D marker to
  * PROMPT_COMMAND — invisible, never enters history, carries the exit code.
  * Output is captured as a byte stream (nothing lost), lines are numbered, and
- * shell_read accepts an exec id or a line range. Commands that outlive
+ * terminal_read accepts an exec id or a line range. Commands that outlive
  * blockUntilMs (default 10s) return as running; read collects the rest later.
- * Known limit (documented in guide): a nested shell inside a shell does not
- * emit markers — the outer exec stays "running" until it returns.
+ * Known limit (documented in guide): a shell started inside a terminal does
+ * not emit markers — the outer exec stays "running" until it returns.
  */
 import { getWorkspace, type SshWorkspace } from "../workspace/workspace-registry.js";
 import { logger } from "../foundation/logger.js";
@@ -33,7 +33,7 @@ interface ShellExec {
   output: string;
   status: "running" | "done";
   resolve?: () => void;
-  /** Settles when the exec reaches done — shell_wait blocks on this. */
+  /** Settles when the exec reaches done — terminal_wait blocks on this. */
   done: Promise<void>;
   doneResolve: () => void;
 }
@@ -62,7 +62,7 @@ interface LiveShell {
   carry: string; // partial OSC/escape sequence split across data chunks
   lastCwd?: string; // last cwd reported by the completion marker (receipt base)
   currentExec: ShellExec | null;
-  execHistory: ShellExec[]; // finished execs (capped) so shell_read can close them out
+  execHistory: ShellExec[]; // finished execs (capped) so terminal_read can close them out
   writeQueue: Array<PendingWrite & { exec?: ShellExec }>;
   draining: boolean;
   sshClient?: any; // kept so close() can tear the whole connection
@@ -72,7 +72,7 @@ const ownedSshConnections = new Map<any,{memberId:string;closed:Promise<void>}>(
 const pendingShells = new Map<Promise<ShellCreateResult>, string>();
 const shells = new Map<string, LiveShell>(); // key: memberId::shellId
 
-// Per-member blocking shell_exec waits — settled by interrupt so the tool
+// Per-member blocking terminal_exec waits — settled by interrupt so the tool
 // returns running (with its exec id) immediately instead of holding the
 // member's abort until the command/timeout ends (qa rc.22 note ①).
 const memberShellWaits = new Map<string, Set<() => void>>();
@@ -90,7 +90,7 @@ function registerMemberShellWait(memberId: string, settle: () => void): () => vo
   };
 }
 
-/** Interrupt support: end every blocking shell_exec wait for this member now.
+/** Interrupt support: end every blocking terminal_exec wait for this member now.
  * Each race resolves as running — the command itself keeps going in the PTY. */
 export function settleMemberShellWaits(memberId: string): void {
   const set = memberShellWaits.get(memberId);
@@ -339,7 +339,7 @@ async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: str
   return shell;
 }
 
-export type ShellCreateResult = { ok: true; shell: string; workspace: string; cwd: string } | { ok: false; error: string };
+export type ShellCreateResult = { ok: true; terminalId: string; workspace: string; cwd: string } | { ok: false; error: string };
 
 export async function createShell(args: {
   memberId: string;
@@ -379,7 +379,7 @@ async function createShellInternal(args: {
       return {ok:false,error:"member runtime admission closed during shell creation"};
     }
     logger.info("shell-manager", "shell created", { memberId: args.memberId, shell: id, workspace: workspace.id });
-    return { ok: true, shell: id, workspace: workspace.id, cwd: args.cwd?.trim() || (workspace.kind === "ssh" ? workspace.root : workspace.root) };
+    return { ok: true, terminalId: id, workspace: workspace.id, cwd: args.cwd?.trim() || (workspace.kind === "ssh" ? workspace.root : workspace.root) };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -404,15 +404,15 @@ export async function execInShell(args: {
   keys?: string;
   blockUntilMs?: number;
 }): Promise<ShellExecResult> {
-  if (args.signal?.aborted) return {ok:false,error:"Shell execution was cancelled before submission"};
+  if (args.signal?.aborted) return {ok:false,error:"Terminal execution was cancelled before submission"};
   if (!memberRuntimeAllowed(args.memberId)) return {ok:false,error:"member runtime admission is closed"};
   const shell = shells.get(shellKey(args.memberId, args.shell));
   if (!shell) {
-    return { ok: false, error: `Shell not found: ${args.shell}. It may have been closed, or the daemon restarted (shells are memory-only — create a new one).` };
+    return { ok: false, error: `Terminal not found: ${args.shell}. It may have been closed, or the daemon restarted (terminals are memory-only — create a new one).` };
   }
-  if (shell.closing) return {ok:false,error:"Shell is closing"};
+  if (shell.closing) return {ok:false,error:"Terminal is closing"};
   if (!shell.alive) {
-    return { ok: false, error: `Shell ${args.shell} is dead (process exited). Create a new one with shell_create.` };
+    return { ok: false, error: `Terminal ${args.shell} is dead (process exited). Create a new one with terminal_create.` };
   }
   if (args.keys !== undefined) {
     const seq = KEY_SEQUENCES[args.keys];
@@ -435,13 +435,13 @@ export async function execInShell(args: {
   // One command at a time per shell (fish 2026-09-05, task-b557b2cf): while an
   // exec is running (or accepted and still waiting for the shell to free up),
   // a new command is REJECTED — no new exec id is allocated and nothing is
-  // queued for later. The model decides: shell_wait, shell_read, ctrl-c, or
+  // queued for later. The model decides: terminal_wait, terminal_read, ctrl-c, or
   // another shell. Keys/read/wait stay available while busy.
   const busy = shell.currentExec ?? shell.writeQueue.find((w) => w.exec)?.exec;
   if (busy) {
     return {
       ok: false,
-      error: `Shell ${args.shell} is busy: exec ${busy.id} is still running. This command was NOT submitted and NOT executed. Wait for it with shell_wait (shell ${args.shell}, exec ${busy.id}), read current output with shell_read, send keys:"ctrl-c" to stop it, or create another shell for independent work.`,
+      error: `Terminal ${args.shell} is busy: exec ${busy.id} is still running. This command was NOT submitted and NOT executed. Wait for it with terminal_wait (terminal ${args.shell}, exec ${busy.id}), read current output with terminal_read, send keys:"ctrl-c" to stop it, or create another terminal for independent work.`,
     };
   }
 
@@ -492,7 +492,7 @@ export async function execInShell(args: {
     status: "running",
     lineStart: exec.lineStart,
     outputSoFar: exec.output,
-    note: `Still running after ${blockMs}ms — collect output later with shell_read, or wait for completion with shell_wait (shell ${args.shell}, exec ${exec.id}). Nested shells do not emit completion markers.`,
+    note: `Still running after ${blockMs}ms — collect output later with terminal_read, or wait for completion with terminal_wait (terminal ${args.shell}, exec ${exec.id}). Nested shells do not emit completion markers.`,
   };
 }
 
@@ -565,10 +565,10 @@ function sliceLines(shell: LiveShell, from: number, to: number): Array<{ n: numb
   return out;
 }
 
-/** Design-interrupt-on-message-v1.1: shell_wait — block until an exec is done
+/** Design-interrupt-on-message-v1.1: terminal_wait — block until an exec is done
  * (or the wait budget runs out). Default 30s; blockUntilMs 0 waits forever.
  * Done returns exit code + line range + output; a timeout returns running with
- * the progress so far. shell_read stays an instant snapshot. */
+ * the progress so far. terminal_read stays an instant snapshot. */
 export async function waitShell(args: {
   signal?: AbortSignal;
   memberId: string;
@@ -582,18 +582,18 @@ export async function waitShell(args: {
 > {
   const shell = shells.get(shellKey(args.memberId, args.shell));
   if (!shell) {
-    return { ok: false, error: `Shell not found: ${args.shell}. It may have been closed, or the daemon restarted (shells are memory-only — create a new one).` };
+    return { ok: false, error: `Terminal not found: ${args.shell}. It may have been closed, or the daemon restarted (terminals are memory-only — create a new one).` };
   }
   const queued = shell.writeQueue.find((w) => w.exec?.id === args.exec)?.exec;
   const exec = (shell.currentExec?.id === args.exec ? shell.currentExec : undefined)
     ?? queued
     ?? shell.execHistory.find((e) => e.id === args.exec);
   if (!exec) {
-    return { ok: false, error: `Exec not found: ${args.exec} on shell ${args.shell}. Use shell_list to see the shell's execs.` };
+    return { ok: false, error: `Exec not found: ${args.exec} on terminal ${args.shell}. Use terminal_list to see the terminal's execs.` };
   }
   const respond = () => exec.status === "done"
     ? { ok: true as const, exec: exec.id, status: "done" as const, exitCode: exec.exitCode, lineStart: exec.lineStart, lineEnd: exec.lineEnd ?? exec.lineStart, output: exec.output }
-    : { ok: true as const, exec: exec.id, status: "running" as const, outputSoFar: exec.output, note: `Still running — wait again with shell_wait, or snapshot with shell_read.` };
+    : { ok: true as const, exec: exec.id, status: "running" as const, outputSoFar: exec.output, note: `Still running — wait again with terminal_wait, or snapshot with terminal_read.` };
   if (exec.status === "done" || args.signal?.aborted) return respond();
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : 30_000;
   let unregister: (()=>void) | undefined;
@@ -634,7 +634,7 @@ export async function closeShell(memberId: string, shellId: string): Promise<{ o
   shell.closing = true;
   try { shell.proc.kill(); } catch (error) { if (shell.alive) throw error; }
   if (shell.sshClient) { try { shell.sshClient.end(); } catch { /* already gone */ } }
-  await awaitResourceClose(shell.exited,"Shell");
+  await awaitResourceClose(shell.exited,"Terminal");
   shells.delete(key);
   logger.info("shell-manager", "shell closed", { memberId, shell: shellId });
   return { ok: true };
@@ -648,5 +648,5 @@ export async function closeAllShellsForMember(memberId?: string): Promise<void> 
   await Promise.all([...pendingShells].filter(([,id])=>memberId===undefined || id===memberId).map(([promise])=>promise));
   const results = await Promise.allSettled([...shells.values()].filter(shell=>memberId===undefined || shell.memberId===memberId).map(shell=>closeShell(shell.memberId,shell.id)));
   const failures = [...connectionResults,...results].filter((result): result is PromiseRejectedResult => result.status === "rejected").map(result=>result.reason);
-  if (failures.length) throw new AggregateError(failures,"Shell shutdown incomplete");
+  if (failures.length) throw new AggregateError(failures,"Terminal shutdown incomplete");
 }

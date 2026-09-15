@@ -25,12 +25,12 @@ export const MEMBER_DIRECT_TOOL_NAMES = [
   "read",
   "write",
   "edit",
-  "shell_create",
-  "shell_exec",
-  "shell_read",
-  "shell_wait",
-  "shell_list",
-  "shell_close",
+  "terminal_create",
+  "terminal_exec",
+  "terminal_read",
+  "terminal_wait",
+  "terminal_list",
+  "terminal_close",
   "reload",
 ] as const;
 

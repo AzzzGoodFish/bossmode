@@ -34,17 +34,17 @@ export const PROFILE_READ_DESCRIPTION = `Read your own profile: name, descriptio
 
 export const PROFILE_UPDATE_DESCRIPTION = `Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`;
 
-export const SHELL_CREATE_DESCRIPTION = `Open a persistent shell session (a real terminal) in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
+export const TERMINAL_CREATE_DESCRIPTION = `Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
 
-export const SHELL_EXEC_DESCRIPTION = `Run a command in a persistent shell and get its exact output plus exit code. Commands longer than blockUntilMs (default 10000ms) return as running — collect the rest later with shell_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per shell: while an exec is running, a new command is rejected with the current exec id — wait (shell_wait), read (shell_read), send ctrl-c, or use another shell for independent work.`;
+export const TERMINAL_EXEC_DESCRIPTION = `Run a command in a persistent terminal and get its exact output plus exit code. Commands longer than blockUntilMs (default 10000ms) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`;
 
-export const SHELL_READ_DESCRIPTION = `Read output from a persistent shell: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
+export const TERMINAL_READ_DESCRIPTION = `Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
 
-export const SHELL_WAIT_DESCRIPTION = `Wait for a command (exec) on a persistent shell to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with shell_read. Default wait 30000ms; blockUntilMs 0 waits until completion.`;
+export const TERMINAL_WAIT_DESCRIPTION = `Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30000ms; blockUntilMs 0 waits until completion.`;
 
-export const SHELL_LIST_DESCRIPTION = `List your shells with running exec, alive state, and buffered line counts.`;
+export const TERMINAL_LIST_DESCRIPTION = `List your terminals with running exec, alive state, and buffered line counts.`;
 
-export const SHELL_CLOSE_DESCRIPTION = `Close a shell and kill its process. Running commands receive a close signal.`;
+export const TERMINAL_CLOSE_DESCRIPTION = `Close a terminal and kill its process. Running commands receive a close signal.`;
 
 export const WORKSPACE_LIST_DESCRIPTION = `List your workspaces with the active one marked.`;
 
@@ -70,12 +70,12 @@ export const PARAM_DESCRIPTIONS = {
   sshUser: "Remote login user.",
   sshKeyPath: "Path to the private key file. Defaults to your member ssh key.",
   sshRoot: "Remote root directory for this workspace. Relative paths resolve against it. Default '.' (remote home).",
-  shellName: "Optional short name for the shell (shows in shell_list).",
-  shellCwd: "Starting directory. Defaults to the workspace root.",
-  shellCommand: "The command line to run.",
-  shellKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
-  shellBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with shell_read.",
-  shellWaitBlockUntilMs: "Max milliseconds to wait for the exec to finish. Default 30000; 0 waits until completion.",
+  terminalName: "Optional short name for the terminal (shows in terminal_list).",
+  terminalCwd: "Starting directory. Defaults to the workspace root.",
+  terminalCommand: "The command line to run.",
+  terminalKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
+  terminalBlockUntilMs: "Max milliseconds to wait before reporting the command as still running. Default 10000, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with terminal_read.",
+  terminalWaitBlockUntilMs: "Max milliseconds to wait for the exec to finish. Default 30000; 0 waits until completion.",
   // chat_read / chat_search
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",

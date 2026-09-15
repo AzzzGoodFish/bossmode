@@ -1,7 +1,7 @@
 /**
- * Batch 7 P2 (spec §6): persistent shells — real PTY lifecycle, completion
+ * Batch 7 P2 (spec §6): persistent terminals — real PTY lifecycle, completion
  * marker with exit code, line-numbered reads, background continuation, keys,
- * dead honesty, member scoping. These tests spawn REAL shells (node-pty).
+ * dead honesty, member scoping. These tests spawn REAL terminals (node-pty).
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -27,13 +27,13 @@ async function fresh() {
   return import("../../src/engine/shell-manager.js");
 }
 
-describe("persistent shell (real PTY)", () => {
+describe("persistent terminal (real PTY)", () => {
   it("one multiline submission stays busy through its last command and preserves shell state", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     expect(created.ok).toBe(true);
-    if (!created.ok) throw new Error("Shell creation failed");
-    const s = created.shell;
+    if (!created.ok) throw new Error("Terminal creation failed");
+    const s = created.terminalId;
     const command = `cd '${dir}'
 export BOSS_TEST_VALUE="a single quote: ' and literal value"
 cat <<'END'
@@ -64,7 +64,7 @@ false`;
     const created = await sm.createShell({ memberId: "mem_sh" });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    const shellId = created.shell;
+    const shellId = created.terminalId;
 
     const done = await sm.execInShell({ memberId: "mem_sh", shell: shellId, command: "echo alpha; echo beta; true", blockUntilMs: 8000 });
     expect(done.ok && done.status).toBe("done");
@@ -84,17 +84,17 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
     await sm.execInShell({ memberId: "mem_sh", shell: s, command: `cd ${dir}`, blockUntilMs: 8000 });
     const where = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "pwd", blockUntilMs: 8000 });
     expect(where.ok && where.status === "done" && where.output.trim()).toBe(dir);
   }, 15000);
 
-  it("shell_wait: timeout returns running with progress; 0 waits to completion (design v1.1)", async () => {
+  it("terminal_wait: timeout returns running with progress; 0 waits to completion (design v1.1)", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
 
     const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.5; echo WAIT-DONE", blockUntilMs: 0 });
     expect(started.ok && started.status).toBe("running");
@@ -125,7 +125,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
 
     // A blocking exec (10s budget) on a 3s command: normally the tool call
     // holds until the command ends. The interrupt settle must end the wait
@@ -139,7 +139,7 @@ false`;
     expect(result.ok && result.status).toBe("running");
     expect(elapsed).toBeLessThan(1000);
     if (result.ok && result.status === "running") {
-      expect(result.note).toContain("shell_wait");
+      expect(result.note).toContain("terminal_wait");
     }
 
     // The command itself kept running: wait for it and get the full record.
@@ -156,7 +156,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
     const sub = join(dir, "receipt-sub");
     mkdirSync(sub, { recursive: true });
 
@@ -184,7 +184,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
 
     const startedAt = Date.now();
     const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 2; echo ZERO-BG-DONE", blockUntilMs: 0 });
@@ -193,7 +193,7 @@ false`;
     // "never block" means immediate return, not a hang until the command ends.
     expect(elapsed).toBeLessThan(1000);
 
-    // The command keeps running in the background and shell_read collects it.
+    // The command keeps running in the background and terminal_read collects it.
     await new Promise((r) => setTimeout(r, 2600));
     const read = sm.readShell({ memberId: "mem_sh", shell: s, exec: started.ok ? started.exec : "e1" });
     expect(read.ok).toBe(true);
@@ -207,7 +207,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
     const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.2; echo LATE-DONE", blockUntilMs: 300 });
     expect(started.ok && started.status).toBe("running");
 
@@ -224,7 +224,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
 
     const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1.2; echo BUSY-DONE", blockUntilMs: 0 });
     expect(started.ok && started.status).toBe("running");
@@ -266,16 +266,16 @@ false`;
     const b = await sm.createShell({ memberId: "mem_sh" });
     if (!a.ok || !b.ok) return;
 
-    const started = await sm.execInShell({ memberId: "mem_sh", shell: a.shell, command: "sleep 1.2; echo A-DONE", blockUntilMs: 0 });
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: a.terminalId, command: "sleep 1.2; echo A-DONE", blockUntilMs: 0 });
     expect(started.ok && started.status).toBe("running");
 
-    const parallel = await sm.execInShell({ memberId: "mem_sh", shell: b.shell, command: "echo B-DONE", blockUntilMs: 8000 });
+    const parallel = await sm.execInShell({ memberId: "mem_sh", shell: b.terminalId, command: "echo B-DONE", blockUntilMs: 8000 });
     expect(parallel.ok && parallel.status).toBe("done");
     if (parallel.ok && parallel.status === "done") {
       expect(parallel.output).toContain("B-DONE");
     }
 
-    const settled = await sm.waitShell({ memberId: "mem_sh", shell: a.shell, exec: started.ok ? started.exec : "e1", blockUntilMs: 8000 });
+    const settled = await sm.waitShell({ memberId: "mem_sh", shell: a.terminalId, exec: started.ok ? started.exec : "e1", blockUntilMs: 8000 });
     expect(settled.ok && settled.status).toBe("done");
   }, 20000);
 
@@ -283,7 +283,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
     const started = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 30; echo NEVER", blockUntilMs: 300 });
     expect(started.ok && started.status).toBe("running");
     const interrupted = await sm.execInShell({ memberId: "mem_sh", shell: s, keys: "ctrl-c", blockUntilMs: 0 });
@@ -307,7 +307,7 @@ false`;
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh", name: "builder" });
     if (!created.ok) return;
-    const s = created.shell;
+    const s = created.terminalId;
 
     expect(sm.listShells("mem_sh")).toHaveLength(1);
     expect(sm.listShells("mem_other")).toHaveLength(0);
@@ -320,13 +320,13 @@ false`;
   }, 10000);
 });
 
-it("unlimited shell_wait is interruptible and close settles outstanding exec completion",async()=>{
+it("unlimited terminal_wait is interruptible and close settles outstanding exec completion",async()=>{
   const sm=await fresh();const created=await sm.createShell({memberId:"mem_sh"});
   if(!created.ok)throw new Error(created.error);
-  const exec=await sm.execInShell({memberId:"mem_sh",shell:created.shell,command:"sleep 30",blockUntilMs:0});
+  const exec=await sm.execInShell({memberId:"mem_sh",shell:created.terminalId,command:"sleep 30",blockUntilMs:0});
   if(!exec.ok)throw new Error(exec.error);
-  const wait=sm.waitShell({memberId:"mem_sh",shell:created.shell,exec:exec.exec,blockUntilMs:0});
+  const wait=sm.waitShell({memberId:"mem_sh",shell:created.terminalId,exec:exec.exec,blockUntilMs:0});
   sm.settleMemberShellWaits("mem_sh");expect((await wait).status).toBe("running");
-  const ending=sm.waitShell({memberId:"mem_sh",shell:created.shell,exec:exec.exec,blockUntilMs:0});
-  await sm.closeShell("mem_sh",created.shell);expect((await ending).status).toBe("done");
+  const ending=sm.waitShell({memberId:"mem_sh",shell:created.terminalId,exec:exec.exec,blockUntilMs:0});
+  await sm.closeShell("mem_sh",created.terminalId);expect((await ending).status).toBe("done");
 });

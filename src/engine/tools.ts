@@ -564,16 +564,16 @@ export async function handleToolCallback(
       if (tool === "write") return fileTools.workspaceWriteTool(fileMemberId, params || {});
       return fileTools.workspaceEditTool(fileMemberId, params || {});
     }
-    case "shell_create":
-    case "shell_exec":
-    case "shell_read":
-    case "shell_wait":
-    case "shell_list":
-    case "shell_close": {
-      // Batch 7 P2: persistent shells — member-owned, cross-scope.
+    case "terminal_create":
+    case "terminal_exec":
+    case "terminal_read":
+    case "terminal_wait":
+    case "terminal_list":
+    case "terminal_close": {
+      // Batch 7 P2: persistent terminals — member-owned, cross-scope.
       const shell = await import("./shell-manager.js");
       const shellMemberId = resolveCallerMemberId(roomId, actorRef);
-      if (tool === "shell_create") {
+      if (tool === "terminal_create") {
         const result = await shell.createShell({
           memberId: shellMemberId,
           name: params?.name ? String(params.name) : undefined,
@@ -582,21 +582,21 @@ export async function handleToolCallback(
         });
         return result.ok ? { ...result } : result;
       }
-      if (tool === "shell_exec") {
+      if (tool === "terminal_exec") {
         const result = await shell.execInShell({
           signal:context?.signal,
           memberId: shellMemberId,
-          shell: String(params?.shell || ""),
+          shell: String(params?.terminalId || ""),
           command: params?.command !== undefined ? String(params.command) : undefined,
           keys: params?.keys !== undefined ? String(params.keys) : undefined,
           blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
         });
         return result.ok ? { ...result } : result;
       }
-      if (tool === "shell_read") {
+      if (tool === "terminal_read") {
         const result = shell.readShell({
           memberId: shellMemberId,
-          shell: String(params?.shell || ""),
+          shell: String(params?.terminalId || ""),
           exec: params?.exec ? String(params.exec) : undefined,
           fromLine: params?.fromLine !== undefined ? Number(params.fromLine) : undefined,
           toLine: params?.toLine !== undefined ? Number(params.toLine) : undefined,
@@ -605,20 +605,20 @@ export async function handleToolCallback(
           ? { ok: true, status: result.status, exitCode: result.exitCode, lineStart: result.lineStart, lineEnd: result.lineEnd, truncated: result.truncated, lines: result.lines.map((l: { n: number; text: string }) => `${l.n}: ${l.text}`) }
           : result;
       }
-      if (tool === "shell_wait") {
+      if (tool === "terminal_wait") {
         const result = await shell.waitShell({
           signal:context?.signal,
           memberId: shellMemberId,
-          shell: String(params?.shell || ""),
+          shell: String(params?.terminalId || ""),
           exec: String(params?.exec || ""),
           blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
         });
         return result;
       }
-      if (tool === "shell_list") {
-        return { ok: true, shells: shell.listShells(shellMemberId) };
+      if (tool === "terminal_list") {
+        return { ok: true, terminals: shell.listShells(shellMemberId) };
       }
-      return shell.closeShell(shellMemberId, String(params?.shell || ""));
+      return shell.closeShell(shellMemberId, String(params?.terminalId || ""));
     }
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.

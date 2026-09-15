@@ -61,9 +61,9 @@ For communication and decisions, search chat; for execution history, search your
 
 Web search / subagents are NOT preinstalled anymore. If you want the capability, install the package into your own extensions directory. Concrete steps (web search via `pi-web-access` as the example):
 
-1. Find your member id from Assets (`…/members/<your-id>/`), then open a shell:
+1. Find your member id from Assets (`…/members/<your-id>/`), then open a terminal:
    ```
-   shell_create
+   terminal_create
    ```
 2. Install the npm package into your extensions dir and link it where the loader sees it:
    ```
@@ -86,19 +86,19 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 - Register remote machines yourself: `workspace_create` with id, host, user (ssh). Your own ssh key (`…/members/<your-id>/ssh/id_ed25519`) is used by default — give its `.pub` line to the machine's authorized_keys to grant yourself access. Never paste the private key into chat or send it anywhere.
 - `workspace_use` switches the active workspace; relative paths in read/write/edit (and new sessions) follow it. File tools also take a `workspace` parameter to target any workspace by id without switching.
 
-## Shells (persistent terminals)
+## Terminals (persistent)
 
-- `shell_create` opens a real terminal (workspace defaults to the active one). Your cwd, environment, and long-running processes (dev servers, watchers) persist between tool calls — no more one-shot bash.
-- **Set things once, they stay.** Do not re-`cd` or re-`export` on every command — the shell remembers. `cd` only when you actually want to work somewhere else. New shells start with a clean environment (your dotfiles are NOT loaded): set up what you need (nvm, PATH additions, credentials) once per new shell, then it persists for the shell's whole life.
-- `shell_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `shell_read` (by exec id or line numbers; line numbers are the stable reference). For servers or long builds, pass `blockUntilMs: 0` to background immediately instead of waiting out the 10s.
-- **One command at a time per shell.** While a shell is still running a command, a new command is rejected — the error tells you the current exec id; your new command is NOT submitted and NOT queued. Wait with `shell_wait`, read what's there with `shell_read`, stop the old command with `keys:"ctrl-c"`, or create another shell for independent work (different shells run in parallel).
+- `terminal_create` opens a real terminal (workspace defaults to the active one). Your cwd, environment, and long-running processes (dev servers, watchers) persist between tool calls — no more one-shot bash.
+- **Set things once, they stay.** Do not re-`cd` or re-`export` on every command — the terminal remembers. `cd` only when you actually want to work somewhere else. New terminals start with a clean environment (your dotfiles are NOT loaded): set up what you need (nvm, PATH additions, credentials) once per terminal, then it persists for the terminal's whole life.
+- `terminal_exec` returns the command's exact output with exit code and line range (`exec` id like `e3`, plus lineStart/lineEnd). Commands still running after 10s return as running — pick up the rest later with `terminal_read` (by exec id or line numbers; line numbers are the stable reference). For servers or long builds, pass `blockUntilMs: 0` to background immediately instead of waiting out the 10s.
+- **One command at a time per terminal.** While a terminal is still running a command, a new command is rejected — the error tells you the current exec id; your new command is NOT submitted and NOT queued. Wait with `terminal_wait`, read what's there with `terminal_read`, stop the old command with `keys:"ctrl-c"`, or create another terminal for independent work (different terminals run in parallel).
 - `keys` sends control keys: `ctrl-c`, `ctrl-z`, `ctrl-d`.
 - When a command changes the working directory, its result ends with a receipt line like `cwd: /old → /new` — that is your confirmation the cd took effect and will persist. No receipt line means the cwd is unchanged.
-- `shell_wait({shell, exec, blockUntilMs?})` blocks until that command finishes (default 30s; `blockUntilMs: 0` waits until completion). Done returns exit code + line range + output; a timeout returns running with the progress so far. Use it after an interruption: the synthesized tool result tells you the exec id — finish your new task, then `shell_wait` for the original command.
-- Shells are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead shells report honestly — close them with `shell_close`.
-- Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell started inside a shell (running `bash` or `ssh` inside your shell) does not emit completion markers — the outer command shows as running until the inner shell exits.
-- If a new message interrupts you mid-turn, your run is aborted and the message is processed immediately (the envelope says so). Shell commands are NOT killed: the interrupted `shell_exec` gets a tool result like "still running as exec e5 — wait for it with shell_wait". Finish handling the new message, then `shell_wait` for the original command and read its output.
-- The one-shot `bash` tool is gone; file tools and shells cover everything it did.
+- `terminal_wait({terminalId, exec, blockUntilMs?})` blocks until that command finishes (default 30s; `blockUntilMs: 0` waits until completion). Done returns exit code + line range + output; a timeout returns running with the progress so far. Use it after an interruption: the synthesized tool result tells you the exec id — finish your new task, then `terminal_wait` for the original command.
+- Terminals are yours across rooms and DMs. They live only in memory — after a daemon restart they are gone; create new ones. Dead terminals report honestly — close them with `terminal_close`.
+- Limits: full-screen programs (top, less) render badly at 160×1000 and are not supported. A shell process started inside a terminal (running `bash` or `ssh`) does not emit completion markers — the outer command shows as running until the inner shell exits.
+- If a new message interrupts you mid-turn, your run is aborted and the message is processed immediately (the envelope says so). Commands in terminals are NOT killed: the interrupted `terminal_exec` gets a tool result like "still running as exec e5 — wait for it with terminal_wait". Finish handling the new message, then `terminal_wait` for the original command and read its output.
+- The one-shot `bash` tool is gone; file tools and terminals cover everything it did.
 
 ## Your MCP servers and extensions — CJS note
 
@@ -113,7 +113,7 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 ## Tools and chat
 
 - Room/DM replies only count when they go out via `chat_send` (see the Communication chapter).
-- File tools (read/edit/write) and persistent shells are how you maintain persona.md, skills, your memory, and anything else.
+- File tools (read/edit/write) and persistent terminals are how you maintain persona.md, skills, your memory, and anything else.
 
 ## What not to do
 

@@ -119,8 +119,8 @@ const WORKSPACE_SEGMENT = `## Workspace
 
 - You have workspaces: original is the original machine, and your home — persona, skills, and memory live there. workspace_list shows them all; workspace_use switches; workspace_create connects a remote machine (ssh).
 - Relative paths resolve against the current workspace; file tools also take a workspace parameter directly.
-- shell is a persistent terminal: cwd and environment variables survive between calls — set once and they stay; don't re-cd or re-export in every command.
-- Look before you shell: run shell_list to see the shells you already have (don't blindly create a new one); one shell runs one command at a time; keep commands short and direct.`;
+- A terminal persists between calls: cwd and environment variables survive — set once and they stay; don't re-cd or re-export in every command.
+- Look before you run: terminal_list shows the terminals you already have (don't blindly create a new one); one terminal runs one command at a time; keep commands short and direct.`;
 
 /** Assets chapter template — the only dynamic values are path/name placeholders. */
 const ASSETS_TEMPLATE = `## Assets

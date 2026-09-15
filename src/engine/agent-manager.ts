@@ -1339,7 +1339,7 @@ function replyObligation(memberId: string, memberName: string, ctx?: ReplyContex
   return { replyDebt, banner };
 }
 
-const INTERRUPT_INPUT_BANNER="Your previous turn was interrupted by this message. Shell commands keep running. Check shell_list for running commands and use shell_wait to collect their results before continuing dependent work.";
+const INTERRUPT_INPUT_BANNER="Your previous turn was interrupted by this message. Commands in terminals keep running. Check terminal_list for running commands and use terminal_wait to collect their results before continuing dependent work.";
 
 function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,capture?:CapturedMessage):{payload:PreparedRuntimeInput;replyExpected:boolean;onAccepted?:()=>void}|null{
   const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
