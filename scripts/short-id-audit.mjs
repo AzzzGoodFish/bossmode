@@ -14,7 +14,8 @@
  *   <bossmode-dir>/bossmode.db first (sqlite backup API), then audit the snapshot.
  *   Use this when the source service is still running (WAL file present).
  * - --assert-clean (post-migration verification): fail if old-shaped member/scope
- *   traces remain on the migration surface (outside the exclusion list).
+ *   traces remain on the migration surface (outside the exclusion list and the
+ *   legacy keep zones: archive/** and rooms/<room>/memory/members/**).
  */
 import { existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative, basename, dirname } from "node:path";
@@ -186,14 +187,19 @@ db.close();
 // ── filesystem pass ─────────────────────────────────────────────────────────
 const SKIP_NAMES = new Set(["node_modules", ".git", "extensions"]);
 const SKIP_FILES = /^(bossmode\.db.*|.*\.log|.*\.pid)$/;
-// Three zones: surface (migration targets) / excluded (rollback & backup artifacts
-// that keep old ids) / library (documentation trees with no migration surface).
+// Four zones: surface (migration targets) / excluded (rollback & backup artifacts
+// that keep old ids) / library (documentation trees with no migration surface) /
+// archive (the global archive tree — historical, keeps old ids). The "kept" bucket
+// holds expected legacy room-memory segments (archive semantics, not renamed).
 const EXCLUDED_DIR_NAMES = new Set(["backups", ".migration-snapshots"]);
 const EXCLUDED_DIR_RE = /^migration-backup-/;
 const EXCLUDED_FILE_RE = /^members\.json$|\.pre-[^.]*$/;
 const LIBRARY_TOPS = new Set(["memory"]);
+// Legacy room trees rename the room directory only; member segments below
+// rooms/<room>/memory/members/ stay as-is by design (archive semantics, §3.3).
+const ROOM_MEMORY_KEEP = /^rooms\/[^/]+\/memory\/members\//;
 let scanned = 0;
-const zones = { surface: { entries: 0, byTop: {} }, excluded: { entries: 0, samples: [] }, library: { entries: 0, byTop: {} } };
+const zones = { surface: { entries: 0, byTop: {} }, excluded: { entries: 0, samples: [] }, library: { entries: 0, byTop: {} }, archive: { entries: 0, byTop: {} }, kept: { entries: 0, byTop: {} } };
 const bump = (zone, top, shape, path) => {
   const bucketRoot = zones[zone];
   if (zone === "excluded") {
@@ -220,7 +226,9 @@ function walk(dir, top, zone) {
       continue; // excluded zones are not walked
     }
     const shape = classify(entry.name);
-    if (shape) bump(zone, top, shape, path);
+    const rel = relative(bossmodeDir, path).split("\\").join("/");
+    if (shape && zone === "surface" && ROOM_MEMORY_KEEP.test(rel)) bump("kept", top, shape, path);
+    else if (shape) bump(zone, top, shape, path);
     else if (entry.isDirectory()) bump(zone, top, "dir", path);
     if (entry.isDirectory()) {
       if (statSync(path, { throwIfNoEntry: false })?.isSymbolicLink?.()) continue;
@@ -231,11 +239,13 @@ function walk(dir, top, zone) {
 for (const top of readdirSync(bossmodeDir, { withFileTypes: true })) {
   if (!top.isDirectory()) continue;
   if (SKIP_NAMES.has(top.name)) continue;
-  walk(join(bossmodeDir, top.name), top.name, LIBRARY_TOPS.has(top.name) ? "library" : "surface");
+  const zone = top.name === "archive" ? "archive" : LIBRARY_TOPS.has(top.name) ? "library" : "surface";
+  walk(join(bossmodeDir, top.name), top.name, zone);
 }
 report.filesystem = { scannedEntries: scanned, ...zones };
 
-// Post-migration assertion: no old-shaped member/scope traces outside exclusions.
+// Post-migration assertion: no old-shaped member/scope traces outside the exclusion
+// list, the archive tree, and the legacy room-memory keep zones.
 const ASSERT_VIOLATION_SHAPES = new Set(["member_old", "member_old_file", "member_other", "dm_scope_old", "dm_scope_other", "mm_scope_old", "mm_scope_other"]);
 if (assertClean) {
   const violations = [];
@@ -250,7 +260,7 @@ if (assertClean) {
     for (const v of violations.slice(0, 20)) console.error(`  ${v}`);
     process.exitCode = 2;
   } else {
-    console.log("assert-clean: no old-shaped member/scope traces outside exclusions");
+    console.log("assert-clean: no old-shaped member/scope traces outside exclusions and keep zones (archive, legacy room memory)");
   }
 }
 
@@ -266,8 +276,8 @@ for (const t of report.tables) {
   const cols = t.columns.map((c) => `${c.column}{${Object.keys(c.matches).join(",")}}`).join(" ");
   summary.push(`  ${t.table} (rows=${t.rows}): ${cols}`);
 }
-summary.push(`fs scanned entries: ${scanned} (surface ${zones.surface.entries} / excluded ${zones.excluded.entries} / library ${zones.library.entries})`);
-for (const [zoneName, zone] of [["surface", zones.surface], ["library", zones.library]]) {
+summary.push(`fs scanned entries: ${scanned} (surface ${zones.surface.entries} / excluded ${zones.excluded.entries} / library ${zones.library.entries} / archive ${zones.archive.entries} / kept ${zones.kept.entries})`);
+for (const [zoneName, zone] of [["surface", zones.surface], ["library", zones.library], ["archive", zones.archive], ["kept", zones.kept]]) {
   for (const [top, shapes] of Object.entries(zone.byTop)) {
     const line = Object.entries(shapes).filter(([s]) => s !== "dir").map(([s, v]) => `${s}:${v.count}`).join(" ");
     if (line) summary.push(`  [${zoneName}] ${top}/: ${line}`);
