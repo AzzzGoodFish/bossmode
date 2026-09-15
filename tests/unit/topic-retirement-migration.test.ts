@@ -16,10 +16,8 @@ import { importAgentEvent } from "../../src/storage/event-repository.js";
 
 let root: string;
 let db: Database | undefined;
-const withoutRetirement = () => coreStorageMigrations.filter((m) =>
-  m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1"
-  && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"
-  && m.id !== "core-member-runtime-state-v1" && m.id !== "core-room-description-v1"); // pre-retirement schema: the member-level reshapes land after these
+const withoutRetirement = () => coreStorageMigrations.slice(
+  0, coreStorageMigrations.findIndex((m) => m.id === "core-task-retirement-v1")); // pre-retirement schema: task/topic/background and every later reshape land after this step
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "topic-retire-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });
