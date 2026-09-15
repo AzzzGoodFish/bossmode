@@ -482,6 +482,12 @@ export interface RoomMessage {
    * seq for display/jump; messageId is the stable anchor.
    */
   replyTo?: { seq: number; messageId: string };
+  /**
+   * ⑤ B/C: member↔member chat activity notice — a system message in the
+   * RECEIVER's DM scope. The user opens `scopeId` read-only; members never see
+   * the notice itself (system notices are hidden from member reads).
+   */
+  member_chat_meta?: { scopeId: string; fromMemberId: string; toMemberId: string };
 }
 
 // -- Agent Status --

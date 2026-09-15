@@ -353,9 +353,19 @@ export async function handleToolCallback(
           return { ok: false, error: "Sending in a member chat requires your member identity" };
         }
         roomStore.ensureMmScope(pair[0], pair[1]);
+        const firstMessage = loadScopeMessages(targetRoomId).length === 0;
         const mmMeta = messageMeta({ senderMemberId: senderId, senderName: actorName() });
         if (mmMeta) postMessage(targetRoomId, actorName(), message, [], mmMeta);
         else postMessage(targetRoomId, actorName(), message, []);
+        if (firstMessage) {
+          // ⑤ B/C: the receiver's user DM gets a jump notice into the read-only view.
+          const other = pair.find((id) => id !== senderId)!;
+          const senderName = actorName();
+          const otherName = getMember(other)?.name ?? other;
+          postMessage(`dm:${other}`, "system",
+            `Members ${senderName} and ${otherName} started a private chat. Open it to read (read-only).`,
+            [], { member_chat_meta: { scopeId: targetRoomId, fromMemberId: senderId, toMemberId: other } });
+        }
         return { ok: true, chat: { id: targetRoomId, kind: "mm", name: chatScopeLabel(targetRoomId, senderId) } };
       }
 

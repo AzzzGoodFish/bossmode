@@ -125,6 +125,11 @@ export class ConversationsRepository {
     ).map(r => r.id);
   }
 
+  /** Every member↔member chat scope (user read-only surface, ⑤ C). */
+  listMmScopes(): string[] {
+    return this.db.all<{ id: string }>("SELECT id FROM scopes WHERE kind='mm' ORDER BY id").map(r => r.id);
+  }
+
   getCursors(scopeId: string): CursorMap {
     return Object.fromEntries(this.db.all<{ actor_key: string; value: string | null }>(
       "SELECT actor_key,value FROM read_cursors WHERE scope_id=? AND kind='member'", scopeId).map(r => [r.actor_key, r.value]));

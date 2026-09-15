@@ -86,4 +86,46 @@ describe("member↔member private chat (⑤ B)", () => {
 
     expect(fixture.db.get("PRAGMA foreign_key_check")).toBeUndefined();
   });
+
+  it("first send posts a read-only jump notice into the receiver's user DM; later sends do not duplicate it", async () => {
+    const reg = await import("../../src/workspace/member-registry.js");
+    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const chatApi = await import("../../src/api/member-chats.js");
+    const ref = await import("../../src/shared/conversation-ref.js");
+    const alice = reg.createMember({ name: "alice" });
+    const bob = reg.createMember({ name: "bob" });
+    const scope = ref.mmScopeIdOf(alice.id, bob.id);
+
+    await handleToolCallback("chat_send", `dm:${alice.id}`, alice.id, { to: bob.id, message: "first" }, { memberId: alice.id });
+    await handleToolCallback("chat_send", `dm:${alice.id}`, alice.id, { to: bob.id, message: "second" }, { memberId: alice.id });
+
+    const notices = fixture.db.all<{ sender: string; content: string; extra_json: string }>(
+      "SELECT sender,content,extra_json FROM messages WHERE scope_id=? AND sender='system'", `dm:${bob.id}`);
+    expect(notices).toHaveLength(1);
+    expect(notices[0].content).toContain("started a private chat");
+    expect(JSON.parse(notices[0].extra_json).fields.member_chat_meta).toEqual({ scopeId: scope, fromMemberId: alice.id, toMemberId: bob.id });
+
+    // Members never see the notice; the user's read-only endpoints do.
+    const bobDm = await handleToolCallback("chat_read", `dm:${bob.id}`, bob.id, {}, { memberId: bob.id }) as any;
+    expect(JSON.stringify(bobDm)).not.toContain("started a private chat");
+
+    const chats = chatApi.listMemberChats();
+    expect(chats).toHaveLength(1);
+    expect(chats[0].scopeId).toBe(scope);
+    expect(chats[0].members.map((m) => m.name).sort()).toEqual(["alice", "bob"]);
+    expect(chats[0].messageCount).toBe(2);
+    expect(chats[0].lastMessage?.id).toBeTruthy();
+
+    const page = chatApi.readMemberChatMessages(scope, { limit: 1 });
+    expect(page.messages).toHaveLength(1);
+    expect(page.messages[0].content).toBe("second");
+    expect(page.hasMore).toBe(true);
+    const older = chatApi.readMemberChatMessages(scope, { limit: 10, before: page.messages[0].id });
+    expect(older.messages.map((m) => m.content)).toEqual(["first"]);
+
+    chatApi.markMemberChatRead(scope);
+    const { getUserReadCursor } = await import("../../src/workspace/user-read-cursors.js");
+    expect(getUserReadCursor(scope)?.messageId).toBe(page.messages[0].id);
+    expect(() => chatApi.readMemberChatMessages("mm:broken", {})).toThrow(/unknown_member_chat/);
+  });
 });
