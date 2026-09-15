@@ -18,6 +18,7 @@ import { memberSessionsMigration } from "./schema/member-sessions.js";
 import { memberRuntimeStateMigration } from "./schema/member-runtime-state.js";
 import { roomDescriptionMigration } from "./schema/room-description.js";
 import { mmScopeMigration } from "./schema/mm-scope.js";
+import { shortIdsMigration } from "./schema/short-ids.js";
 import type { StorageMigration } from "./database.js";
 
 // The sole ordered schema plan. Initial conversion runs on the upgrade staging DB,
@@ -28,6 +29,6 @@ export const coreStorageMigrations: readonly StorageMigration[] = Object.freeze(
   templatesMigration, memberArchivesMigration, mcpOauthMigration, deliveryMigration,
   messageArchivesMigration, runtimeInputsMigration, taskRetirementMigration,
   topicRetirementMigration, backgroundRetirementMigration, memberSessionsMigration,
-  memberRuntimeStateMigration, roomDescriptionMigration, mmScopeMigration,
+  memberRuntimeStateMigration, roomDescriptionMigration, mmScopeMigration, shortIdsMigration,
 ]);
 export const CORE_STORAGE_FORMAT = 1;

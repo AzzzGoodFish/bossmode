@@ -67,7 +67,7 @@ function inspectAuthority(path: string): Authority | undefined {
   } finally { db.close(); }
 }
 
-function assertServiceStopped(root: string): void {
+export function assertServiceStopped(root: string): void {
   const path = join(root, "bossmode.pid");
   if (!existsSync(path)) return;
   requireRegularFile(path);

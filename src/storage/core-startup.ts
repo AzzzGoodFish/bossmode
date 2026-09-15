@@ -1,7 +1,7 @@
 import {createRequire} from "node:module";
 import {logger} from "../foundation/logger.js";
 import {readFileSync} from "node:fs";
-import {prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade-runner.js";
+import {assertServiceStopped,prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade-runner.js";
 import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./migrations.js";
 import {discoverLegacyInventory,type LegacySourceEntry} from "./legacy-inventory.js";
 import {importLegacyArchives} from "./upgrade-archives.js";
@@ -17,6 +17,7 @@ import {cleanupRetiredBackgroundSessionFiles} from "./background-session-cleanup
 import {archiveRetiredScopeSessions} from "./member-session-archive.js";
 import {archiveLegacySharedMemory,cleanupMemberMemoryScopes} from "./memory-retirement-migration.js";
 import {copyRoomPrinciplesToDescriptions} from "./room-description-migration.js";
+import {migrateShortIds,replayShortIdJournalFromDisk} from "./short-id-migration.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
@@ -46,6 +47,13 @@ export interface CoreStartupOptions{
 /** Ordinary startup owns this coordinator. There is no dry-run/apply/recover mode.
  * Unhandled source domains fail before cutover rather than silently disappearing. */
 export async function prepareCoreStorage(options:CoreStartupOptions){
+ // Batch 5 (short ids): finish any interrupted renames before ANY verifier inspects
+ // the filesystem — the DB rewrite commits before the filesystem renames, so a crash
+ // window leaves new ids in SQL against old names on disk. Guarded by the same
+ // no-live-service check as the upgrade runner (never rename under a running daemon).
+ assertServiceStopped(options.root);
+ const shortIdReplay=replayShortIdJournalFromDisk(options.root);
+ if(shortIdReplay.status==="failed")throw new Error(`Short-id rename journal replay failed: ${shortIdReplay.failures.join("; ")}`);
  let entries:LegacySourceEntry[]=[];let quarantinedEvents=0;
  const result=await prepareStorageUpgrade({root:options.root,formatVersion:CORE_STORAGE_FORMAT,migrations:coreStorageMigrations,
   onProgress:options.onProgress,
@@ -91,6 +99,10 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
   const warning=`Preserved ${quarantinedEvents} unreadable legacy runtime-event lines in SQL quarantine; original files remain in the upgrade backup.`;
   result.warnings.push(warning);logger.warn("storage-upgrade",warning);
  }
+ // Batch 5 (short ids): the one-shot rewrite (blocking — a partial migration fails
+ // startup instead of running half-old/half-new). An interrupted rename journal was
+ // already replayed at the top of prepareCoreStorage, before filesystem verifiers.
+ migrateShortIds(options.root,result.db);
  // Topic retirement §3.4 (fish #19358): retire topic session files once the DB settles.
  cleanupRetiredTopicSessionFiles(options.root,result.db);
  // Background retirement (fish #19454): retire background task directories once the DB settles.
