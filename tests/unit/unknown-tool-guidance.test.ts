@@ -37,10 +37,9 @@ describe("unknown tool guidance", () => {
   });
 
   it("never offers a retired tool name as available", async () => {
-    // `wait` stays excluded here: its dispatcher branch lives until the
-    // member-level batch removes the runtime (it is unregistered from the
-    // surface but still answers). Every name below is gone from the surface.
-    for (const retired of ["chat", "query_room_messages", "list_scopes", "member_status", "update_profile", "create_room", "edit_room", "list_members"]) {
+    // `wait` joined the list with the member-level batch: its dispatcher branch
+    // and runtime are gone, so the surface is fully single-channel.
+    for (const retired of ["chat", "query_room_messages", "list_scopes", "member_status", "update_profile", "create_room", "edit_room", "list_members", "wait"]) {
       const message = await unknownMessage(retired);
       expect(message.startsWith(`Unknown tool "${retired}"`)).toBe(true);
       expect(availableNames(message)).not.toContain(retired);
