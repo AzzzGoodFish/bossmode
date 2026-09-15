@@ -143,6 +143,18 @@ describe("agent-manager context usage cache", () => {
     expect(contextUsageCallCount).toBe(0);
   });
 
+  it("serves one member-level budget to every chat (① B8)", async () => {
+    refreshContextUsage("room1", "developer");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    contextUsageCallCount = 0;
+
+    // The same figure answers from another room and from the member's DM —
+    // one budget per member, not one per chat.
+    expect(getAgentContextUsage("room2", "developer")).toEqual({ totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet" });
+    expect(getAgentContextUsage("dm:mem_developer", "mem_developer")).toEqual({ totalTokens: 1234, rawMaxTokens: 200000, percentage: 0.617, model: "sonnet" });
+    expect(contextUsageCallCount).toBe(0);
+  });
+
   it("preserves previous usage and marks compacted when SDK reports null tokens", async () => {
     refreshContextUsage("room1", "developer");
     await new Promise((resolve) => setTimeout(resolve, 0));
