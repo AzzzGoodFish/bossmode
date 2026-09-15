@@ -9,6 +9,7 @@ import { importLegacyMembers } from "../../src/storage/upgrade-members.js";
 import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../src/storage/migrations.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import type { Database } from "../../src/storage/database.js";
+import { migratedMemberId } from "../helpers/short-id.js";
 
 const fault = vi.hoisted(() => ({ cutover: false }));
 vi.mock("node:fs", async original => {
@@ -23,6 +24,10 @@ let db: Database | undefined;
 const persona = "members/mem_one/persona.md";
 const metadata = "members/mem_one/member.json";
 const profile = "members/mem_one/member.md";
+// Short-id migration (batch 5) re-keys members on first startup: post-start paths
+// resolve through the durable mapping; the legacy literals above stay for pre-start steps.
+let currentPersona = persona;
+function syncIds(database: Database): string { const mid=migratedMemberId(database,"mem_one"); currentPersona=`members/${mid}/persona.md`; return mid; }
 const body = "\r\n literal 😀\r\n";
 function file(path: string, bytes: string) { mkdirSync(dirname(join(root,path)),{recursive:true}); writeFileSync(join(root,path),bytes); }
 function seed() {
@@ -45,16 +50,16 @@ it("retries repeated pre-cutover failures over a previous DB, retaining every ba
   await expect(start()).rejects.toThrow("injected pre-cutover failure");
   expect(statSync(join(root,persona)).ino).toBe(inode);
   fault.cutover=false;
-  const result=await start();
+  const result=await start(); const mid=syncIds(db!);
   expect(result.migrated).toBe(true); expect(result.warnings).toEqual([]);
-  expect(db!.all("SELECT id,name FROM members")).toEqual([{id:"mem_one",name:"not-a-path"}]);
+  expect(db!.all("SELECT id,name FROM members")).toEqual([{id:mid,name:"not-a-path"}]);
   expect(db!.get("SELECT value FROM original")).toEqual({value:"keep"});
-  expect(readFileSync(join(root,persona),"utf8")).toBe(body); expect(statSync(join(root,persona)).ino).toBe(inode);
+  expect(readFileSync(join(root,currentPersona),"utf8")).toBe(body); expect(statSync(join(root,currentPersona)).ino).toBe(inode);
   expect(readFileSync(join(root,"backups",firstBackup,"files",metadata))).toEqual(originalMetadata);
   expect(readFileSync(join(root,"backups",firstBackup,"assets",persona),"utf8")).toBe(body);
   expect(readdirSync(join(root,"backups"))).toHaveLength(3);
   expect(readdirSync(join(root,"upgrades")).filter(p=>p.startsWith("interrupted-"))).toHaveLength(2);
-  expect(db!.get("SELECT member_id FROM memory_documents WHERE path=?",persona)).toEqual({member_id:"mem_one"});
+  expect(db!.get("SELECT member_id FROM memory_documents WHERE path=?",currentPersona)).toEqual({member_id:mid});
   expect(existsSync(join(root,metadata))).toBe(false);
 });
 
@@ -71,9 +76,9 @@ it.each(["edited body", "\ufeff"+body, body.replaceAll("\r\n","\n")])("preserves
 
 it("retains an identical preexisting persona only by parsed ID ownership and exact snapshot bytes", async () => {
   seed(); file(persona,body); const inode=statSync(join(root,persona)).ino;
-  await start();
-  expect(statSync(join(root,persona)).ino).toBe(inode);
-  expect(db!.get("SELECT id FROM members")).toEqual({id:"mem_one"});
+  await start(); const mid=syncIds(db!);
+  expect(statSync(join(root,currentPersona)).ino).toBe(inode);
+  expect(db!.get("SELECT id FROM members")).toEqual({id:mid});
 });
 
 it("rechecks the live retained body after snapshot reuse and preserves a concurrent edit", async () => {

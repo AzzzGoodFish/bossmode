@@ -12,6 +12,7 @@ import { TemplateRepository } from "../../src/storage/repositories/templates.js"
 import { readTemplateBody } from "../../src/workforce/template-files.js";
 import { readMemberProfile } from "../../src/workspace/member-profile.js";
 import type { Database } from "../../src/storage/database.js";
+import { migratedMemberId } from "../helpers/short-id.js";
 
 describe("stable identity and body-free metadata", () => {
   let fixture: ReturnType<typeof coreFixture>;
@@ -79,8 +80,8 @@ describe("historical authority-loss guards", () => {
   it("refuses missing active member assets on subsequent normal startup", async () => {
     mkdirSync(join(root,"members/mem_current"),{recursive:true});
     writeFileSync(join(root,"members/mem_current/member.json"),JSON.stringify({id:"mem_current",name:"current",agentTemplate:"general",global:{},createdAt:1,updatedAt:1}));
-    const first=await start(); first.db.close();
-    rmSync(join(root,"members/mem_current"),{recursive:true});
+    const first=await start(); const mid=migratedMemberId(first.db,"mem_current"); first.db.close();
+    rmSync(join(root,`members/${mid}`),{recursive:true});
     await expect(start()).rejects.toThrow();
   });
 

@@ -7,7 +7,7 @@ import { coreStorageMigrations } from "../../src/storage/migrations.js";
 
 let root: string;
 let db: Database | undefined;
-const withoutMmScope = () => coreStorageMigrations.filter((m) => m.id !== "core-mm-scope-v1");
+const withoutMmScope = () => coreStorageMigrations.filter((m) => m.id !== "core-mm-scope-v1" && m.id !== "core-short-ids-v1");
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "mm-scope-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });

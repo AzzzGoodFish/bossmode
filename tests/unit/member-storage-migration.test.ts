@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/storage/core-startup.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { migratedMemberId } from "../helpers/short-id.js";
 import type { Database } from "../../src/storage/database.js";
 
 const fault = vi.hoisted(() => ({ phase: "" }));
@@ -41,14 +42,15 @@ describe("automatic member storage conversion and recovery", () => {
   it("retains metadata authority, exact UTF-8/BOM/CRLF body bytes, source backup and idempotence", async () => {
     const body="\ufeff---\r\nname: stale\r\ntitle: Engineer\r\n---\r\n\r\n原文 😀\r\n";
     const member=seed("mem_a","old",body); const result=await start();
-    expect(new MembersRepository(db!).get(member.id)).toMatchObject({...member,title:"Engineer"});
-    expect(readFileSync(join(root,"members/mem_a/persona.md"),"utf8")).toBe("\r\n原文 😀\r\n");
+    const mid=migratedMemberId(db!,"mem_a");
+    expect(new MembersRepository(db!).get(mid)).toMatchObject({...member,id:mid,title:"Engineer"});
+    expect(readFileSync(join(root,`members/${mid}/persona.md`),"utf8")).toBe("\r\n原文 😀\r\n");
     expect(readFileSync(join(result.backupDirectory!,"files/members/mem_a/member.md"),"utf8")).toBe(body);
-    expect(existsSync(join(root,"members/mem_a/member.md"))).toBe(false);
-    db!.run("UPDATE members SET name='new',name_key='new' WHERE id='mem_a'"); db!.close();
-    file("members/mem_a/persona.md","---\nthis is literal Markdown\n");
-    await start(); expect(new MembersRepository(db!).get(member.id)?.name).toBe("new");
-    expect(readFileSync(join(root,"members/mem_a/persona.md"),"utf8")).toBe("---\nthis is literal Markdown\n");
+    expect(existsSync(join(root,`members/${mid}/member.md`))).toBe(false);
+    db!.run("UPDATE members SET name='new',name_key='new' WHERE id=?",mid); db!.close();
+    file(`members/${mid}/persona.md`,"---\nthis is literal Markdown\n");
+    await start(); expect(new MembersRepository(db!).get(mid)?.name).toBe("new");
+    expect(readFileSync(join(root,`members/${mid}/persona.md`),"utf8")).toBe("---\nthis is literal Markdown\n");
   });
   it("holds an exclusive startup lease through activation and allows later ordinary reopen", async () => {
     seed(); await start(async () => { await expect(start()).rejects.toThrow(/lease/); });
@@ -68,18 +70,20 @@ describe("automatic member storage conversion and recovery", () => {
   });
   it("retirement failures retain files and committed authority, then retry without duplication", async () => {
     seed(); fault.phase="retirement"; const first=await start();
+    const mid=migratedMemberId(db!,"mem_a");
+    // Retirement ran before the id migration in this same start, so the warning carries the seed path.
     expect(first.warnings).toContain("Legacy source retirement pending: members/mem_a/member.json");
-    expect(new MembersRepository(db!).list()).toHaveLength(1); expect(existsSync(join(root,"members/mem_a/member.json"))).toBe(true);
+    expect(new MembersRepository(db!).list()).toHaveLength(1); expect(existsSync(join(root,`members/${mid}/member.json`))).toBe(true);
     db!.close(); fault.phase=""; const retry=await start();
     expect(retry.warnings).toEqual([]); expect(retry.migrated).toBe(false); expect(new MembersRepository(db!).list()).toHaveLength(1);
-    expect(existsSync(join(root,"members/mem_a/member.json"))).toBe(false);
+    expect(existsSync(join(root,`members/${mid}/member.json`))).toBe(false);
   });
   it("keeps user edits made after cutover rather than retiring or reimporting them", async () => {
-    seed(); fault.phase="retirement"; await start(); db!.close(); fault.phase="";
-    file("members/mem_a/member.json","user edited retired source");
-    const retry=await start(); expect(retry.warnings).toContain("Legacy source retirement pending: members/mem_a/member.json");
-    expect(readFileSync(join(root,"members/mem_a/member.json"),"utf8")).toBe("user edited retired source");
-    expect(new MembersRepository(db!).get("mem_a")?.name).toBe("old");
+    seed(); fault.phase="retirement"; await start(); const mid=migratedMemberId(db!,"mem_a"); db!.close(); fault.phase="";
+    file(`members/${mid}/member.json`,"user edited retired source");
+    const retry=await start(); expect(retry.warnings).toContain(`Legacy source retirement pending: members/${mid}/member.json`);
+    expect(readFileSync(join(root,`members/${mid}/member.json`),"utf8")).toBe("user edited retired source");
+    expect(new MembersRepository(db!).get(mid)?.name).toBe("old");
   });
   it("rejects normalized duplicate names before activating any identities", async () => {
     seed("mem_a","Änne"); seed("mem_b","änne"); await expect(start()).rejects.toThrow(/UNIQUE/);

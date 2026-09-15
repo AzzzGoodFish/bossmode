@@ -8,12 +8,17 @@ import { getDefaultConfig } from "../../src/shared/config.js";
 import { MembersRepository } from "../../src/storage/repositories/members.js";
 import type { Database } from "../../src/storage/database.js";
 import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
+import { migratedMemberId } from "../helpers/short-id.js";
 
 let root: string;
 let db: Database | undefined;
 const journal="migrations/member-storage-v1.json";
 const member={id:"mem_one",name:"same-label",agentTemplate:"general",global:{},createdAt:1,updatedAt:2};
-const persona="members/mem_one/persona.md";
+// Short-id migration (batch 5) re-keys members on first startup: post-start code must
+// target the current id and paths; the legacy seed above stays literal.
+let mid="mem_one";
+let persona="members/mem_one/persona.md";
+function syncIds() { mid=migratedMemberId(db!,"mem_one"); persona=`members/${mid}/persona.md`; }
 function file(path: string, bytes: string) { mkdirSync(dirname(join(root,path)),{recursive:true}); writeFileSync(join(root,path),bytes); }
 function seed() { file("members/mem_one/member.json",JSON.stringify(member)); file("members/mem_one/member.md","original body"); }
 async function start(activate?: (db: Database)=>Promise<void>) {
@@ -60,37 +65,37 @@ it("does not infer identity from a metadata ID that disagrees with its asset dir
 });
 
 it.each(["missing-file","missing-directory","directory-body","symlink-body","symlink-directory"]) ("fails current-generation startup visibly before activation without stale-body repair: %s", async damage => {
-  seed(); await start(); db!.close();
-  if(damage==="missing-directory"||damage==="symlink-directory")rmSync(join(root,"members/mem_one"),{recursive:true});
+  seed(); await start(); syncIds(); db!.close();
+  if(damage==="missing-directory"||damage==="symlink-directory")rmSync(join(root,`members/${mid}`),{recursive:true});
   else rmSync(join(root,persona));
   if(damage==="directory-body")mkdirSync(join(root,persona));
   if(damage==="symlink-body"){file("retained-body.md","untouched target");symlinkSync(join(root,"retained-body.md"),join(root,persona));}
   if(damage==="symlink-directory"){
     file("retained-directory/persona.md","untouched target");
-    symlinkSync(join(root,"retained-directory"),join(root,"members/mem_one"));
+    symlinkSync(join(root,"retained-directory"),join(root,`members/${mid}`));
   }
-  file("members/mem_one/member.md","stale body must stay inert");
+  file(`members/${mid}/member.md`,"stale body must stay inert");
   const activate=vi.fn(async()=>{});
-  await expect(start(activate)).rejects.toThrow("Active member persona asset missing or unsafe: mem_one");
+  await expect(start(activate)).rejects.toThrow(`Active member persona asset missing or unsafe: ${mid}`);
   expect(activate).not.toHaveBeenCalled();
-  expect(readFileSync(join(root,"members/mem_one/member.md"),"utf8")).toBe("stale body must stay inert");
+  expect(readFileSync(join(root,`members/${mid}/member.md`),"utf8")).toBe("stale body must stay inert");
   const authority=new DatabaseSync(join(root,"bossmode.db"),{readOnly:true});
-  try { expect(authority.prepare("SELECT id,name FROM members").get()).toEqual({id:"mem_one",name:"same-label"}); }finally{authority.close();}
+  try { expect(authority.prepare("SELECT id,name FROM members").get()).toEqual({id:mid,name:"same-label"}); }finally{authority.close();}
   if(damage.startsWith("missing"))expect(existsSync(join(root,persona))).toBe(false);
   if(damage==="symlink-body")expect(readFileSync(join(root,"retained-body.md"),"utf8")).toBe("untouched target");
   if(damage==="symlink-directory")expect(readFileSync(join(root,"retained-directory/persona.md"),"utf8")).toBe("untouched target");
 });
 
 it("checks current persona ownership even when the body exists", async () => {
-  seed(); await start(); db!.run("DELETE FROM memory_documents WHERE path=?",persona); db!.close();
-  await expect(start()).rejects.toThrow("Member persona metadata missing: mem_one");
+  seed(); await start(); syncIds(); db!.run("DELETE FROM memory_documents WHERE path=?",persona); db!.close();
+  await expect(start()).rejects.toThrow(`Member persona metadata missing: ${mid}`);
   expect(readFileSync(join(root,persona),"utf8")).toBe("original body");
 });
 
 it("does not require a live directory for archived SQL identity or reconstruct one from its reused name", async () => {
-  seed(); await start();
-  new MembersRepository(db!).archive(member.id,"backups/fired-one",3);
-  renameSync(join(root,"members/mem_one"),join(root,"backups/fired-one"));
+  seed(); await start(); syncIds();
+  new MembersRepository(db!).archive(mid,"backups/fired-one",3);
+  renameSync(join(root,`members/${mid}`),join(root,"backups/fired-one"));
   // Explicit current tombstone fixture: a same-named active identity owns different assets.
   new MembersRepository(db!).insert({...member,id:"mem_two"});
   file("members/mem_two/persona.md","current body");
@@ -98,33 +103,33 @@ it("does not require a live directory for archived SQL identity or reconstruct o
   db!.close();
   expect((await start()).migrated).toBe(false);
   expect(new MembersRepository(db!).list().map(m=>m.id)).toEqual(["mem_two"]);
-  expect(new MembersRepository(db!).getRetained("mem_one")?.name).toBe(member.name);
-  expect(existsSync(join(root,"members/mem_one"))).toBe(false);
+  expect(new MembersRepository(db!).getRetained(mid)?.name).toBe(member.name);
+  expect(existsSync(join(root,`members/${mid}`))).toBe(false);
   expect(readFileSync(join(root,"backups/fired-one/persona.md"),"utf8")).toBe("original body");
   db!.close(); rmSync(join(root,"members/mem_two/persona.md"));
   await expect(start()).rejects.toThrow("Active member persona asset missing or unsafe: mem_two");
 });
 
 it.each(["before-move","after-move"]) ("preserves automatic recovery of a pending archive rather than treating it as an active missing directory: %s", async phase => {
-  seed(); await start();
+  seed(); await start(); syncIds();
   if(phase==="after-move")db!.exec("CREATE TRIGGER fail_archive BEFORE INSERT ON member_archives BEGIN SELECT RAISE(ABORT,'archive failure'); END");
   const archive=new MemberArchiveService(db!,root,{quiesce:async()=>{if(phase==="before-move")throw new Error("quiesce failure");}});
-  await expect(archive.archive(member.id,{confirm:true})).rejects.toThrow(/failure/);
-  expect(archive.admission(member.id)).toBe("pending");
+  await expect(archive.archive(mid,{confirm:true})).rejects.toThrow(/failure/);
+  expect(archive.admission(mid)).toBe("pending");
   const intent=archive.pending()[0];
   if(phase==="after-move")db!.exec("DROP TRIGGER fail_archive");
   db!.close();
   const result=await start(async ready=>{await new MemberArchiveService(ready,root,{quiesce:async()=>{}}).recoverPending();});
   expect(result.migrated).toBe(false);
-  expect(new MembersRepository(db!).get(member.id)).toBeNull();
+  expect(new MembersRepository(db!).get(mid)).toBeNull();
   expect(readFileSync(join(root,intent.archivePath,"persona.md"),"utf8")).toBe("original body");
-  expect(existsSync(join(root,"members/mem_one"))).toBe(false);
+  expect(existsSync(join(root,`members/${mid}`))).toBe(false);
 });
 
 it.each(["both","neither","replaced","symlink","missing-persona"]) ("does not let a pending archive intent bypass asset safety: %s", async conflict => {
-  seed(); await start();
+  seed(); await start(); syncIds();
   const archive=new MemberArchiveService(db!,root,{quiesce:async()=>{throw new Error("stop");}});
-  await expect(archive.archive(member.id,{confirm:true})).rejects.toThrow("stop");
+  await expect(archive.archive(mid,{confirm:true})).rejects.toThrow("stop");
   const intent=archive.pending()[0];
   if(conflict==="both")file(`${intent.archivePath}/sentinel`,"unknown bytes");
   if(conflict==="neither"||conflict==="replaced"||conflict==="symlink"){
@@ -141,10 +146,10 @@ it.each(["both","neither","replaced","symlink","missing-persona"]) ("does not le
 });
 
 it("leaves pending source retirement untouched when ready asset verification fails", async () => {
-  seed(); await start();
-  const path="members/mem_one/member.md";
+  seed(); await start(); syncIds();
+  const path=`members/${mid}/member.md`;
   db!.run("UPDATE storage_upgrade_files SET retired_at=NULL WHERE path=?",path);
-  file(path,"original body");
+  file(`members/${mid}/member.md`,"original body");
   const source=db!.get<{backup_path:string}>("SELECT backup_path FROM storage_upgrade_files WHERE path=?",path)!;
   // Model a pending retirement whose destination is still free.
   rmSync(join(root,source.backup_path+".retired")); db!.close(); rmSync(join(root,persona));

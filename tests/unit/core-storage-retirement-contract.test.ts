@@ -8,6 +8,7 @@ import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-stora
 import { prepareCoreStorage } from "../../src/storage/core-startup.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { migratedMemberId } from "../helpers/short-id.js";
 import { getDatabase, type Database } from "../../src/storage/database.js";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
@@ -125,15 +126,16 @@ describe("test-only historical fixture fidelity", () => {
     file("members/mem_old/member.json", "invalid retired identity");
     file("members/mem_old/member.md", "---\ninvalid retired frontmatter");
     const result = await start();
+    const mid = migratedMemberId(db!, "mem_old");
     expect(result.migrated).toBe(true);
     expect(result.warnings).toEqual([]);
-    expect(new MembersRepository(db!).get("mem_old")).toMatchObject({
-      id: "mem_old", name: "Old", title: "Engineer", agentTemplate: "general", global: { model: "p/m" }, createdAt: 123, updatedAt: 456,
+    expect(new MembersRepository(db!).get(mid)).toMatchObject({
+      id: mid, name: "Old", title: "Engineer", agentTemplate: "general", global: { model: "p/m" }, createdAt: 123, updatedAt: 456,
     });
-    expect(db!.get("SELECT member_id FROM memory_documents WHERE path='members/mem_old/persona.md'"))
-      .toEqual({ member_id: "mem_old" });
-    expect(readFileSync(join(root, "members/mem_old/persona.md"))).toEqual(Buffer.from(body));
-    expect(existsSync(join(root, "members/mem_old/member.json"))).toBe(false);
+    expect(db!.get("SELECT member_id FROM memory_documents WHERE path=?", `members/${mid}/persona.md`))
+      .toEqual({ member_id: mid });
+    expect(readFileSync(join(root, `members/${mid}/persona.md`))).toEqual(Buffer.from(body));
+    expect(existsSync(join(root, `members/${mid}/member.json`))).toBe(false);
     const backup = new DatabaseSync(join(result.backupDirectory!, "database-before.sqlite"), { readOnly: true });
     try {
       expect(backup.prepare("SELECT id,name,created_at,updated_at FROM members").all())
@@ -143,7 +145,7 @@ describe("test-only historical fixture fidelity", () => {
     db!.close();
     expect((await start()).migrated).toBe(false);
     expect(new MembersRepository(db!).list()).toHaveLength(1);
-    expect(readFileSync(join(root, "members/mem_old/persona.md"))).toEqual(Buffer.from(body));
+    expect(readFileSync(join(root, `members/${mid}/persona.md`))).toEqual(Buffer.from(body));
   });
 
   it("retains a corrupt historical SQL row on rejection instead of normalizing it in the fixture", async () => {
