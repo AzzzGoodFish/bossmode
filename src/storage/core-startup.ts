@@ -15,6 +15,7 @@ import {archiveRetiredTasks} from "./task-retirement.js";
 import {cleanupRetiredTopicSessionFiles} from "./topic-session-cleanup.js";
 import {cleanupRetiredBackgroundSessionFiles} from "./background-session-cleanup.js";
 import {archiveRetiredScopeSessions} from "./member-session-archive.js";
+import {archiveLegacySharedMemory,cleanupMemberMemoryScopes} from "./memory-retirement-migration.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
@@ -95,5 +96,8 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
  cleanupRetiredBackgroundSessionFiles(options.root,result.db);
  // Member-centric sessions (① A3): park retired per-scope session files in the member archive.
  archiveRetiredScopeSessions(options.root,result.db);
+ // Assets batch ④ (fish #20035): legacy shared memory → global archive; member memory/scopes folded.
+ archiveLegacySharedMemory(options.root,result.db);
+ cleanupMemberMemoryScopes(options.root,result.db);
  return result;
 }

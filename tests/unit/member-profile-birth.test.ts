@@ -16,9 +16,9 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("member birth skeleton", () => {
-  it("createMember writes an empty persona.md and skills dir", async () => {
+  it("createMember writes an empty persona.md and skills dir (no shared memory roots)", async () => {
     const { createMember } = await import("../../src/workspace/member-registry.js");
-    const { memberProfilePath, sharedUserMemoryDir, sharedProjectsMemoryDir } = await import(
+    const { memberProfilePath } = await import(
       "../../src/workspace/member-profile.js"
     );
     const m = createMember({ name: "nova" });
@@ -29,8 +29,9 @@ describe("member birth skeleton", () => {
     expect(path).toMatch(/persona\.md$/);
     expect(raw).not.toMatch(/## Persona/); // empty body at birth
     expect(existsSync(join(tmpDir, "members", m.id, "skills"))).toBe(true);
-    expect(existsSync(sharedUserMemoryDir())).toBe(true);
-    expect(existsSync(sharedProjectsMemoryDir())).toBe(true);
+    // ④ A: the shared memory roots are retired — birth must not recreate them.
+    expect(existsSync(join(tmpDir, "memory", "user"))).toBe(false);
+    expect(existsSync(join(tmpDir, "memory", "projects"))).toBe(false);
   });
 
   it("empty name allocates New Member uniquely", async () => {

@@ -40,27 +40,11 @@ export function memberArchiveDir(memberId: string): string {
   return join(memberDir(memberId), "archive");
 }
 
-export function sharedUserMemoryDir(): string {
-  return join(getBossmodeDir(), "memory", "user");
-}
-
-export function sharedProjectsMemoryDir(): string {
-  return join(getBossmodeDir(), "memory", "projects");
-}
-
-/** Ensure shared memory roots exist (idempotent). */
-export function ensureSharedMemoryDirs(): void {
-  getDatabase().assertOutsideTransaction();
-  mkdirSync(sharedUserMemoryDir(), { recursive: true });
-  mkdirSync(sharedProjectsMemoryDir(), { recursive: true });
-}
-
-/** Birth creates an empty persona, its skills directory, and shared memory roots. */
+/** Birth creates an empty persona and its skills directory. */
 export function writeMemberProfileSkeleton(memberId: string): string {
   getDatabase().assertOutsideTransaction();
   mkdirSync(memberDir(memberId), { recursive: true });
   mkdirSync(memberSkillsDir(memberId), { recursive: true });
-  ensureSharedMemoryDirs();
   const path = memberProfilePath(memberId);
   if (!existsSync(path)) writeFileSync(path, "", "utf-8");
   return path;
