@@ -8,11 +8,11 @@ import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
-import { getMember } from "../workspace/member-registry.js";
+import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-access.js";
 import { unknownMemberToolMessage } from "../shared/member-tool-names.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
-import { chatScopeRoomId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import type { RoomMessage } from "../shared/types.js";
 import { parseMentions, parseMentionMemberIds } from "../communication/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
@@ -42,6 +42,10 @@ function resolveMemoryActor(roomId: string, agentName: string): { id: string; na
     const member = getMember(roomId.slice("dm:".length));
     return member ? { id: member.id, name: member.name } : null;
   }
+  if (isMmScopeId(roomId)) {
+    const member = resolveMemberRef(agentName);
+    return member ? { id: member.id, name: member.name } : null;
+  }
   return roomStore.resolveRoomMemberRef(roomId, agentName);
 }
 
@@ -62,9 +66,10 @@ function resolveChatTarget(
   const value = ref === undefined || ref === null ? "" : String(ref).trim();
   if (!value) return { ok: true, roomId: currentRoomId };
   if (value === "user" || value === "dm" || value === actor.id) return { ok: true, roomId: `dm:${actor.id}` };
-  if (value.startsWith("dm:") || value.startsWith("room:")) {
+  if (value.startsWith("dm:") || value.startsWith("room:") || isMmScopeId(value)) {
     try {
       const access = assertMemberScopeAccess(actor.id, value);
+      if (access.kind === "mm") return { ok: true, roomId: mmScopeIdOf(access.memberIds[0], access.memberIds[1]) };
       return { ok: true, roomId: access.kind === "dm" ? `dm:${access.memberId}` : access.roomId };
     } catch (err: any) {
       return { ok: false, error: err?.message || String(err) };
@@ -83,12 +88,24 @@ function resolveChatTarget(
   if (named.length > 1) {
     return { ok: false, error: `Multiple chats named "${value}": ${named.map((room) => `room:${room.id}`).join(", ")} — use the chat id.` };
   }
+  // Member refs (exact id or unique name) open the member↔member chat (⑤ B):
+  // sending to a member needs no creation step. Self resolves to the user DM.
+  const targetMember = resolveMemberRef(value);
+  if (targetMember) {
+    if (targetMember.id === actor.id) return { ok: true, roomId: `dm:${actor.id}` };
+    if (getMember(targetMember.id)) return { ok: true, roomId: mmScopeIdOf(actor.id, targetMember.id) };
+  }
   return { ok: false, error: `Chat not found: ${value} — use chat_list to see your chats.` };
 }
 
-/** Display label for a chat scope key (room name / DM label). */
-function chatScopeLabel(scopeId: string): string {
+/** Display label for a chat scope key (room name / DM / member chat label). */
+function chatScopeLabel(scopeId: string, viewerId?: string): string {
   if (scopeId.startsWith("dm:")) return "Direct message with user";
+  if (isMmScopeId(scopeId)) {
+    const pair = parseMmScopeId(scopeId);
+    const other = pair ? (viewerId && pair.includes(viewerId) ? pair.find((id) => id !== viewerId) ?? pair[1] : pair[1]) : "";
+    return other ? `Private chat with ${getMember(other)?.name ?? other}` : "Private chat";
+  }
   return roomStore.getRoom(scopeId)?.name || scopeId;
 }
 
@@ -288,11 +305,14 @@ export async function handleToolCallback(
       const target = resolveChatTarget(roomId, sendActor, params?.to);
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
+      if (isMmScopeId(targetRoomId) && Array.isArray(params?.attachments) && params.attachments.length > 0) {
+        return { ok: false, error: "Attachments are not supported in member chats yet" };
+      }
 
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
       const rosterId = chatScopeRoomId(targetRoomId) || targetRoomId;
       const room = roomStore.getRoom(rosterId);
-      const roomMembers = targetRoomId.startsWith("dm:") ? [] : roomStore.getRoomMembers(rosterId);
+      const roomMembers = (targetRoomId.startsWith("dm:") || isMmScopeId(targetRoomId)) ? [] : roomStore.getRoomMembers(rosterId);
       const senderMember = context?.memberId ? boundActor() : roomStore.resolveRoomMemberRef(rosterId, actorRef);
       const info = room ? mentionInfoFromText(message, roomMembers) : { mentions: [], mentionMemberIds: [] };
       const { mentions, mentionMemberIds } = info;
@@ -322,6 +342,21 @@ export async function handleToolCallback(
           const errorMsg = errors.join("; ");
           return { ok: false, error: `Attachment failed: ${errorMsg}` };
         }
+      }
+
+      // Member↔member chat: plain text only for now; opened on the first send.
+      if (isMmScopeId(targetRoomId)) {
+        if (attachments.length > 0) return { ok: false, error: "Attachments are not supported in member chats yet" };
+        const senderId = context?.memberId ?? null;
+        const pair = parseMmScopeId(targetRoomId);
+        if (!senderId || !pair || !pair.includes(senderId)) {
+          return { ok: false, error: "Sending in a member chat requires your member identity" };
+        }
+        roomStore.ensureMmScope(pair[0], pair[1]);
+        const mmMeta = messageMeta({ senderMemberId: senderId, senderName: actorName() });
+        if (mmMeta) postMessage(targetRoomId, actorName(), message, [], mmMeta);
+        else postMessage(targetRoomId, actorName(), message, []);
+        return { ok: true, chat: { id: targetRoomId, kind: "mm", name: chatScopeLabel(targetRoomId, senderId) } };
       }
 
       // DM target: single scope-routed egress (dm store + broadcast + listeners).
@@ -470,7 +505,16 @@ export async function handleToolCallback(
         name: r.name,
         description: chatDescriptionOf(r.id),
       }));
-      const chats = [...rooms, { id: `dm:${actor.id}`, kind: "dm" as const, name: "Direct message with user", description: "" }];
+      const mmChats = roomStore.listMmScopesForMember(actor.id).map((scope) => {
+        const other = parseMmScopeId(scope)?.find((id) => id !== actor.id);
+        return {
+          id: scope,
+          kind: "mm" as const,
+          name: other ? `Private chat with ${getMember(other)?.name ?? other}` : "Private chat",
+          description: "",
+        };
+      });
+      const chats = [...rooms, ...mmChats, { id: `dm:${actor.id}`, kind: "dm" as const, name: "Direct message with user", description: "" }];
       const q = String(params?.query ?? "").trim().toLowerCase();
       const filtered = q
         ? chats.filter((chat) => chat.name.toLowerCase().includes(q) || chat.description.toLowerCase().includes(q))
@@ -490,6 +534,18 @@ export async function handleToolCallback(
       if (!target.ok) return { ok: false, error: target.error };
       if (target.roomId.startsWith("dm:")) {
         return { ok: true, chat: { id: target.roomId, kind: "dm", name: "Direct message with user", counterpart: "user" } };
+      }
+      if (isMmScopeId(target.roomId)) {
+        const other = parseMmScopeId(target.roomId)?.find((id) => id !== actor.id);
+        return {
+          ok: true,
+          chat: {
+            id: target.roomId,
+            kind: "mm",
+            name: chatScopeLabel(target.roomId, actor.id),
+            counterpart: other ? { id: other, name: getMember(other)?.name ?? other } : null,
+          },
+        };
       }
       const room = roomStore.getRoom(target.roomId);
       if (!room) return { ok: false, error: "Chat not found" };
@@ -704,7 +760,7 @@ export async function handleToolCallback(
       if (!ref) return { ok: false, error: "chat is required — pass a chat id or name (see chat_list)" };
       const target = resolveChatTarget(roomId, { id: actorGlobal.id, name: actorGlobal.name }, ref);
       if (!target.ok) return { ok: false, error: target.error };
-      if (target.roomId.startsWith("dm:")) return { ok: false, error: "chat_edit edits group chats — a private chat has nothing to edit" };
+      if (target.roomId.startsWith("dm:") || isMmScopeId(target.roomId)) return { ok: false, error: "chat_edit edits group chats — a private chat has nothing to edit" };
       const targetRoomId = target.roomId;
       const room = roomStore.getRoom(targetRoomId);
       if (!room) return { ok: false, error: "Chat not found" };

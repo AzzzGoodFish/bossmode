@@ -5,16 +5,19 @@ export type SenderRole = "user" | "member";
 
 /** Source chat of an envelope: the stable id a member can address with the chat tools. */
 export interface ChatLabel {
-  kind: "room" | "dm";
-  /** Room id, or the member id that owns the private chat. */
+  kind: "room" | "dm" | "mm";
+  /** Room id, the member id that owns the private chat, or the canonical
+   *  `mm:<a>-<b>` scope for member↔member chats. */
   id: string;
   /** Display name (room name, or the counterpart label for a private chat). */
   name: string;
 }
 
-/** Stable chat id used by the chat tools: `room:<roomId>` | `dm:<memberId>`. */
+/** Stable chat id used by the chat tools: `room:<roomId>` | `dm:<memberId>` | `mm:<a>-<b>`. */
 export function chatRefOf(chat: ChatLabel): string {
-  return chat.kind === "dm" ? `dm:${chat.id}` : `room:${chat.id}`;
+  if (chat.kind === "dm") return `dm:${chat.id}`;
+  if (chat.kind === "mm") return chat.id.startsWith("mm:") ? chat.id : `mm:${chat.id}`;
+  return `room:${chat.id}`;
 }
 
 function escapeLabel(text: string): string {

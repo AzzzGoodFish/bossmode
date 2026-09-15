@@ -1,11 +1,12 @@
 import type { Database } from "../database.js";
+import { parseMmScopeId } from "../../shared/conversation-ref.js";
 
 /** Shared DB keys use bare room IDs. API session/runtime keys also accept room:<id>.
  * Topic scopes were retired (fish #19358) and are no longer accepted here. */
 export function executionScopeId(scope: string): string {
   const key = scope.startsWith("room:") ? scope.slice(5) : scope;
   if (!key || (scope.startsWith("room:") && key.includes(":")) ||
-    !/^(?:dm:)?[^/:\\\0]+$/.test(key) || [".", ".."].includes(key.split(":").at(-1)!)) {
+    !/^(?:dm:|mm:)?[^/:\\\0]+$/.test(key) || [".", ".."].includes(key.split(":").at(-1)!)) {
     throw new Error(`Invalid execution scope: ${scope}`);
   }
   return key;
@@ -26,6 +27,10 @@ export function assertExecutionOwner(db: Database, memberId: string, scopeValue:
   const scope = db.get<{kind: string; member_id: string | null}>("SELECT kind,member_id FROM scopes WHERE id=?", scopeId);
   if (!scope) throw new Error(`scope_not_found: ${scopeValue}`);
   if (scope.kind === "dm" && scope.member_id !== memberId) throw new Error(`DM scope does not belong to member ${memberId}`);
+  if (scope.kind === "mm") {
+    const pair = parseMmScopeId(scopeId);
+    if (!pair || !pair.includes(memberId)) throw new Error(`Member chat scope does not include member ${memberId}`);
+  }
   return scopeId;
 }
 

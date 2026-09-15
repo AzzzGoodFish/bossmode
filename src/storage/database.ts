@@ -9,6 +9,11 @@ import type { DatabaseSync } from "node:sqlite";
 export interface StorageMigration {
   readonly id: string;
   readonly sql: string;
+  /** Table rebuilds only: run this migration with `foreign_keys=OFF` (the pragma
+   *  is a no-op inside a transaction, so the runner toggles it around the step)
+   *  and restore enforcement after. Use for dropping/renaming a table that other
+   *  tables reference; the SQL must end with `PRAGMA foreign_key_check;`. */
+  readonly foreignKeysOff?: boolean;
 }
 
 export class Database {
@@ -203,10 +208,17 @@ export function applyStorageMigrations(db: Database, migrations: readonly Storag
   db.exec("CREATE TABLE IF NOT EXISTS storage_schema_versions (id TEXT NOT NULL PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)");
   for (const migration of migrations) {
     const checksum = createHash("sha256").update(migration.sql).digest("hex");
-    db.transaction(tx => {
-      if (tx.get("SELECT 1 FROM storage_schema_versions WHERE id=?", migration.id)) return;
-      tx.exec(migration.sql);
-      tx.run("INSERT INTO storage_schema_versions (id, checksum, applied_at) VALUES (?, ?, ?)", migration.id, checksum, Date.now());
-    });
+    // foreign_keys can only be toggled outside a transaction; the runner never
+    // holds one between migrations, so rebuild steps bracket their own step.
+    if (migration.foreignKeysOff) db.exec("PRAGMA foreign_keys=OFF");
+    try {
+      db.transaction(tx => {
+        if (tx.get("SELECT 1 FROM storage_schema_versions WHERE id=?", migration.id)) return;
+        tx.exec(migration.sql);
+        tx.run("INSERT INTO storage_schema_versions (id, checksum, applied_at) VALUES (?, ?, ?)", migration.id, checksum, Date.now());
+      });
+    } finally {
+      if (migration.foreignKeysOff) db.exec("PRAGMA foreign_keys=ON");
+    }
   }
 }

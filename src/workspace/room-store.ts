@@ -5,7 +5,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import { latestMessage } from "../storage/message-repository.js";
 import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../storage/repositories/conversations.js";
-export { ensureDmScope } from "../storage/repositories/conversations.js";
+export { ensureDmScope, ensureMmScope } from "../storage/repositories/conversations.js";
 import { memberDir } from "./member-profile.js";
 import { readWorkspaces } from "./workspace-registry.js";
 
@@ -528,6 +528,11 @@ export function listRooms(): Room[] {
 }
 
 export function listRoomsStrict(): Room[] { return listRooms(); }
+
+/** Member↔member chat scopes involving `memberId` (⑤ B). */
+export function listMmScopesForMember(memberId: string): string[] {
+  return new ConversationsRepository().listMmScopesForMember(memberId);
+}
 
 // -- Cursors --
 export function getCursors(roomId: string): CursorMap {

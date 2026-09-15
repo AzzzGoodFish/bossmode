@@ -7,7 +7,7 @@
 import { getMember } from "./member-registry.js";
 import { listRooms } from "./room-store.js";
 import type { Room } from "../shared/types.js";
-import type { ScopeId } from "../shared/conversation-ref.js";
+import { isMmScopeId, parseMmScopeId, type ScopeId } from "../shared/conversation-ref.js";
 
 /** Rooms a registry member belongs to — stamped rooms by globalMemberIds,
  * legacy unstamped rooms by name membership. */
@@ -24,7 +24,8 @@ export function listRoomsForMember(memberId: string): Room[] {
 
 export type ScopeAccess =
   | { kind: "room"; roomId: string; room: Room }
-  | { kind: "dm"; memberId: string };
+  | { kind: "dm"; memberId: string }
+  | { kind: "mm"; memberIds: [string, string] };
 
 /**
  * Assert `memberId` may read `scopeId`. Returns the parsed target on success.
@@ -41,11 +42,17 @@ export function assertMemberScopeAccess(memberId: string, scopeId: ScopeId): Sco
     if (target !== memberId) throw new Error("Access denied: a member can only read its own DM scope");
     return { kind: "dm", memberId: target };
   }
+  if (isMmScopeId(scopeId)) {
+    const pair = parseMmScopeId(scopeId);
+    if (!pair) throw new Error(`Malformed member chat scope: ${scopeId}`);
+    if (!pair.includes(memberId)) throw new Error("Access denied: a member can only read its own member chats");
+    return { kind: "mm", memberIds: pair };
+  }
   if (scopeId.startsWith("room:")) {
     const roomId = scopeId.slice("room:".length);
     const room = listRoomsForMember(memberId).find((r) => r.id === roomId);
     if (!room) throw new Error(`Access denied: ${member.name} is not a member of room ${roomId} (or the room does not exist)`);
     return { kind: "room", roomId, room };
   }
-  throw new Error(`scope must be 'room:<id>' or 'dm:<memberId>', got: ${scopeId}`);
+  throw new Error(`scope must be 'room:<id>', 'dm:<memberId>' or 'mm:<memberA>-<memberB>', got: ${scopeId}`);
 }

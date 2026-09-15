@@ -1,7 +1,8 @@
 import { getDatabase, type Database } from "../database.js";
+import { mmScopeIdOf } from "../../shared/conversation-ref.js";
 import type { Room, RoomMemberRecord, CursorMap } from "../../shared/types.js";
 
-interface ScopeRow { id: string; kind: "room" | "dm"; room_id: string | null; member_id: string | null }
+interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null }
 interface RoomRow {
   id: string; name: string; created_at: number; legacy_cwd: string | null;
   docs_path: string | null; description: string | null; leader_member_id: string | null; leader_global_member_id: string | null;
@@ -32,6 +33,15 @@ export class ConversationsRepository {
     if (!memberId) throw new Error("DM scope requires a stable member ID");
     const id = `dm:${memberId}`;
     this.ensureScope(id, "dm", null, memberId);
+    return id;
+  }
+
+  /** Member↔member chat scope (⑤ B): canonical `mm:<a>-<b>`; idempotent, opened on
+   * first send. member_id stores the sorted "a|b" pair for lookups and checks. */
+  ensureMmScope(memberA: string, memberB: string): string {
+    const id = mmScopeIdOf(memberA, memberB);
+    const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
+    this.ensureScope(id, "mm", null, `${a}|${b}`);
     return id;
   }
 
@@ -107,6 +117,14 @@ export class ConversationsRepository {
     });
   }
 
+  /** Member↔member chat scopes involving `memberId` (canonical "a|b" ordering). */
+  listMmScopesForMember(memberId: string): string[] {
+    return this.db.all<{ id: string }>(
+      "SELECT id FROM scopes WHERE kind='mm' AND (member_id LIKE ? OR member_id LIKE ?) ORDER BY id",
+      `${memberId}|%`, `%|${memberId}`,
+    ).map(r => r.id);
+  }
+
   getCursors(scopeId: string): CursorMap {
     return Object.fromEntries(this.db.all<{ actor_key: string; value: string | null }>(
       "SELECT actor_key,value FROM read_cursors WHERE scope_id=? AND kind='member'", scopeId).map(r => [r.actor_key, r.value]));
@@ -131,4 +149,9 @@ export function getConversationMember(id: string): { id: string; name: string; a
 
 export function ensureDmScope(memberId: string): string {
   return new ConversationsRepository().ensureDmScope(memberId);
+}
+
+/** ⑤ B: canonical member↔member scope, opened on first send. */
+export function ensureMmScope(memberA: string, memberB: string): string {
+  return new ConversationsRepository().ensureMmScope(memberA, memberB);
 }

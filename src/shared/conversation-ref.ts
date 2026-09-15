@@ -13,6 +13,36 @@ export type ScopeId = string; // "dm:<memberId>" | "room:<roomId>"
 
 const DM_PREFIX = "dm:";
 const ROOM_PREFIX = "room:";
+const MM_PREFIX = "mm:";
+
+/**
+ * Member↔member private chat scope (⑤ B, 2026-09-15): `mm:` + the two member ids
+ * sorted and joined by a single dash. Member ids (`mem_<uuid>`) contain dashes,
+ * but `mem_` appears only as their prefix, so the pair splits at the second
+ * `mem_` occurrence; canonical order is enforced on parse.
+ */
+export function mmScopeIdOf(memberA: string, memberB: string): ScopeId {
+  if (!memberA || !memberB || memberA === memberB) throw new Error("mm scope requires two distinct member ids");
+  const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
+  return `${MM_PREFIX}${a}-${b}`;
+}
+
+/** Parse a `mm:` scope id into its canonical [memberA, memberB] pair, or null. */
+export function parseMmScopeId(scope: string): [string, string] | null {
+  if (typeof scope !== "string" || !scope.startsWith(MM_PREFIX)) return null;
+  const body = scope.slice(MM_PREFIX.length);
+  const second = body.indexOf("mem_", 1);
+  if (second <= 0 || body[second - 1] !== "-") return null;
+  const a = body.slice(0, second - 1);
+  const b = body.slice(second);
+  if (!isMemberId(a) || !isMemberId(b) || a === b) return null;
+  const [x, y] = a < b ? [a, b] : [b, a];
+  return x === a && y === b ? [x, y] : null;
+}
+
+export function isMmScopeId(scope: string): boolean {
+  return typeof scope === "string" && scope.startsWith(MM_PREFIX);
+}
 
 export function scopeIdOf(ref: ConversationRef): ScopeId {
   if (ref.kind === "dm") {
@@ -45,6 +75,7 @@ export function parseScopeId(s: string): ConversationRef | null {
  */
 export function chatScopeRoomId(scopeOrRoomId: string): string | null {
   if (scopeOrRoomId.startsWith(DM_PREFIX)) return null;
+  if (scopeOrRoomId.startsWith(MM_PREFIX)) return null;
   return scopeOrRoomId.startsWith(ROOM_PREFIX) ? scopeOrRoomId.slice(ROOM_PREFIX.length) : scopeOrRoomId;
 }
 

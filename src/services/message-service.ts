@@ -1,5 +1,6 @@
 import { getDatabase } from "../storage/database.js";
 import { appendMessageInTransaction, type MessageInput } from "../storage/message-repository.js";
+import { parseMmScopeId } from "../shared/conversation-ref.js";
 import { executionScopeId } from "../storage/repositories/execution-identity.js";
 import { DeliveryRepository, type CapturedMessage, type DeliveryActor, type CapturedDeliverySnapshot } from "../storage/repositories/delivery-repository.js";
 import { ReplyObligationRepository } from "../storage/repositories/reply-obligation-repository.js";
@@ -17,13 +18,14 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
     const members = new MembersRepository(db);
     const actor = (id: string): DeliveryActor => ({ actorKey: id, memberId: members.getRetained(id) ? id : null });
     const isDm = scopeId.startsWith("dm:");
+    const isMm = scopeId.startsWith("mm:");
     let roster: Array<{ id: string; name: string }> | undefined;
     const ids = (provided: string[] | undefined, names: string[] | undefined): string[] => {
       if (provided !== undefined) return [...new Set(provided)];
       if (!names?.length) return [];
       if (!roster) {
         const owner = isDm ? members.getRetained(scopeId.slice(3)) : null;
-        roster = isDm ? (owner ? [owner] : []) : getRoomMembers(scopeId);
+        roster = isDm ? (owner ? [owner] : []) : isMm ? [] : getRoomMembers(scopeId);
       }
       if (names.includes("all")) return roster.map(member => member.id);
       const current = roster;
@@ -32,7 +34,7 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
     // Match persisted JSON, including absent optional fields. Publish derived IDs
     // in the message/outbox too: renderers and wait listeners must see the same targets.
     const prepared = JSON.parse(JSON.stringify(input)) as MessageInput;
-    if (!prepared.type && !isDm) {
+    if (!prepared.type && !isDm && !isMm) {
       if (prepared.mentionMemberIds === undefined) prepared.mentionMemberIds = ids(undefined, prepared.mentions);
     }
     if (prepared.needResponse !== undefined && prepared.needResponseMemberIds === undefined) prepared.needResponseMemberIds = ids(undefined, prepared.needResponse);
@@ -44,6 +46,14 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
     if (messageType === "chat") {
       if (isDm) {
         if (origin === "user") targets.dm = [actor(scopeId.slice(3))];
+      } else if (isMm) {
+        // Member↔member chat: every member-sent chat line is addressed to the other
+        // member of the pair (delivery kind "ordinary"; a pair has exactly one peer).
+        if (sender) {
+          const pair = parseMmScopeId(scopeId);
+          const other = pair?.find(id => id !== sender.memberId);
+          if (other && members.getRetained(other)) targets.ordinary = [{ actorKey: other, memberId: other }];
+        }
       } else {
         targets.ordinary = ids(message.mentionMemberIds, message.mentions).filter(id => id !== sender?.actorKey).map(actor);
       }
