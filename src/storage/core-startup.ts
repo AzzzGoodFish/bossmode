@@ -16,6 +16,7 @@ import {cleanupRetiredTopicSessionFiles} from "./topic-session-cleanup.js";
 import {cleanupRetiredBackgroundSessionFiles} from "./background-session-cleanup.js";
 import {archiveRetiredScopeSessions} from "./member-session-archive.js";
 import {archiveLegacySharedMemory,cleanupMemberMemoryScopes} from "./memory-retirement-migration.js";
+import {copyRoomPrinciplesToDescriptions} from "./room-description-migration.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
@@ -99,5 +100,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
  // Assets batch ④ (fish #20035): legacy shared memory → global archive; member memory/scopes folded.
  archiveLegacySharedMemory(options.root,result.db);
  cleanupMemberMemoryScopes(options.root,result.db);
+ // ⑤ A (fish #20135): legacy room principles content → rooms.description.
+ copyRoomPrinciplesToDescriptions(options.root,result.db);
  return result;
 }

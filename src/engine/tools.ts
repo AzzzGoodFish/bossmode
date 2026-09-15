@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { postMessage } from "../communication/message-bus.js";
 import * as messageStore from "../workspace/message-store.js";
 import * as roomStore from "../workspace/room-store.js";
-import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../workspace/member-memory-store.js";
 import { getMember } from "../workspace/member-registry.js";
@@ -93,10 +92,10 @@ function chatScopeLabel(scopeId: string): string {
   return roomStore.getRoom(scopeId)?.name || scopeId;
 }
 
-/** Compact description (first line, capped) from a room's principles content. */
+/** Compact description (first line, capped) from a room's stored description. */
 function chatDescriptionOf(roomId: string, max = 120): string {
   try {
-    const line = (principlesStore.readPrinciples(roomId, "room")?.content || "").split("\n").map((part) => part.trim()).find(Boolean) || "";
+    const line = (roomStore.getRoom(roomId)?.description || "").split("\n").map((part) => part.trim()).find(Boolean) || "";
     return line.length > max ? `${line.slice(0, max - 1)}…` : line;
   } catch {
     return "";
@@ -501,7 +500,7 @@ export async function handleToolCallback(
           id: `room:${target.roomId}`,
           kind: "room",
           name: room.name,
-          description: (principlesStore.readPrinciples(target.roomId, "room")?.content || "").trim().slice(0, 500),
+          description: room.description ?? "",
           members,
         },
       };
@@ -673,34 +672,18 @@ export async function handleToolCallback(
       if (missing.length > 0) return { ok: false, error: `Unknown member id: ${missing.join(", ")}` };
       const invitees = allIds.map((id) => getMember(id)!);
 
+      const description = typeof params?.description === "string" ? params.description.trim() : "";
+      if (description.length > roomStore.ROOM_DESCRIPTION_MAX_CHARS) {
+        return { ok: false, error: `description must be ${roomStore.ROOM_DESCRIPTION_MAX_CHARS} characters or fewer` };
+      }
+
       let room;
       try {
         // DB members already have validated identities. Do not materialize
         // room-local drafts with the retired ASCII-only name validation.
-        room = roomStore.createRoom(name, undefined, allIds, undefined, { promptLeaderMemberId: creator.id });
+        room = roomStore.createRoom(name, undefined, allIds, undefined, { promptLeaderMemberId: creator.id, description });
       } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };
-      }
-
-      const description = typeof params?.description === "string" ? params.description.trim() : "";
-      if (description) {
-        try {
-          principlesStore.writePrinciples({
-            roomId: room.id,
-            scope: "room",
-            content: description,
-            actor: { type: "member", memberId: creator.id, name: creator.name },
-            reason: "chat_create initial description",
-            operation: "write",
-          });
-        } catch (err: any) {
-          return {
-            ok: true,
-            chat: { id: `room:${room.id}`, kind: "room", name: room.name },
-            members: invitees.map((m) => ({ id: m.id, name: m.name })),
-            warning: `Chat created but description write failed: ${err?.message || err}`,
-          };
-        }
       }
 
       return {
@@ -737,14 +720,12 @@ export async function handleToolCallback(
       }
 
       if (typeof params?.description === "string") {
-        principlesStore.writePrinciples({
-          roomId: targetRoomId,
-          scope: "room",
-          content: params.description,
-          actor: { type: "member", memberId: actorLocal.id, name: actorLocal.name },
-          reason: "chat_edit description update",
-          operation: "write",
-        });
+        const next = params.description.trim();
+        if (next.length > roomStore.ROOM_DESCRIPTION_MAX_CHARS) {
+          return { ok: false, error: `description must be ${roomStore.ROOM_DESCRIPTION_MAX_CHARS} characters or fewer` };
+        }
+        const updated = roomStore.updateRoomDescription(targetRoomId, next);
+        if (!updated) return { ok: false, error: "Failed to update description" };
       }
 
       // Invite additions

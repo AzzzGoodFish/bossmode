@@ -68,8 +68,11 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
 addRoute("POST", "/api/rooms", async (req, res) => {
   const body = (await parseBody(req)) as {
     name?: string; cwd?: string; memberIds?: unknown; leaderMemberId?: string | null;
-    principles?: string; ruleDocs?: string[]; docsPath?: string | null;
+    description?: string; ruleDocs?: string[]; docsPath?: string | null;
   };
+  if ("principles" in body) {
+    sendJson(res, 400, { error: "principles is retired — use description" }); return;
+  }
   if (typeof body.name !== "string" || !body.name.trim()) {
     sendJson(res, 400, { error: "name is required" }); return;
   }
@@ -88,11 +91,8 @@ addRoute("POST", "/api/rooms", async (req, res) => {
   try {
     const room = roomStore.createRoom(body.name.trim(), body.cwd, body.memberIds as string[], body.ruleDocs, {
       promptLeaderMemberId: body.leaderMemberId ?? undefined, docsPath: body.docsPath,
+      description: typeof body.description === "string" ? body.description : undefined,
     });
-    if (typeof body.principles === "string" && body.principles.trim()) {
-      principlesStore.writePrinciples({roomId: room.id, scope: "room", content: body.principles,
-        actor: {type: "user"}, reason: "create room", operation: "write"});
-    }
     sendJson(res, 200, room);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -143,6 +143,7 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   const body = (await parseBody(req)) as {
     name?: string;
     cwd?: string;
+    description?: string | null;
     ruleDocs?: string[];
     promptLeaderMemberId?: string | null;
     docsPath?: string | null;
@@ -154,6 +155,19 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   if (typeof body.name === "string" && body.name.length > 0 && body.name !== room.name) {
     updated = roomStore.updateRoomName(params.id, body.name) || updated;
     changed = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "description")) {
+    try {
+      const next = typeof body.description === "string" ? body.description : "";
+      if ((room.description ?? "") !== next.trim()) {
+        updated = roomStore.updateRoomDescription(params.id, next) || updated;
+        changed = true;
+      }
+    } catch (err: any) {
+      sendJson(res, 400, { error: err.message || String(err) });
+      return;
+    }
   }
 
 
@@ -195,7 +209,7 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   }
 
   if (!changed) {
-    sendJson(res, 400, { error: "Nothing to update (provide name, cwd, ruleDocs, promptLeaderMemberId, or docsPath)" });
+    sendJson(res, 400, { error: "Nothing to update (provide name, description, cwd, ruleDocs, promptLeaderMemberId, or docsPath)" });
     return;
   }
   sendJson(res, 200, updated);
@@ -205,14 +219,10 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
 // Writes happen exclusively through member tools (read/edit/write_memory) so governance
 // (reason, budget, history) is enforced in one place.
 
-addRoute("GET", "/api/rooms/:id/principles", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const principles = principlesStore.readPrinciplesWithBudget(params.id, "room");
-  sendJson(res, 200, { ...principles, asset: "principles", scope: "room", budgetHeader: principlesStore.formatBudgetHeader(principles.budget), suggestedTemplate: principles.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
+// ⑤ A: room principles is retired — the room description (rooms.description,
+// name + description) is the room's shared text. Member-scope assets below stay.
+addRoute("GET", "/api/rooms/:id/principles", async (_req, res, _params) => {
+  sendJson(res, 410, { error: "gone", message: "Room principles is retired — use the room description (GET /api/rooms/:id)" });
 });
 
 addRoute("GET", "/api/rooms/:id/members/:memberRef/principles", async (_req, res, params) => {

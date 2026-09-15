@@ -423,6 +423,9 @@ export interface Room {
   promptLeaderMemberId?: string;
   /** Default docs subtree prefix relative to ~/.bossmode/knowledge/docs/, e.g. "bossmode/". */
   docsPath?: string;
+  /** ⑤ A: free-form room description (分工/合作细节/公告), ≤2000 chars on write.
+   * Not injected into prompts — read on demand via chat_info or the UI. */
+  description?: string;
   /** Authoritative room-local members for v0.14+. */
   roomMembers?: RoomMemberRecord[];
   /**

@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Crown, Loader2, Trash2, UserPlus, X } from "lucide-react";
 import { Sheet } from "./Sheet";
 import { StaffBadge } from "./StaffBadge";
-import type { ContactEntry, MemberInfo, Principles, Room } from "../api/client";
-import { getRoomMembers, getRoomPrinciples, updateRoomSettings, deleteRoom, getContacts, inviteRoomMember, removeRoomMember } from "../api/client";
+import type { ContactEntry, MemberInfo, Room } from "../api/client";
+import { getRoomMembers, updateRoomSettings, deleteRoom, getContacts, inviteRoomMember, removeRoomMember } from "../api/client";
 import { useDialog } from "./dialogs";
 import { Markdown } from "./Markdown";
 
@@ -21,37 +21,6 @@ function normalizeDocsPathInput(value: string): string {
   return trimmed ? `${trimmed}/` : "";
 }
 
-type PrinciplesPreviewState =
-  | { status: "loading" }
-  | { status: "ready"; principles: Principles }
-  | { status: "error" };
-
-export function promptPreviewDisplayState(state: PrinciplesPreviewState): "loading" | "loaded" | "empty" | "error" {
-  if (state.status !== "ready") return state.status;
-  return state.principles.content.trim() ? "loaded" : "empty";
-}
-
-function PromptPreview({ state, onRetry }: { state: PrinciplesPreviewState; onRetry: () => void }) {
-  const displayState = promptPreviewDisplayState(state);
-  const content = state.status === "ready" ? state.principles.content.trim() : "";
-  return (
-    <div className="rounded-lg border border-line bg-inset p-3 min-h-36 max-h-[46vh] overflow-auto">
-      {displayState === "loading" ? (
-        <div className="text-xs text-ink-4 leading-relaxed">Loading shared guidance…</div>
-      ) : displayState === "error" ? (
-        <div role="alert" className="flex items-center justify-between gap-3 text-xs text-blocked">
-          <span>Couldn’t load shared guidance.</span>
-          <button type="button" onClick={onRetry} className="shrink-0 rounded border border-blocked/40 px-2 py-1 text-[11px] hover:bg-blocked/10">Retry</button>
-        </div>
-      ) : displayState === "loaded" ? (
-        <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={content} /></div>
-      ) : (
-        <div className="text-xs text-ink-4 leading-relaxed">No shared guidance yet.</div>
-      )}
-    </div>
-  );
-}
-
 export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: RoomSettingsDialogProps) {
   const { toast, confirm } = useDialog();
   const [name, setName] = useState(room.name);
@@ -63,23 +32,9 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
-  const [principlesState, setPrinciplesState] = useState<PrinciplesPreviewState>({ status: "loading" });
-  const principlesRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const loadPrinciples = useCallback(async () => {
-    const request = ++principlesRequestRef.current;
-    setPrinciplesState({ status: "loading" });
-    try {
-      const principles = await getRoomPrinciples(room.id);
-      if (request === principlesRequestRef.current) setPrinciplesState({ status: "ready", principles });
-    } catch (err) {
-      console.error("Failed to load Room prompt", err);
-      if (request === principlesRequestRef.current) setPrinciplesState({ status: "error" });
-    }
-  }, [room.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -90,8 +45,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
     setError(null);
     getRoomMembers(room.id).then(setMembers).catch((err) => { console.error("Failed to load Room members", err); toast("Couldn’t load Room members. Close Settings and try again.", "error"); });
     getContacts().then((r) => setContacts(r.contacts)).catch(() => {});
-    void loadPrinciples();
-  }, [open, room, toast, loadPrinciples]);
+  }, [open, room, toast]);
 
   const profileRevision = useMemberProfileRevision();
   useEffect(() => {
@@ -326,11 +280,17 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
 
             <section className="rounded-xl border border-line bg-inset/50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-ink-1">Room principles preview</h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full border border-line text-ink-4 uppercase">preview only</span>
+                <h3 className="text-sm font-semibold text-ink-1">Description</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full border border-line text-ink-4 uppercase">read-only preview</span>
               </div>
-              <p className="text-xs text-ink-4">Room Principles are shared by all Room members. Preview only. {currentLeader ? <>Ask <span className="font-mono">@{currentLeader.name}</span> to update it in chat.</> : "Choose a Room leader, then ask them to update it in chat."}</p>
-              <PromptPreview state={principlesState} onRetry={() => void loadPrinciples()} />
+              <p className="text-xs text-ink-4">The Room description is shared with all members. Members update it with <span className="font-mono">chat_edit</span> in chat.</p>
+              <div className="rounded-lg border border-line bg-inset p-3 min-h-24 max-h-[46vh] overflow-auto">
+                {room.description?.trim() ? (
+                  <div className="text-[13px] text-ink-1 leading-relaxed preview-markdown"><Markdown content={room.description} /></div>
+                ) : (
+                  <div className="text-xs text-ink-4 leading-relaxed">No description yet.</div>
+                )}
+              </div>
             </section>
 
             <section className="rounded-xl border border-blocked/30 bg-blocked-dim/30 p-4 space-y-3">

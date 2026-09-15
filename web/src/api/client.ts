@@ -711,6 +711,8 @@ export interface Mainline extends Principles {
 export interface Room {
   id: string;
   name: string;
+  /** ⑤: room description — shown in chat_info / the room settings dialog. */
+  description?: string;
   cwd: string;
   members: string[];
   /** 0.20: authoritative member composition — join via useGlobalMembers(). */
@@ -750,7 +752,7 @@ export async function updateRoomBindings(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
+  patch: { name?: string; description?: string | null; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",
@@ -771,10 +773,6 @@ export async function renameRoom(id: string, name: string): Promise<Room> {
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
-}
-
-export async function getRoomPrinciples(roomId: string): Promise<Principles> {
-  return apiFetch(`/api/rooms/${roomId}/principles`);
 }
 
 export async function getMemberPrinciples(roomId: string, memberRef: string): Promise<Principles> {

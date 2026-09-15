@@ -71,9 +71,8 @@ describe("batch 3 gateway tools", () => {
     const leader = roomStore.getRoomMembers(roomId).find((m) => m.id === room.promptLeaderMemberId);
     expect(leader?.name).toBe("pm");
 
-    const principles = await import("../../src/workspace/principles-store.js");
-    const rp = principles.readPrinciples(roomId, "room");
-    expect(rp.content).toContain("Ship it");
+    const room2 = roomStore.getRoom(roomId)!;
+    expect(room2.description).toContain("Ship it");
 
     // Retired parameter names carry guidance instead of silent fallback.
     const legacy = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {

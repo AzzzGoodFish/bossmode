@@ -93,7 +93,7 @@ export const PARAM_DESCRIPTIONS = {
   listLimit: "Max entries to return (default 50).",
   listOffset: "Skip this many entries (for paging).",
   // chat_create / chat_edit / profile
-  chatDescription: "Description text; an empty string clears it.",
+  chatDescription: "Description text (≤2000 characters); an empty string clears it.",
   createMembers: "Member ids to include; the creator is always included.",
   addMembers: "Member ids to add.",
   removeMembers: "Member ids to remove (history and memory are retained).",

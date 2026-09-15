@@ -12,6 +12,7 @@ import { memberArchivesMigration } from "../../src/storage/schema/member-archive
 import { assetsMigration } from "../../src/storage/schema/assets.js";
 import { memberSessionsMigration } from "../../src/storage/schema/member-sessions.js";
 import { memberRuntimeStateMigration } from "../../src/storage/schema/member-runtime-state.js";
+import { roomDescriptionMigration } from "../../src/storage/schema/room-description.js";
 import * as registry from "../../src/workspace/member-registry.js";
 import * as profile from "../../src/workspace/member-profile.js";
 import * as wizard from "../../src/workspace/member-archive.js";
@@ -46,7 +47,7 @@ vi.mock("node:fs", async original => {
     },
   };
 });
-const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, assetsMigration, memberArchivesMigration, memberSessionsMigration, memberRuntimeStateMigration];
+const migrations = [baseStorageMigration, membersMigration, settingsMigration, conversationsMigration, executionMigration, assetsMigration, memberArchivesMigration, memberSessionsMigration, memberRuntimeStateMigration, roomDescriptionMigration];
 function reopen(): void {
   db.close(); db = openDatabase(join(root, "bossmode.db")); applyStorageMigrations(db, migrations); bindDatabase(db);
 }

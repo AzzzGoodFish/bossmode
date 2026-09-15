@@ -163,6 +163,7 @@ export function roomMemberAssetRoots(roomId: string): string[] {
 export function createRoom(name: string, cwd: string | undefined, memberIds: string[], ruleDocs?: string[], opts?: {
   promptLeaderMemberId?: string;
   docsPath?: string | null;
+  description?: string | null;
 }): Room {
   const repository = new ConversationsRepository();
   repository.db.assertOutsideTransaction();
@@ -173,11 +174,16 @@ export function createRoom(name: string, cwd: string | undefined, memberIds: str
   for (const id of ids) if (!getMember(id)) throw new Error(`Member not found: ${id}`);
   const leader = opts?.promptLeaderMemberId ?? ids[0];
   if (leader && !ids.includes(leader)) throw new Error("leaderMemberId must be one of memberIds");
+  const roomDescription = typeof opts?.description === "string" ? opts.description.trim() : "";
+  if (roomDescription.length > ROOM_DESCRIPTION_MAX_CHARS) {
+    throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
+  }
   const room: Room = {
     id: randomUUID(), name,
     members: [], globalMemberIds: ids,
     ...(leader ? { promptLeaderMemberId: leader, promptLeaderGlobalMemberId: leader } : {}),
     docsPath: normalizeRoomDocsPath(opts?.docsPath) || slugifyRoomDocsPath(name),
+    ...(roomDescription ? { description: roomDescription } : {}),
     createdAt: Date.now(),
     ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
@@ -495,6 +501,23 @@ export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string)
   }
 
   return affected;
+}
+
+/** ⑤ A: room description (name + description) — product cap on every write. */
+export const ROOM_DESCRIPTION_MAX_CHARS = 2000;
+
+/** Set or clear the room description. Empty string clears the field. */
+export function updateRoomDescription(roomId: string, description: string): Room | null {
+  const room = getRoom(roomId);
+  if (!room) return null;
+  const next = String(description ?? "").trim();
+  if (next.length > ROOM_DESCRIPTION_MAX_CHARS) {
+    throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
+  }
+  if (next) room.description = next;
+  else delete room.description;
+  writeRoom(room);
+  return room;
 }
 
 export function listRooms(): Room[] {

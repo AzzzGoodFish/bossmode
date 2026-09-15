@@ -4,7 +4,7 @@ import type { Room, RoomMemberRecord, CursorMap } from "../../shared/types.js";
 interface ScopeRow { id: string; kind: "room" | "dm"; room_id: string | null; member_id: string | null }
 interface RoomRow {
   id: string; name: string; created_at: number; legacy_cwd: string | null;
-  docs_path: string | null; leader_member_id: string | null; leader_global_member_id: string | null;
+  docs_path: string | null; description: string | null; leader_member_id: string | null; leader_global_member_id: string | null;
   roster_kind: "global" | "local" | "names"; has_local_records: number; has_rule_docs: number; has_overrides: number;
 }
 interface SnapshotRow {
@@ -42,12 +42,12 @@ export class ConversationsRepository {
     }
     this.db.transaction(() => {
       this.ensureScope(room.id, "room", room.id, null);
-      this.db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,leader_member_id,leader_global_member_id,
-        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      this.db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
+        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,created_at=excluded.created_at,legacy_cwd=excluded.legacy_cwd,
-        docs_path=excluded.docs_path,leader_member_id=excluded.leader_member_id,leader_global_member_id=excluded.leader_global_member_id,
+        docs_path=excluded.docs_path,description=excluded.description,leader_member_id=excluded.leader_member_id,leader_global_member_id=excluded.leader_global_member_id,
         roster_kind=excluded.roster_kind,has_local_records=excluded.has_local_records,has_rule_docs=excluded.has_rule_docs,has_overrides=excluded.has_overrides`,
-        room.id, room.name, room.createdAt, room.cwd ?? null, room.docsPath ?? null, room.promptLeaderMemberId ?? null,
+        room.id, room.name, room.createdAt, room.cwd ?? null, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null,
         room.promptLeaderGlobalMemberId ?? null, Array.isArray(room.globalMemberIds) ? "global" : Array.isArray(room.roomMembers) ? "local" : "names",
         Number(Array.isArray(room.roomMembers)), Number(Array.isArray(room.ruleDocs)), Number(room.memberOverrides !== undefined));
       for (const table of ["room_members", "room_member_labels", "room_member_snapshots", "room_member_overrides", "room_rule_docs"]) {
@@ -74,6 +74,7 @@ export class ConversationsRepository {
       members: this.db.all<{ label: string }>("SELECT label FROM room_member_labels WHERE room_id=? ORDER BY position", id).map(r => r.label),
       ...(row.legacy_cwd !== null ? { cwd: row.legacy_cwd } : {}),
       ...(row.docs_path !== null ? { docsPath: row.docs_path } : {}),
+      ...(row.description !== null ? { description: row.description } : {}),
       ...(row.leader_member_id !== null ? { promptLeaderMemberId: row.leader_member_id } : {}),
       ...(row.leader_global_member_id !== null ? { promptLeaderGlobalMemberId: row.leader_global_member_id } : {}),
     };
