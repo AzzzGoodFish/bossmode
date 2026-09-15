@@ -512,14 +512,11 @@ export async function handleToolCallback(
       if (!ref) return { ok: false, error: "member is required — pass a name or id (see member_list)" };
       const member = resolveMemberRef(ref);
       if (!member) return { ok: false, error: `Member not found: ${ref} — use member_list to see members.` };
-      // Transitional live status (batch 1 moves status to member level): same
-      // source as the member panel — working if any scope is working.
+      // ① B4: member-level live status — one runtime per member, one status.
       let status = "idle";
       try {
         const am = await import("./agent-manager.js");
-        const workingScopes = am.getMemberActiveScopes(member.id);
-        const dmLive = am.getScopeLiveStatus(`dm:${member.id}`);
-        status = workingScopes.length > 0 || dmLive === "working" ? "working" : "idle";
+        status = am.getMemberLiveStatus(member.id) === "working" ? "working" : "idle";
       } catch { /* runtime cold — idle */ }
       return { ok: true, member: { id: member.id, name: member.name, description: member.title ?? "", status } };
     }

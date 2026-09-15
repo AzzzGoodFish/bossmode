@@ -236,10 +236,12 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
     const rooms = roomStore.listRooms();
     let getMemberActiveScopes: ((id: string) => string[]) | null = null;
     let getScopeLiveStatus: ((sid: string) => string) | null = null;
+    let getMemberLiveStatus: ((id: string) => string) | null = null;
     try {
       const am = await import("../engine/agent-manager.js");
       getMemberActiveScopes = (id) => am.getMemberActiveScopes(id);
       getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
+      getMemberLiveStatus = (id) => am.getMemberLiveStatus(id);
     } catch { /* runtime cold */ }
 
     const contacts = listMembers().map((m) => {
@@ -254,8 +256,8 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
       membershipScopes.unshift(scopeIdOf({ kind: "dm", memberId: m.id }));
 
       const workingScopes = getMemberActiveScopes?.(m.id) || [];
-      const dmStatus = getScopeLiveStatus?.(scopeIdOf({ kind: "dm", memberId: m.id })) || "idle";
-      const status = workingScopes.length > 0 || dmStatus === "working" ? "working" : "idle";
+      // ① B4: status is member-level — one runtime, one status, every chat.
+      const status = getMemberLiveStatus?.(m.id) === "working" ? "working" : "idle";
 
       return {
         memberId: m.id,

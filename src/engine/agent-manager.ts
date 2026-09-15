@@ -319,18 +319,25 @@ export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inac
   return "inactive";
 }
 
-/** Working-set for contacts: which scopes a global member is currently active in. */
+/**
+ * ① B4: working-set for contacts — the scopes where this member has unhandled
+ * messages queued or a turn being served right now (one runtime serves every
+ * chat, so the build scope says nothing about where it is active).
+ */
 export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
   const out: ScopeId[] = [];
+  const seen = new Set<string>();
+  const push = (scope: string) => { if (scope && !seen.has(scope)) { seen.add(scope); out.push(scope as ScopeId); } };
+  const own = instances.get(instanceKey(globalMemberId));
+  for (const scope of pendingRuntimeInputOwners(globalMemberId)) push(scope);
+  if (own && (own.status === "working" || own.dispatchState !== "idle")) push(own.activeChat?.scopeId || own.scopeId);
+  if (own || out.length) return Array.from(out);
+  // Historical name-only members (no mem_ id): keep the legacy room/DM match.
   for (const inst of instances.values()) {
     if (inst.status !== "working" && inst.dispatchState === "idle") continue;
-    if (inst.memberId === globalMemberId) { out.push(inst.scopeId); continue; }
     if (inst.memberId.startsWith("mem_")) continue;
-    // Match by global id (DM) or by sourceMemberId / name for room locals
     if (inst.scopeId.startsWith("dm:")) {
-      if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) {
-        out.push(inst.scopeId);
-      }
+      if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) push(inst.scopeId);
       continue;
     }
     const roomUuid = inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId;
@@ -339,9 +346,15 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
     const local = roomStore.getRoomMembers(r.id).find((m) => m.id === inst.memberId || m.name === inst.agentName);
     if (!local) continue;
     const gid = roomStore.resolveGlobalMemberId(r, local);
-    if (gid === globalMemberId) out.push(scopeIdOf({ kind: "room", roomId: r.id }));
+    if (gid === globalMemberId) push(scopeIdOf({ kind: "room", roomId: r.id }));
   }
-  return Array.from(new Set(out));
+  return Array.from(out);
+}
+
+/** ① B4: member-level live status — one runtime, one status, every chat. */
+export function getMemberLiveStatus(memberId: string): AgentStatus {
+  const instance = instances.get(instanceKey(memberId));
+  return instance ? instance.status : "inactive";
 }
 
 function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {

@@ -3,7 +3,7 @@
  *
  * Locks: member-level read-only lookup by name or id — name + description
  * (title storage until the profile rename) + live status from the same source
- * as the member panel (working if any scope is working). Never activates.
+ * as the member panel (① B4: one runtime per member, one status). Never activates.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -33,10 +33,12 @@ vi.mock("../../src/workspace/member-registry.js", () => ({
 
 const getMemberActiveScopes = vi.fn((id: string) => (id === "mem_pm" ? ["room:r1"] : []));
 const getScopeLiveStatus = vi.fn((sid: string) => (sid === "dm:mem_qa" ? "working" : "inactive"));
+const getMemberLiveStatus = vi.fn((id: string) => (id === "mem_pm" || id === "mem_qa" ? "working" : "idle"));
 
 vi.mock("../../src/engine/agent-manager.js", () => ({
   getMemberActiveScopes: (...args: unknown[]) => getMemberActiveScopes(...(args as [string])),
   getScopeLiveStatus: (...args: unknown[]) => getScopeLiveStatus(...(args as [string])),
+  getMemberLiveStatus: (...args: unknown[]) => getMemberLiveStatus(...(args as [string])),
 }));
 
 vi.mock("../../src/workspace/room-store.js", () => ({}));
@@ -47,6 +49,7 @@ beforeEach(() => {
   state.tmpDir = mkdtempSync(join(tmpdir(), "bossmode-member-info-"));
   getMemberActiveScopes.mockClear();
   getScopeLiveStatus.mockClear();
+  getMemberLiveStatus.mockClear();
 });
 
 afterEach(() => {
@@ -66,10 +69,11 @@ describe("member_info tool", () => {
     expect(result.member).toMatchObject({ name: "designer", description: "", status: "idle" });
   });
 
-  it("counts a working DM scope as working", async () => {
+  it("counts the member-level working status", async () => {
     const result = (await handleToolCallback("member_info", "room:r1", "pm", { member: "qa" })) as any;
     expect(result.ok).toBe(true);
     expect(result.member.status).toBe("working");
+    expect(getMemberLiveStatus).toHaveBeenCalledWith("mem_qa");
   });
 
   it("errors without throwing on unknown member and missing param", async () => {
