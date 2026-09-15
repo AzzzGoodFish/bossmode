@@ -6,6 +6,8 @@ import {
   applyRenameOps,
   assignShortIds,
   clearShortIdJournal,
+  isExcludedRelPath,
+  mapCompositeString,
   planFilesystemRenames,
   readShortIdJournal,
   renameSegment,
@@ -86,6 +88,43 @@ describe("renameSegment", () => {
     expect(renameSegment(`dm:${LEGACY_RECORD}`, mapping)).toBeNull();
     expect(renameSegment(`mm:${M1}-${LEGACY_RECORD}`, mapping)).toBeNull();
     expect(renameSegment("mem_active", mapping)).toBeNull();
+  });
+});
+
+describe("mapCompositeString", () => {
+  const mapping = fixtureMapping();
+
+  it("rebuilds mm pairs canonically inside composite strings", () => {
+    const flipped: ShortIdMapping = {
+      members: new Map([
+        [M1, "mem_zzzzzzzzzz"],
+        [M2, "mem_aaaaaaaaaa"],
+      ]),
+      rooms: new Map(),
+    };
+    expect(mapCompositeString(`message:mm:${M1}-${M2}:msg-1`, flipped)).toBe("message:mm:mem_aaaaaaaaaa-mem_zzzzzzzzzz:msg-1");
+  });
+
+  it("rewrites colon-delimited room scopes (dedupe keys)", () => {
+    expect(mapCompositeString(`message:${R1}:msg-004a07d4`, mapping)).toBe("message:rm_cccccccccc:msg-004a07d4");
+    expect(mapCompositeString(`scope-notification:${R1}:task-ui:msg-1`, mapping)).toBe("scope-notification:rm_cccccccccc:task-ui:msg-1");
+  });
+
+  it("never touches unmapped legacy records", () => {
+    expect(mapCompositeString(`dm:${LEGACY_RECORD}`, mapping)).toBe(`dm:${LEGACY_RECORD}`);
+  });
+});
+
+describe("isExcludedRelPath", () => {
+  it("matches the exclusion zones and leaves live paths alone", () => {
+    expect(isExcludedRelPath("backups/x/y.jsonl")).toBe(true);
+    expect(isExcludedRelPath("a/backups/b")).toBe(true);
+    expect(isExcludedRelPath("pi-agent/runtime/.migration-snapshots/x")).toBe(true);
+    expect(isExcludedRelPath("migration-backup-1/x")).toBe(true);
+    expect(isExcludedRelPath("members.json")).toBe(true);
+    expect(isExcludedRelPath("foo/bar.pre-1")).toBe(true);
+    expect(isExcludedRelPath("members/mem_x/persona.md")).toBe(false);
+    expect(isExcludedRelPath("rooms/rm_x/agent-events/mem_y.jsonl")).toBe(false);
   });
 });
 

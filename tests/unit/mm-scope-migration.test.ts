@@ -7,7 +7,11 @@ import { coreStorageMigrations } from "../../src/storage/migrations.js";
 
 let root: string;
 let db: Database | undefined;
-const withoutMmScope = () => coreStorageMigrations.filter((m) => m.id !== "core-mm-scope-v1" && m.id !== "core-short-ids-v1");
+// Everything before the mm-scope migration: a cutoff slice so later-appended
+// migrations (e.g. core-short-ids-v1) never leak into the "old schema" fixture.
+const MM_SCOPE_CUTOFF = coreStorageMigrations.findIndex((m) => m.id === "core-mm-scope-v1");
+if (MM_SCOPE_CUTOFF < 0) throw new Error("core-mm-scope-v1 missing from the migration list");
+const beforeMmScope = () => coreStorageMigrations.slice(0, MM_SCOPE_CUTOFF);
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "mm-scope-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });
@@ -16,7 +20,7 @@ describe("core-mm-scope-v1", () => {
   it("swaps the scope-kind constraint in place, keeps child FKs pointed at scopes, and accepts mm rows", () => {
     const database = openDatabase(join(root, "bossmode.db"));
     db = database;
-    applyStorageMigrations(database, withoutMmScope());
+    applyStorageMigrations(database, beforeMmScope());
     // Seed data through the old schema: a room scope, a dm scope, messages + cursors.
     database.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES('room-1','room','room-1',NULL),('dm:mem_a','dm',NULL,'mem_a')");
     database.run("INSERT INTO scope_sequences(scope_id,next_seq) VALUES('room-1',2),('dm:mem_a',2)");
