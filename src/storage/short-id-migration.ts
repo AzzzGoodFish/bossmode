@@ -7,8 +7,8 @@
  *  - filesystem rename planning (surface roots, exclusion-aware, legacy archive
  *    segments kept, idempotent) + journal write / replay / apply (replayed at
  *    startup before other upgrade steps, per the review口径);
- *  - the DB rewrite engine: one transaction (incl. the three immutability/guard
- *    triggers dropped and rebuilt verbatim), mapping table fill, scope-string
+ *  - the DB rewrite engine: one transaction (incl. every immutability/guard trigger
+ *    on a rewritten table dropped and rebuilt verbatim), mapping table fill, scope-string
  *    recomputation, structured JSON replacement on the known keys, ledger path
  *    updates, self-check, done flag + archive mirror.
  *
@@ -259,27 +259,42 @@ export function replayShortIdJournal(
  */
 export function replayShortIdJournalFromDisk(root: string):
   | { status: "none" }
+  | { status: "stale" }
   | { status: "replayed"; done: number; skipped: number }
   | { status: "failed"; failures: string[] } {
   if (!readShortIdJournal(root)) return { status: "none" };
-  return replayShortIdJournal(root, () => readMappingFromDisk(root));
+  const probe = probeMappingFromDisk(root);
+  if (probe.kind === "empty") {
+    // The journal is written before the rewrite transaction and renames only run after
+    // it commits, so an empty mapping means the run died pre-commit: nothing was
+    // renamed, the journal is stale, and the ordinary flow re-plans from scratch.
+    clearShortIdJournal(root);
+    logger.info("storage-upgrade", "Cleared stale short-id rename journal (rewrite never committed)");
+    return { status: "stale" };
+  }
+  return replayShortIdJournal(root, probe.kind === "mapping" ? () => probe.mapping : undefined);
 }
 
-function readMappingFromDisk(root: string): ShortIdMapping | null {
+type MappingProbe =
+  | { kind: "mapping"; mapping: ShortIdMapping }
+  | { kind: "empty" }
+  | { kind: "unavailable" };
+
+function probeMappingFromDisk(root: string): MappingProbe {
   const dbPath = join(root, "bossmode.db");
-  if (!existsSync(dbPath)) return null;
+  if (!existsSync(dbPath)) return { kind: "unavailable" };
   let raw: import("node:sqlite").DatabaseSync | undefined;
   try {
     const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
     raw = new DatabaseSync(dbPath, { readOnly: true });
     const rows = raw.prepare("SELECT kind, old_id, new_id FROM id_migration_map").all() as Array<{ kind: string; old_id: string; new_id: string }>;
-    if (rows.length === 0) return null;
+    if (rows.length === 0) return { kind: "empty" };
     const members = new Map<string, string>();
     const rooms = new Map<string, string>();
     for (const row of rows) (row.kind === "member" ? members : rooms).set(row.old_id, row.new_id);
-    return { members, rooms };
+    return { kind: "mapping", mapping: { members, rooms } };
   } catch {
-    return null; // unreadable mapping: replay still runs in strict mode
+    return { kind: "unavailable" }; // missing table or unreadable db: replay still runs in strict mode
   } finally {
     try { raw?.close(); } catch { /* already closed */ }
   }
@@ -376,14 +391,12 @@ const COLUMN_REWRITES: readonly ColumnRewrite[] = [
   { table: "topics", column: "room_id", mode: "room" },
 ];
 
-const REWRITE_TRIGGERS = ["captured_delivery_immutable", "delivery_capture_immutable", "queued_input_guard"] as const;
-
 const SINGLE_MEMBER_KEYS = new Set([
   "senderMemberId", "targetMemberId", "memberId", "actorKey", "senderActorKey", "targetActorKey",
-  "fromMemberId", "toMemberId", "ownerKey",
+  "fromMemberId", "toMemberId", "ownerKey", "sourceOwnerKey", "assigneeMemberId",
 ]);
-const MEMBER_LIST_KEYS = new Set(["mentionMemberIds", "needResponseMemberIds", "targetMemberIds", "memberIds"]);
-const SCOPE_KEYS = new Set(["scopeId", "scope_id"]);
+const MEMBER_LIST_KEYS = new Set(["mentionMemberIds", "needResponseMemberIds", "targetMemberIds", "memberIds", "subscriberMemberIds"]);
+const SCOPE_KEYS = new Set(["scopeId", "scope_id", "sourceScopeId"]);
 const ROOM_KEYS = new Set(["roomId", "room_id"]);
 const COMPOSITE_KEYS = new Set(["path", "root"]);
 
@@ -411,7 +424,7 @@ function mapMmTokens(value: string, mapping: ShortIdMapping): string {
     if (at < 0) { out += value.slice(index); break; }
     out += value.slice(index, at);
     let end = at + 3;
-    while (end < value.length && /[0-9a-z-]/.test(value[end]!)) end++;
+    while (end < value.length && /[0-9a-z_-]/.test(value[end]!)) end++;
     const token = value.slice(at + 3, end);
     const pair = parseMmScopeId(`mm:${token}`);
     if (pair) {
@@ -434,8 +447,22 @@ export function mapCompositeString(value: string, mapping: ShortIdMapping): stri
     if (out.includes(`rooms/${old}`)) out = out.split(`rooms/${old}`).join(`rooms/${next}`);
     if (out.includes(`room-${old}`)) out = out.split(`room-${old}`).join(`room-${next}`);
     if (out.includes(`room_${old}`)) out = out.split(`room_${old}`).join(`room_${next}`);
+    if (out.includes(`:${old}:`)) out = out.split(`:${old}:`).join(`:${next}:`);
   }
   return out;
+}
+
+const LEGACY_UNRESOLVED_PREFIX = "legacy-unresolved:";
+
+/** Exact member-id mapping, including the quarantined `legacy-unresolved:<id>` key form. */
+function mapMemberValue(value: string, mapping: ShortIdMapping): string {
+  const direct = mapping.members.get(value);
+  if (direct) return direct;
+  if (value.startsWith(LEGACY_UNRESOLVED_PREFIX)) {
+    const inner = mapping.members.get(value.slice(LEGACY_UNRESOLVED_PREFIX.length));
+    if (inner) return `${LEGACY_UNRESOLVED_PREFIX}${inner}`;
+  }
+  return value;
 }
 
 function containsOldId(value: string, mapping: ShortIdMapping): boolean {
@@ -495,11 +522,13 @@ export function transformJsonText(text: string, mapping: ShortIdMapping): JsonTr
   const walk = (value: unknown, key: string | null): unknown => {
     if (typeof value === "string") {
       if (key && SINGLE_MEMBER_KEYS.has(key)) {
-        const next = mapping.members.get(value);
-        if (next) return next;
+        const next = mapMemberValue(value, mapping);
+        if (next !== value) return next;
       } else if (key && SCOPE_KEYS.has(key)) {
         const next = mapScopeValue(value, mapping);
         if (next) return next;
+        const composite = mapCompositeString(value, mapping);
+        if (composite !== value) return composite;
       } else if (key && ROOM_KEYS.has(key)) {
         const next = mapping.rooms.get(value);
         if (next) return next;
@@ -511,7 +540,7 @@ export function transformJsonText(text: string, mapping: ShortIdMapping): JsonTr
     }
     if (Array.isArray(value)) {
       if (key && MEMBER_LIST_KEYS.has(key)) {
-        return value.map((element) => (typeof element === "string" ? mapping.members.get(element) ?? element : walk(element, key)));
+        return value.map((element) => (typeof element === "string" ? mapMemberValue(element, mapping) : walk(element, key)));
       }
       return value.map((element) => walk(element, key));
     }
@@ -634,7 +663,7 @@ function rewriteColumns(tx: Database, mapping: ShortIdMapping, stats: { jsonPars
       continue;
     }
     const transform =
-      mode === "member" ? (value: string) => mapping.members.get(value) ?? value
+      mode === "member" ? (value: string) => mapMemberValue(value, mapping)
         : mode === "room" ? (value: string) => mapping.rooms.get(value) ?? value
           : mode === "scope" ? (value: string) => mapScopeValue(value, mapping) ?? value
             : (value: string) => mapCompositeString(value, mapping);
@@ -657,22 +686,42 @@ function rewriteLegacyEventLedgers(tx: Database, mapping: ShortIdMapping, stats:
   }
 }
 
+const EXCLUDED_PATH_SEGMENTS = new Set(["backups", ".migration-snapshots"]);
+const EXCLUDED_FILE_RE = /^(members\.json|.*\.pre-[^.]*)$/;
+/** Exclusion zones from the migration design: their disk names keep the old ids. */
+export function isExcludedRelPath(rel: string): boolean {
+  const segments = rel.split("/").filter(Boolean);
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index]!;
+    if (EXCLUDED_PATH_SEGMENTS.has(segment) || segment.startsWith("migration-backup-")) return true;
+    if (index === segments.length - 1 && EXCLUDED_FILE_RE.test(segment)) return true;
+  }
+  return false;
+}
+
 function rewriteUpgradeFilePaths(tx: Database, mapping: ShortIdMapping): void {
-  // Every ledger path follows its renamed file (hash unchanged; backup_path keeps the
-  // exclusion-listed old value). Pending-retirement rows (retire=1, retired_at NULL)
-  // must keep resolving so the retirement pass can still find their sources.
+  // Every live ledger path follows its renamed file (hash unchanged; backup_path keeps
+  // the exclusion-listed old value). Pending-retirement rows (retire=1, retired_at NULL)
+  // must keep resolving so the retirement pass can still find their sources. Paths that
+  // point into exclusion zones (backups etc.) keep the old ids — the disk names there
+  // never change, so the ledger must stay paired with them.
   const rows = tx.all<{ r: number; p: string }>("SELECT rowid AS r, path AS p FROM storage_upgrade_files");
   for (const row of rows) {
+    if (isExcludedRelPath(row.p)) continue;
     const next = mapCompositeString(row.p, mapping);
     if (next !== row.p) tx.run("UPDATE storage_upgrade_files SET path=? WHERE rowid=?", next, row.r);
   }
 }
 
 function snapshotTriggers(tx: Database): Array<{ name: string; sql: string }> {
-  const placeholders = REWRITE_TRIGGERS.map(() => "?").join(",");
+  // Every trigger on a rewritten table must be dropped for the rewrite and rebuilt
+  // verbatim afterwards (immutability/guard triggers on deliveries, inputs and reply
+  // bookkeeping all abort direct updates).
+  const tables = [...new Set([...COLUMN_REWRITES.map((entry) => entry.table), "scopes", "members", "rooms"])];
+  const placeholders = tables.map(() => "?").join(",");
   return tx.all<{ name: string; sql: string }>(
-    `SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name IN (${placeholders})`,
-    ...REWRITE_TRIGGERS,
+    `SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name IN (${placeholders}) ORDER BY name`,
+    ...tables,
   );
 }
 
@@ -698,7 +747,8 @@ function checkNoOldIds(tx: Database, mapping: ShortIdMapping): string[] {
       count = tx.get<{ n: number }>(
         `SELECT COUNT(*) AS n FROM "${table}" WHERE ${c} IS NOT NULL AND (${c} GLOB ${OLD_MEMBER_GLOB}`
         + ` OR ${c} LIKE '%rooms/________-____-____-____-____________%'`
-        + ` OR ${c} LIKE '%room-________-____-____-____-____________%')`,
+        + ` OR ${c} LIKE '%room-________-____-____-____-____________%'`
+        + ` OR ${c} GLOB '*room_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*')`,
       )?.n;
     } else {
       count = jsonResidualCount(tx, table, column, mapping);
@@ -710,6 +760,12 @@ function checkNoOldIds(tx: Database, mapping: ShortIdMapping): string[] {
     + ` OR member_id GLOB ${OLD_MEMBER_GLOB} OR room_id LIKE ${UUID_LIKE})`,
   )?.n;
   if (scopes && scopes > 0) failures.push(`scopes: ${scopes}`);
+  const ledgerRows = tx.all<{ v: string }>(
+    "SELECT value AS v FROM storage_meta WHERE key LIKE 'legacy-event-occurrence-v1:%' AND value IS NOT NULL",
+  );
+  let ledgerResidual = 0;
+  for (const row of ledgerRows) if (jsonResidual(row.v, mapping)) ledgerResidual++;
+  if (ledgerResidual > 0) failures.push(`storage_meta.ledger: ${ledgerResidual}`);
   return failures;
 }
 
@@ -722,9 +778,11 @@ export interface ShortIdMigrationReport {
 }
 
 /**
- * The one-shot migration: single-transaction DB rewrite (mapping fill, root ids,
- * column surface, ledgers, trigger round-trip, FK + residue self-check), then
- * filesystem renames through the journal, then the archive mirror and done flag.
+ * The one-shot migration: plan + journal the filesystem renames, then the
+ * single-transaction DB rewrite (mapping fill, root ids, column surface, ledgers,
+ * trigger round-trip, FK + residue self-check), then apply the renames, then the
+ * archive mirror and done flag. Journal-before-commit makes the crash windows
+ * self-healing: a journal without a committed mapping is stale and gets cleared.
  * Any failure throws — startup must not continue on a half-migrated store.
  */
 export function migrateShortIds(root: string, db: Database): ShortIdMigrationReport {
@@ -733,6 +791,10 @@ export function migrateShortIds(root: string, db: Database): ShortIdMigrationRep
   }
   const mapping = loadOrAssignMapping(db);
   const stats = { jsonParseFailures: 0 };
+  // Plan and journal BEFORE the rewrite transaction; renames only run after it
+  // commits, so a journal with no committed mapping is always stale (see replay).
+  const ops = planFilesystemRenames(root, mapping);
+  if (ops.length > 0) writeShortIdJournal(root, ops);
   db.exec("PRAGMA foreign_keys=OFF");
   try {
     db.transaction((tx) => {
@@ -748,13 +810,14 @@ export function migrateShortIds(root: string, db: Database): ShortIdMigrationRep
       const residue = checkNoOldIds(tx, mapping);
       if (residue.length > 0) throw new Error(`Short-id rewrite incomplete: ${residue.join(", ")}`);
     });
+  } catch (error) {
+    if (ops.length > 0) clearShortIdJournal(root); // rewrite rolled back: the pre-commit plan is stale
+    throw error;
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
   }
-  const ops = planFilesystemRenames(root, mapping);
   let filesRenamed = 0;
   if (ops.length > 0) {
-    writeShortIdJournal(root, ops);
     const result = applyRenameOps(root, ops, { fold: (rel) => foldRelPath(rel, mapping) });
     if (result.failures.length > 0) {
       throw new Error(`Short-id filesystem rename failed (journal kept for replay): ${result.failures.slice(0, 5).join("; ")}`);
