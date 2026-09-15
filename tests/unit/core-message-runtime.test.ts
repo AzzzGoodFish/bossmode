@@ -8,7 +8,7 @@ import {DeliveryRepository} from "../../src/storage/repositories/delivery-reposi
 import {getDatabase} from "../../src/storage/database.js";
 setupTestWorkspace();
 
-it("room @all keeps working members undisturbed; `!name` stays plain text",async()=>{
+it("room @all reaches every member (a busy one is interrupted, not skipped); `!name` stays plain text",async()=>{
   const server=await createTestServer();let release:undefined|(()=>void);
   try{
     resetMocks();const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Broadcast admission",["busy-broadcast","idle-broadcast"]);
@@ -18,8 +18,10 @@ it("room @all keeps working members undisturbed; `!name` stays plain text",async
     expect((await post("@busy-broadcast initial work")).status).toBe(200);
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));mockAbortFn.mockClear();
     const response=await post("@all FYI !busy-broadcast");expect(response.status,response.body).toBe(200);
+    // ① B3: @everyone is a real mention — the busy member's turn is interrupted
+    // and the message is re-delivered, never skipped.
+    await vi.waitFor(()=>expect(mockAbortFn).toHaveBeenCalledTimes(1));
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(2));
-    expect(mockAbortFn).not.toHaveBeenCalled();
     const body=JSON.parse(response.body);const message=body.message??body;
     const capture=new DeliveryRepository(getDatabase()).getCapture(room.id,message.id)!;
     expect(capture.snapshot.targets.ordinary.map(actor=>actor.actorKey)).toEqual(room.globalMemberIds);

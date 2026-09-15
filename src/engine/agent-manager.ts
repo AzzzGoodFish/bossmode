@@ -1374,11 +1374,12 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
   const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
   const active=instances.get(instanceKey(scope,memberId));
   const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
-  const broadcast=!scope.includes(":")&&Array.isArray(ctx.capture.snapshot.message.mentions)&&ctx.capture.snapshot.message.mentions.includes("all");
   const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
   const scopeAllowed=memberHasScopeAccess(scope,memberId);
   const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
-  const skipped=unavailable||(broadcast&&busy);
+  // ① B3: @everyone reaches everyone — a busy member is interrupted and
+  // re-delivered just like any other message, never skipped.
+  const skipped=unavailable;
   let prepared:ReturnType<typeof prepareScopeInput>;
   const receipt=acceptRuntimeInput(ctx.capture,{scopeId:scope,messageId:ctx.capture.messageId,targetActorKey:memberId,deliveryKind:ctx.deliveryKind},()=>{
     if(skipped)return {prompt:"",source:"system",trigger:"not-dispatched"};
@@ -1387,7 +1388,7 @@ function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionAc
     const payload={...prepared.payload};
     if(busy&&!active!.compacting)payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
     return payload;
-  },{placement:(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:unavailable?"member unavailable":"broadcast skipped busy member",disposition:(broadcast&&busy?"broadcast-skipped":"cancelled") as ReplyDisposition}}:{})});
+  },{placement:(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:"member unavailable",disposition:"cancelled" as ReplyDisposition}}:{})});
   if(receipt.input.status!=="pending"){
     return;
   }
