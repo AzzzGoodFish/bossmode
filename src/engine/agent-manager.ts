@@ -27,7 +27,7 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../communicat
 import { initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt } from "./prompt-compiler.js";
-import { instanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
@@ -282,6 +282,7 @@ function roomScopeId(roomId: string): ScopeId {
 function memberHasScopeAccess(scopeValue: string, memberId: string): boolean {
   const scope = runtimeInputOwner(scopeValue, memberId).scopeId;
   if (scope.startsWith("dm:")) return scope === `dm:${memberId}`;
+  if (isMmScopeId(scope)) return Boolean(parseMmScopeId(scope)?.includes(memberId));
   return !!scope && !!roomStore.resolveRoomMemberRef(scope, memberId);
 }
 function memberScopeAllowsExecution(scopeValue: string, memberId: string): boolean {
@@ -431,7 +432,7 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
   const epoch=inputScopeEpoch.get(key)??0;
   let failed=false;
   const operation=trackMemberOperation(memberId,async()=>{
-    const scopeId=owner.scopeId.startsWith("dm:")?owner.scopeId:roomScopeId(owner.scopeId);
+    const scopeId=owner.scopeId.startsWith("dm:")||isMmScopeId(owner.scopeId)?owner.scopeId:roomScopeId(owner.scopeId);
     const instance=await buildMemberAgentSession(memberId,scopeId);
     if(!instance){
       if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch){
@@ -946,8 +947,9 @@ export interface BuildSessionOpts {
 export async function buildMemberAgentSession(memberId: string, scopeId: string, _opts: BuildSessionOpts = {}): Promise<AgentInstance | null> {
   if (!memberRuntimeAllowed(memberId)) return null;
   const creationProfileRevision = profileRevision;
+  const mmScope = isMmScopeId(scopeId);
   const ref = parseScopeId(scopeId);
-  if (!ref) {
+  if (!ref && !mmScope) {
     logger.error("agent", "buildMemberAgentSession: invalid scope", { scopeId, memberId });
     return null;
   }
@@ -1012,7 +1014,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     /** postMessage/transition take bare room ids or dm:<id>; normalize room scopes. */
     const chatTarget = () => chatTargetOf(activeChat.scopeId);
 
-    if (ref.kind === "dm") {
+    if (ref?.kind === "dm" || mmScope) {
       // ── DM scope: global member config, daemon cwd, roster-labeled activeScopes ──
       const m = memberRecordToConfig(memberId);
       if (!m) {
@@ -1037,13 +1039,13 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       skills = resolveSkills(member);
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
-      keyRoomId = dmScopeId; // "dm:<memberId>" — tools/chat branch on this prefix
+      keyRoomId = dmScopeId; // "dm:<memberId>" | "mm:<a>-<b>" — tools/chat branch on the prefix
       sessionDir = mainSessionDirectory(memberId);
       const savedSession = sessionStore.getCurrentSession(memberId);
       resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
       onSessionChanged = (session) => { if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session }); };
-      logLabel = "dmAgentCreated";
-      errLabel = "dm";
+      logLabel = mmScope ? "mmAgentCreated" : "dmAgentCreated";
+      errLabel = mmScope ? "mm" : "dm";
       const dmKey = key;
       const dmMemberName = () => currentRuntimeName(memberId, member.name);
       callbacks = {
@@ -1059,7 +1061,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         },
       };
       var runtime = runtime0;
-    } else {
+    } else if (ref) {
       // ── Room scope: roster member + global effective-config overlay ──
       const r = roomStore.getRoom(ref.roomId);
       if (!r) {
@@ -1157,6 +1159,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         },
       };
       var runtime = runtime1;
+    } else {
+      return null; // unreachable: invalid scopes returned above
     }
 
     try {
@@ -1364,6 +1368,20 @@ function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,c
     else prompt=`You are in a private chat with the user (${dmLabel}). They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
   }
+  if(scope.startsWith("mm:")){
+    // ⑤ B: member↔member private chat — mirror the DM transcript path for the peer.
+    const pair=parseMmScopeId(scope);
+    if(!pair||!pair.includes(memberId))throw new Error(`Member chat scope does not include member ${memberId}`);
+    const otherId=pair.find(id=>id!==memberId)!;
+    const otherName=getMember(otherId)?.name??otherId;
+    const all=loadScopeMessages(scope).filter(m=>!isSystemNoticeHiddenFromMembers(m));
+    const bounded=captured?all.filter(m=>m.id!==captured.id&&(m.seq??0)<(captured.seq??Number.MAX_SAFE_INTEGER)).concat(captured):all;
+    const transcript=bounded.slice(-40).map(m=>`[Member \`${m.sender}\`${m.senderMemberId?` (${m.senderMemberId})`:''}] ${m.content}`).join("\n\n");
+    let prompt:string;
+    if(transcript)prompt=`You are in a private chat with member \`${otherName}\` (${scope}). Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest message with the chat tool.":""}`;
+    else prompt=`You are in a private chat with member \`${otherName}\` (${scope}). They just opened it — reply with the chat tool, or wait for their next message.`;
+    return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"mm-activate"},replyExpected};
+  }
   const parent=scope;
   const room=roomStore.getRoom(parent);if(!room)throw new Error("Room not found");
   const member=resolveRoomMember(parent,memberId);if(!member)throw new Error("Member is not in the room");
@@ -1424,7 +1442,7 @@ async function activateControl(scope:string,memberId:string,ctx?:ReplyContext):P
   if(!memberRuntimeAllowed(memberId))return;
   const prepared=prepareScopeInput(scope,memberId,ctx);
   if(!prepared){
-    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")?scope:roomScopeId(scope)) as ScopeId);
+    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")||isMmScopeId(scope)?scope:roomScopeId(scope)) as ScopeId);
     return;
   }
   const active=instances.get(instanceKey(memberId));
@@ -2185,6 +2203,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
 function memberScopesFor(memberId: string): string[] {
   return [
     ...listRoomsForMember(memberId).map((r) => `room:${r.id}`),
+    ...roomStore.listMmScopesForMember(memberId),
     scopeIdOf({ kind: "dm", memberId }),
   ];
 }
