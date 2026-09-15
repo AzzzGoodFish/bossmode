@@ -1,29 +1,31 @@
-# Shared memory method
+# Your memory — method
 
-How to work the shared memory — the `memory/user/` and `memory/projects/`
-directories listed in your Environment segment. Plain files, ordinary tools:
-`ls` and `read` to look, `write`/`edit` to maintain.
+How to work **your own memory** — `…/members/<your-id>/memory/` (path in your
+Assets chapter). Plain files, ordinary tools: `ls` and `read` to look,
+`write`/`edit` to maintain. Memory is private: each member keeps their own,
+from their own view.
 
-## Scope determination
+## Placement rules
 
-Start from the current need: what exactly must be found or recorded? Look at the
-existing directories and records first — `ls` the memory roots and the current
-project folder before assuming a project name or file layout; do not invent a
-fixed project naming scheme.
+Start from the current need: what exactly must be found or recorded? Look at
+what already exists first — `ls` the memory directory, open the overview file —
+before assuming a layout; do not invent a fixed naming scheme.
 
-## The layer rules
+- **Persona** (`persona.md`): who this member is and how they work — durable
+  identity and working rules, not project facts.
+- **Reusable skills** (`skills/`): procedures worth repeating. Not a place
+  for facts.
+- **Your memory** (`members/<id>/memory/`): what you learn and accumulate —
+  private notes, kept as overview + parts.
+- **Documents** (the Library): knowledge to share with other members, and
+  anything they will need to find later.
+- Changing state, conventions, rosters: **look them up fresh** — do not write
+  them down.
 
-Keep the existing layers in their roles; do not flatten everything into
-project notes:
+## Structure: overview + parts
 
-- **Member persona** (`persona.md`): who this member is and how they work —
-  durable identity and working rules, not project facts.
-- **Reusable skills** (`skills/`): procedures worth repeating. Not a place for
-  facts.
-- **User memory** (`memory/user/`): one shared record about the human —
-  preferences, habits, durable facts about them.
-- **Project memory** (`memory/projects/<project>/`): this project's decisions,
-  state and learnings.
+Keep an overview/index file first, then files by topic — so a look finds it
+fast. Split into parts when a topic grows; keep each note short and durable.
 
 ## Reading
 
@@ -40,6 +42,10 @@ project notes:
 
 ## Writing: read before write
 
+- Quality over quantity: write at meaningful checkpoints — after a decision,
+  after a repeated correction, at the end of substantial work — not after every
+  exchange. One-off thoughts, and anything chat history can easily replace, do
+  not belong here.
 - Read the original text before maintaining it; compare source and time. Do not
   overwrite a newer conclusion with an older one, and do not create a record
   that already exists.
@@ -47,6 +53,6 @@ project notes:
   failed or a turn was interrupted partway, report the partial state honestly.
   Writes are never rolled back: after an interruption, first check what may
   already have been written before repeating the pass.
-- After a maintenance pass, record a brief completion time in the project
-  memory (a line is enough). Do not add coverage ledgers or a second
-  bookkeeping database.
+- After a maintenance pass, record a brief completion time in your memory (a
+  line is enough). Do not add coverage ledgers or a second bookkeeping
+  database.

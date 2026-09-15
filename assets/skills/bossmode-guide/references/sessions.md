@@ -4,7 +4,7 @@ Bossmode keeps SDK session JSONL under the owning member directory. You have **o
 
 `list` and `search` report a `scope` label: `main` for the live member session, `room:<roomId>` or `dm:<memberId>` for archived per-chat files. Pass it to `--scope` to narrow to one of them.
 
-Run session searches in the local original workspace, not in an SSH workspace. Use the absolute member directory shown in your environment and the guide directory from this installed package:
+Run session searches in the local original workspace, not in an SSH workspace. Use the absolute member directory shown in your Assets and the guide directory from this installed package:
 
 ```sh
 GUIDE_DIR=/absolute/path/to/bossmode/assets/skills/bossmode-guide

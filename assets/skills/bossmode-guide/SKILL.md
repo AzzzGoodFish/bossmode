@@ -1,6 +1,6 @@
 ---
 name: bossmode-guide
-description: How to live in Bossmode — persona.md, memory dirs, skills, archive fold. Read when unsure how to manage identity or environment.
+description: How to live in Bossmode — persona.md, your memory, skills, archive fold. Read when unsure how to manage identity or environment.
 ---
 
 # Bossmode environment guide
@@ -9,37 +9,32 @@ Platform skill (read-only, shipped with bossmode). Use the **read** tool on this
 
 ## Your persona — persona.md
 
-- Path is in your Environment segment (`Your profile: …/persona.md`).
+- Path is in your Assets chapter (`persona: …`).
 - The entire file is your persona: plain Markdown, without frontmatter, a schema, or required headings.
-- Your name, title, and structured member configuration live in Bossmode's database. Writing them as text in persona.md does not change those fields.
+- Your name, description, and structured member configuration live in Bossmode's database. Writing them as text in persona.md does not change those fields.
 - Use `profile_update` to change your own name or description. Names are globally unique; `all`, `user`, and `system` are reserved. An empty description clears it. Use the committed name returned by the tool immediately; old names are not aliases. Your current turn and stable member ID are preserved.
 - Grow the file with the **edit** tool when the user teaches you something lasting. Keep it under **4000 characters** (over-budget still injects, but the panel flags it — trim when you can).
 - Birth state is an empty file. The first DM icebreaker is how you learn what you are for — then write it down.
-- Use the current name shown in your environment for communication; the stable member ID identifies your records and scope membership.
+- Use your current name when communicating; the stable member ID identifies your records and scope membership.
 
-## Shared memory (not injected)
+## Your memory (private)
 
-Listed in Environment. **ls / read on demand**; write back what should stick.
+Memory is **yours alone** — each member keeps their own, from their own view. It lives in `…/members/<your-id>/memory/` (path in your Assets chapter). Plain files, ordinary tools (`ls`, `read`, `write`, `edit`) — there is no separate memory tool.
 
-| Path | What lives there |
-|------|------------------|
-| `…/memory/user/` | One shared record about the human: preferences, habits, durable facts. |
-| `…/memory/projects/` | One folder per project. ls before project work; write project learnings back. |
-
-Do not dump session noise here. Prefer short, durable notes.
-
-For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read memory. See [references/sessions.md](references/sessions.md) for complete read-only session search commands, pagination, and the operator-only migration procedure.
-
-**Working it.** Use the ordinary file tools (`ls`, `read`, `write`, `edit`) — there is no separate memory tool.
-
-- Read when the conversation leans on things you may not have at hand: decisions from earlier days, another room's outcome, the user's standing preferences. Look at what already exists — `ls` the memory roots and the current project folder — before assuming a project name or file layout.
-- Write at meaningful checkpoints — after a decision, after a repeated correction, at the end of substantial work — not after every exchange. Put durable facts on the right layer: user memory for who the user is and how they work; the room's project folder for decisions and project state.
+- **Quality over quantity.** Keep what has been refined twice and holds reuse value. One-off thoughts, and anything chat history can easily replace, do not belong here.
+- **Overview plus parts.** Keep an overview/index first, then files by topic — so a look finds it fast.
+- Knowledge you want **other members** to see does not go here: write it into a document (the Library) or say it to them in chat.
+- Read when the conversation leans on things you may not have at hand: decisions from earlier days, another room's outcome, the user's standing preferences. Look at what already exists before assuming a layout.
+- Write at meaningful checkpoints — after a decision, after a repeated correction, at the end of substantial work — not after every exchange.
 - Read before you write: do not overwrite a newer conclusion with an older one, and do not duplicate a record that already exists. Keep notes short and durable, and report what you changed.
-- The full method — layer rules, read-before-write, source discipline — lives in `references/memory.md` next to this file.
+
+The full method — placement rules, read-before-write, source discipline — lives in [references/memory.md](references/memory.md) next to this file.
+
+For communication and decisions, search chat; for execution history, search your session archive; for reusable methods, read skills; for current preferences and project state, read your memory and the documents. See [references/sessions.md](references/sessions.md) for complete read-only session search commands, pagination, and the operator-only migration procedure.
 
 ## Your private skills directory
 
-- Path: `…/members/<your-id>/skills/` (also listed in Environment when non-empty).
+- Path: `…/members/<your-id>/skills/` (also listed in Assets when non-empty).
 - Each skill is a folder with `SKILL.md` (optional frontmatter `description:`).
 - **To add a skill:** create `skills/<name>/SKILL.md` with the write tool. Then call **reload** (or it applies on your next activation).
 - Read a skill's SKILL.md when you need the procedure — do not paste whole skills into chat.
@@ -51,10 +46,10 @@ For communication and decisions, search chat; for execution history, search your
 
 ## Archive fold (legacy notes)
 
-- If Environment shows **Legacy notes** under `…/members/<id>/archive/`, those files came from the old principles/mainline system.
-- The same archive holds `archive/sessions/…`: session files from the retired per-chat layout, kept readable but never resumed. Leave them alone; search them with the session-search script when you need old history.
-- When relevant: read → fold what is still true into `persona.md` or shared memory → **delete the archive file** once folded (never delete `archive/sessions/`).
-- Empty archive → the legacy line disappears from Environment.
+- If your Assets chapter shows the **archive** line, those files came from the old system (old notes, old sessions).
+- The archive holds `archive/sessions/…`: session files from the retired per-chat layout, kept readable but never resumed. Leave them alone; search them with the session-search script when you need old history.
+- When relevant: read → fold what is still true into `persona.md` or your own memory → **delete the archive file** once folded (never delete `archive/sessions/`).
+- Empty archive → the archive line disappears from Assets.
 
 ## Your MCP servers and extensions
 
@@ -66,7 +61,7 @@ For communication and decisions, search chat; for execution history, search your
 
 Web search / subagents are NOT preinstalled anymore. If you want the capability, install the package into your own extensions directory. Concrete steps (web search via `pi-web-access` as the example):
 
-1. Find your member id from Environment (`…/members/<your-id>/`), then open a shell:
+1. Find your member id from Assets (`…/members/<your-id>/`), then open a shell:
    ```
    shell_create
    ```
@@ -117,8 +112,8 @@ To uninstall: delete the symlink (and `npm uninstall` if you want the files gone
 
 ## Tools and chat
 
-- Room/DM replies only count when they go out via the **chat** tool (see Communication segment).
-- File tools (read/edit/write) and persistent shells are how you maintain persona.md, skills, memory dirs, and anything else.
+- Room/DM replies only count when they go out via `chat_send` (see the Communication chapter).
+- File tools (read/edit/write) and persistent shells are how you maintain persona.md, skills, your memory, and anything else.
 
 ## What not to do
 
