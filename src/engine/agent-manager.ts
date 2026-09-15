@@ -1926,7 +1926,13 @@ export function refreshContextUsage(roomId: string, memberRef: string, options: 
   const retries = Math.max(0, options.retries || 0);
   const delay = Math.max(0, options.retryDelayMs || 0);
   for (let i = 1; i <= retries; i += 1) {
-    setTimeout(() => refreshContextUsageOnce(roomId, memberRef, options), delay * i);
+    const timer = setTimeout(() => {
+      // A retry can fire after teardown (shutdown, test isolation): drop it
+      // instead of letting the storage access escape as an unhandled error.
+      try { refreshContextUsageOnce(roomId, memberRef, options); }
+      catch { /* runtime torn down — drop the retry */ }
+    }, delay * i);
+    (timer as { unref?: () => void }).unref?.();
   }
 }
 
