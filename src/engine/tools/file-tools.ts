@@ -184,7 +184,7 @@ export async function workspaceReadTool(memberId: string, args: { path?: string;
     const sftp = await getSftp(memberId, workspace);
     const buf = await sftpReadFile(sftp, path);
     if (buf.length > MAX_READ_BYTES) {
-      return toolError(`File too large to read remotely (${buf.length} bytes > ${MAX_READ_BYTES}). Copy it locally or read in chunks once shells exist.`);
+      return toolError(`File too large to read remotely (${buf.length} bytes > ${MAX_READ_BYTES}). Copy it locally, or use a terminal on that workspace to read it in chunks.`);
     }
     const lines = buf.toString("utf-8").split("\n");
     const sliced = lines.slice(offset - 1, offset - 1 + limit);

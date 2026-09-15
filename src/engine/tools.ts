@@ -589,7 +589,7 @@ export async function handleToolCallback(
           shell: String(params?.terminalId || ""),
           command: params?.command !== undefined ? String(params.command) : undefined,
           keys: params?.keys !== undefined ? String(params.keys) : undefined,
-          blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
+          blockUntilMs: params?.blockSeconds !== undefined ? Math.round(Number(params.blockSeconds) * 1000) : undefined,
         });
         return result.ok ? { ...result } : result;
       }
@@ -611,7 +611,7 @@ export async function handleToolCallback(
           memberId: shellMemberId,
           shell: String(params?.terminalId || ""),
           exec: String(params?.exec || ""),
-          blockUntilMs: params?.blockUntilMs !== undefined ? Number(params.blockUntilMs) : undefined,
+          blockUntilMs: params?.blockSeconds !== undefined ? Math.round(Number(params.blockSeconds) * 1000) : undefined,
         });
         return result;
       }

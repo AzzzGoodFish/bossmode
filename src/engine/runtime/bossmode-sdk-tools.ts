@@ -448,7 +448,7 @@ export function createBossmodeSdkTools(opts: {
         terminalId: Type.String({ description: "Terminal id from terminal_create / terminal_list." }),
         command: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCommand })),
         keys: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalKeys })),
-        blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalBlockUntilMs })),
+        blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalBlockSeconds })),
       }),
       execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_exec", params as any, signal), null, 2))),
     }),
@@ -471,7 +471,7 @@ export function createBossmodeSdkTools(opts: {
       parameters: Type.Object({
         terminalId: Type.String({ description: "Terminal id." }),
         exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
-        blockUntilMs: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalWaitBlockUntilMs })),
+        blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalWaitBlockSeconds })),
       }),
       execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_wait", params as any, signal), null, 2))),
     }),
