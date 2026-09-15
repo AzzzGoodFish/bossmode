@@ -5,7 +5,7 @@ import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
 } from "../workforce/skill-store.js";
-import { getMemberInstances, destroyInstance } from "../engine/agent-manager.js";
+import { getMemberInstances, abortMember, compactMemberById, resetMemberSession, restartMember } from "../engine/agent-manager.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../workspace/room-store.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
@@ -153,21 +153,40 @@ addRoute("GET", "/api/members/:id/status", async (_req, res, params) => {
   sendJson(res, 200, { instances });
 });
 
-addRoute("POST", "/api/members/:id/restart", async (req, res, params) => {
-  const url = new URL(req.url || "", "http://localhost");
-  const roomId = url.searchParams.get("roomId");
-  if (!roomId) { sendJson(res, 400, { error: "member and roomId required" }); return; }
-  const resolveRoomMemberRef = "resolveRoomMemberRef" in roomStore ? (roomStore as any).resolveRoomMemberRef as (roomId: string, ref: string) => { id: string } | null : undefined;
-  const roomMember = resolveRoomMemberRef?.(roomId, params.id);
-  const memberRef = roomMember?.id;
-  if (!memberRef) { sendJson(res, 400, { error: "member and roomId required" }); return; }
-  destroyInstance(roomId, memberRef);
+addRoute("POST", "/api/members/:id/stop", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const result = abortMember(member.id);
+  logger.info("api", "POST /api/members/:id/stop", { memberId: member.id, ...result });
+  sendJson(res, 200, result);
+});
 
-  const latestId = getLatestMessageId(roomId);
-  roomStore.setCursor(roomId, memberRef, latestId);
+addRoute("POST", "/api/members/:id/compact", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  try {
+    const result = await compactMemberById(member.id);
+    sendJson(res, 200, result);
+  } catch (err: any) {
+    const message = err?.message || String(err);
+    logger.error("api", "member compact failed", { memberId: member.id, error: message });
+    sendJson(res, 400, { error: "compact_failed", message });
+  }
+});
 
-  sendJson(res, 200, {
-    ok: true,
-    message: "Instance restarted. Next activation will wait for new messages.",
-  });
+addRoute("POST", "/api/members/:id/reset", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const result = resetMemberSession(member.id);
+  logger.info("api", "POST /api/members/:id/reset", { memberId: member.id });
+  sendJson(res, 200, result);
+});
+
+// ① B5: member-level operations — the interface targets the member directly.
+addRoute("POST", "/api/members/:id/restart", async (_req, res, params) => {
+  const member = getMember(params.id);
+  if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
+  const result = restartMember(member.id);
+  logger.info("api", "POST /api/members/:id/restart", { memberId: member.id });
+  sendJson(res, 200, result);
 });

@@ -2184,6 +2184,85 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   return { ok: true, message };
 }
 
+// -- Member-level operations (① B5) --
+// Stop / compact / reset / restart target the member directly — one runtime
+// per member means no chat scope belongs in the interface.
+
+/** Every scope this member can hold queued work in. */
+function memberScopesFor(memberId: string): string[] {
+  return [
+    ...listRoomsForMember(memberId).map((r) => `room:${r.id}`),
+    scopeIdOf({ kind: "dm", memberId }),
+  ];
+}
+
+/** Drop the member's live runtime (teardown only; no SQL side effects). */
+function teardownMemberInstance(memberId: string): void {
+  const key = instanceKey(memberId);
+  const instance = instances.get(key);
+  if (!instance) return;
+  invalidateInputScope(key);
+  sessionPublishOwners.delete(key);
+  requestInstanceStop(instance, true);
+  instance.handle.destroy();
+  instance.unsubscribe();
+  if (instances.get(key) === instance) instances.delete(key);
+  contextUsageCache.delete(key);
+  contextCompactionWarningCache.delete(key);
+}
+
+/** Stop the member's current work; queued work in every chat is cancelled. */
+export function abortMember(memberId: string): { ok: boolean; action: string } {
+  for (const scope of memberScopesFor(memberId)) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "explicit stop");
+  const instance = instances.get(instanceKey(memberId));
+  if (!instance) return { ok: false, action: "not_found" };
+  if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
+  try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
+  instance.handle.abort();
+  updateDispatchState(instance, "aborting", "member stop");
+  logger.info("agent", "memberAborted", { memberId, member: instance.agentName });
+  return { ok: true, action: "aborted" };
+}
+
+/** Compact the member's session: the chat being served, else the member DM. */
+export async function compactMemberById(memberId: string): Promise<{ ok: boolean; action: string }> {
+  const instance = instances.get(instanceKey(memberId));
+  const scope = instance?.activeChat?.scopeId || scopeIdOf({ kind: "dm", memberId });
+  return compactMember(scope, memberId);
+}
+
+/** Reset the member's session from any interface. */
+export function resetMemberSession(memberId: string): { ok: true; message: string } {
+  const instance = instances.get(instanceKey(memberId));
+  const agentName = instance?.agentName || memberRecordToConfig(memberId)?.name || memberId;
+  const scopes = memberScopesFor(memberId);
+  const message = "Session reset. Next activation will start fresh.";
+  getDatabase().transaction(() => {
+    for (const scope of scopes) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "session reset");
+    sessionStore.clearCurrentSession(memberId);
+  });
+  teardownMemberInstance(memberId);
+  for (const scope of scopes) {
+    clearActivationSource(scope, memberId);
+    clearRuntimeStateEntry(scope, memberId);
+    const target = chatTargetOf(scope);
+    const statusEvent = { type: "agent:status" as const, roomId: target, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
+    if (scope.startsWith("dm:")) broadcastToAgentSubscribers(target, agentName, statusEvent);
+    else broadcastToRoom(target, statusEvent);
+  }
+  emitAgentLocalEvent(scopeIdOf({ kind: "dm", memberId }), memberId, { type: "system", text: message }, { memberId, agentName });
+  logger.info("agent", "memberSessionReset", { memberId, member: agentName });
+  return { ok: true, message };
+}
+
+/** Restart the member's runtime: drop it; the next activation rebuilds. */
+export function restartMember(memberId: string): { ok: true; message: string } {
+  for (const scope of memberScopesFor(memberId)) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "member restart");
+  teardownMemberInstance(memberId);
+  logger.info("agent", "memberRestarted", { memberId });
+  return { ok: true, message: "Member restarted. Next activation will start a fresh runtime." };
+}
+
 export function destroyInstance(roomId: string, memberRef: string,options:{preservePending?:boolean}={}): void {
   const resolved = resolveRoomMember(roomId, memberRef);
   const memberId = resolved?.id || memberRef;

@@ -212,8 +212,10 @@ export async function getMemberStatus(id: string): Promise<{ instances: MemberIn
   return apiFetch(`/api/members/${id}/status`);
 }
 
-export async function restartMember(id: string, roomId: string): Promise<void> {
-  await apiFetch(`/api/members/${id}/restart?roomId=${roomId}`, { method: "POST" });
+export async function restartMember(id: string, roomId?: string): Promise<void> {
+  void roomId;
+  // ① B5: member-level restart — the old room query is ignored.
+  await memberAction(id, "restart");
 }
 
 // -- Model Credentials --
@@ -999,8 +1001,20 @@ export async function getMemberActivityEvents(
   return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(ref)}/events?${qs}`);
 }
 
-export async function abortAgent(roomId: string, agentName: string): Promise<{ ok: boolean; action: string }> {
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/abort`, { method: "POST" });
+/** ① B5: stop/compact/reset/restart target the member directly — no chat scope
+ *  in the interface; the same call works from any chat or the member panel. */
+export async function memberAction(
+  memberId: string,
+  action: "abort" | "compact" | "reset" | "restart",
+): Promise<{ ok?: boolean; action?: string; message?: string }> {
+  return apiFetch(`/api/members/${encodeURIComponent(memberId)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function abortMember(memberId: string): Promise<{ ok: boolean; action: string }> {
+  return apiFetch(`/api/members/${encodeURIComponent(memberId)}/stop`, { method: "POST" });
 }
 
 // -- Context Usage --
@@ -1560,10 +1574,12 @@ export async function conversationMemberAction(
   memberId: string,
   action: "abort" | "reset-session" | "reload" | "compact",
 ): Promise<{ ok?: boolean; action?: string; message?: string; reloaded?: boolean }> {
-  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/${action}?memberId=${encodeURIComponent(memberId)}`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  void scopeId;
+  // ① B5: kept as a thin member-level shim for older callers; new code uses
+  // memberAction directly.
+  if (action === "reset-session") return memberAction(memberId, "reset");
+  if (action === "reload") return { ok: false, message: "Reload retired — activation recompiles the latest prompt" };
+  return memberAction(memberId, action);
 }
 
 export async function patchGlobalMember(id: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {

@@ -31,10 +31,9 @@ import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-l
 import {
   getMemberDetail, getMemberScopes, getAvailableModels,
   patchGlobalMember, deleteGlobalMember, getMemberProfile, getMemberSkills,
-  restartMember, resetAgentSession,
   getMemberStats, getMemberSystemPrompt, getMemberAssets,
   getMemberScopedStats,
-  getConversationSession, conversationMemberAction, sendDmMessage,
+  getConversationSession, memberAction, sendDmMessage,
   type MemberDetail, type MemberScopeInfo, type AvailableModelOption,
   type MemberProfileDoc, type MemberSkillEntry, type MemberStats,
   type ContextUsageData, type MemberSystemPromptDoc, type MemberAssets,
@@ -830,9 +829,8 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   }, [dm, roomId, member.memberId, scope, liveStatus]);
 
   const handleCompact = useCallback(async () => {
-    if (!scope) return;
     try {
-      const result = await conversationMemberAction(scope.scopeId, member.memberId, "compact");
+      const result = await memberAction(member.memberId, "compact");
       if (result.action === "stopped") {
         toast("Compaction stopped", "info");
       } else if (result.ok) {
@@ -841,24 +839,22 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
         throw new Error(result.message || "Couldn’t compact this conversation.");
       }
     } catch (err) { console.error(err); toast(String((err as Error)?.message || "Couldn’t compact this conversation."), "error"); }
-  }, [member, scope, toast]);
+  }, [member, toast]);
   const handleResetSession = useCallback(async () => {
     if (!scope) return;
     const ok = await confirm(`Reset session for @${member.name}?\n\nThis clears the member's working session memory and starts fresh. Messages and activity history stay visible.`);
     if (!ok) return;
     try {
-      if (dm) await conversationMemberAction(scope.scopeId, member.memberId, "reset-session");
-      else await resetAgentSession(roomId!, member.memberId);
+      await memberAction(member.memberId, "reset");
       toast(`${member.name} session reset`, "success");
     } catch (err) { console.error(err); toast("Couldn’t reset this session. Try again.", "error"); }
-  }, [dm, roomId, member, scope, confirm, toast]);
+  }, [member, confirm, toast]);
   const handleRestart = useCallback(async () => {
-    if (!roomId) return;
     try {
-      await restartMember(member.memberId, roomId);
+      await memberAction(member.memberId, "restart");
       toast(`${member.name} restarted`, "success");
     } catch (err) { console.error(err); toast("Couldn’t restart this member. Try again.", "error"); }
-  }, [member, roomId, toast]);
+  }, [member, toast]);
 
   const flashCfg = () => {
     setCfgSave("saved");

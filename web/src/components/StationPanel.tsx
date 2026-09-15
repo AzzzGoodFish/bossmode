@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortAgent, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getToken, restartMember, resetAgentSession,
+  abortMember, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getToken,
   getMemberStats, getMemberActiveTools,
   getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
@@ -477,7 +477,7 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onMem
                 </div>
                 {isBusy && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); abortAgent(roomId, name).catch(console.error); }}
+                    onClick={(e) => { e.stopPropagation(); if (info) abortMember(info.id).catch(console.error); }}
                     className="w-4 h-4 flex items-center justify-center rounded text-ink-4 hover:text-blocked hover:bg-surface-3 transition-colors cursor-pointer shrink-0"
                     title={`Abort ${name}`}
                   >
