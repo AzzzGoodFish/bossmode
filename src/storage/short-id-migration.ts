@@ -138,13 +138,25 @@ export function planFilesystemRenames(root: string, mapping: ShortIdMapping): Re
 
 // ── rename execution + journal ──────────────────────────────────────────────
 
+/** Fold every segment of a relative path through the mapping (ancestor renames included). */
+export function foldRelPath(rel: string, mapping: ShortIdMapping): string {
+  return rel
+    .split("/")
+    .map((segment) => renameSegment(segment, mapping) ?? segment)
+    .join("/");
+}
+
 export interface RenameApplyResult {
   done: number;
   skipped: number;
   failures: string[];
 }
 
-export function applyRenameOps(root: string, ops: readonly RenameOp[]): RenameApplyResult {
+export function applyRenameOps(
+  root: string,
+  ops: readonly RenameOp[],
+  options: { fold?: (rel: string) => string } = {},
+): RenameApplyResult {
   const result: RenameApplyResult = { done: 0, skipped: 0, failures: [] };
   for (const op of ops) {
     const from = join(root, op.from);
@@ -157,6 +169,11 @@ export function applyRenameOps(root: string, ops: readonly RenameOp[]): RenameAp
       result.done++;
     } else if (!fromExists && toExists) {
       result.skipped++; // already applied by a previous run
+    } else if (!fromExists && !toExists && options.fold && existsSync(join(root, options.fold(op.to)))) {
+      // Nested op whose parent was renamed afterwards (crash before the journal was
+      // cleared): from/to were both recorded under the old parent name; the file
+      // exists at the folded (final) location, so the op is already applied.
+      result.skipped++;
     } else if (fromExists && toExists) {
       result.failures.push(`target exists: ${op.to}`);
     } else {
@@ -205,14 +222,22 @@ export function clearShortIdJournal(root: string): void {
 /**
  * Startup replay: finish any renames a previously interrupted run left pending.
  * Runs before the other upgrade steps so every later step sees consistent names.
+ *
+ * `mappingProvider` resolves the id mapping when available; it is only needed for
+ * nested ops whose parent was already renamed (both recorded paths point under
+ * the old parent name) — the op is then recognized via its folded final location.
  */
-export function replayShortIdJournal(root: string):
+export function replayShortIdJournal(
+  root: string,
+  mappingProvider?: () => ShortIdMapping | null,
+):
   | { status: "none" }
   | { status: "replayed"; done: number; skipped: number }
   | { status: "failed"; failures: string[] } {
   const journal = readShortIdJournal(root);
   if (!journal) return { status: "none" };
-  const result = applyRenameOps(root, journal.ops);
+  const mapping = mappingProvider ? mappingProvider() : null;
+  const result = applyRenameOps(root, journal.ops, mapping ? { fold: (rel) => foldRelPath(rel, mapping) } : {});
   if (result.failures.length > 0) return { status: "failed", failures: result.failures };
   clearShortIdJournal(root);
   return { status: "replayed", done: result.done, skipped: result.skipped };

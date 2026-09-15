@@ -172,4 +172,31 @@ describe("journal", () => {
     }
     clearShortIdJournal(root);
   });
+
+  it("replays nested ops whose parent already moved (crash before journal clear)", () => {
+    const root = makeRoot();
+    mkdirSync(join(root, "rooms", R1, "agent-events"), { recursive: true });
+    writeFileSync(join(root, "rooms", R1, "agent-events", `${M1}.jsonl`), "{}");
+    const mapping = fixtureMapping();
+    const ops = planFilesystemRenames(root, mapping);
+    expect(ops.length).toBe(2); // child file op + parent room op
+    applyRenameOps(root, ops); // everything applied…
+    writeShortIdJournal(root, ops); // …then a crash before the journal is cleared
+
+    // Without the mapping the nested op cannot be folded to its final path — the
+    // replay reports it rather than guessing (documents why the caller passes it).
+    const blind = replayShortIdJournal(root);
+    expect(blind.status).toBe("failed");
+    if (blind.status === "failed") expect(blind.failures.length).toBe(1);
+
+    // With the mapping the fold resolves the final location: replayed, all skipped.
+    const replay = replayShortIdJournal(root, () => mapping);
+    expect(replay.status).toBe("replayed");
+    if (replay.status === "replayed") {
+      expect(replay.done).toBe(0);
+      expect(replay.skipped).toBe(ops.length);
+    }
+    expect(readShortIdJournal(root)).toBeNull();
+    expect(existsSync(join(root, "rooms", "rm_cccccccccc", "agent-events", "mem_aaaaaaaaaa.jsonl"))).toBe(true);
+  });
 });
