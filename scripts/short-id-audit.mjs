@@ -7,12 +7,14 @@
  * against (migrated DBs must preserve every count with old ids swapped for new).
  *
  * Usage:
- *   node scripts/short-id-audit.mjs --bossmode-dir <absolute dir> [--snapshot-from <live.db>] [--output <report.json>]
+ *   node scripts/short-id-audit.mjs --bossmode-dir <absolute dir> [--snapshot-from <live.db>] [--output <report.json>] [--assert-clean]
  *
  * - Never writes to the audited database (opens it read-only).
  * - --snapshot-from: take a consistent online snapshot of a live DB into
  *   <bossmode-dir>/bossmode.db first (sqlite backup API), then audit the snapshot.
  *   Use this when the source service is still running (WAL file present).
+ * - --assert-clean (post-migration verification): fail if old-shaped member/scope
+ *   traces remain on the migration surface (outside the exclusion list).
  */
 import { existsSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative, basename, dirname } from "node:path";
@@ -23,8 +25,9 @@ const option = (name) => { const i = argv.indexOf(name); return i < 0 ? undefine
 const bossmodeDir = option("--bossmode-dir");
 const snapshotFrom = option("--snapshot-from");
 const outputFile = option("--output");
+const assertClean = argv.includes("--assert-clean");
 if (!bossmodeDir || !bossmodeDir.startsWith("/") || !existsSync(bossmodeDir)) {
-  console.error("Usage: node scripts/short-id-audit.mjs --bossmode-dir <absolute existing dir> [--snapshot-from <live.db>] [--output <report.json>]");
+  console.error("Usage: node scripts/short-id-audit.mjs --bossmode-dir <absolute existing dir> [--snapshot-from <live.db>] [--output <report.json>] [--assert-clean]");
   process.exit(1);
 }
 
@@ -52,14 +55,30 @@ const classify = (value) => {
   if (typeof value !== "string" || value.length === 0) return null;
   if (reMemberOld.test(value)) return "member_old";
   if (reMemberNano.test(value)) return "member_nano";
-  if (value.startsWith("dm:")) return "dm_scope";
-  if (value.startsWith("mm:")) return "mm_scope";
+  if (value.startsWith("dm:")) {
+    const rest = value.slice(3);
+    if (reMemberOld.test(rest)) return "dm_scope_old";
+    if (reMemberNano.test(rest)) return "dm_scope_new";
+    return "dm_scope_other";
+  }
+  if (value.startsWith("mm:")) {
+    const rest = value.slice(3);
+    if (/mem_[0-9a-f]{8}-/.test(rest)) return "mm_scope_old";
+    if (/^mem_[0-9a-z]{10}-mem_[0-9a-z]{10}$/.test(rest)) return "mm_scope_new";
+    return "mm_scope_other";
+  }
   if (value.startsWith("room:")) return "room_scope";
   if (reBareUuid.test(value)) return "uuid_bare";
   if (reRmOld.test(value)) return "rm_old_record";
   if (reRmAny.test(value)) return "rm_other";
   if (reRoomPrefix.test(value)) return "room_prefix";
-  if (reMemberAny.test(value)) return "member_other";
+  if (reMemberAny.test(value)) {
+    // File-name forms: `mem_<id>.jsonl`, `mem_<id>.stats.json` — classify the stem.
+    const stem = value.includes(".") ? value.slice(0, value.indexOf(".")) : value;
+    if (stem !== value && reMemberOld.test(stem)) return "member_old_file";
+    if (stem !== value && reMemberNano.test(stem)) return "member_nano_file";
+    return "member_other";
+  }
   return null;
 };
 
@@ -167,16 +186,28 @@ db.close();
 // ── filesystem pass ─────────────────────────────────────────────────────────
 const SKIP_NAMES = new Set(["node_modules", ".git", "extensions"]);
 const SKIP_FILES = /^(bossmode\.db.*|.*\.log|.*\.pid)$/;
+// Three zones: surface (migration targets) / excluded (rollback & backup artifacts
+// that keep old ids) / library (documentation trees with no migration surface).
+const EXCLUDED_DIR_NAMES = new Set(["backups", ".migration-snapshots"]);
+const EXCLUDED_DIR_RE = /^migration-backup-/;
+const EXCLUDED_FILE_RE = /^members\.json$|\.pre-[^.]*$/;
+const LIBRARY_TOPS = new Set(["memory"]);
 let scanned = 0;
-const byTop = {};
-const bump = (top, shape, path) => {
-  byTop[top] ??= { entries: 0, shapes: {} };
-  byTop[top].entries++;
-  const bucket = (byTop[top].shapes[shape] ??= { count: 0, samples: [] });
+const zones = { surface: { entries: 0, byTop: {} }, excluded: { entries: 0, samples: [] }, library: { entries: 0, byTop: {} } };
+const bump = (zone, top, shape, path) => {
+  const bucketRoot = zones[zone];
+  if (zone === "excluded") {
+    bucketRoot.entries++;
+    if (bucketRoot.samples.length < 10) bucketRoot.samples.push(relative(bossmodeDir, path));
+    return;
+  }
+  bucketRoot.entries++;
+  bucketRoot.byTop[top] ??= {};
+  const bucket = (bucketRoot.byTop[top][shape] ??= { count: 0, samples: [] });
   bucket.count++;
   if (bucket.samples.length < 3) bucket.samples.push(relative(bossmodeDir, path));
 };
-function walk(dir, top) {
+function walk(dir, top, zone) {
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const entry of entries) {
@@ -184,21 +215,44 @@ function walk(dir, top) {
     if (entry.isFile() && SKIP_FILES.test(entry.name)) continue;
     const path = join(dir, entry.name);
     scanned++;
+    if (zone === "surface" && (EXCLUDED_DIR_NAMES.has(entry.name) || EXCLUDED_DIR_RE.test(entry.name) || (entry.isFile() && EXCLUDED_FILE_RE.test(entry.name)))) {
+      bump("excluded", top, entry.isDirectory() ? "dir" : "file", path);
+      continue; // excluded zones are not walked
+    }
     const shape = classify(entry.name);
-    if (shape) bump(top, shape, path);
-    else if (entry.isDirectory()) bump(top, "dir", path);
+    if (shape) bump(zone, top, shape, path);
+    else if (entry.isDirectory()) bump(zone, top, "dir", path);
     if (entry.isDirectory()) {
       if (statSync(path, { throwIfNoEntry: false })?.isSymbolicLink?.()) continue;
-      walk(path, top);
+      walk(path, top, zone);
     }
   }
 }
 for (const top of readdirSync(bossmodeDir, { withFileTypes: true })) {
   if (!top.isDirectory()) continue;
   if (SKIP_NAMES.has(top.name)) continue;
-  walk(join(bossmodeDir, top.name), top.name);
+  walk(join(bossmodeDir, top.name), top.name, LIBRARY_TOPS.has(top.name) ? "library" : "surface");
 }
-report.filesystem = { scannedEntries: scanned, byTop };
+report.filesystem = { scannedEntries: scanned, ...zones };
+
+// Post-migration assertion: no old-shaped member/scope traces outside exclusions.
+const ASSERT_VIOLATION_SHAPES = new Set(["member_old", "member_old_file", "member_other", "dm_scope_old", "dm_scope_other", "mm_scope_old", "mm_scope_other"]);
+if (assertClean) {
+  const violations = [];
+  for (const [top, shapes] of Object.entries(zones.surface.byTop)) {
+    for (const [shape, bucket] of Object.entries(shapes)) {
+      if (!ASSERT_VIOLATION_SHAPES.has(shape)) continue;
+      for (const sample of bucket.samples) violations.push(`${shape} ${sample}`);
+    }
+  }
+  if (violations.length > 0) {
+    console.error(`assert-clean FAILED — ${violations.length} old-shaped trace(s) on the migration surface:`);
+    for (const v of violations.slice(0, 20)) console.error(`  ${v}`);
+    process.exitCode = 2;
+  } else {
+    console.log("assert-clean: no old-shaped member/scope traces outside exclusions");
+  }
+}
 
 // ── output ──────────────────────────────────────────────────────────────────
 const summary = [];
@@ -212,10 +266,12 @@ for (const t of report.tables) {
   const cols = t.columns.map((c) => `${c.column}{${Object.keys(c.matches).join(",")}}`).join(" ");
   summary.push(`  ${t.table} (rows=${t.rows}): ${cols}`);
 }
-summary.push(`fs scanned entries: ${scanned}`);
-for (const [top, info] of Object.entries(byTop)) {
-  const shapes = Object.entries(info.shapes).filter(([s]) => s !== "dir").map(([s, v]) => `${s}:${v.count}`).join(" ");
-  if (shapes) summary.push(`  ${top}/: ${shapes}`);
+summary.push(`fs scanned entries: ${scanned} (surface ${zones.surface.entries} / excluded ${zones.excluded.entries} / library ${zones.library.entries})`);
+for (const [zoneName, zone] of [["surface", zones.surface], ["library", zones.library]]) {
+  for (const [top, shapes] of Object.entries(zone.byTop)) {
+    const line = Object.entries(shapes).filter(([s]) => s !== "dir").map(([s, v]) => `${s}:${v.count}`).join(" ");
+    if (line) summary.push(`  [${zoneName}] ${top}/: ${line}`);
+  }
 }
 console.log(summary.join("\n"));
 
