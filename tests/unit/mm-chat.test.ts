@@ -28,6 +28,14 @@ describe("member↔member private chat (⑤ B)", () => {
     expect(ref.parseMmScopeId("dm:mem_a")).toBeNull();
     expect(() => ref.mmScopeIdOf("mem_a", "mem_a")).toThrow();
     expect(ref.chatScopeRoomId(id)).toBeNull();
+
+    // Short-id shape regression (批 5 prep): nanoid(10) has no separators, so the
+    // second-`mem_` split stays unambiguous for new, old and mixed ids.
+    const c = "mem_3kf9q2xz7p";
+    const d = "mem_a1b2c3d4e5";
+    expect(ref.parseMmScopeId(ref.mmScopeIdOf(c, d))).toEqual([c, d].sort() as [string, string]);
+    expect(ref.parseMmScopeId(ref.mmScopeIdOf(a, d))).toEqual([a, d].sort() as [string, string]); // mixed old/new
+    expect(ref.parseMmScopeId(`mm:${c}-${a}`)).toBeNull(); // non-canonical order is rejected
   });
 
   it("send opens the pair scope, captures the peer target, and read/list/info work for both", async () => {
