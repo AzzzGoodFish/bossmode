@@ -8,15 +8,18 @@ import { handleToolCallback } from "../../src/engine/tools.js";
 import { getAgentInstanceForScope } from "../../src/engine/agent-manager.js";
 setupTestWorkspace();
 const barrier = () => { let release!: () => void; const promise = new Promise<void>(r => release = r); return { promise, release }; };
-async function fixture() {
+async function fixture(label: string) {
   const server = await createTestServer(); resetMocks();
   const token = await loginAndGetToken(server.port);
-  const room = await createMockRoom(server.port, token, "Revocation", ["revoked", "controller"]);
+  // ① B1: one member "revoked" shared by both it.each runs would let a slow
+  // delivery from one run leak into the other — each run gets its own member.
+  const name = `revoked-${label}`;
+  const room = await createMockRoom(server.port, token, `Revocation ${label}`, [name, "controller"]);
   const [id, controller] = room.globalMemberIds!;
   const scope = room.id;
   const path = `/api/rooms/${room.id}/messages`;
   return { server, token, room, id, controller, scope,
-    post: (text: string) => jsonRequest(server.port, "POST", path, { token, body: { content: `@revoked ${text}` } }),
+    post: (text: string) => jsonRequest(server.port, "POST", path, { token, body: { content: `@${name} ${text}` } }),
     remove: async (via: "api" | "tool" = "api") => {
       if (via === "api") expect((await jsonRequest(server.port, "DELETE", `/api/rooms/${room.id}/members/${id}`, { token })).status).toBe(200);
       else expect(await handleToolCallback("chat_edit", room.id, "controller", { chat: room.id, remove_members: [id] }, { memberId: controller })).toMatchObject({ ok: true });
@@ -34,7 +37,7 @@ const assertCancelled = (inputId: number) => {
 const debts = (scope: string, id: string) => new ReplyObligationRepository(getDatabase()).listPending(scope, id);
 
 it.each(["api", "tool"] as const)("does not dispatch pending room input after membership removal through %s", async (via) => {
-  const f = await fixture(), gate = barrier();
+  const f = await fixture(via), gate = barrier();
   try {
     mockPromptFn.mockImplementationOnce(() => gate.promise);
     expect((await f.post("first")).status).toBe(200);
@@ -48,7 +51,9 @@ it.each(["api", "tool"] as const)("does not dispatch pending room input after me
     expect(debts(f.scope, f.id)).toEqual([]);
     // Room revocation is not global member suspension: the owned DM still works.
     expect((await jsonRequest(f.server.port, "POST", `/api/dm/${f.id}/messages`, { token: f.token, body: { content: "still permitted in my DM" } })).status).toBe(200);
-    await vi.waitFor(() => expect(mockPromptFn).toHaveBeenCalledTimes(2));
+    // One runtime per member: the DM turn queues behind the room turn's
+    // settlement before it runs.
+    await vi.waitFor(() => expect(mockPromptFn).toHaveBeenCalledTimes(2), { timeout: 5000 });
   } finally { gate.release(); await closeTestServer(f.server); }
 });
 

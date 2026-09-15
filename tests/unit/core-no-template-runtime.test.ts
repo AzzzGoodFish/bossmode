@@ -65,6 +65,7 @@ describe("current runtime does not depend on historical agent templates", () => 
         restore = damageHistoricalTemplate(mode);
 
         const scopes = [`room:${room.id}`, `dm:${id}`];
+        let liveInstance: Awaited<ReturnType<typeof buildMemberAgentSession>> | null = null;
         const runtime = getRegistry()!.get("pi-cli")!;
         const create = vi.spyOn(runtime, "createAgent");
         const publicResponse = await jsonRequest(server.port, "GET", `/api/members/${id}`, { token });
@@ -78,27 +79,39 @@ describe("current runtime does not depend on historical agent templates", () => 
         for (const scope of scopes) {
           const instance = await buildMemberAgentSession(id, scope);
           expect(instance).not.toBeNull();
-          const args = create.mock.calls.at(-1)![0];
-          expect(args.member.id).toBe(id);
-          expect(args.agentPrompt).toBe(`# Member\n\nI am ${getMember(id)!.name}.\n\n${raw.trim()}`);
-          expect(args.skillNames).toEqual([]);
-          expect(args.skillPaths).toEqual([]);
+          // ① B1: one instance per member — every chat reuses the same runtime.
+          if (liveInstance) expect(instance).toBe(liveInstance);
+          liveInstance = instance;
+          const built = create.mock.calls.at(-1)![0];
+          expect(built.member.id).toBe(id);
+          expect(built.agentPrompt).toBe(`# Member\n\nI am ${getMember(id)!.name}.\n\n${raw.trim()}`);
+          expect(built.skillNames).toEqual([]);
+          expect(built.skillPaths).toEqual([]);
 
           const preview = await jsonRequest(server.port, "GET", `/api/members/${id}/system-prompt?scope=${encodeURIComponent(scope)}`, { token });
           expect(preview.status, preview.body).toBe(200);
-          expect(JSON.parse(preview.body).text.startsWith([args.agentPrompt, ...args.appendSystemPrompt!].join("\n\n"))).toBe(true);
+          const previewText = JSON.parse(preview.body).text;
+          if (scope === scopes[0]) {
+            expect(previewText.startsWith([built.agentPrompt, ...built.appendSystemPrompt!].join("\n\n"))).toBe(true);
+          } else {
+            // The reuse path does not re-run createAgent: the member-owned
+            // persona still renders for this chat.
+            expect(previewText).toContain(`I am ${getMember(id)!.name}.`);
+          }
 
           // Preserve real session metadata publication and reload teardown.
-          const file = join(args.sessionDir!, "fixture-session.jsonl");
-          mkdirSync(args.sessionDir!, { recursive: true });
+          const file = join(built.sessionDir!, "fixture-session.jsonl");
+          mkdirSync(built.sessionDir!, { recursive: true });
           writeFileSync(file, "retained SDK history\n");
-          args.onSessionChanged?.({ sessionId: "fixture-session", sessionFile: file });
+          built.onSessionChanged?.({ sessionId: "fixture-session", sessionFile: file });
           expect(getCurrentSession(id)?.sessionFile).toBe(file);
           const teardown = vi.spyOn(instance!.handle, "destroyAndWait");
           expect(await reloadMemberSession(scope, id, "template-independent reload")).toEqual({ queued: false, rebuilt: true });
           expect(teardown).toHaveBeenCalledOnce();
           expect(create.mock.calls.at(-1)![0].resumeSession).toEqual({ sessionId: "fixture-session", sessionFile: file });
-          expect(create.mock.calls.at(-1)![0].agentPrompt).toBe(args.agentPrompt);
+          expect(create.mock.calls.at(-1)![0].agentPrompt).toBe(built.agentPrompt);
+          // The reload replaced the live instance — refresh the reuse anchor.
+          liveInstance = await buildMemberAgentSession(id, scope);
         }
 
         // In-place resource reload also uses only member-owned persona/config.
@@ -115,21 +128,30 @@ describe("current runtime does not depend on historical agent templates", () => 
         const renamed = updateMember(id, { name: `当前 ${mode} \`mem_looking\`` });
         notifyMemberProfileChanged(renamed);
         const creationsBeforeRefresh = create.mock.calls.length;
-        for (const scope of scopes) {
+        for (const [index, scope] of scopes.entries()) {
           const instance = getAgentInstanceForScope(scope, id)!;
           const refresh = vi.fn();
           instance.handle.refreshPrompt = refresh;
           expect(instance.sessionSources.compiled.agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
+          const creationsBefore = create.mock.calls.length;
           if (scope.startsWith("dm:")) await activateDmMember(id);
           else {
             postMessage(room.id, "user", "Refresh identity.", []);
             await activateAgent(room.id, id);
           }
-          await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+          if (index === 0) {
+            // ① B1: identity refresh is member-level — the first chat's batch
+            // refreshes the single instance and clears the member's dirty flag,
+            // so the second chat reuses the already-refreshed identity.
+            await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+            expect(refresh.mock.calls[0][0].agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
+          } else {
+            expect(refresh).not.toHaveBeenCalled();
+          }
           await vi.waitFor(() => expect(getTestWorkspace().db.get<{ n: number }>(
             "SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND status='settled' AND outcome='completed'", scope.startsWith("room:") ? room.id : scope,
           )?.n).toBe(1));
-          expect(refresh.mock.calls[0][0].agentPrompt).toBe(`# Member\n\nI am ${renamed.name}.`);
+          expect(create.mock.calls.length).toBe(creationsBefore);
           const preview = await jsonRequest(server.port, "GET", `/api/members/${id}/system-prompt?scope=${encodeURIComponent(scope)}`, { token });
           expect(preview.status, preview.body).toBe(200);
           expect(JSON.parse(preview.body).text).not.toContain("Literal persona.");

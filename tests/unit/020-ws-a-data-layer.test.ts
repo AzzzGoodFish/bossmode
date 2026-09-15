@@ -9,7 +9,6 @@ import {
   scopeDirName,
   parseScopeDirName,
   instanceKey,
-  parseInstanceKey,
 } from "../../src/shared/conversation-ref.js";
 
 let fixture: ReturnType<typeof coreFixture>;
@@ -44,15 +43,9 @@ describe("ConversationRef / ScopeId", () => {
     expect(parseScopeDirName("room-r1", "mem_x")).toEqual({ kind: "room", roomId: "r1" });
   });
 
-  it("instanceKey = scopeId:memberId", () => {
-    const k = instanceKey("room:r1", "mem_a");
-    expect(k).toBe("room:r1:mem_a");
-    expect(parseInstanceKey(k)).toEqual({ scopeId: "room:r1", memberId: "mem_a" });
-    expect(parseInstanceKey(instanceKey("dm:mem_a", "mem_a"))).toEqual({
-      scopeId: "dm:mem_a",
-      memberId: "mem_a",
-    });
-    expect(parseInstanceKey("bad")).toBeNull();
+  it("instanceKey = memberId (one runtime per member, ① B1)", () => {
+    expect(instanceKey("mem_a")).toBe("mem_a");
+    expect(() => instanceKey("")).toThrow(/memberId/);
   });
 });
 

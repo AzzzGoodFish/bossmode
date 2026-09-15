@@ -287,16 +287,18 @@ describe("manual compaction conversation action", () => {
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
   });
 
-  it("DM instances are addressed by their real scopeIds", async () => {
+  it("the member's single runtime serves the DM compaction too (① B1)", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
     await manager.activateAgent("room", "pm");
-    const roomHandle = handles[0];
+    const handle = handles[0];
 
+    // The DM build reuses the member's single live runtime (built for the room).
     const dmBuilt = await manager.buildMemberAgentSession("mem_pm", "dm:mem_pm");
-    expect(dmBuilt?.scopeId).toBe("dm:mem_pm");
+    expect(dmBuilt?.scopeId).toBe("room:room");
+    expect(handles).toHaveLength(1);
 
     const dmResult = await manager.compactMember("dm:mem_pm", "mem_pm");
     expect(dmResult).toEqual({ ok: true, action: "compacted" });
-    expect(roomHandle.compactCalls).toBe(0); // scope-exact, no room-path spillover
+    expect(handle.compactCalls).toBe(1); // the live instance is the one compacted
   });
 });

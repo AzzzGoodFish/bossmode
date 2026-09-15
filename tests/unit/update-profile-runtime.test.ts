@@ -61,7 +61,9 @@ it("renames a running member across room/DM without abort; next prompt refreshes
     await manager.activateAgent(room.id, peer.id, { senderName: "peer", needResponseMemberIds: [] });
     const peerHandle = built.find(e => e.opts.member.id === peer.id)!.handle;
     expect(JSON.stringify(peerHandle.refreshPrompt.mock.calls)).toContain(next);
-    expect(runtime.createAgent).toHaveBeenCalledTimes(3);
+    // ① B1: one runtime per member — the DM build reuses the room instance,
+    // so only two creations happen (own room + peer).
+    expect(runtime.createAgent).toHaveBeenCalledTimes(2);
     for (const entry of built) expect(entry.handle.abort).not.toHaveBeenCalled();
   } finally { release.resolve(); await manager.shutdownAll(); }
 });

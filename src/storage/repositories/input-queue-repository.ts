@@ -84,6 +84,18 @@ export class InputQueueRepository {
     return this.db.get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND target_actor_key=? AND status='pending'",actor.scopeId,actor.targetActorKey)!.n;
   }
 
+  /** ① B1: member-level queue views — one runtime serves every chat. */
+  listReadyOwners(memberId:string):string[]{
+    deliveryText(memberId,"member ID");
+    return this.db.all<{scopeId:string}>(`SELECT scope_id AS scopeId FROM queued_inputs
+      WHERE target_actor_key=? AND status='pending' GROUP BY scope_id ORDER BY MIN(id)`,memberId).map(row=>row.scopeId);
+  }
+
+  countPendingForMember(memberId:string):number{
+    deliveryText(memberId,"member ID");
+    return this.db.get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId)!.n;
+  }
+
   /** Indexed keyset listing. Omitting actor lists all safe pending inputs; no dispatch. */
   listPending(options: { actor?: { scopeId: string; targetActorKey: string }; afterId?: number; limit?: number } = {}): QueuedInput[] {
     const { afterId = 0, limit = 100, actor } = options;

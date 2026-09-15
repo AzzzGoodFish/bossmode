@@ -392,8 +392,12 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
 
       const data = JSON.parse(res.body);
       expect(data.agentStatuses).toBeDefined();
-      expect(data.agentStatuses.pm).toBe("inactive");
-      expect(data.agentStatuses.architect).toBe("inactive");
+      // ① B1: status is member-level — a member activated earlier in this run
+      // (in any chat) already reads "idle" here; never-activated members stay
+      // "inactive". Both are valid per-member states for this endpoint.
+      for (const name of ["pm", "architect"]) {
+        expect(["inactive", "idle"]).toContain(data.agentStatuses[name]);
+      }
     });
   });
 

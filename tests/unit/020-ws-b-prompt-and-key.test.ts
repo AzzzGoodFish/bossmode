@@ -31,13 +31,11 @@ describe("020 WS-B prompt + instanceKey", () => {
     fixture.close();
   });
 
-  it("instanceKey for room uses room:<id>:<memberId>", async () => {
-    const { scopeIdOf, instanceKey, parseInstanceKey } = await import("../../src/shared/conversation-ref.js");
+  it("instanceKey is member-only (one runtime per member, ① B1)", async () => {
+    const { scopeIdOf, instanceKey } = await import("../../src/shared/conversation-ref.js");
     const scope = scopeIdOf({ kind: "room", roomId: "abc" });
     expect(scope).toBe("room:abc");
-    const key = instanceKey(scope, "mem_x");
-    expect(key).toBe("room:abc:mem_x");
-    expect(parseInstanceKey(key)).toEqual({ scopeId: "room:abc", memberId: "mem_x" });
+    expect(instanceKey("mem_x")).toBe("mem_x");
   });
 
   it("compileMemberPromptForScope (room) is four-segment Member → Working Principles → Communication → Environment", async () => {

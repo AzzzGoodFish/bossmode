@@ -1,5 +1,5 @@
 import {randomUUID} from "node:crypto";
-import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../services/runtime-input-service.js";
+import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../services/runtime-input-service.js";
 import {InputQueueRepository,type QueuedInput} from "../storage/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../storage/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../storage/repositories/delivery-repository.js";
@@ -27,7 +27,7 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../communicat
 import { initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt, compileMemberPromptForScope } from "./prompt-compiler.js";
-import { instanceKey as scopeInstanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { instanceKey, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
 import { listRoomsForMember } from "../workspace/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
@@ -266,36 +266,12 @@ const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
  * the creation gate (creations wait for it to end before building). */
 const memberSwitchGates = new Map<string, Promise<void>>();
 
-/** §10: creations of this member already in flight (registered in
- * pendingCreations, whose keys end with `:${memberId}`) — the switch awaits
- * them so its instance snapshot is complete. */
+/** §10: creations of this member already in flight (pendingCreations is keyed
+ * by member after ① B1) — the switch awaits them so its instance snapshot is
+ * complete. */
 function pendingCreationsFor(memberId: string): Array<Promise<AgentInstance | null>> {
-  const suffix = `:${memberId}`;
-  const out: Array<Promise<AgentInstance | null>> = [];
-  for (const [key, promise] of pendingCreations) {
-    if (key.endsWith(suffix)) out.push(promise);
-  }
-  return out;
-}
-
-/**
- * Resolve instance map key from a roomId-or-scopeId + memberId.
- * - room uuid → room:<uuid>:<memberId>
- * - already "dm:…" / "room:…" scopeId → scopeId:memberId
- * Contract §5.
- */
-function instanceKey(roomIdOrScope: string, memberId: string): string {
-  if (
-    typeof roomIdOrScope === "string"
-    && (roomIdOrScope.startsWith("dm:") || roomIdOrScope.startsWith("room:"))
-  ) {
-    return scopeInstanceKey(roomIdOrScope, memberId);
-  }
-  return scopeInstanceKey(scopeIdOf({ kind: "room", roomId: roomIdOrScope }), memberId);
-}
-
-function dmInstanceKey(memberId: string): string {
-  return scopeInstanceKey(scopeIdOf({ kind: "dm", memberId }), memberId);
+  const pending = pendingCreations.get(instanceKey(memberId));
+  return pending ? [pending] : [];
 }
 
 function roomScopeId(roomId: string): ScopeId {
@@ -382,8 +358,17 @@ function transition(
   if (instance.status === newStatus) return;
   const prev = instance.status;
   instance.status = newStatus;
-  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger });
-  broadcastToRoom(roomId, { type: "agent:status", roomId, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
+  // ① B1: status follows the chat the member is serving right now; callers pass
+  // the build-time room only as a fallback.
+  const chat = instance.activeChat?.scopeId || roomId;
+  const publishTo = chatTargetOf(chat);
+  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger, chat });
+  broadcastToRoom(publishTo, { type: "agent:status", roomId: publishTo, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
+}
+
+/** ① B1: postMessage/transition target for a scope id — bare room id or dm:<id>. */
+function chatTargetOf(scopeId: string): string {
+  return scopeId.startsWith("room:") ? scopeId.slice("room:".length) : scopeId;
 }
 
 function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
@@ -397,12 +382,12 @@ function updateDispatchState(instance: AgentInstance, next: DispatchState, trigg
   instance.dispatchState = next;
 }
 
-function queueDepth(instance:AgentInstance):number{return pendingRuntimeInputCount(runtimeInputOwner(instance.scopeId,instance.memberId));}
+function queueDepth(instance:AgentInstance):number{return memberPendingInputCount(instance.memberId);}
 const inputPumps=new Map<string,Promise<void>>();
 // Waiter handles observe committed receipts; they are not queue or reply authority.
 const inputProgress=new Map<string,Set<(error?:unknown)=>void>>();
 function waitForInputSettlement(input:QueuedInput,operation:Promise<void>):Promise<void>{
-  const key=instanceKey(input.scopeId,input.targetActorKey);
+  const key=instanceKey(input.targetActorKey);
   return new Promise((resolve,reject)=>{
     const listeners=inputProgress.get(key)??new Set<(error?:unknown)=>void>();inputProgress.set(key,listeners);
     let finished=false;
@@ -419,13 +404,13 @@ function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string
 }
 function drainQueuedInputsAsPrompt(instance:AgentInstance,trigger:string):boolean{
   if(!memberRuntimeAllowed(instance.memberId)||!queueDepth(instance)||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")return false;
-  void pumpRuntimeInputs(instance.scopeId,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
+  void pumpRuntimeInputs(instance.activeChat?.scopeId||instance.scopeId,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
   return true;
 }
 function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
-  const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(owner.scopeId,memberId);
+  const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(memberId);
   const current=inputPumps.get(key);if(current)return current;
-  if(!memberRuntimeAllowed(memberId)||!pendingRuntimeInputCount(owner))return Promise.resolve();
+  if(!memberRuntimeAllowed(memberId)||!memberPendingInputCount(memberId))return Promise.resolve();
   if(!memberScopeAllowsExecution(owner.scopeId,memberId)){
     cancelPendingRuntimeInputs(owner,"execution scope access revoked");
     return Promise.resolve();
@@ -467,9 +452,21 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
   inputPumps.set(key,operation);
   return operation.finally(()=>{
     if(inputPumps.get(key)===operation)inputPumps.delete(key);
+    // ① B1: a member left publicly "working" only because its queue was going
+    // to drain must fall back to idle once that queued work is gone (e.g. a
+    // membership removal cancelled it) — otherwise every later activation
+    // reads the member as busy.
+    const quiet=instances.get(key);
+    if(quiet&&!quiet.promptInFlight&&!quiet.turnActive&&quiet.dispatchState==="idle"&&quiet.status!=="idle"&&!memberPendingInputCount(memberId)){
+      transition(quiet,quiet.roomId,quiet.agentName,"idle","queue-cancelled");
+    }
     for(const notify of [...(inputProgress.get(key)??[])])notify();
     const live=instances.get(key);
-    if(!failed&&memberRuntimeAllowed(memberId)&&pendingRuntimeInputCount(owner)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle")))queueMicrotask(()=>{void pumpRuntimeInputs(owner.scopeId,memberId).catch(error=>logger.error("agent","input wake failed",{memberId,error:String(error)}));});
+    if(!failed&&memberRuntimeAllowed(memberId)&&memberPendingInputCount(memberId)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle"))){
+      // ① B1: the member's pending work may live in several chats — wake every
+      // owner scope, not just the one that started this pump.
+      queueMicrotask(()=>{for(const ownerScope of pendingRuntimeInputOwners(memberId))void pumpRuntimeInputs(ownerScope,memberId).catch(error=>logger.error("agent","input wake failed",{memberId,error:String(error)}));});
+    }
   });
 }
 const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat_send` tool.";
@@ -479,30 +476,33 @@ function isLengthStopReason(stopReason:unknown):boolean{
   const value=stopReason.toLowerCase();return value==="length"||value.includes("max_tokens")||value.includes("max_output");
 }
 function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],trigger:string,skipChatWarning:boolean):void{
-  if(instances.get(instanceKey(instance.scopeId,instance.memberId))!==instance)return;
+  if(instances.get(instanceKey(instance.memberId))!==instance)return;
   updateDispatchState(instance,"idle",trigger);
   if(!memberRuntimeAllowed(instance.memberId))return;
   applyPendingAfterPromptSettlement(instance,trigger);
+  // ① B1: this batch's chat, not the build-time scope.
+  const chat=instance.activeChat?.scopeId||instance.roomId;
+  const chatTarget=chatTargetOf(chat);
   // Pending work does not inherit this batch's reply obligations. Complete or
   // explicitly hand off this batch before the pump chooses its next inputs.
   if(instance.lengthContinuationPending&&!skipChatWarning){
     instance.lengthContinuationPending=false;instance.lastMessageEndWasLength=false;
     if(instance.lengthContinuationAttempted){
       dismissRuntimeReplies(inputs,"continuation-exhausted","length continuation budget exhausted");
-      postMessage(instance.roomId,"system",`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
+      postMessage(chatTarget,"system",`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
     }else{
       instance.lengthContinuationAttempted=true;
-      const owed=hasRuntimeReply(runtimeInputOwner(instance.scopeId,instance.memberId),inputs);
-      acceptControlInput(instance.scopeId,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
+      const owed=hasRuntimeReply(runtimeInputOwner(chat,instance.memberId),inputs);
+      acceptControlInput(chat,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
     }
     return;
   }
-  const owner=runtimeInputOwner(instance.scopeId,instance.memberId);
+  const owner=runtimeInputOwner(chat,instance.memberId);
   if(!skipChatWarning&&!instance.hadErrorInTurn&&hasRuntimeReply(owner,inputs)){
     // A reply was owed but the turn ended without a chat call: nothing is
     // delivered — the debt is dismissed and the silence is made visible.
     dismissRuntimeReplies(inputs,"silent","member finished without replying");
-    postMessage(instance.roomId,"system",`Member "${instance.agentName}" finished without replying.`);
+    postMessage(chatTarget,"system",`Member "${instance.agentName}" finished without replying.`);
   }
 }
 
@@ -552,24 +552,28 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   if(!memberRuntimeAllowed(instance.memberId))return;
   const payloads=inputs.map(runtimeInputPayload),message=payloads.map(x=>x.prompt).join("\n\n");
   const trigger=payloads.length===1?payloads[0].trigger:"queued",token=randomUUID();
+  // ① B1: this batch's chat — the instance serves it now; outbound calls follow it.
+  const batchScope=inputs[0].scopeId;
+  instance.activeChat.scopeId=batchScope;
+  const batchTarget=chatTargetOf(batchScope);
   updateDispatchState(instance,"promptSubmitted",trigger);
   instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
   instance.lastMessageEndWasLength=false;instance.lengthContinuationPending=false;
   instance.lengthContinuationAttempted=payloads.some(payload=>payload.trigger==="length_continuation");
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
-  setActivationSource(instance.roomId,instance.memberId,payloads[0].source);
+  setActivationSource(batchTarget,instance.memberId,payloads[0].source);
   try{
-    if(trigger!=="length_continuation")emitAgentLocalEvent(instance.roomId,instance.memberId,{type:"user_prompt",text:message,trigger});
+    if(trigger!=="length_continuation")emitAgentLocalEvent(batchTarget,instance.memberId,{type:"user_prompt",text:message,trigger});
     if(instance.profilePromptDirty){
       refreshProfileSources(instance);
       if(!instance.handle.refreshPrompt)throw new Error("Runtime cannot refresh member identity without resetting the session.");
       instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;
     }
     await instance.handle.prompt(message,{beforeDispatch:(event:{attemptId:string;dispatchIndex:number;message:string})=>{
-      if(!memberScopeAllowsExecution(instance.scopeId,instance.memberId))throw new RuntimeScopeRevokedError();
+      if(!memberScopeAllowsExecution(batchScope,instance.memberId))throw new RuntimeScopeRevokedError();
       if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
       else{
-        const continuation=acceptControlInput(instance.scopeId,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(instance.scopeId,instance.memberId),inputs)).input;
+        const continuation=acceptControlInput(batchScope,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(batchScope,instance.memberId),inputs)).input;
         claimRuntimeInputs([continuation],event.attemptId,token);inputs.push(continuation);
       }
     }});
@@ -583,12 +587,12 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   // Provider settlement is not application publication. Publication failure cannot replay the input.
   try{finalizePromptSettlement(instance,inputs,`${trigger}_settled`,outcome!=="completed");}
   catch(error){failure=error;outcome="failed";instance.lastTurnError=formatRuntimeErrorMessage(error);updateDispatchState(instance,"idle",`${trigger}_publication_error`);}
-  finally{finishRuntimeInputs(inputs,token,outcome,failure?"runtime operation or publication failed":outcome);clearActivationSource(instance.roomId,instance.memberId);}
+  finally{finishRuntimeInputs(inputs,token,outcome,failure?"runtime operation or publication failed":outcome);clearActivationSource(batchTarget,instance.memberId);}
   if(failure){
-    logger.error("agent","input processing failed",{memberId:instance.memberId,scopeId:instance.scopeId,error:String(failure)});
-    if(instances.get(instanceKey(instance.scopeId,instance.memberId))===instance)postMessage(instance.roomId,"system",`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
+    logger.error("agent","input processing failed",{memberId:instance.memberId,scopeId:batchScope,error:String(failure)});
+    if(instances.get(instanceKey(instance.memberId))===instance)postMessage(batchTarget,"system",`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
   }
-  if(instances.get(instanceKey(instance.scopeId,instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,instance.roomId,instance.agentName,"idle",`${trigger}_settled`);
+  if(instances.get(instanceKey(instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,batchTarget,instance.agentName,"idle",`${trigger}_settled`);
 }
 
 function normalizeSwitchModelRef(model: string): string {
@@ -652,7 +656,8 @@ async function applyModelSwitchToInstanceInternal(
   instance.appliedModel = model;
   instance.appliedCredentialId = profile.id;
   logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
+  const modelChat = chatTargetOf(instance.activeChat?.scopeId || instance.roomId);
+  broadcastToRoom(modelChat, { type: "agent:status", roomId: modelChat, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
 }
 
 /** If the live instance drifted from the room binding, re-apply (or destroy so the next create is clean). */
@@ -666,7 +671,8 @@ async function applyThinkingSwitchToInstanceInternal(instance: AgentInstance, pe
   await instance.handle.setThinkingLevel(pending.thinkingLevel);
   if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
   logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, roomId: instance.roomId, thinkingLevel: pending.thinkingLevel, trigger });
-  broadcastToRoom(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
+  const thinkingChat = chatTargetOf(instance.activeChat?.scopeId || instance.roomId);
+  broadcastToRoom(thinkingChat, { type: "agent:status", roomId: thinkingChat, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
 }
 
 function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): void {
@@ -675,7 +681,7 @@ function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): v
   instance.pendingThinkingSwitch = undefined;
   applyThinkingSwitchToInstance(instance, pending, trigger).catch((err) => {
     logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
-    postMessage(instance.roomId, "system", `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
+    postMessage(chatTargetOf(instance.activeChat?.scopeId || instance.roomId), "system", `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
   });
 }
 
@@ -684,7 +690,7 @@ function instanceUsesCredentialProfile(instance: AgentInstance, profileId: strin
 }
 
 function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason: string): void {
-  const key = instanceKey(instance.roomId, instance.memberId);
+  const key = instanceKey(instance.memberId);
   if (instances.get(key) === instance) instances.delete(key);
   contextUsageCache.delete(key);
   contextCompactionWarningCache.delete(key);
@@ -934,7 +940,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     logger.error("agent", "buildMemberAgentSession: invalid scope", { scopeId, memberId });
     return null;
   }
-  const key = instanceKey(scopeId, memberId);
+  const key = instanceKey(memberId);
   // §10 creation gate: an in-progress member switch must not race a fresh
   // build (stale binding the switch will never see). Wait for the switch to
   // end, then re-run the whole lookup. Never register a creation while the
@@ -961,7 +967,9 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
 
   const publicationOwner = {};
   sessionPublishOwners.set(key,publicationOwner);
-  // Closing execution admission must not discard final session facts from an owned run.
+  // Closing execution admission must not discard final session facts from an owned
+  // run — publish as long as this build's chat access holds (① B1: the key is the
+  // member, the access check stays the build chat's).
   const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner
     && memberHasScopeAccess(scopeId, memberId);
   const creation = (async (): Promise<AgentInstance | null> => {
@@ -987,6 +995,13 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     let callbacks: Parameters<typeof runtime.createAgent>[0]["callbacks"];
 
     const docsRootPath = join(getBossmodeDir(), "memory", "projects");
+
+    // ① B1: the chat whose turn is being processed right now. Callbacks and the
+    // instance share this holder; runInputBatch rewrites it for every batch, so
+    // one member instance serves whichever chat activated it.
+    const activeChat: { scopeId: string } = { scopeId };
+    /** postMessage/transition take bare room ids or dm:<id>; normalize room scopes. */
+    const chatTarget = () => chatTargetOf(activeChat.scopeId);
 
     if (ref.kind === "dm") {
       // ── DM scope: global member config, daemon cwd, roster-labeled activeScopes ──
@@ -1032,12 +1047,13 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       callbacks = {
         onChat: async (message: string) => {
           // Single egress: scope-routed postMessage writes the member-owned DM
-          // store, broadcasts to dm:<id> subscribers, and notifies listeners.
-          postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
+          // store, broadcasts to subscribers, and notifies listeners. The chat
+          // follows the live turn (① B1), not the scope this instance was built for.
+          postMessage(chatTarget(), dmMemberName(), message, [], { senderMemberId: memberId });
         },
         onMention: async (_target: string, message: string) => {
           // DM has no @ routing — treat as normal chat.
-          postMessage(dmScopeId, dmMemberName(), message, [], { senderMemberId: memberId });
+          postMessage(chatTarget(), dmMemberName(), message, [], { senderMemberId: memberId });
         },
       };
       var runtime = runtime0;
@@ -1123,23 +1139,25 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       };
       callbacks = {
         onChat: async (message: string) => {
-          postMessage(ref.roomId, roomMemberName(), message, [], { senderMemberId: memberId });
+          postMessage(chatTarget(), roomMemberName(), message, [], { senderMemberId: memberId });
         },
         onMention: async (targetMember: string, message: string) => {
           // Mention activation is handled by router listener via message-bus.
-          const target = roomStore.resolveRoomMemberRef(ref.roomId, targetMember);
-          postMessage(ref.roomId, roomMemberName(), message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
+          // Resolve the target in the chat being served (① B1); a reused
+          // instance may be serving a DM, where @ routing does not exist.
+          if (!activeChat.scopeId.startsWith("room:")) {
+            postMessage(chatTarget(), roomMemberName(), message, [], { senderMemberId: memberId });
+            return;
+          }
+          const roomId = activeChat.scopeId.slice("room:".length);
+          const target = roomStore.resolveRoomMemberRef(roomId, targetMember);
+          postMessage(roomId, roomMemberName(), message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
         },
       };
       var runtime = runtime1;
     }
 
     try {
-      // ① B1: one instance per member, so the tool surface must target the chat
-      // of the turn being processed. Behavior-preserving until the member-level
-      // activation path starts moving it; every chat-dependent consumer reads
-      // this holder instead of the build-time scope.
-      const activeChat: { scopeId: string } = { scopeId };
       const handle = await runtime.createAgent({
         cwd,
         roomId: keyRoomId,
@@ -1169,7 +1187,9 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         handle,
         /** ① B1: the chat whose turn is being processed right now. */
         activeChat,
-        scopeId: scopeId.startsWith("room:") ? scopeId : scopeId,
+        /** Build-time chat scope: source of cwd/session/roster material only.
+         *  Outbound traffic reads activeChat; never route from this field. */
+        scopeId,
         roomId: keyRoomId,
         memberId,
         agentName: currentRuntimeName(memberId, member.name),
@@ -1229,7 +1249,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
 /** Batch 6 §3: rebuild a live member session with fresh assets, keeping the
  * session files (conversation history). Queued until the current run settles. */
 export async function reloadMemberSession(scopeId: string, memberId: string, reason: string): Promise<{ queued: boolean; rebuilt: boolean }> {
-  const key = instanceKey(scopeId, memberId);
+  const key = instanceKey(memberId);
   const instance = instances.get(key);
   if (!instance) {
     // Nothing live — plain activation semantics (resume if a file exists).
@@ -1256,10 +1276,10 @@ async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: stri
   updateDispatchState(instance,"aborting","session-reload");
   if(!instance.handle.destroyAndWait)throw new Error("Runtime cannot confirm reload teardown");
   await instance.handle.destroyAndWait();
-  if(instances.get(instanceKey(scopeId,memberId))!==instance||!memberRuntimeAllowed(memberId))return null;
+  if(instances.get(instanceKey(memberId))!==instance||!memberRuntimeAllowed(memberId))return null;
   instance.unsubscribe();
-  instances.delete(instanceKey(scopeId, memberId));
-  sessionPublishOwners.delete(instanceKey(scopeId,memberId));
+  instances.delete(instanceKey(memberId));
+  sessionPublishOwners.delete(instanceKey(memberId));
   // Session files are kept — reload means same conversation, fresh assets.
   const built = await buildMemberAgentSession(memberId, scopeId, { resume: true });
   if(built)drainQueuedInputsAsPrompt(built,"session-reloaded");
@@ -1276,7 +1296,7 @@ function maybeFlushPendingReload(instance: AgentInstance): void {
   if (queueDepth(instance) > 0) return;
   const reason = instance.pendingReload;
   instance.pendingReload = null;
-  const key = instanceKey(instance.scopeId, instance.memberId);
+  const key = instanceKey(instance.memberId);
   // Escape the current event handler before destroying the instance.
   setTimeout(() => {
     if (instances.get(key) !== instance) return; // replaced/destroyed meanwhile
@@ -1372,7 +1392,7 @@ function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,c
 /** Admission is synchronous. The outbox may acknowledge only after this returns. */
 function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionActivationCtx):void{
   const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
-  const active=instances.get(instanceKey(scope,memberId));
+  const active=instances.get(instanceKey(memberId));
   const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
   const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
   const scopeAllowed=memberHasScopeAccess(scope,memberId);
@@ -1405,7 +1425,7 @@ async function activateControl(scope:string,memberId:string,ctx?:ReplyContext):P
     await buildMemberAgentSession(memberId,(scope.startsWith("dm:")?scope:roomScopeId(scope)) as ScopeId);
     return;
   }
-  const active=instances.get(instanceKey(scope,memberId));
+  const active=instances.get(instanceKey(memberId));
   const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
   if(busy&&!active!.compacting)prepared.payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${prepared.payload.prompt}`;
   const {input}=acceptControlInput(scope,memberId,prepared.payload,prepared.replyExpected,busy?"front":"tail",prepared.onAccepted);
@@ -1507,7 +1527,7 @@ async function rollbackSwitchedInstances(
   for (const inst of attempted) {
     const original = originals.get(inst);
     if (!original) continue;
-    const stillCurrent = instances.get(instanceKey(inst.scopeId, inst.memberId)) === inst;
+    const stillCurrent = instances.get(instanceKey(inst.memberId)) === inst;
     if (!stillCurrent) continue;
     if (!original.model || !original.credentialId) {
       destroyInstance(inst.scopeId, inst.memberId);
@@ -1642,7 +1662,7 @@ export async function switchMemberThinkingLevel(memberId: string, thinkingLevel:
 
 /** Read-only live-instance lookup by scope (batch 6 reload surface + tests). */
 export function getAgentInstanceForScope(scopeId: string, memberId: string): AgentInstance | null {
-  const instance = instances.get(instanceKey(scopeId, memberId)) ?? null;
+  const instance = instances.get(instanceKey(memberId)) ?? null;
   if (instance?.profilePromptDirty) refreshProfileSources(instance);
   return instance;
 }
@@ -1650,7 +1670,7 @@ export function getAgentInstanceForScope(scopeId: string, memberId: string): Age
 export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  const instance = instances.get(instanceKey(roomId, memberId));
+  const instance = instances.get(instanceKey(memberId));
   if (!instance) return "inactive";
   return instance.status;
 }
@@ -1658,7 +1678,7 @@ export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
 export function getMemberBusyState(roomId: string, memberRef: string): { busy: boolean; reason?: string } {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   if (pendingCreations.has(key)) return { busy: true, reason: "pending_creation" };
   const instance = instances.get(key);
   if (!instance) return { busy: false };
@@ -1780,7 +1800,7 @@ export function getMemberStale(_scopeId: string, _memberId: string): { mounts?: 
 export function broadcastMemberStatus(roomId: string, memberRef: string): void {
   const member = resolveRoomMember(roomId, memberRef);
   if (!member) return;
-  const key = instanceKey(roomId, member.id);
+  const key = instanceKey(member.id);
   const instance = instances.get(key);
   const status = instance?.status ?? "inactive";
   const stale = getMemberStale(`room:${roomId}`, member.id) ?? undefined;
@@ -1818,7 +1838,7 @@ function shouldKeepCompactedMarker(previous: ContextUsage | undefined, next: Con
 export function getAgentContextUsage(roomId: string, memberRef: string): ContextUsage | null {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   return contextUsageCache.get(key) ?? null;
 }
 
@@ -1830,7 +1850,7 @@ export function getMemberActiveTools(roomId: string, memberRef: string): {
 } {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   const instance = instances.get(key);
   if (!instance?.handle.getActiveTools) {
     return {
@@ -1863,7 +1883,7 @@ function refreshContextUsageOnce(roomId: string, memberRef: string, options: Ref
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const agentName = member?.name || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   const instance = instances.get(key);
   if (!instance?.handle.getContextUsage) return;
 
@@ -1926,7 +1946,7 @@ function emitAgentLocalEvent(
   const scopedMember = roomId.startsWith("dm:") ? getMember(memberRef) : null;
   const member = identity ? undefined : scopedMember ?? roomStore.resolveRoomMemberRef(roomId, memberRef);
   // Prefer live instance identity, then the global member record for DM.
-  const keyHint = instanceKey(roomId, member?.id || memberRef);
+  const keyHint = instanceKey(member?.id || memberRef);
   const instance = instances.get(keyHint)
     || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
   const memberId = identity?.memberId || member?.id || instance?.memberId || memberRef;
@@ -1948,7 +1968,7 @@ function emitAgentLocalEvent(
  * never killed — blocking shell waits are settled so the member's turn can
  * end, but the commands keep running in the PTY. */
 export async function compactMember(scopeId: string, memberId: string): Promise<{ ok: boolean; action: string }> {
-  let instance: AgentInstance | undefined = instances.get(instanceKey(scopeId, memberId)) ?? undefined;
+  let instance: AgentInstance | undefined = instances.get(instanceKey(memberId)) ?? undefined;
   if (!instance) {
     // The room /compact command can arrive before any activation — build the
     // session (no prompt) so there is something to compact. Unresolvable or
@@ -2013,7 +2033,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
     }
     // A manual compact emits agent_end after compaction_end and has no input
     // pump to flush deferred reloads. Wait for the actual SDK operation first.
-    if (completed && instances.get(instanceKey(scopeId, memberId)) === instance
+    if (completed && instances.get(instanceKey(memberId)) === instance
       && memberRuntimeAllowed(memberId) && !queueDepth(instance)) maybeFlushPendingReload(instance);
   }
 }
@@ -2024,7 +2044,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
   const memberName = member?.name || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"explicit stop");
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
@@ -2078,7 +2098,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   const member = resolveRoomMember(roomId, memberRef);
   if (!member) throw new Error(`Member not found: ${memberRef}`);
   const memberId = member.id;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   const instance = instances.get(key);
   if (!instance) {
     // No running instance: reload is a no-op semantically (activation creates
@@ -2127,7 +2147,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const ref = parseScopeId(scopeId);
   const resolved = ref?.kind === "room" ? resolveRoomMember(ref.roomId, memberRef) : undefined;
   const memberId = resolved?.id || memberRef;
-  const key = instanceKey(scopeId, memberId);
+  const key = instanceKey(memberId);
   const instance = instances.get(key);
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
 
@@ -2155,7 +2175,7 @@ export function destroyInstance(roomId: string, memberRef: string,options:{prese
   const resolved = resolveRoomMember(roomId, memberRef);
   const memberId = resolved?.id || memberRef;
   const memberName = resolved?.name || memberRef;
-  const key = instanceKey(roomId, memberId);
+  const key = instanceKey(memberId);
   if(!options.preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"instance removed");
   invalidateInputScope(key);
   sessionPublishOwners.delete(key);
@@ -2212,11 +2232,14 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
 function wireInstanceEvents(
   instance: AgentInstance,
   key: string,
-  roomId: string,
+  builtRoomId: string,
   memberId: string,
 ): void {
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const memberName = instance.agentName;
+    // ① B1: persisted/streamed facts belong to the chat being served right
+    // now; event scopes keep the historical form (bare room id | dm:<id>).
+    const roomId = chatTargetOf(instance.activeChat?.scopeId || builtRoomId);
     const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
     if (event.type === "agent_start") {
       instance.turnActive = true;
@@ -2271,9 +2294,9 @@ function wireInstanceEvents(
         const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
           && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
         if (settled) {
-          const compactionScopeId = instance.scopeId;
+          const compactionScopeId = instance.activeChat?.scopeId || instance.scopeId;
           const compactionMemberId = instance.memberId;
-          const compactionKey = instanceKey(compactionScopeId, compactionMemberId);
+          const compactionKey = instanceKey(compactionMemberId);
           setTimeout(() => {
             if (instances.get(compactionKey) !== instance) return; // replaced meanwhile
             void reloadMemberSession(compactionScopeId, compactionMemberId, "compaction").catch((err) =>
@@ -2352,8 +2375,13 @@ export async function activateDmMember(memberId:string,ctx?:ReplyContext):Promis
 
 function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:string):void{
   try{settleMemberShellWaits(instance.memberId);}catch{}
+  // ① B1: one runtime serves every chat, so an interrupt can arrive while the
+  // member is between turns. Only a real in-flight turn becomes "aborting" —
+  // marking a quiet instance aborting would wedge its input pump (nothing
+  // would fire the agent_end that settles it).
+  const inFlightTurn=instance.promptInFlight||instance.turnActive;
   instance.handle.abort({preserveCompaction:true});
-  updateDispatchState(instance,"aborting",trigger);
+  if(inFlightTurn)updateDispatchState(instance,"aborting",trigger);
 }
 
 

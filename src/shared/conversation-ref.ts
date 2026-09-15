@@ -74,20 +74,10 @@ export function parseScopeDirName(dirName: string, memberIdForDm: string): Conve
   return null;
 }
 
-/** Runtime instance table key: scope first so sessions group by conversation. */
-export function instanceKey(scopeId: ScopeId, memberId: string): string {
-  if (!scopeId || !memberId) throw new Error("instanceKey requires scopeId and memberId");
-  return `${scopeId}:${memberId}`;
-}
-
-export function parseInstanceKey(key: string): { scopeId: ScopeId; memberId: string } | null {
-  if (typeof key !== "string") return null;
-  // scopeId itself contains one colon (dm:x | room:x); split after the prefix.
-  const m = key.match(/^(dm:[^:]+|room:[^:]+):(.+)$/);
-  if (!m) return null;
-  if (!parseScopeId(m[1])) return null;
-  if (!m[2]) return null;
-  return { scopeId: m[1], memberId: m[2] };
+/** Runtime instance table key: one runtime per member, wherever it serves (① B1 2026-09-15). */
+export function instanceKey(memberId: string): string {
+  if (!memberId) throw new Error("instanceKey requires memberId");
+  return memberId;
 }
 
 /** Member id allocator prefix (contract: mem_<uuid>). */

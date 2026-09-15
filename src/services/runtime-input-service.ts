@@ -66,6 +66,9 @@ export function acceptControlInput(scopeValue:string,memberId:string,payload:Pre
 
 export function pendingRuntimeInputs(owner:RuntimeInputOwner):QueuedInput[]{return new InputQueueRepository(getDatabase()).listReady(owner);}
 export function pendingRuntimeInputCount(owner:RuntimeInputOwner):number{return new InputQueueRepository(getDatabase()).countPending(owner);}
+/** ① B1: member-level queue views — one runtime serves every chat. */
+export function pendingRuntimeInputOwners(memberId:string):string[]{return new InputQueueRepository(getDatabase()).listReadyOwners(memberId);}
+export function memberPendingInputCount(memberId:string):number{return new InputQueueRepository(getDatabase()).countPendingForMember(memberId);}
 export function runtimeInputPayload(input:QueuedInput):PreparedRuntimeInput{
   const value=input.payload as unknown as PreparedRuntimeInput;
   if(!value||typeof value.prompt!=="string"||typeof value.trigger!=="string"||!["room_mention","private_instruction","system"].includes(value.source))throw new Error(`Invalid durable runtime input: ${input.id}`);
