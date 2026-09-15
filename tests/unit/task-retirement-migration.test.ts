@@ -43,7 +43,7 @@ describe("task feature retirement migration", () => {
     db = openDatabase(join(root, "stage.sqlite"));
     // Build the pre-retirement schema by applying the plan WITHOUT the retirement
     // migration, so the task tables exist to be exported.
-    const withoutRetirement = coreStorageMigrations.filter((m) => m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1" && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1");
+    const withoutRetirement = coreStorageMigrations.filter((m) => m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1" && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1" && m.id !== "core-member-runtime-state-v1");
     applyStorageMigrations(db, withoutRetirement);
     seedTaskData(db);
 
@@ -94,7 +94,7 @@ describe("task feature retirement migration", () => {
     // End-to-end through prepareStorageUpgrade: a DB with the pre-retirement schema
     // but no authority marker forces the upgrade path; the archive step must run.
     const { prepareStorageUpgrade } = await import("../../src/storage/upgrade-runner.js");
-    const withoutRetirement = coreStorageMigrations.filter((m) => m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1" && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1");
+    const withoutRetirement = coreStorageMigrations.filter((m) => m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1" && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1" && m.id !== "core-member-runtime-state-v1");
     // Build a "previous" database at the pre-retirement schema.
     const prevPath = join(root, "previous.sqlite");
     const prev = openDatabase(prevPath);

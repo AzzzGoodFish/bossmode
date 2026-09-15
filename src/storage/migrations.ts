@@ -15,6 +15,7 @@ import { taskRetirementMigration } from "./schema/task-retirement.js";
 import { topicRetirementMigration } from "./schema/topic-retirement.js";
 import { backgroundRetirementMigration } from "./schema/background-retirement.js";
 import { memberSessionsMigration } from "./schema/member-sessions.js";
+import { memberRuntimeStateMigration } from "./schema/member-runtime-state.js";
 import type { StorageMigration } from "./database.js";
 
 // The sole ordered schema plan. Initial conversion runs on the upgrade staging DB,
@@ -25,5 +26,6 @@ export const coreStorageMigrations: readonly StorageMigration[] = Object.freeze(
   templatesMigration, memberArchivesMigration, mcpOauthMigration, deliveryMigration,
   messageArchivesMigration, runtimeInputsMigration, taskRetirementMigration,
   topicRetirementMigration, backgroundRetirementMigration, memberSessionsMigration,
+  memberRuntimeStateMigration,
 ]);
 export const CORE_STORAGE_FORMAT = 1;

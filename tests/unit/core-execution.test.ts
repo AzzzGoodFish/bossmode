@@ -6,6 +6,7 @@ import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type D
 import { baseStorageMigration } from "../../src/storage/base-schema.js";
 import { executionMigration } from "../../src/storage/schema/execution.js";
 import { memberSessionsMigration } from "../../src/storage/schema/member-sessions.js";
+import { memberRuntimeStateMigration } from "../../src/storage/schema/member-runtime-state.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
@@ -30,7 +31,7 @@ function restart(): void {
   const path = db.path;
   db.close();
   db = openDatabase(path);
-  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration]);
+  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration, memberRuntimeStateMigration]);
   bindDatabase(db);
 }
 beforeEach(() => {
@@ -41,7 +42,7 @@ beforeEach(() => {
   const path = join(sandbox, "bossmode.db");
   createLegacyMemberStorageFixture(path);
   db = openDatabase(path);
-  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration]);
+  applyStorageMigrations(db, [baseStorageMigration, executionMigration, memberSessionsMigration, memberRuntimeStateMigration]);
   bindDatabase(db);
   for (const [id, name] of [[owner,"Alice"], [other,"Bob"]]) {
     db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,'test','{}',1,1)", id, name, name.toLowerCase());
@@ -167,32 +168,33 @@ describe("DB member sessions, unchanged SDK files", () => {
 });
 
 describe("runtime checkpoints and numeric user cursor semantics", () => {
-  it("normalizes fields, merges stale mounts, clears drift, and survives reopen across scopes", () => {
-    runtime.markStaleMounts("room:r",owner,["mcpServers"]);
-    runtime.markStaleMounts("r",owner,["mcpServers","extensions"]);
-    runtime.markDriftNotified("room:r",owner,9);
-    runtime.setContractFingerprint("room:r",owner,"hash",10);
-    runtime.setContractFingerprint(`dm:${owner}`,owner,"dm",1);
+  it("normalizes fields, merges stale mounts, clears drift, and survives reopen (member-level)", () => {
+    runtime.markStaleMounts(owner,["mcpServers"]);
+    runtime.markStaleMounts(owner,["mcpServers","extensions"]);
+    runtime.markDriftNotified(owner,9);
+    runtime.setContractFingerprint(owner,"hash",10);
     restart();
-    expect(runtime.getRuntimeStateEntry("r",owner)).toMatchObject({contractFingerprint:"hash",contractVersion:10,staleMounts:{fields:["mcpServers","extensions"]}});
-    expect(runtime.getRuntimeStateEntry("r",owner).driftNotified).toBeUndefined();
-    expect(Object.keys(runtime.readRuntimeState("room:r"))).toEqual([`room:r:${owner}`]);
-    runtime.clearStaleMounts("room:r",owner);
+    expect(runtime.getRuntimeStateEntry(owner)).toMatchObject({contractFingerprint:"hash",contractVersion:10,staleMounts:{fields:["mcpServers","extensions"]}});
+    expect(runtime.getRuntimeStateEntry(owner).driftNotified).toBeUndefined();
+    expect(Object.keys(runtime.readRuntimeState())).toEqual([owner]);
+    runtime.clearStaleMounts(owner);
     expect(db.all("SELECT * FROM runtime_stale_fields")).toEqual([]);
-    runtime.clearRuntimeStateEntry("r",owner);
-    expect(runtime.getRuntimeStateEntry(`dm:${owner}`,owner).contractFingerprint).toBe("dm");
-    expect(runtime.readRuntimeState("room:missing")).toEqual({});
+    runtime.clearRuntimeStateEntry(owner);
+    expect(runtime.getRuntimeStateEntry(owner)).toEqual({});
     expect(existsSync(join(sandbox,"rooms/r/runtime-state.json"))).toBe(false);
   });
   it("imports normalized runtime records with timestamps; failure rolls back child fields", () => {
     const repo=new RuntimeRepository(db);
-    repo.importEntry("r",owner,{contractFingerprint:"original",staleMounts:{since:100,fields:["one"]}},101);
+    repo.importEntry(owner,{contractFingerprint:"original",staleMounts:{since:100,fields:["one"]}},101);
     db.exec("CREATE TRIGGER reject_fields BEFORE INSERT ON runtime_stale_fields WHEN NEW.field='bad' BEGIN SELECT RAISE(ABORT,'injected'); END");
-    expect(() => repo.importEntry("r",owner,{contractFingerprint:"changed",staleMounts:{since:200,fields:["two","bad"]}},201)).toThrow(/injected/);
-    expect(repo.get("r",owner)).toEqual({contractFingerprint:"original",staleMounts:{since:100,fields:["one"]}});
+    expect(() => repo.importEntry(owner,{contractFingerprint:"changed",staleMounts:{since:200,fields:["two","bad"]}},201)).toThrow(/injected/);
+    expect(repo.get(owner)).toEqual({contractFingerprint:"original",staleMounts:{since:100,fields:["one"]}});
     expect(db.get("SELECT updated_at FROM runtime_checkpoints")).toEqual({updated_at:101});
-    runtime.clearStaleMounts(`dm:${owner}`,owner);
-    expect(db.all("SELECT * FROM runtime_checkpoints WHERE scope_id=?", `dm:${owner}`)).toEqual([]);
+    runtime.clearStaleMounts(owner);
+    expect(repo.get(owner)).toMatchObject({contractFingerprint:"original"});
+    expect(repo.get(owner).staleMounts).toBeUndefined();
+    runtime.clearStaleMounts("mem_missing");
+    expect(db.all("SELECT * FROM runtime_checkpoints WHERE member_id='mem_missing'")).toEqual([]);
   });
   it("keeps user numeric seq as TEXT and message ID separate, preserving null, zero and partial patches", () => {
     db.run("INSERT INTO read_cursors VALUES('r','member',?,'member-message',1)",owner);

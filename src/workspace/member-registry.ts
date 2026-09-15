@@ -322,7 +322,7 @@ export function applyMemberConfigPatch(
     if (Object.keys(globalPatch).length > 0) updateMember(id, { global: globalPatch as Partial<MemberGlobalConfig> });
 
     if (mountFieldsChanged.length > 0) {
-      markStaleMounts(scopeId, id, mountFieldsChanged);
+      markStaleMounts(id, mountFieldsChanged);
     }
 
     return getMember(id)!;

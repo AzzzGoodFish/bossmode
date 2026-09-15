@@ -14,7 +14,8 @@ import { cleanupRetiredBackgroundSessionFiles } from "../../src/storage/backgrou
 let root: string;
 let db: Database | undefined;
 const withoutBackgroundRetirement = () => coreStorageMigrations.filter((m) =>
-  m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"); // pre-retirement schema: the member-session reshape lands after these
+  m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"
+  && m.id !== "core-member-runtime-state-v1"); // pre-retirement schema: the member-level reshapes land after these
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bg-retire-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });

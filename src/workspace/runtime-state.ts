@@ -1,4 +1,6 @@
 // DB-owned runtime recovery metadata. Module import never initializes storage.
+// ① B8 / C3: runtime checkpoints are member-level — one entry per member,
+// independent of the chat being served.
 import { getDatabase } from "../storage/database.js";
 import { RuntimeRepository } from "../storage/repositories/runtime-repository.js";
 
@@ -19,28 +21,29 @@ export interface RuntimeStateEntry {
   staleMounts?: MountStale;
 }
 
+/** Member-id keyed map (all members with a checkpoint). */
 export type RuntimeStateMap = Record<string, RuntimeStateEntry>;
 
 function repository(): RuntimeRepository { return new RuntimeRepository(getDatabase()); }
 
-export function readRuntimeState(scopeId: string): RuntimeStateMap { return repository().list(scopeId); }
-export function getRuntimeStateEntry(scopeId: string, memberId: string): RuntimeStateEntry { return repository().get(scopeId, memberId); }
-export function updateRuntimeStateEntry(scopeId: string, memberId: string, patch: RuntimeStateEntry): void {
-  repository().update(scopeId, memberId, current => ({...current, ...patch}), Date.now());
+export function readRuntimeState(): RuntimeStateMap { return repository().list(); }
+export function getRuntimeStateEntry(memberId: string): RuntimeStateEntry { return repository().get(memberId); }
+export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEntry): void {
+  repository().update(memberId, current => ({...current, ...patch}), Date.now());
 }
-export function setContractFingerprint(scopeId: string, memberId: string, fingerprint: string, contractVersion: number): void {
-  updateRuntimeStateEntry(scopeId, memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
+export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
+  updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
 }
-export function markDriftNotified(scopeId: string, memberId: string, version: number): void {
-  updateRuntimeStateEntry(scopeId, memberId, {driftNotified: version});
+export function markDriftNotified(memberId: string, version: number): void {
+  updateRuntimeStateEntry(memberId, {driftNotified: version});
 }
-export function markStaleMounts(scopeId: string, memberId: string, fields: string[]): void {
+export function markStaleMounts(memberId: string, fields: string[]): void {
   const now = Date.now();
-  repository().update(scopeId, memberId, current => ({...current, staleMounts: {
+  repository().update(memberId, current => ({...current, staleMounts: {
     since: now, fields: [...new Set([...(current.staleMounts?.fields ?? []), ...fields])],
   }}), now);
 }
-export function clearStaleMounts(scopeId: string, memberId: string): void {
-  repository().update(scopeId, memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
+export function clearStaleMounts(memberId: string): void {
+  repository().update(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }
-export function clearRuntimeStateEntry(scopeId: string, memberId: string): void { repository().clear(scopeId, memberId); }
+export function clearRuntimeStateEntry(memberId: string): void { repository().clear(memberId); }

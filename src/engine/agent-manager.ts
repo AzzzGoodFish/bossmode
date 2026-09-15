@@ -34,7 +34,7 @@ import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
 import { loadScopeMessages } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, getRuntimeStateEntry, readRuntimeState } from "../workspace/runtime-state.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../workspace/runtime-state.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -1032,8 +1032,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       }
       const dmScopeId = scopeId;
       compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(dmScopeId, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      clearStaleMounts(dmScopeId, memberId);
+      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+      clearStaleMounts(memberId);
       skills = resolveSkills(member);
       cwd = activeWorkspaceRoot(memberId);
       roomMembers = [member.name];
@@ -1101,8 +1101,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         return null;
       }
       compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(`room:${ref.roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      clearStaleMounts(`room:${ref.roomId}`, memberId);
+      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+      clearStaleMounts(memberId);
       skills = resolveSkills(member);
       skillPaths = [
         ...resolveGlobalSkillPaths(skills),
@@ -2115,9 +2115,9 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     // a false "needs reload" badge for a member that will auto-pick-up.
     try {
       const compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     } catch { /* compile failed — best effort */ }
-    clearStaleMounts(`room:${roomId}`, memberId);
+    clearStaleMounts(memberId);
     return { ok: true, reloaded: false, message: "Member is not running — marked up to date; latest prompt, skills and tools apply on next activation." };
   }
   if (instance.status === "working" || instance.dispatchState !== "idle" || instance.promptInFlight) {
@@ -2141,8 +2141,8 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     skillNames: skills,
   });
   // Reload picked up new contract + mounts: refresh fingerprint, clear stale.
-  setContractFingerprint(`room:${roomId}`, memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-  clearStaleMounts(`room:${roomId}`, memberId);
+  setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+  clearStaleMounts(memberId);
   emitAgentLocalEvent(roomId, memberId, { type: "system", text: "Reloaded member resources in place." });
   logger.info("agent", "member resources reloaded", { roomId, member: member.name, memberId, skills: skills.length });
   return { ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." };
@@ -2163,7 +2163,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   getDatabase().transaction(() => {
     cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");
     sessionStore.clearCurrentSession(memberId);
-    clearRuntimeStateEntry(scopeId, memberId);
+    clearRuntimeStateEntry(memberId);
     if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
     emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId,
       {type:"system",text:message},{memberId,agentName});
@@ -2237,7 +2237,7 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
   teardownMemberInstance(memberId);
   for (const scope of scopes) {
     clearActivationSource(scope, memberId);
-    clearRuntimeStateEntry(scope, memberId);
+    clearRuntimeStateEntry(memberId);
     const target = chatTargetOf(scope);
     const statusEvent = { type: "agent:status" as const, roomId: target, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     if (scope.startsWith("dm:")) broadcastToAgentSubscribers(target, agentName, statusEvent);

@@ -127,12 +127,11 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
     expect(fixture.db.all("SELECT source_key,reason FROM execution_import_ambiguities WHERE domain='session' ORDER BY source_key"))
       .toEqual([{source_key:"dm:mem_one",reason:"retired-scope-session-generation"},
         {source_key:"room:r",reason:"retired-scope-session-generation"}]);
-    for (const scope of ["room:r", "dm:mem_one"]) {
-      expect(new RuntimeRepository(fixture.db).get(scope, member.id)).toEqual(checkpoint);
-    }
+    // ① B8 / C3: checkpoints converge to the member — the room and DM sources
+    // collapse into one member-keyed row with the exact source timestamp.
+    expect(new RuntimeRepository(fixture.db).get(member.id)).toEqual(checkpoint);
     expect(fixture.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();
-    expect(fixture.db.get("SELECT 1 FROM runtime_checkpoints WHERE scope_id LIKE 'topic:%'")).toBeUndefined();
-    expect(fixture.db.all("SELECT updated_at FROM runtime_checkpoints")).toEqual(Array(2).fill({updated_at: 123000}));
+    expect(fixture.db.all("SELECT member_id, updated_at FROM runtime_checkpoints")).toEqual([{member_id: member.id, updated_at: 123000}]);
     expect(fixture.db.all("SELECT source_key,reason,record_json FROM execution_import_ambiguities WHERE domain='runtime'")).toEqual([
       {source_key: "room:r:pm", reason: "unresolved-runtime-owner", record_json: JSON.stringify({contractFingerprint: "ambiguous"})}]);
   });

@@ -38,10 +38,10 @@ it("does not revive retired room sessions when a current map is explicitly empty
  importLegacyExecution(ctx,entries);expect(new SessionRepository(ctx.db).get("mem_one","room-one")).toBeUndefined();
  expect(ctx.db.get<{reason:string;record_json:string}>("SELECT reason,record_json FROM execution_import_ambiguities")).toMatchObject({reason:"retired-room-session-generation",record_json:JSON.stringify(old)});
 });
-it("retains runtime entries by explicit scope/member key without binding old labels",()=>{
+it("retains member-level runtime entries without binding old labels",()=>{
  const {ctx,entries}=setup({"rooms/room-one/runtime-state.json":{"room:room-one:mem_one":{contractFingerprint:"old",staleMounts:{since:1,fields:["mcpServers"]}},"room:room-one:old-label":{contractFingerprint:"unresolved"}}});
  importLegacyExecution(ctx,entries);
- expect(new RuntimeRepository(ctx.db).get("room-one","mem_one")).toEqual({contractFingerprint:"old",staleMounts:{since:1,fields:["mcpServers"]}});
+ expect(new RuntimeRepository(ctx.db).get("mem_one")).toEqual({contractFingerprint:"old",staleMounts:{since:1,fields:["mcpServers"]}});
  expect(ctx.db.all("SELECT * FROM execution_import_ambiguities")).toHaveLength(1);
 });
 it("retires background task sources: consumed, never imported, table gone",()=>{

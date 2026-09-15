@@ -49,7 +49,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
     let scope:string;try{scope=executionScopeId(rawScope);}catch{quarantine(e,key,"runtime",value,"invalid-runtime-scope");continue;}
     ensureImportedScope(ctx.db,scope);
     const entry=object(value,e.path);
-    if(unique(`runtime:${scope}:${member}`,entry))runtime.importEntry(scope,member,entry,at);
+    if(unique(`runtime:${scope}:${member}`,entry))runtime.importEntry(member,entry,at);
    }
   }
   consumed.add(e.path);

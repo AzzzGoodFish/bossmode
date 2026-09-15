@@ -74,7 +74,7 @@ describe("current runtime does not depend on historical agent templates", () => 
 
         // Even an inactive room member gets its prompt contract refreshed.
         expect(await reloadMemberResources(room.id, id)).toMatchObject({ reloaded: false });
-        expect(getRuntimeStateEntry(scopes[0], id).contractFingerprint).toEqual(expect.any(String));
+        expect(getRuntimeStateEntry(id).contractFingerprint).toEqual(expect.any(String));
 
         for (const scope of scopes) {
           const instance = await buildMemberAgentSession(id, scope);

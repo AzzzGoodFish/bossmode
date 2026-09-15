@@ -6,7 +6,6 @@ import { openDatabase, applyStorageMigrations, type Database } from "../../src/s
 import { coreStorageMigrations } from "../../src/storage/migrations.js";
 import { cleanupRetiredTopicSessionFiles } from "../../src/storage/topic-session-cleanup.js";
 import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
-import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
 import { importMessage, importMessageNextSequence } from "../../src/storage/message-repository.js";
 import { importAgentEvent } from "../../src/storage/event-repository.js";
 
@@ -19,7 +18,8 @@ let root: string;
 let db: Database | undefined;
 const withoutRetirement = () => coreStorageMigrations.filter((m) =>
   m.id !== "core-task-retirement-v1" && m.id !== "core-topic-retirement-v1"
-  && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"); // pre-retirement schema: the member-session reshape lands after these
+  && m.id !== "core-background-retirement-v1" && m.id !== "core-member-session-v1"
+  && m.id !== "core-member-runtime-state-v1"); // pre-retirement schema: the member-level reshapes land after these
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "topic-retire-")); });
 afterEach(() => { db?.close(); db = undefined; rmSync(root, { recursive: true, force: true }); });
@@ -33,7 +33,11 @@ function scopeTables(database: Database): string[] {
     .filter((name) => name !== "background_tasks")
     // current_sessions loses its scope column to the member-session reshape
     // (core-member-session-v1); the topic-row check for it is asserted directly.
-    .filter((name) => name !== "current_sessions");
+    .filter((name) => name !== "current_sessions")
+    // runtime_checkpoints / runtime_stale_fields lose their scope column to the
+    // member-runtime reshape (core-member-runtime-state-v1); their topic rows are
+    // deleted by the retirement migration and asserted directly below.
+    .filter((name) => name !== "runtime_checkpoints" && name !== "runtime_stale_fields");
 }
 
 /** Dynamic ownership scan: every table carrying scope_id + the special keys. */
@@ -80,7 +84,7 @@ function seed(database: Database): void {
   database.run("INSERT INTO read_cursors(scope_id,kind,actor_key,value,updated_at) VALUES('topic:t1','user','user','topic-msg',12)");
   database.run("INSERT INTO current_sessions(member_id,scope_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at) VALUES('mem_m1','r1','pi-sdk',NULL,NULL,'member-relative',1,1)");
   database.run("INSERT INTO current_sessions(member_id,scope_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at) VALUES('mem_m1','topic:t1','pi-sdk',NULL,NULL,'member-relative',1,1)");
-  new RuntimeRepository(database).importEntry("r1", "mem_m1", { contractFingerprint: "room" }, 5);
+  database.run("INSERT INTO runtime_checkpoints(scope_id,member_id,contract_fingerprint,updated_at) VALUES('r1','mem_m1','room',5)");
   database.run("INSERT INTO runtime_checkpoints(scope_id,member_id,contract_fingerprint,updated_at) VALUES('topic:t1','mem_m1','topic',6)");
   database.run("INSERT INTO runtime_stale_fields(scope_id,member_id,field,ordinal) VALUES('topic:t1','mem_m1','a',0)");
   importAgentEvent(database, { id: "ev-room", scopeId: "r1", ownerKey: "mem_m1", memberId: "mem_m1", seq: 1, ts: 1, event: { type: "message_end", usage: { inputTokens: 7, outputTokens: 1, cost: 0.5 }, model: "p/m" } } as any);
@@ -112,6 +116,12 @@ describe("core-topic-retirement-v1", () => {
     expect(mainChatValues(db)).toEqual(beforeChat);
     // The member-session reshape (① A1/A3) carries no legacy per-scope row over.
     expect(db.all("SELECT * FROM current_sessions")).toEqual([]);
+    // Member-level runtime state (① B8 / C3): topic rows are gone and the
+    // member's remaining checkpoint collapses to one member-keyed row.
+    expect(db.all("SELECT * FROM runtime_checkpoints")).toEqual([
+      { member_id: "mem_m1", contract_fingerprint: "room", contract_version: null, drift_notified: null, stale_since: null, updated_at: 5 },
+    ]);
+    expect(db.all("SELECT * FROM runtime_stale_fields")).toEqual([]);
     expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
 
     // Idempotent: re-application records nothing and deletes nothing further.
@@ -132,6 +142,7 @@ describe("core-topic-retirement-v1", () => {
     // Whole transaction rolled back — deletes ordered before `messages` are restored too.
     expect(topicRowCounts(db)).toEqual(beforeTopic);
     expect(mainChatValues(db)).toEqual(beforeChat);
+    expect(db.get("SELECT COUNT(*) n FROM runtime_checkpoints")?.n).toBe(2);
 
     db.exec("DROP TRIGGER block_topic_messages");
     applyStorageMigrations(db, coreStorageMigrations);

@@ -22,8 +22,8 @@ it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and
       const directory=sessions.mainSessionDirectory(member);mkdirSync(directory,{recursive:true});
       const file=join(directory,"retained.jsonl");writeFileSync(file,`SDK history ${member}\n`);files.push(file);
       sessions.saveCurrentSession(member,{runtime:"pi-cli",sessionId:member,sessionFile:file});
-      runtime.setContractFingerprint(`room:${room.id}`,member,"retained",1);
-      runtime.markStaleMounts(`room:${room.id}`,member,["skills"]);
+      runtime.setContractFingerprint(member,"retained",1);
+      runtime.markStaleMounts(member,["skills"]);
       rooms.setCursor(room.id,member,`cursor-${member}`);
     }
     const db=getDatabase();
@@ -35,10 +35,10 @@ it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and
     db.exec("DROP TRIGGER reset_fault");
     expect(resetAgentSession(room.id,id)).toMatchObject({ok:true});
     expect(sessions.getCurrentSession(id)).toBeUndefined();
-    expect(runtime.getRuntimeStateEntry(`room:${room.id}`,id)).toEqual({});
+    expect(runtime.getRuntimeStateEntry(id)).toEqual({});
     expect(rooms.getCursors(room.id)[id]).toBeNull();
     expect(sessions.getCurrentSession(other)?.sessionId).toBe(other);
-    expect(runtime.getRuntimeStateEntry(`room:${room.id}`,other)).toMatchObject({contractFingerprint:"retained"});
+    expect(runtime.getRuntimeStateEntry(other)).toMatchObject({contractFingerprint:"retained"});
     expect(rooms.getCursors(room.id)[other]).toBe(`cursor-${other}`);
     expect(files.map(file=>readFileSync(file,"utf8"))).toEqual([`SDK history ${id}\n`,`SDK history ${other}\n`]);
     expect(db.get("SELECT member_id FROM agent_events WHERE scope_id=? AND owner_key=?",room.id,id)).toMatchObject({member_id:id});

@@ -28,40 +28,37 @@ afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 describe("execution metadata isolation and transactional failures", () => {
   it("keeps runtime fields, drift versions and notification timestamps isolated over rename and reopen", () => {
     for (const id of owners) {
-      for (const scope of ["room:r", `dm:${id}`]) {
-        runtime.setContractFingerprint(scope, id, `${scope}:${id}`, 3);
-        runtime.markDriftNotified(scope, id, 4);
-      }
+      runtime.setContractFingerprint(id, `${id}`, 3);
+      runtime.markDriftNotified(id, 4);
     }
     vi.spyOn(Date, "now").mockReturnValue(100);
-    runtime.markStaleMounts("r", owners[0], ["mcpServers"]);
+    runtime.markStaleMounts(owners[0], ["mcpServers"]);
     vi.mocked(Date.now).mockReturnValue(200);
-    runtime.markStaleMounts("room:r", owners[0], ["mcpServers", "skills"]);
-    runtime.setContractFingerprint("r", owners[0], "refreshed", 5);
+    runtime.markStaleMounts(owners[0], ["mcpServers", "skills"]);
+    runtime.setContractFingerprint(owners[0], "refreshed", 5);
     fixture.db.run("UPDATE members SET name='Renamed',name_key='renamed' WHERE id=?", owners[0]);
     fixture.reopen();
-    expect(runtime.getRuntimeStateEntry("room:r", owners[0])).toEqual({contractFingerprint: "refreshed", contractVersion: 5,
+    expect(runtime.getRuntimeStateEntry(owners[0])).toEqual({contractFingerprint: "refreshed", contractVersion: 5,
       staleMounts: {since: 200, fields: ["mcpServers", "skills"]}});
-    expect(runtime.readRuntimeState("r")[`room:r:${owners[1]}`]).toEqual({contractFingerprint: `room:r:${owners[1]}`, contractVersion: 3, driftNotified: 4});
-    runtime.clearRuntimeStateEntry("r", owners[0]);
-    expect(runtime.getRuntimeStateEntry("r", owners[0])).toEqual({});
+    expect(runtime.readRuntimeState()[owners[1]]).toEqual({contractFingerprint: owners[1], contractVersion: 3, driftNotified: 4});
+    runtime.clearRuntimeStateEntry(owners[0]);
+    expect(runtime.getRuntimeStateEntry(owners[0])).toEqual({});
     expect(fixture.db.all("SELECT * FROM runtime_stale_fields")).toEqual([]);
-    expect(runtime.getRuntimeStateEntry(`dm:${owners[0]}`, owners[0]).contractFingerprint).toBe(`dm:${owners[0]}:${owners[0]}`);
-    expect(() => runtime.setContractFingerprint(`dm:${owners[0]}`, owners[1], "wrong", 1)).toThrow(/belong/);
-    expect(() => runtime.setContractFingerprint("r", "Renamed", "wrong", 1)).toThrow(/member ID/);
+    // Member-level entries bind to stable IDs, never to a display name.
+    expect(() => runtime.setContractFingerprint("Renamed", "wrong", 1)).toThrow(/member ID/);
   });
 
   it("rolls back runtime parent and ordered child fields with the original timestamp on failure", () => {
     const repo = new RuntimeRepository(fixture.db);
     const original = {contractVersion: 2, staleMounts: {since: 1, fields: ["old"]}};
-    repo.importEntry("r", owners[0], original, 10);
+    repo.importEntry(owners[0], original, 10);
     fixture.db.exec("CREATE TRIGGER reject_stale BEFORE INSERT ON runtime_stale_fields WHEN NEW.field='bad' BEGIN SELECT RAISE(ABORT,'stale full'); END");
-    expect(() => repo.importEntry("r", owners[0], {contractVersion: 3, staleMounts: {since: 20, fields: ["new", "bad"]}}, 30)).toThrow("stale full");
+    expect(() => repo.importEntry(owners[0], {contractVersion: 3, staleMounts: {since: 20, fields: ["new", "bad"]}}, 30)).toThrow("stale full");
     fixture.reopen();
-    expect(new RuntimeRepository(fixture.db).get("r", owners[0])).toEqual(original);
+    expect(new RuntimeRepository(fixture.db).get(owners[0])).toEqual(original);
     expect(fixture.db.get("SELECT updated_at FROM runtime_checkpoints")).toEqual({updated_at: 10});
-    runtime.clearStaleMounts(`dm:${owners[0]}`, owners[0]);
-    expect(runtime.readRuntimeState(`dm:${owners[0]}`)).toEqual({});
+    runtime.clearStaleMounts(owners[1]);
+    expect(runtime.readRuntimeState()[owners[1]]).toBeUndefined();
   });
 
   it("preserves session creation time and atomically rolls back a clear", () => {
