@@ -17,9 +17,10 @@ const MM_PREFIX = "mm:";
 
 /**
  * Member↔member private chat scope (⑤ B, 2026-09-15): `mm:` + the two member ids
- * sorted and joined by a single dash. Member ids (`mem_<uuid>`) contain dashes,
- * but `mem_` appears only as their prefix, so the pair splits at the second
- * `mem_` occurrence; canonical order is enforced on parse.
+ * sorted and joined by a single dash. `mem_` appears exactly once per id in both
+ * generations (legacy `mem_<uuid>` ids keep their dashes; current ids are
+ * `mem_<nanoid10>`), so the pair splits at the second `mem_` occurrence; canonical
+ * order is enforced on parse.
  */
 export function mmScopeIdOf(memberA: string, memberB: string): ScopeId {
   if (!memberA || !memberB || memberA === memberB) throw new Error("mm scope requires two distinct member ids");
@@ -111,7 +112,7 @@ export function instanceKey(memberId: string): string {
   return memberId;
 }
 
-/** Member id allocator prefix (contract: mem_<uuid>). */
+/** Wide member-id check: recognizes legacy `mem_<uuid>` and current `mem_<nanoid10>` ids. */
 export function isMemberId(id: string): boolean {
   return typeof id === "string" && /^mem_[A-Za-z0-9-]+$/.test(id);
 }

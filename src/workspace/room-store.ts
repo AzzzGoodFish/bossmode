@@ -8,6 +8,7 @@ import { ConversationsRepository, getConversationMember as getMember } from "../
 export { ensureDmScope, ensureMmScope } from "../storage/repositories/conversations.js";
 import { memberDir } from "./member-profile.js";
 import { readWorkspaces } from "./workspace-registry.js";
+import { newRoomId } from "../shared/short-id.js";
 
 function roomsDir(): string {
   return join(getBossmodeDir(), "rooms");
@@ -178,8 +179,13 @@ export function createRoom(name: string, cwd: string | undefined, memberIds: str
   if (roomDescription.length > ROOM_DESCRIPTION_MAX_CHARS) {
     throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
   }
+  // Batch 5: fresh room ids are `rm_<nanoid10>`. Legacy room-member records keep
+  // their `rm_<uuid>` form (distinguishable by shape). Bounded retry on an occupied
+  // identity; the mkdir below still fails loudly on any residual collision.
+  let id = newRoomId();
+  for (let attempts = 0; attempts < 10 && (repository.getRoom(id) || existsSync(roomDir(id))); attempts++) id = newRoomId();
   const room: Room = {
-    id: randomUUID(), name,
+    id, name,
     members: [], globalMemberIds: ids,
     ...(leader ? { promptLeaderMemberId: leader, promptLeaderGlobalMemberId: leader } : {}),
     docsPath: normalizeRoomDocsPath(opts?.docsPath) || slugifyRoomDocsPath(name),

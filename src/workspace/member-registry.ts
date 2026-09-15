@@ -11,7 +11,7 @@ import { documentContentMeta, insertInitialDocument } from "../storage/document-
 import { ConversationsRepository } from "../storage/repositories/conversations.js";
 import { prepareMemberSshCredential, syncMemberBirthAssets } from "./member-birth-assets.js";
 import { SshCredentialsRepository } from "../storage/repositories/workspace-settings.js";
-import { randomUUID } from "node:crypto";
+import { newMemberId } from "../shared/short-id.js";
 import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
@@ -196,7 +196,11 @@ export function createMemberWithPersona(input: CreateMemberInput, persona: strin
   if (!isValidMemberName(name)) throw new Error("invalid_member_name");
   if (findMemberByName(name)) throw new MemberNameTakenError(name);
 
-  const id = `mem_${randomUUID()}`;
+  // Batch 5: fresh ids are `mem_<nanoid10>`. Bounded retry on an occupied identity
+  // (table row or claimed asset dir); a residual collision still fails loudly at the
+  // mkdir claim below — preexisting assets are never overwritten.
+  let id = newMemberId();
+  for (let attempts = 0; attempts < 10 && (getMember(id) || existsSync(memberDir(id))); attempts++) id = newMemberId();
   const now = Date.now();
   const rec: MemberRecord = {
     id,

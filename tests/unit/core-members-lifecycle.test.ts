@@ -29,10 +29,17 @@ let failRename = false;
 let failSyncAfterRename = false;
 let moved = false;
 let forcedUUID: string | undefined;
+let forcedIdDraw: number | undefined;
 vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => root}));
 vi.mock("node:crypto", async original => {
   const actual = await original<typeof import("node:crypto")>();
-  return {...actual, randomUUID: () => forcedUUID ?? actual.randomUUID()};
+  const drawInt = actual.randomInt as unknown as (...args: number[]) => number;
+  return {...actual,
+    randomUUID: () => forcedUUID ?? actual.randomUUID(),
+    // Short-id draws (member/room ids) route through randomInt; forcing a constant
+    // draw makes the next minted id predictable for collision tests.
+    randomInt: (...args: number[]) => forcedIdDraw ?? drawInt(...args),
+  };
 });
 vi.mock("node:fs", async original => {
   const actual = await original<typeof import("node:fs")>();
@@ -62,7 +69,7 @@ function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
     unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:2};
 }
 beforeEach(() => {
-  failRename = false; failSyncAfterRename = false; moved = false; forcedUUID = undefined;
+  failRename = false; failSyncAfterRename = false; moved = false; forcedUUID = undefined; forcedIdDraw = undefined;
   root = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!,"members-"));
   mkdirSync(join(root,"knowledge"));
   db = openDatabase(join(root,"bossmode.db")); applyStorageMigrations(db,migrations); bindDatabase(db);
@@ -151,10 +158,10 @@ describe("explicit member authority and birth", () => {
     expect(readdirSync(join(root,"members"))).toEqual([]);
   });
   it("never clobbers a preexisting newly allocated path", () => {
-    forcedUUID = "collision";
-    file(join(root,"members/mem_collision/persona.md"),"owned by someone else");
+    forcedIdDraw = 0; // every draw yields `mem_0000000000`; the bounded retry still fails loudly
+    file(join(root,"members/mem_0000000000/persona.md"),"owned by someone else");
     expect(() => registry.createMember({name:"Collision"})).toThrow(/EEXIST/);
-    expect(readFileSync(join(root,"members/mem_collision/persona.md"),"utf8")).toBe("owned by someone else");
+    expect(readFileSync(join(root,"members/mem_0000000000/persona.md"),"utf8")).toBe("owned by someone else");
     expect(registry.listMembers()).toEqual([]);
   });
   it("rejects file/async operations under ambient transactions, including raw BEGIN", () => {
