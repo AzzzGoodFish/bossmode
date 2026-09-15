@@ -141,4 +141,21 @@ describe("bossmode gateway", () => {
       expect.objectContaining({ memberId: "mem-tester" }),
     );
   });
+
+  // ① B1: a member has one instance across chats, so a tool call must target the
+  // chat of the turn being processed rather than the one the instance was built for.
+  it("targets the live chat from the resolver, not the build-time room", async () => {
+    const live = createBossmodeSdkTools({ roomId: "room-a", memberId: "mem-tester", resolveChatId: () => "dm:mem-tester" });
+    vi.mocked(handleToolCallback).mockClear();
+    const send = live.find((tool) => tool.name === "chat_send")!;
+    await expect((send.execute as any)("c1", { to: "user", message: "hi" })).rejects.toThrow("boom: explicit error");
+    expect(handleToolCallback).toHaveBeenCalledWith("chat_send", "dm:mem-tester", "mem-tester", expect.anything(), expect.anything());
+
+    // Without a resolver the build-time chat stays the fallback.
+    const fallback = createBossmodeSdkTools({ roomId: "room-a", memberId: "mem-tester" });
+    vi.mocked(handleToolCallback).mockClear();
+    const sendFallback = fallback.find((tool) => tool.name === "chat_send")!;
+    await expect((sendFallback.execute as any)("c2", { to: "user", message: "hi" })).rejects.toThrow("boom: explicit error");
+    expect(handleToolCallback).toHaveBeenCalledWith("chat_send", "room-a", "mem-tester", expect.anything(), expect.anything());
+  });
 });

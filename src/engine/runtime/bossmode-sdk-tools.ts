@@ -215,15 +215,21 @@ function renderGatewayDescribe(entry: GatewayEntry): string {
 }
 
 export function createBossmodeSdkTools(opts: {
+  /** Chat this instance was built for; the fallback when no live resolver is given. */
   roomId: string;
   memberId: string;
   /** Retained for call-site compatibility — the tool surface no longer varies by scope kind (batch 3). */
   scopeKind?: "dm" | "room";
+  /** ① B1: a member has one instance across chats, so tool calls must target the
+   *  chat of the turn being processed, not the one the instance was built for.
+   *  Resolved per call; defaults to `roomId`. */
+  resolveChatId?: () => string;
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
+  const chatIdOf = () => opts.resolveChatId?.() || opts.roomId;
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
     const { handleToolCallback } = await import("../tools.js");
-    return handleToolCallback(tool, opts.roomId, opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
+    return handleToolCallback(tool, chatIdOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
   // ── Hot tools: registered directly (chat send/read/search/list) ──

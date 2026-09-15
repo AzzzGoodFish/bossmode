@@ -44,6 +44,9 @@ export interface RuntimeCapabilities {
 export interface CreateAgentOpts {
   cwd: string;
   roomId: string;              // bossmode room ID (for tool callbacks)
+  /** ① B1: the chat a tool call targets. A member has one instance across
+   *  chats, so this resolves per call; defaults to `roomId`. */
+  resolveChatId?: () => string;
   member: AgentMemberConfig;
 
   // Layered prompt content
@@ -79,6 +82,8 @@ export interface AgentCallbacks {
 
 export interface ReloadAgentResourcesOpts {
   roomId: string;
+  /** ① B1: same resolver as creation — reload rebuilds the tool surface. */
+  resolveChatId?: () => string;
   member: AgentMemberConfig;
   agentPrompt: string;
   appendSystemPrompt?: string[];

@@ -191,6 +191,8 @@ export interface SessionSources {
 
 interface AgentInstance {
   handle: AgentHandle;
+  /** ① B1: the chat currently being processed; one instance serves every chat. */
+  activeChat: { scopeId: string };
   /** Conversation scope id: "room:<roomId>" | "dm:<memberId>". */
   scopeId: ScopeId;
   /** Room id when scope is room:*; empty string for dm. */
@@ -1133,9 +1135,15 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     }
 
     try {
+      // ① B1: one instance per member, so the tool surface must target the chat
+      // of the turn being processed. Behavior-preserving until the member-level
+      // activation path starts moving it; every chat-dependent consumer reads
+      // this holder instead of the build-time scope.
+      const activeChat: { scopeId: string } = { scopeId };
       const handle = await runtime.createAgent({
         cwd,
         roomId: keyRoomId,
+        resolveChatId: () => activeChat.scopeId,
         member,
         agentPrompt: compiled.agentPrompt,
         envPrompt: compiled.envPrompt,
@@ -1159,6 +1167,8 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
 
       const instance: AgentInstance = {
         handle,
+        /** ① B1: the chat whose turn is being processed right now. */
+        activeChat,
         scopeId: scopeId.startsWith("room:") ? scopeId : scopeId,
         roomId: keyRoomId,
         memberId,
@@ -2096,6 +2106,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
 
   await instance.handle.reloadResources({
     roomId,
+    resolveChatId: () => instance.activeChat.scopeId,
     member,
     agentPrompt: compiled.agentPrompt,
     appendSystemPrompt: compiled.appendSystemPrompt,
