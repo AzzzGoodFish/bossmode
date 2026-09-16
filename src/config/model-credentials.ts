@@ -3,11 +3,11 @@ import { ModelCredentialsRepository } from "../data/repositories/model-settings.
 export function credentialRepository(): ModelCredentialsRepository { return new ModelCredentialsRepository(getDatabase()); }
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { readConfig, writeConfig } from "./config.js";
 import { logger } from "../kernel/logger.js";
 import { buildProviderOverlaysFromFetch, distributeModelsStoreOverlays } from "./pi-adapt/runtime-bridge.js";
+import { ensureCatalogRegistry, ensureCatalogRegistryRuntime, getCatalogRegistrySync, getCatalogRuntimeSync } from "./pi-adapt/catalog-registry.js";
+import type { AuthInteraction } from "./pi-adapt/runtime-bridge.js";
 import {
   createDatabaseModelsStore,
   setBundledCatalogLoader,
@@ -1012,51 +1012,12 @@ export function setCatalogNetworkRefreshForTests(
   setCatalogNetworkHook(fn);
 }
 
-class NoopCredentialStore implements CredentialStore {
-  async read(): Promise<Credential | undefined> { return undefined; }
-  async list(): Promise<readonly CredentialInfo[]> { return []; }
-  async modify(_providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> { return fn(undefined); }
-  async delete(): Promise<void> {}
-}
-
-// Credential-less registry used only for static catalog metadata (model list, provider display
-// names, OAuth-provider ids) — not for real request auth. ModelRuntime.create() is async, but the
-// many callers below (validateInput, sanitizeProfile, etc.) are synchronous; the cache is warmed
-// once (lazily, or eagerly via ensurePiCatalogWarm() at server startup) and read synchronously
-// afterward. Before the cache is warm, callers fall back to their pre-existing empty/default
-// behavior (unchanged from before this migration).
-let catalogRegistryPromise: Promise<ModelRegistry> | null = null;
-let catalogRegistrySync: ModelRegistry | null = null;
-let catalogRuntimeSync: ModelRuntime | null = null;
-
-async function ensureCatalogRegistry(): Promise<ModelRegistry> {
-  if (catalogRegistrySync) return catalogRegistrySync;
-  if (!catalogRegistryPromise) {
-    catalogRegistryPromise = ModelRuntime.create({ credentials: new NoopCredentialStore(), modelsPath: null, allowModelNetwork: false })
-      .then((runtime) => {
-        const registry = new ModelRegistry(runtime);
-        catalogRuntimeSync = runtime;
-        catalogRegistrySync = registry;
-        return registry;
-      })
-      .catch((err) => {
-        catalogRegistryPromise = null;
-        throw err;
-      });
-  }
-  return catalogRegistryPromise;
-}
-
-async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
-  await ensureCatalogRegistry();
-  if (!catalogRuntimeSync) throw new Error("pi model catalog is unavailable");
-  return catalogRuntimeSync;
-}
 
 function loadBundledCatalogSync(): any[] {
-  if (!catalogRegistrySync) return [];
+  const registry = getCatalogRegistrySync();
+  if (!registry) return [];
   try {
-    return typeof catalogRegistrySync.getAll === "function" ? catalogRegistrySync.getAll() : [];
+    return typeof registry.getAll === "function" ? registry.getAll() : [];
   } catch {
     return [];
   }
@@ -1369,18 +1330,20 @@ export function getCatalogSettingsPublic(): {
 }
 
 function displayNameForProvider(providerSlug: string): string {
-  if (!catalogRegistrySync) return providerSlug;
+  const registry = getCatalogRegistrySync();
+  if (!registry) return providerSlug;
   try {
-    return catalogRegistrySync.getProviderDisplayName(providerSlug) || providerSlug;
+    return registry.getProviderDisplayName(providerSlug) || providerSlug;
   } catch {
     return providerSlug;
   }
 }
 
 function oauthProviderIds(): Set<string> {
-  if (!catalogRuntimeSync) return new Set(OAUTH_PROVIDERS as readonly string[]);
+  const runtime = getCatalogRuntimeSync();
+  if (!runtime) return new Set(OAUTH_PROVIDERS as readonly string[]);
   try {
-    return new Set(catalogRuntimeSync.getProviders().filter((p) => p.auth.oauth).map((p) => p.id));
+    return new Set(runtime.getProviders().filter((p) => p.auth.oauth).map((p) => p.id));
   } catch {
     return new Set(OAUTH_PROVIDERS as readonly string[]);
   }

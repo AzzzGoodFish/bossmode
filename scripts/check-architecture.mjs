@@ -130,8 +130,19 @@ const curLegacyTotal = [...current.pairs.entries()]
   .filter(([pair]) => pair.split("->").every(m => legacy.has(m)))
   .reduce((a, [, c]) => a + c, 0);
 
+// Quarantine rule (P5): @earendil-works/* is importable only from the marked adapter zones.
+const QUARANTINE_ALLOW = ["src/engine/runtime/", "src/config/pi-adapt/"];
+const quarantine = [];
+for (const abs of walk(SRC)) {
+  const rel = relative(ROOT, abs).split(sep).join("/");
+  if (QUARANTINE_ALLOW.some((a) => rel.startsWith(a))) continue;
+  if (/@earendil-works\//.test(readFileSync(abs, "utf8"))) quarantine.push(rel);
+}
+if (quarantine.length) violations.push(...quarantine.map((f) => `quarantine: ${f} imports @earendil-works/* (allowed: engine/runtime/**, config/pi-adapt/**)`));
+
 console.log(`modules: ${baseline.modules.length} frozen; src files scanned: ${current.fileCount}`);
 console.log(`burn line: ${baseline.totalRefs} frozen refs -> ${curLegacyTotal} current (burned ${burned})`);
+if (mode === "report") console.log(`  quarantine: ${quarantine.length === 0 ? "clean" : quarantine.join(", ")} (allowed: ${QUARANTINE_ALLOW.join(", ")})`);
 if (removedPairs.length) console.log(`  removed: ${removedPairs.join(", ")}`);
 if (shrunkPairs.length && mode === "report") console.log(`  shrunk: ${shrunkPairs.join(", ")}`);
 if (newEdges.length) console.log(`  new-module edges (recorded): ${newEdges.length}${mode === "report" ? " -> " + newEdges.join(", ") : ""}`);

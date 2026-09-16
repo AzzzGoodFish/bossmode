@@ -1,5 +1,6 @@
 // pi SDK runtime bridge (config's marked adapter zone, P5).
 // Owns the pi-coding-agent / pi-ai facing runtime, credential store and config export.
+export type { AuthInteraction } from "@earendil-works/pi-ai";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
