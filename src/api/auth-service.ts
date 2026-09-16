@@ -1,10 +1,28 @@
-import { randomBytes } from "node:crypto";
-import { readConfig, verifyPassword } from "../config/config.js";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { readConfig } from "../config/config.js";
 import type { SessionToken } from "../kernel/types.js";
 
 import { getDatabase } from "../data/database.js";
 import { AuthSessionsRepository } from "../data/repositories/settings.js";
 function sessions(): AuthSessionsRepository { return new AuthSessionsRepository(getDatabase()); }
+
+// Password hashing: SHA-256 with salt (moved out of config in P9 — auth concern)
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = createHash("sha256").update(salt + password).digest("hex");
+  return `${salt}:${hash}`;
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const [salt, expectedHash] = stored.split(":");
+  if (!salt || !expectedHash) return false;
+  const hash = createHash("sha256").update(salt + password).digest("hex");
+  const a = Buffer.from(hash, "hex");
+  const b = Buffer.from(expectedHash, "hex");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 
 /** Full idle TTL. Sliding renewal extends back to this on active use. */
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h

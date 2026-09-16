@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 
 describe("password hashing", () => {
   // Import the functions - they're pure crypto, no fs side effects
-  let hashPassword: typeof import("../src/config/config.js").hashPassword;
-  let verifyPassword: typeof import("../src/config/config.js").verifyPassword;
+  let hashPassword: typeof import("../src/api/auth-service.js").hashPassword;
+  let verifyPassword: typeof import("../src/api/auth-service.js").verifyPassword;
 
   beforeEach(async () => {
-    const mod = await import("../src/config/config.js");
+    const mod = await import("../src/api/auth-service.js");
     hashPassword = mod.hashPassword;
     verifyPassword = mod.verifyPassword;
   });

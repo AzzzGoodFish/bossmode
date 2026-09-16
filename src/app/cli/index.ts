@@ -14,8 +14,8 @@ import {
   ensureBossmodeDir,
   getBossmodeDir,
   getDefaultConfig,
-  hashPassword,
 } from "../../config/config.js";
+import { hashPassword } from "../../api/auth-service.js";
 import { isProcessRunning, readPidFile, removePidFile } from "../pid.js";
 
 const __filename = fileURLToPath(import.meta.url);

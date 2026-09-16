@@ -7,7 +7,7 @@ import { readPidFile } from "../../src/app/pid.js";
 import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp/mcp-settings.js";
 import { getCatalog } from "../../src/config/model-catalog.js";
 import { loadModelCredentialProfiles } from "../../src/config/model-credentials.js";
-import { validateToken } from "../../src/services/auth-service.js";
+import { validateToken } from "../../src/api/auth-service.js";
 import { readWorkspaces } from "../../src/member/workspaces/workspace-registry.js";
 import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/workspaces/ssh-keygen.js";
 

@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { WebSocket } from "ws";
 
 const identity = vi.hoisted(() => ({ name: "before", id: "mem_one" }));
-vi.mock("../../src/services/auth-service.js", () => ({ validateToken: (token: string) => token === "valid" }));
+vi.mock("../../src/api/auth-service.js", () => ({ validateToken: (token: string) => token === "valid" }));
 vi.mock("../../src/member/member-registry.js", () => ({
   findMemberByName: vi.fn((name: string) => name === identity.name ? { ...identity } : null),
 }));

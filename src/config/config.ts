@@ -1,7 +1,6 @@
 import { getDatabase } from "../data/database.js";
 import { SettingsRepository } from "../data/repositories/settings.js";
 import { existsSync, mkdirSync } from "node:fs";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BossmodeConfig } from "../kernel/types.js";
@@ -35,22 +34,7 @@ export function writeConfig(config: BossmodeConfig): void {
   new SettingsRepository(getDatabase()).importConfig(config);
 }
 
-// Password hashing: SHA-256 with salt
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  return `${salt}:${hash}`;
-}
-
-export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, expectedHash] = stored.split(":");
-  if (!salt || !expectedHash) return false;
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  const a = Buffer.from(hash, "hex");
-  const b = Buffer.from(expectedHash, "hex");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
+// Password hashing moved to api/auth-service.ts (P9).
 
 // API key resolution: env var first, config fallback
 export function resolveApiKey(provider: string, config?: BossmodeConfig): string | undefined {

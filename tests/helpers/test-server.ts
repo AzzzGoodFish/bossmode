@@ -20,7 +20,8 @@ export function getTestWorkspace() {
 export function setupTestWorkspace(): void {
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
-    const { getDefaultConfig, hashPassword, writeConfig } = await import("../../src/config/config.js");
+    const { getDefaultConfig, writeConfig } = await import("../../src/config/config.js");
+    const { hashPassword } = await import("../../src/api/auth-service.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
   });
   afterAll(async () => {

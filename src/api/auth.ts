@@ -1,4 +1,4 @@
-import {validateToken} from "../services/auth-service.js";
+import {validateToken} from "./auth-service.js";
 
 export function extractToken(headers: Record<string, string | string[] | undefined>): string | null {
   const auth = headers["authorization"];
