@@ -20,11 +20,11 @@
 // observability, never trusted as the skip condition.
 import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../kernel/logger.js";
-import { getMember, getEffectiveConfig } from "../member/member-registry.js";
-import { isModelAvailable, listAvailableModels } from "../engine/model-credentials.js";
-import type { RoomMemberOverride } from "../kernel/types.js";
+import { getBossmodeDir } from "../../shared/config.js";
+import { logger } from "../../kernel/logger.js";
+import { getMember, getEffectiveConfig } from "../member-registry.js";
+import { isModelAvailable, listAvailableModels } from "../../engine/model-credentials.js";
+import type { RoomMemberOverride } from "../../kernel/types.js";
 
 const MIGRATION_ID = "cleanup-member-overrides-v1";
 

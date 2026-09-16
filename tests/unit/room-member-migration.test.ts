@@ -52,7 +52,7 @@ describe("room-member v0.14 migration", () => {
     roomASessions.qa.sessionFile = legacyQaSessionFile;
     writeFileSync(roomASessionsPath, JSON.stringify(roomASessions, null, 2));
 
-    const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
+    const { runRoomMemberMigration } = await import("../../src/chat/migrations/room-member-migration.js");
     runRoomMemberMigration();
 
     const roomA = JSON.parse(readFileSync(join(tempDir, "rooms", "room-a", "room.json"), "utf-8"));
@@ -119,7 +119,7 @@ describe("room-member v0.14 migration", () => {
       architect: { runtime: "pi-cli" },
     }, null, 2));
 
-    const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
+    const { runRoomMemberMigration } = await import("../../src/chat/migrations/room-member-migration.js");
     runRoomMemberMigration();
 
     const sessions = JSON.parse(readFileSync(join(roomDir, "sessions.json"), "utf-8"));

@@ -46,7 +46,7 @@ describe("room-member-resolver — no implicit model default", () => {
     const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
     // Retained historical converter runs on files; resolution sees only the explicitly imported SQL DTO.
-    const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
+    const { runRoomMemberMigration } = await import("../../src/chat/migrations/room-member-migration.js");
     const path = join(dir,"rooms/legacy-room/room.json");
     mkdirSync(join(dir,"rooms/legacy-room"),{recursive:true});
     writeFileSync(path,JSON.stringify({id:"legacy-room",name:"Legacy",members:["developer"],createdAt:1}));

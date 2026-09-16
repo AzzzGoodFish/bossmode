@@ -13,9 +13,9 @@
 // was interrupted) is completed on the next startup regardless of any marker.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../kernel/logger.js";
-import { getRoomsDir } from "../files/layout.js";
+import { getBossmodeDir } from "../../shared/config.js";
+import { logger } from "../../kernel/logger.js";
+import { getRoomsDir } from "../../files/layout.js";
 
 const MIGRATION_ID = "memory-storage-reorg-v1";
 

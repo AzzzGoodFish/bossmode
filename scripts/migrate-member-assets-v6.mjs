@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Thin CLI for the batch-6 member-assets migration.
- * Logic lives in dist/workspace/member-assets-migration.js (daemon uses the same module).
+ * Logic lives in dist/member/migrations/member-assets-migration.js (daemon uses the same module).
  *
  * Usage:
  *   node scripts/migrate-member-assets-v6.mjs              # dry-run (report only)
@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
-const distMod = join(root, "dist", "workspace", "member-assets-migration.js");
+const distMod = join(root, "dist", "member", "migrations", "member-assets-migration.js");
 
 async function loadModule() {
   if (existsSync(distMod)) {

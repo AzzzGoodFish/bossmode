@@ -186,7 +186,7 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
     const reg = await import("../../src/member/member-registry.js");
     const { memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/ssh-keygen.js");
     const { SshCredentialsRepository } = await import("../../src/data/repositories/workspace-settings.js");
-    const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
+    const { backfillMemberSshKeys } = await import("../../src/member/migrations/member-assets-migration.js");
     // Import a pre-key member rather than deleting current authoritative credentials.
     const legacy = reg.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",
       unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
@@ -209,7 +209,7 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
 
   // SQL credentials are authoritative even when legacy key files do not exist.
   it("backfill reports existing SQL credentials as skipped on rerun", async () => {
-    const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
+    const { backfillMemberSshKeys } = await import("../../src/member/migrations/member-assets-migration.js");
     backfillMemberSshKeys();
     expect(backfillMemberSshKeys()).toEqual({ generated: [], skipped: 1 });
   });

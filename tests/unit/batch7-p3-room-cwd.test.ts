@@ -37,7 +37,7 @@ describe("room attachments migration", () => {
       id: roomId, name: "proj-room", cwd: legacyRoot, members: [], roomMembers: [], createdAt: 1,
     });
 
-    const mig = await import("../../src/workspace/room-attachments-migration.js");
+    const mig = await import("../../src/chat/migrations/room-attachments-migration.js");
     expect(mig.needsRoomAttachmentsMigration()).toBe(true);
     const report = mig.runRoomAttachmentsMigration();
     expect(report.movedRooms).toContain(roomId);

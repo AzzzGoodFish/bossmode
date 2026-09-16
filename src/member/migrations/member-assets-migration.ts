@@ -15,17 +15,17 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { basename, join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../../shared/config.js";
 import {
   getBossmodeMcpConfigPath,
   getAssignableMcpServerNames,
   getMcpServersObject,
   getMemberMcpConfigPath,
   disableDeferredMcpCapabilities,
-} from "../shared/mcp-settings.js";
-import { listMembers } from "../member/member-registry.js";
-import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../member/ssh-keygen.js";
-import { memberDir } from "../files/layout.js";
+} from "../../shared/mcp-settings.js";
+import { listMembers } from "../member-registry.js";
+import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../ssh-keygen.js";
+import { memberDir } from "../../files/layout.js";
 
 export interface MemberAssetsMigrationReport {
   ran: boolean;

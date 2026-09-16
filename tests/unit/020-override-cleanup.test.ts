@@ -76,7 +76,7 @@ describe("cleanup-member-overrides-v1", () => {
     });
 
     const before = reg.getEffectiveConfig(member.id, `room:${room.id}`);
-    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const migration = await import("../../src/member/migrations/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
 
     expect(result.entriesRemoved).toBe(3);
@@ -111,7 +111,7 @@ describe("cleanup-member-overrides-v1", () => {
       qa: { model: "testprov/claude-b", credentialId: cred.id },
     });
 
-    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const migration = await import("../../src/member/migrations/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
     expect(result.entriesRemoved).toBe(0);
     expect(result.entriesKeptSuspicious).toBe(1);
@@ -138,7 +138,7 @@ describe("cleanup-member-overrides-v1", () => {
     reg.updateMember(member.id, { global: { mcpServers: ["playwright"] } });
 
     writeOverrides(room.id, { qa: { mcpServers: ["playwright"] } });
-    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const migration = await import("../../src/member/migrations/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
     expect(result.entriesRemoved).toBe(1);
     expect(readOverrides(room.id)).toBeUndefined();
@@ -166,7 +166,7 @@ describe("cleanup-member-overrides-v1", () => {
       qa: { thinkingLevel: "low" },
     });
 
-    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const migration = await import("../../src/member/migrations/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
     expect(result.entriesRemoved).toBe(2);
     expect(result.entriesKeptSuspicious).toBe(1);
@@ -181,7 +181,7 @@ describe("cleanup-member-overrides-v1", () => {
     // No stampGlobalMemberIds — legacy read side consults memberOverrides.
     writeOverrides(room.id, { pm: { thinkingLevel: "high" } });
 
-    const migration = await import("../../src/workspace/member-overrides-cleanup-migration.js");
+    const migration = await import("../../src/member/migrations/member-overrides-cleanup-migration.js");
     const result = migration.runMemberOverridesCleanupMigration();
     expect(result.legacyRoomsSkipped).toBe(1);
     expect(result.entriesRemoved).toBe(0);

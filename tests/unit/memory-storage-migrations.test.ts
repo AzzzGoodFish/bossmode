@@ -40,7 +40,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   }
 
   it("copies room + member principles and member mainline into the new memory/ layout", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     seedLegacy("room1");
 
     migration.runMemoryStorageReorgMigration();
@@ -59,7 +59,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   });
 
   it("is idempotent: a second run makes no changes", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     seedLegacy("room1");
     migration.runMemoryStorageReorgMigration();
     const before = readFileSync(join(dir, "rooms", "room1", "memory", "room-principles.md"), "utf-8");
@@ -69,7 +69,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   });
 
   it("does not overwrite a new-location file that already has content", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     seedLegacy("room1");
     const memDir = join(dir, "rooms", "room1", "memory");
     mkdirSync(memDir, { recursive: true });
@@ -80,7 +80,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   });
 
   it("self-heals: a member file added to the legacy location after an earlier run still gets copied", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     mkdirSync(join(dir, "rooms", "room1"), { recursive: true });
     migration.runMemoryStorageReorgMigration(); // nothing to migrate yet; room marked seen
 
@@ -94,7 +94,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   });
 
   it("handles a member with only one of the two assets", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     const pMembersDir = join(dir, "rooms", "room1", "prompt-supplements", "members");
     mkdirSync(pMembersDir, { recursive: true });
     writeFileSync(join(pMembersDir, "solo.md"), "Only principles, no mainline.");
@@ -106,7 +106,7 @@ describe("memory-storage-reorg-v1 migration", () => {
   });
 
   it("skips rooms with no legacy data", async () => {
-    const migration = await import("../../src/workspace/memory-storage-reorg-migration.js");
+    const migration = await import("../../src/member/migrations/memory-storage-reorg-migration.js");
     mkdirSync(join(dir, "rooms", "empty-room"), { recursive: true });
     expect(() => migration.runMemoryStorageReorgMigration()).not.toThrow();
     expect(existsSync(join(dir, "rooms", "empty-room", "memory"))).toBe(false);
@@ -131,7 +131,7 @@ describe("mainline-english-headings-v1 migration", () => {
   }
 
   it("rewrites Chinese headings to English in member mainline files", async () => {
-    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const migration = await import("../../src/member/migrations/mainline-english-headings-migration.js");
     const path = seedMainline("room1", "qa", "## 焦点\n\nQuality focus.\n\n## 动态索引\n\n- docs/x.md — ref\n");
 
     migration.runMainlineEnglishHeadingsMigration();
@@ -140,7 +140,7 @@ describe("mainline-english-headings-v1 migration", () => {
   });
 
   it("leaves files already in English untouched and is idempotent", async () => {
-    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const migration = await import("../../src/member/migrations/mainline-english-headings-migration.js");
     const content = "## Focus\n\nAlready English.\n\n## Dynamic Index\n\n- docs/x.md — ref\n";
     const path = seedMainline("room1", "qa", content);
 
@@ -151,7 +151,7 @@ describe("mainline-english-headings-v1 migration", () => {
   });
 
   it("self-heals a room wrongly marked done before its mainline files existed", async () => {
-    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const migration = await import("../../src/member/migrations/mainline-english-headings-migration.js");
     mkdirSync(join(dir, "rooms", "room1", "memory", "members"), { recursive: true });
     migration.runMainlineEnglishHeadingsMigration();
 
@@ -162,7 +162,7 @@ describe("mainline-english-headings-v1 migration", () => {
   });
 
   it("syncs mainline-meta.json contentHash/contentLength after rewriting a file (QA-caught bug)", async () => {
-    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const migration = await import("../../src/member/migrations/mainline-english-headings-migration.js");
     const content = "## 焦点\n\n中文内容测试。\n\n## 动态索引\n\n- docs/x.md — 引用\n";
     seedMainline("room1", "qa", content);
     const metaPath = join(dir, "rooms", "room1", "memory", "mainline-meta.json");
@@ -182,7 +182,7 @@ describe("mainline-english-headings-v1 migration", () => {
   });
 
   it("does not touch meta for a file that needed no heading rewrite", async () => {
-    const migration = await import("../../src/workspace/mainline-english-headings-migration.js");
+    const migration = await import("../../src/member/migrations/mainline-english-headings-migration.js");
     const content = "## Focus\n\nAlready English.\n\n## Dynamic Index\n\n";
     seedMainline("room1", "qa", content);
     const metaPath = join(dir, "rooms", "room1", "memory", "mainline-meta.json");

@@ -27,7 +27,7 @@ afterEach(() => {
 describe("platform extensions.json retirement", () => {
   it("startup archives the manifest once, silently on later runs", async () => {
     writeFileSync(join(dir, "extensions.json"), JSON.stringify({ packages: ["npm:pi-web-access"] }), "utf-8");
-    const { runMemberAssetsMigrationOnStartup } = await import("../../src/workspace/member-assets-migration.js");
+    const { runMemberAssetsMigrationOnStartup } = await import("../../src/member/migrations/member-assets-migration.js");
     runMemberAssetsMigrationOnStartup();
     expect(existsSync(join(dir, "extensions.json"))).toBe(false);
     expect(existsSync(join(dir, "extensions.json.pre-batch7c"))).toBe(true);

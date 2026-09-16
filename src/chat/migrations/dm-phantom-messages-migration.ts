@@ -9,11 +9,11 @@
 // activity artifacts are re-keyed in a later storage-convergence batch.)
 import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../kernel/logger.js";
-import { parseJsonlLines } from "../kernel/jsonl.js";
-import type { RoomMessage } from "../kernel/types.js";
-import { addDmMessage } from "../chat/dm-message-store.js";
+import { getBossmodeDir } from "../../shared/config.js";
+import { logger } from "../../kernel/logger.js";
+import { parseJsonlLines } from "../../kernel/jsonl.js";
+import type { RoomMessage } from "../../kernel/types.js";
+import { addDmMessage } from "../dm-message-store.js";
 
 function roomsRoot(): string {
   return join(getBossmodeDir(), "rooms");

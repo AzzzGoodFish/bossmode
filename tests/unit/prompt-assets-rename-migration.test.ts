@@ -41,7 +41,7 @@ afterEach(() => {
 describe("prompt-assets-rename migration", () => {
   it("rewrites retired tool names, refreshes meta hashes, snapshots, and writes an idempotent marker", async () => {
     const legacy = seedLegacyRoom();
-    const { runPromptAssetsRenameMigration } = await import("../../src/workspace/prompt-assets-rename-migration.js");
+    const { runPromptAssetsRenameMigration } = await import("../../src/member/migrations/prompt-assets-rename-migration.js");
     runPromptAssetsRenameMigration();
 
     const dir = join(tmpDir, "rooms", "room-legacy", "prompt-supplements");
@@ -80,7 +80,7 @@ describe("prompt-assets-rename migration", () => {
 
   it("second run is a no-op (idempotent) and leaves already-clean rooms untouched", async () => {
     seedLegacyRoom();
-    const { runPromptAssetsRenameMigration } = await import("../../src/workspace/prompt-assets-rename-migration.js");
+    const { runPromptAssetsRenameMigration } = await import("../../src/member/migrations/prompt-assets-rename-migration.js");
     runPromptAssetsRenameMigration();
     const dir = join(tmpDir, "rooms", "room-legacy", "prompt-supplements");
     const afterFirst = readFileSync(join(dir, "room.md"), "utf-8");
@@ -99,7 +99,7 @@ describe("prompt-assets-rename migration", () => {
 
   it("handles a room added after the first migration pass", async () => {
     seedLegacyRoom();
-    const { runPromptAssetsRenameMigration } = await import("../../src/workspace/prompt-assets-rename-migration.js");
+    const { runPromptAssetsRenameMigration } = await import("../../src/member/migrations/prompt-assets-rename-migration.js");
     runPromptAssetsRenameMigration();
     // Room restored from backup after migration → still gets migrated on next startup
     const dir = join(tmpDir, "rooms", "room-restored", "prompt-supplements");

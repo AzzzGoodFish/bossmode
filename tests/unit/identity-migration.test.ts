@@ -55,7 +55,7 @@ function seedDirty() {
 describe("identity-migration", () => {
   it("needsIdentityMigration is true on dirty disk, false when clean", async () => {
     const { needsIdentityMigration, runIdentityMigration } = await import(
-      "../../src/workspace/identity-migration.js"
+      "../../src/member/migrations/identity-migration.js"
     );
     expect(needsIdentityMigration(boss)).toBe(false);
     seedDirty();
@@ -66,7 +66,7 @@ describe("identity-migration", () => {
 
   it("apply migrates and snapshot excludes agent-events", async () => {
     seedDirty();
-    const { runIdentityMigration } = await import("../../src/workspace/identity-migration.js");
+    const { runIdentityMigration } = await import("../../src/member/migrations/identity-migration.js");
     const result = runIdentityMigration({ apply: true, quiet: true, bossmodeDir: boss });
     expect(result.error).toBeUndefined();
     expect(result.skipped).toBe(false);
@@ -98,7 +98,7 @@ describe("identity-migration", () => {
 
   it("second apply is no-op skip (already_clean)", async () => {
     seedDirty();
-    const { runIdentityMigration } = await import("../../src/workspace/identity-migration.js");
+    const { runIdentityMigration } = await import("../../src/member/migrations/identity-migration.js");
     runIdentityMigration({ apply: true, quiet: true, bossmodeDir: boss });
     const md1 = readFileSync(join(boss, "members", "mem_test_a", "memory", "persona.md"), "utf-8");
     const r2 = runIdentityMigration({ apply: true, quiet: true, bossmodeDir: boss });
@@ -110,7 +110,7 @@ describe("identity-migration", () => {
   it("runIdentityMigrationOnStartup applies dirty then skips clean", async () => {
     seedDirty();
     const { runIdentityMigrationOnStartup, needsIdentityMigration } = await import(
-      "../../src/workspace/identity-migration.js"
+      "../../src/member/migrations/identity-migration.js"
     );
     const first = runIdentityMigrationOnStartup();
     expect(first?.skipped).toBe(false);
@@ -121,7 +121,7 @@ describe("identity-migration", () => {
 
   it("failure path returns error without throwing", async () => {
     seedDirty();
-    const { runIdentityMigration } = await import("../../src/workspace/identity-migration.js");
+    const { runIdentityMigration } = await import("../../src/member/migrations/identity-migration.js");
     // Point backup parent at a file to force snapshot failure mid-flight is hard;
     // instead ensure dry-run never throws on missing paths.
     const r = runIdentityMigration({ apply: false, quiet: true, bossmodeDir: join(boss, "nope-missing") });

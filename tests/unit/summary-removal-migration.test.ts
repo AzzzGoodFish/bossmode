@@ -67,7 +67,7 @@ describe("summary-removal-v1 migration", () => {
     ]);
     seedRoom("room-b", [line("user", "NO-SUMMARY-HERE")]);
 
-    const { runSummaryRemovalMigration } = await import("../../src/workspace/summary-removal-migration.js");
+    const { runSummaryRemovalMigration } = await import("../../src/chat/migrations/summary-removal-migration.js");
     const result = runSummaryRemovalMigration();
     expect(result).toEqual({ rooms: 1, removed: 1, skipped: false });
 

@@ -43,7 +43,7 @@ describe("member-credential-binding-v1 migration", () => {
       { id: "rm_general", roomId: "room-a", name: "general", sourceAgent: "general", config: { model: "claude-sonnet-4-6" }, createdAt: 1, updatedAt: 1 },
     ]);
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     runMemberCredentialBindingMigration();
 
     const room = JSON.parse(readFileSync(join(tempDir, "rooms", "room-a", "room.json"), "utf-8"));
@@ -63,7 +63,7 @@ describe("member-credential-binding-v1 migration", () => {
       { id: "rm_architect", roomId: "room-b", name: "architect", sourceAgent: "architect", config: { model: "moonshotai/kimi-k2.7-code", credentialId: "cred-x" }, createdAt: 1, updatedAt: 1 },
     ]);
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     runMemberCredentialBindingMigration();
 
     const room = JSON.parse(readFileSync(join(tempDir, "rooms", "room-b", "room.json"), "utf-8"));
@@ -76,7 +76,7 @@ describe("member-credential-binding-v1 migration", () => {
       { id: "rm_qa", roomId: "room-c", name: "qa", sourceAgent: "qa", createdAt: 1, updatedAt: 1 },
     ]);
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     runMemberCredentialBindingMigration();
 
     const room = JSON.parse(readFileSync(join(tempDir, "rooms", "room-c", "room.json"), "utf-8"));
@@ -90,7 +90,7 @@ describe("member-credential-binding-v1 migration", () => {
       { id: "pm", name: "pm", type: "agent", agent: "pm", model: "anthropic/claude-opus-4-6", credentialId: "cred-a", thinkingLevel: "off" },
     ]);
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     runMemberCredentialBindingMigration();
 
     const members = JSON.parse(readFileSync(join(tempDir, "members.json"), "utf-8"));
@@ -105,7 +105,7 @@ describe("member-credential-binding-v1 migration", () => {
   it("does not reactivate old global storage imported after a clean-state run", async () => {
     mkdirSync(tempDir, { recursive: true });
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     // First run happens before any legacy data exists (a fresh install boot).
     runMemberCredentialBindingMigration();
 
@@ -132,7 +132,7 @@ describe("member-credential-binding-v1 migration", () => {
       { id: "developer", name: "developer", type: "agent", agent: "developer", model: "claude-sonnet-4-6", thinkingLevel: "off" },
     ]);
 
-    const { runMemberCredentialBindingMigration } = await import("../../src/workspace/member-credential-binding-migration.js");
+    const { runMemberCredentialBindingMigration } = await import("../../src/member/migrations/member-credential-binding-migration.js");
     runMemberCredentialBindingMigration();
     const snapshotDir = join(tempDir, "pi-agent", "runtime", ".migration-snapshots");
     const afterFirst = readdirSync(snapshotDir).length;

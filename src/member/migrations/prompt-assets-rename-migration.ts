@@ -8,9 +8,9 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../kernel/logger.js";
-import { getRoomsDir } from "../files/layout.js";
+import { getBossmodeDir } from "../../shared/config.js";
+import { logger } from "../../kernel/logger.js";
+import { getRoomsDir } from "../../files/layout.js";
 
 const MIGRATION_ID = "prompt-assets-rename-v1";
 

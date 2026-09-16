@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { documentContentMeta } from "../data/repositories/document-repository.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "../workspace/document-assets.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { memberDir } from "../files/layout.js";
 import { scopeDirName, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "../workspace/document-assets.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import {
   AssetBudgetError,
   PRINCIPLES_TEMPLATE,

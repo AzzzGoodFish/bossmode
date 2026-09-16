@@ -60,7 +60,7 @@ describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   }
 
   it("rewrites *_asset references in room, member principles, and member mainline files + syncs meta hashes", async () => {
-    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const migration = await import("../../src/member/migrations/prompt-memory-rename-migration.js");
     seedRoomPrinciples("room1", "Room rule: use read_asset.");
     seedMemberPrinciples("room1", "qa", "Member rule: use write_asset to rewrite.");
     seedMemberMainline("room1", "qa", "- docs/x.md — see edit_asset\n");
@@ -82,7 +82,7 @@ describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   });
 
   it("orphan member files without a meta entry still get rewritten", async () => {
-    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const migration = await import("../../src/member/migrations/prompt-memory-rename-migration.js");
     const memberDir = join(memDir("room1"), "members", "ghost");
     mkdirSync(memberDir, { recursive: true });
     writeFileSync(join(memberDir, "principles.md"), "orphan uses read_asset");
@@ -94,7 +94,7 @@ describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   });
 
   it("self-heals a room wrongly marked done before its member files existed", async () => {
-    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const migration = await import("../../src/member/migrations/prompt-memory-rename-migration.js");
     mkdirSync(memDir("room1"), { recursive: true });
     migration.runPromptMemoryRenameMigration();
     const marker1 = JSON.parse(readFileSync(join(dir, "pi-agent", "runtime", ".migrations", "prompt-memory-rename-v1.json"), "utf-8"));
@@ -107,7 +107,7 @@ describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   });
 
   it("leaves files without asset references untouched and is idempotent", async () => {
-    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const migration = await import("../../src/member/migrations/prompt-memory-rename-migration.js");
     seedMemberPrinciples("room1", "qa", "No tool references here.");
 
     migration.runPromptMemoryRenameMigration();
@@ -118,7 +118,7 @@ describe("prompt-memory-rename-v1 migration (new memory/ layout)", () => {
   });
 
   it("skips rooms with no memory directory", async () => {
-    const migration = await import("../../src/workspace/prompt-memory-rename-migration.js");
+    const migration = await import("../../src/member/migrations/prompt-memory-rename-migration.js");
     mkdirSync(join(dir, "rooms", "empty-room"), { recursive: true });
     expect(() => migration.runPromptMemoryRenameMigration()).not.toThrow();
   });

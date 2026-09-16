@@ -69,7 +69,7 @@ describe("SQL member MCP configuration as sole live source", () => {
 describe("batch 6 migration (behavior invariants)", () => {
   it("dry-run default: nothing written", async () => {
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
-    const { runMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
+    const { runMemberAssetsMigration } = await import("../../src/member/migrations/member-assets-migration.js");
     const reg = await import("../../src/member/member-registry.js");
     reg.createMember({ name: "listed", agentTemplate: "pm", mcpServers: ["srv-a"] } as any);
     const report = runMemberAssetsMigration(); // dry-run
@@ -85,7 +85,7 @@ describe("batch 6 migration (behavior invariants)", () => {
 
   it("apply: only enable-listed servers copied; no-list member gets no file", async () => {
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
-    const { runMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
+    const { runMemberAssetsMigration } = await import("../../src/member/migrations/member-assets-migration.js");
     const reg = await import("../../src/member/member-registry.js");
     const withList = reg.createMember({ name: "with-list", agentTemplate: "pm", mcpServers: ["srv-a"] } as any);
     const noList = reg.createMember({ name: "no-list", agentTemplate: "pm" });
@@ -106,7 +106,7 @@ describe("batch 6 migration (behavior invariants)", () => {
 
   it("rerun after apply is a no-op", async () => {
     writeFileSync(join(dir, "mcp", "mcp.json"), JSON.stringify(PLATFORM_MCP), "utf-8");
-    const { runMemberAssetsMigration, needsMemberAssetsMigration } = await import("../../src/workspace/member-assets-migration.js");
+    const { runMemberAssetsMigration, needsMemberAssetsMigration } = await import("../../src/member/migrations/member-assets-migration.js");
     const reg = await import("../../src/member/member-registry.js");
     reg.createMember({ name: "solo", agentTemplate: "pm", mcpServers: ["srv-b"] } as any);
     runMemberAssetsMigration({ dryRun: false });

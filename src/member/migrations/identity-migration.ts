@@ -17,8 +17,8 @@ import {
   rmSync,
 } from "node:fs";
 import { join, dirname, relative } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../kernel/logger.js";
+import { getBossmodeDir } from "../../shared/config.js";
+import { logger } from "../../kernel/logger.js";
 
 export interface IdentityMigrationAction {
   step: string;

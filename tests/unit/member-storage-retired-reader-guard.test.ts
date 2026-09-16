@@ -18,6 +18,6 @@ describe("retired member storage boundary", () => {
       expect(text, path).not.toMatch(/(?:from\s*|import\s*\()["'][^"']*member-store(?:\.js)?["']/);
       if (/["'`]members\.json["'`]/.test(text)) readers.push(relative("src", path));
     }
-    expect(readers.sort()).toEqual(["workspace/room-member-migration.ts"]);
+    expect(readers.sort()).toEqual(["chat/migrations/room-member-migration.ts"]);
   });
 });

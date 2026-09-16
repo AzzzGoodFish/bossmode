@@ -22,7 +22,7 @@ const { getDocument, listDocumentHistory, importDocument, documentContentMeta, d
 const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/principles-store.js");
 const { readMainline, writeMainline, editMainline } = await import("../../src/chat/mainline-store.js");
 const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/member/member-memory-store.js");
-const { saveDocument } = await import("../../src/workspace/document-assets.js");
+const { saveDocument } = await import("../../src/member/document-assets.js");
 import type { Database } from "../../src/data/database.js";
 import type { DocumentIdentity, DocumentImport } from "../../src/data/repositories/document-repository.js";
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Thin CLI for identity-memory-v1 migration.
- * Logic lives in dist/workspace/identity-migration.js (daemon uses the same module).
+ * Logic lives in dist/member/migrations/identity-migration.js (daemon uses the same module).
  *
  * Usage:
  *   node scripts/migrate-identity-memory-v1.mjs              # dry-run
@@ -19,7 +19,7 @@ import { writeFileSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const apply = process.argv.includes("--apply");
 const root = join(__dirname, "..");
-const distMod = join(root, "dist", "workspace", "identity-migration.js");
+const distMod = join(root, "dist", "member", "migrations", "identity-migration.js");
 
 async function loadRunner() {
   if (existsSync(distMod)) {
@@ -28,7 +28,7 @@ async function loadRunner() {
   // Dev fallback: tsx/ts-node not assumed — require built package next to script.
   const require = createRequire(import.meta.url);
   try {
-    return require("../dist/workspace/identity-migration.js");
+    return require("../dist/member/migrations/identity-migration.js");
   } catch {
     console.error(
       "identity-migration module not found. Run `npm run build` first, or use an installed bossmode package.",
