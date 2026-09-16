@@ -6,16 +6,6 @@
 
 export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
 
-export interface BossmodeRuntimeConfig {
-  sessionResume: boolean;
-  /** pi SDK transport override. Defaults to "auto" when omitted. */
-  codexTransport?: PiTransportSetting;
-  /** WebSocket connect timeout passed to pi SDK. Bossmode default: 15000. */
-  websocketConnectTimeoutMs?: number;
-  /** HTTP idle timeout passed to pi SDK when set. */
-  httpIdleTimeoutMs?: number;
-}
-
 export interface BossmodeMcpConfig {
   enabled: boolean;
 }
@@ -48,16 +38,7 @@ export interface BossmodeConfig {
     host: string;
     port: number;
   };
-  runtime?: BossmodeRuntimeConfig;
   mcp?: BossmodeMcpConfig;
-  /** Memory asset character budgets (persona / memberPrinciples / mainline /
-   * roomPrinciples). Optional — absent uses product defaults. */
-  memoryBudgets?: {
-    persona?: number;
-    memberPrinciples?: number;
-    mainline?: number;
-    roomPrinciples?: number;
-  };
   /** Model directory (pi.dev catalog) preferences. */
   catalog?: {
     /** Auto-refresh interval in days for the built-in provider catalog. Default 7. 0 = off. */

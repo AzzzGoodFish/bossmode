@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Database } from "../database.js";
 import type { BossmodeConfig } from "../../shared/types.js";
-import { bool, defined } from "./settings-codec.js";
+import { bool } from "./settings-codec.js";
 
 /** Secret-bearing internal settings API; public transports must select/redact fields. */
 export class SettingsRepository {
@@ -12,14 +12,11 @@ export class SettingsRepository {
     if (!r) return null;
     const auth = this.db.get<any>("SELECT * FROM login_credentials WHERE id=1");
     if (!auth) throw new Error("Login credentials are missing");
-    const budgets = defined({ persona: r.persona_budget, memberPrinciples: r.member_principles_budget, mainline: r.mainline_budget, roomPrinciples: r.room_principles_budget });
     return {
       auth: { username: auth.username, passwordHash: auth.password_hash },
       apiKeys: Object.fromEntries(this.db.all<any>("SELECT * FROM provider_api_keys").map(k => [k.provider, k.api_key])),
       defaults: { host: r.host, port: r.port },
-      runtime: { sessionResume: !!r.session_resume, ...defined({ codexTransport: r.codex_transport, websocketConnectTimeoutMs: r.websocket_connect_timeout_ms, httpIdleTimeoutMs: r.http_idle_timeout_ms }) },
       ...(r.mcp_enabled === null ? {} : { mcp: { enabled: !!r.mcp_enabled } }),
-      ...(Object.keys(budgets).length ? { memoryBudgets: budgets } : {}),
       ...(r.catalog_interval_days === null ? {} : { catalog: { autoRefreshIntervalDays: r.catalog_interval_days } }),
     };
   }
@@ -27,10 +24,10 @@ export class SettingsRepository {
   importConfig(c: BossmodeConfig): void {
     this.db.transaction(tx => {
       tx.run(`INSERT OR REPLACE INTO app_settings VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.defaults.host, c.defaults.port,
-        Number(c.runtime?.sessionResume !== false), "fork", // topic_seed_mode retired (fish #19358): legacy column, no writer input
-        c.runtime?.codexTransport ?? null, c.runtime?.websocketConnectTimeoutMs ?? null, c.runtime?.httpIdleTimeoutMs ?? null,
-        bool(c.mcp?.enabled), c.memoryBudgets?.persona ?? null, c.memoryBudgets?.memberPrinciples ?? null,
-        c.memoryBudgets?.mainline ?? null, c.memoryBudgets?.roomPrinciples ?? null, c.catalog?.autoRefreshIntervalDays ?? null);
+        1, "fork", // session_resume fixed on; topic_seed_mode retired (fish #19358): legacy column, no writer input
+        null, null, null, // codex_transport / websocket_connect_timeout_ms / http_idle_timeout_ms retired (P1)
+        bool(c.mcp?.enabled), null, null, null, null, // memory budgets retired (P1)
+        c.catalog?.autoRefreshIntervalDays ?? null);
       tx.run("INSERT OR REPLACE INTO login_credentials VALUES (1,?,?)", c.auth.username, c.auth.passwordHash);
       tx.run("DELETE FROM provider_api_keys");
       for (const [provider, key] of Object.entries(c.apiKeys)) tx.run("INSERT INTO provider_api_keys VALUES (?,?)", provider, key);

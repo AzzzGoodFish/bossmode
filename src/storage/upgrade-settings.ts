@@ -21,11 +21,7 @@ export function decodeLegacyConfig(value:unknown):BossmodeConfig{
  if(typeof auth.username!=="string"||typeof auth.passwordHash!=="string"||typeof defaults.host!=="string"||!defaults.host||!Number.isInteger(defaults.port)||defaults.port<1||defaults.port>65535)throw new Error("Invalid legacy application configuration");
  const apiKeys=object(row.apiKeys??{},"config.json");if(Object.values(apiKeys).some(v=>typeof v!=="string"))throw new Error("Invalid legacy provider keys");
  const base=getDefaultConfig();
- const runtime=row.runtime===undefined?{}:object(row.runtime,"config.json");
- const sessionResume=runtime.sessionResume??row.sessionResume??base.runtime!.sessionResume;
- if(typeof sessionResume!=="boolean")throw new Error("Invalid legacy session resume setting");
- return {...base,...row,auth:{username:auth.username,passwordHash:auth.passwordHash},apiKeys,defaults:{host:defaults.host,port:defaults.port},
-  runtime:{...base.runtime,...runtime,sessionResume}};
+ return {...base,...row,auth:{username:auth.username,passwordHash:auth.passwordHash},apiKeys,defaults:{host:defaults.host,port:defaults.port}};
 }
 /** Snapshot-only reads. Caller supplies packaged catalog rows without starting a runtime.
  * Returned keys identify sources this adapter consumed; other domains must account for the rest. */
