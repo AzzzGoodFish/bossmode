@@ -15,7 +15,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SdkExecutionService, type SdkExecutionAttempt } from "../../services/sdk-execution-service.js";
 import { logger } from "../../foundation/logger.js";
-import { readConfig } from "../../shared/config.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../shared/types.js";
@@ -141,42 +140,16 @@ function resolveModelLabel(modelRef: string): string {
   return `${provider}/${modelId}`;
 }
 
-const VALID_TRANSPORTS = new Set<PiTransportSetting>(["auto", "websocket", "websocket-cached", "sse"]);
-
 interface RuntimeTransportSettings {
   transport: PiTransportSetting;
   websocketConnectTimeoutMs: number;
   httpIdleTimeoutMs?: number;
 }
 
-function normalizeTimeout(value: unknown, field: string): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    logger.warn("runtime:pi-sdk", "invalid runtime timeout ignored", { field, value });
-    return undefined;
-  }
-  return Math.floor(value);
-}
-
 function resolveRuntimeTransportSettings(): RuntimeTransportSettings {
-  const defaults: RuntimeTransportSettings = { transport: "auto", websocketConnectTimeoutMs: 15000 };
-  try {
-    const runtime = readConfig().runtime;
-    const configuredTransport = runtime?.codexTransport;
-    const transport = configuredTransport && VALID_TRANSPORTS.has(configuredTransport)
-      ? configuredTransport
-      : defaults.transport;
-    if (configuredTransport && !VALID_TRANSPORTS.has(configuredTransport)) {
-      logger.warn("runtime:pi-sdk", "invalid runtime transport ignored", { transport: configuredTransport });
-    }
-    return {
-      transport,
-      websocketConnectTimeoutMs: normalizeTimeout(runtime?.websocketConnectTimeoutMs, "websocketConnectTimeoutMs") ?? defaults.websocketConnectTimeoutMs,
-      httpIdleTimeoutMs: normalizeTimeout(runtime?.httpIdleTimeoutMs, "httpIdleTimeoutMs"),
-    };
-  } catch {
-    return defaults;
-  }
+  // Transport behavior is fixed (runtime settings retired 2026-09-16): auto transport,
+  // 15s websocket connect timeout.
+  return { transport: "auto", websocketConnectTimeoutMs: 15000 };
 }
 
 function applyRuntimeTransportSettings(settingsManager: SettingsManager): RuntimeTransportSettings {

@@ -17,7 +17,7 @@ import { logger } from "../foundation/logger.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getBossmodeDir, readConfig } from "../shared/config.js";
+import { getBossmodeDir } from "../shared/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
@@ -1109,16 +1109,9 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       skillPaths = [
         ...resolveGlobalSkillPaths(skills),
       ];
-      // Session resume (global toggle; default true)
-      let sessionResumeEnabled = true;
-      try {
-        const config = readConfig();
-        sessionResumeEnabled = (config.runtime?.sessionResume ?? (config as any).sessionResume) !== false;
-      } catch {
-        sessionResumeEnabled = true;
-      }
+      // Session resume is fixed on (runtime settings retired 2026-09-16).
       const savedSession = sessionStore.getCurrentSession(memberId);
-      resumeSession = (sessionResumeEnabled && savedSession)
+      resumeSession = savedSession
         ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
         : undefined;
       if (resumeSession) {

@@ -15,7 +15,6 @@ import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
 import { logger } from "../foundation/logger.js";
-import * as roomStore from "../workspace/room-store.js";
 import { seedBuiltinAssets } from "../workforce/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {
@@ -60,21 +59,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
   initAgentManager(registry);
-
-  // Session-resume OFF means fresh runtime sessions; reset cursors so agents receive
-  // recent room context on next activation instead of an empty incremental window.
-  const config = readConfig();
-  if (config.runtime?.sessionResume === false) {
-    let resetCount = 0;
-    for (const room of roomStore.listRooms()) {
-      const cursors = roomStore.getCursors(room.id);
-      for (const agentName of Object.keys(cursors)) {
-        roomStore.setCursor(room.id, agentName, null);
-        resetCount += 1;
-      }
-    }
-    logger.info("server", "cursors reset — session resume disabled", { resetCount });
-  }
 
   // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();

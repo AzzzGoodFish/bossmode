@@ -1,14 +1,9 @@
-import { normalizeRuntimeSettings, updateRuntimeSettings, SettingsValidationError, type RuntimeSettingsPatch } from "../services/settings-service.js";
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./index.js";
 import {
   getRegistry,
   invalidateModelCredentialProfile,
 } from "../engine/agent-manager.js";
-import { readConfig, writeConfig } from "../shared/config.js";
-import { getEnvironmentCommunicationAsset, saveEnvironmentCommunication, resetEnvironmentCommunication } from "../workspace/environment-communication-asset.js";
-import { getMemoryBudgets, normalizeMemoryBudgetsInput } from "../workspace/memory-budgets.js";
-import type { PiTransportSetting } from "../shared/types.js";
 import {
   cancelOAuthLoginJob,
   connectBuiltinProviderApiKey,
@@ -244,74 +239,5 @@ addRoute("POST", "/api/model-catalog/refresh", async (_req, res) => {
     sendJson(res, 200, result);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message || String(err) });
-  }
-});
-
-// GET /api/settings/runtime — never substitute defaults for a storage failure.
-addRoute("GET", "/api/settings/runtime", async (_req, res) => {
-  try { sendJson(res, 200, normalizeRuntimeSettings(readConfig().runtime)); }
-  catch { sendJson(res, 500, {error: "Unable to read runtime settings"}); }
-});
-
-addRoute("PUT", "/api/settings/runtime", async (req, res) => {
-  const body = await parseBody(req) as RuntimeSettingsPatch;
-  try { sendJson(res, 200, updateRuntimeSettings(body)); }
-  catch (error) { sendJson(res, error instanceof SettingsValidationError ? 400 : 500, {error: error instanceof SettingsValidationError ? error.message : "Unable to update runtime settings"}); }
-});
-
-// GET /api/settings/environment-communication — global user-editable prompt
-// asset (0.20 experience ③). Returns current content + source + updatedAt.
-addRoute("GET", "/api/settings/environment-communication", async (_req, res) => {
-  try {
-    sendJson(res, 200, getEnvironmentCommunicationAsset());
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
-});
-
-// PUT /api/settings/environment-communication — materialize the user file.
-addRoute("PUT", "/api/settings/environment-communication", async (req, res) => {
-  try {
-    const body = (await parseBody(req)) as { content?: unknown };
-    if (typeof body?.content !== "string" || !body.content.trim()) {
-      sendJson(res, 400, { error: "content is required and cannot be empty" });
-      return;
-    }
-    sendJson(res, 200, saveEnvironmentCommunication(body.content));
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
-});
-
-// DELETE /api/settings/environment-communication — restore the product default.
-addRoute("DELETE", "/api/settings/environment-communication", async (_req, res) => {
-  try {
-    sendJson(res, 200, resetEnvironmentCommunication());
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
-});
-
-// GET /api/settings/memory-budgets — memory asset character budgets
-// (0.20 experience ①). Single source: memory-budgets module (config.json).
-addRoute("GET", "/api/settings/memory-budgets", async (_req, res) => {
-  try {
-    sendJson(res, 200, getMemoryBudgets());
-  } catch (err: any) {
-    sendJson(res, 500, { error: err.message });
-  }
-});
-
-// PUT /api/settings/memory-budgets — update one or more budgets.
-addRoute("PUT", "/api/settings/memory-budgets", async (req, res) => {
-  try {
-    const body = (await parseBody(req)) as Record<string, unknown>;
-    const next = normalizeMemoryBudgetsInput(body || {});
-    const config = readConfig();
-    config.memoryBudgets = next;
-    writeConfig(config);
-    sendJson(res, 200, next);
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message });
   }
 });
