@@ -1,6 +1,6 @@
-import { getDatabase } from "../data/database.js";
-import { readConfig, writeConfig } from "../config/config.js";
-import { parseMcpConfigText, readMcpConfigText, restoreRedactedMcpConfig, writeMcpConfig, countMcpServers } from "../member/mcp/mcp-settings.js";
+import { getDatabase } from "../../data/database.js";
+import { readConfig, writeConfig } from "../../config/config.js";
+import { parseMcpConfigText, readMcpConfigText, restoreRedactedMcpConfig, writeMcpConfig, countMcpServers } from "./mcp-settings.js";
 
 export class SettingsValidationError extends Error {}
 export function updateMcpSettings(body: {enabled?: boolean; configText?: string}): {enabled: boolean; savedServerCount?: number} {

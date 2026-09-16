@@ -1,6 +1,6 @@
 // MCP Settings API — Bossmode-managed pi-mcp-adapter config
 import { getDatabase } from "../data/database.js";
-import { updateMcpSettings, SettingsValidationError } from "../services/settings-service.js";
+import { updateMcpSettings, SettingsValidationError } from "../member/mcp/settings-service.js";
 import { addRoute, parseBody, sendJson } from "./index.js";
 import { readConfig } from "../config/config.js";
 import {
