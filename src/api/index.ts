@@ -1,6 +1,7 @@
+import { requireAuth, login } from "./auth.js";
 // API Router — route matching + CORS + auth guard + delegation to domain handlers
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { requireAuth } from "./auth.js";
+
 import { logger } from "../kernel/logger.js";
 
 // -- Route types --
@@ -66,7 +67,7 @@ export async function parseBody(req: IncomingMessage): Promise<unknown> {
 
 // -- Register all domain routes (lazy — called once on first request) --
 
-import { login } from "./auth-service.js";
+
 
 let routesRegistered = false;
 

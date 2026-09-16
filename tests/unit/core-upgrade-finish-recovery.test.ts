@@ -1,3 +1,4 @@
+import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -7,7 +8,7 @@ import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyMembers } from "../../src/app/upgrade/records.js";
 import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../src/data/schema.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
 import type { Database } from "../../src/data/database.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 

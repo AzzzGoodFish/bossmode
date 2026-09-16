@@ -1,13 +1,14 @@
+import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
+
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
-  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
   new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });

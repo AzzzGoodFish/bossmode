@@ -1,10 +1,11 @@
+import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 /**
  * rc.8 read-chain presentation: shared member-view renderer for
  * chat_read — seq header, replyTo quote, attachments; inline + file.
  */
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
+
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +15,7 @@ const dir = process.env.BOSSMODE_DIR!;
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
-  new SettingsRepository(fixture.db).importConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } });
+  writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
   new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });

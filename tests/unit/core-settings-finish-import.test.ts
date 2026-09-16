@@ -1,9 +1,10 @@
+import { readConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getCatalog, hydrateCatalogFromDisk, setBundledCatalogLoader } from "../../src/config/model-catalog.js";
-import { readConfig } from "../../src/config/config.js";
+import { getCatalog, setBundledCatalogLoader } from "../../src/config/catalog.js";
+
 import { readMcpConfigText } from "../../src/member/mcp/mcp-settings.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacySettings } from "../../src/app/upgrade/records.js";
@@ -14,7 +15,7 @@ it("settings, MCP and bundled catalog access require explicit database bootstrap
   expect(() => readConfig()).toThrow("bootstrap");
   expect(() => readMcpConfigText()).toThrow("bootstrap");
   expect(() => getCatalog()).toThrow("bootstrap");
-  expect(() => hydrateCatalogFromDisk()).toThrow("bootstrap");
+  expect(() => getCatalog()).toThrow("bootstrap");
 });
 
 describe("legacy catalog timestamp conversion at the explicit SQL import boundary", () => {
@@ -42,7 +43,7 @@ describe("legacy catalog timestamp conversion at the explicit SQL import boundar
     const { path, entries, ctx } = snapshot({ models, updatedAt });
     const source = readFileSync(path, "utf8");
     setBundledCatalogLoader(() => [{ provider: "test", id: "bundled" }]);
-    hydrateCatalogFromDisk();
+    getCatalog();
     expect(getCatalog().source).toBe("bundled");
     expect(importLegacySettings(ctx, entries, [])).toContain("pi-catalog-remote.json");
     fixture.reopen();

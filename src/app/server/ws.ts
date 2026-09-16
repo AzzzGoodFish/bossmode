@@ -1,8 +1,9 @@
+import { validateToken } from "../../api/auth.js";
 import {logger} from "../../kernel/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../../kernel/types.js";
-import { validateToken } from "../../api/auth-service.js";
+
 import { findMemberByName } from "../../member/member-registry.js";
 
 interface ClientState {

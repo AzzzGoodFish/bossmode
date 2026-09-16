@@ -1,3 +1,4 @@
+
 import { coreFixture } from "./helpers/core-fixture.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
@@ -16,7 +17,7 @@ vi.mock("../src/app/pid.js", () => ({
   readPidFile: () => null,
   isProcessRunning: () => false,
 }));
-vi.mock("../src/config/config.js", () => ({
+vi.mock("../src/config/settings.js", () => ({
   readConfig: () => ({
     auth: { username: "testuser", passwordHash: testPasswordHash },
     apiKeys: {},

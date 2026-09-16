@@ -1,3 +1,4 @@
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,21 +47,22 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: loggerInfo, warn: loggerWarn, error: loggerError },
 }));
 
-vi.mock("../../src/config/config.js", () => ({
+vi.mock("../../src/config/settings.js", () => ({
   readConfig: () => bossmodeConfig
 }));
 
-vi.mock("../../src/config/model-credentials.js", () => ({
+vi.mock("../../src/config/models.js", () => ({
+  normalizeModelRef: (modelRef: string) => modelRef,
   getModelCredentialProfile: (id: string) => ({ id, providerSlug: "anthropic", enabled: true, name: "Test account" }),
   loadModelCredentialProfiles: () => [{ id: "cred", providerSlug: "anthropic", enabled: true, name: "Test account" }],
 }));
 
-vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
+vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   createDatabaseModelRuntime: async (credentials: unknown, profileId: string) => { modelRegistryCreate(credentials, profileId); return modelRuntime; },
   refreshDatabaseModelRuntime: databaseRuntimeRefresh,
   exportPiConfigForMember: () => exportedConfig,
-  normalizeModelRef: (modelRef: string) => modelRef,
+
   createCredentialStore: (profile: any) => ({ kind: "credentials", profile, read: vi.fn(), list: vi.fn(async () => []), modify: vi.fn(), delete: vi.fn() }),
   // Faithful room-scope shape (dm scope not exercised in this suite).
   resolvePiAgentDir: (roomIdOrScope: string, memberIdOrName: string) =>

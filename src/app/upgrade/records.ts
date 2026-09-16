@@ -1,3 +1,4 @@
+import { getDefaultConfig, writeConfig } from "../../config/settings.js";
 import { parseDocument, parse } from "yaml";
 import { type MemberRecord } from "../../data/types.js";
 import { readFileSync, lstatSync } from "node:fs";
@@ -11,13 +12,13 @@ import { isAbsolute, join } from "node:path";
 import { type Database } from "../../data/database.js";
 import { createHash } from "node:crypto";
 import { requireObject } from "../../kernel/json.js";
-import { getDefaultConfig } from "../../config/config.js";
+
 import { type BossmodeConfig } from "../../kernel/types.js";
-import { normalizeLegacyCredentialImport } from "../../config/model-credentials.js";
+import { normalizeLegacyCredentialImport } from "../../config/models.js";
 import { McpOauthRepository, decodeLegacyMcpOauthEntry } from "../../data/repositories/mcp-oauth.js";
-import { SettingsRepository } from "../../data/repositories/settings.js";
-import { ModelCredentialsRepository } from "../../data/repositories/model-settings.js";
-import { CatalogRepository } from "../../config/pi-adapt/models-store.js";
+
+import { replaceCredentialStore } from "../../config/models.js";
+import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "../../config/catalog.js";
 import { McpSettingsRepository } from "../../data/repositories/mcp-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../data/repositories/workspace-settings.js";
 import { isDeepStrictEqual } from "node:util";
@@ -248,26 +249,26 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
   try{return new TextDecoder("utf-8",{fatal:true}).decode(readFileSync(path));}
   catch{throw new Error(`Invalid legacy text source: ${entry.path}`);}
  };
- const catalog=new CatalogRepository(ctx.db);
+ const catalog=ctx.db;
  for(const entry of entries.filter(e=>e.kind==="catalog-remote"||e.kind==="catalog-overlays")){
   const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
   if(entry.kind==="catalog-remote"){
    const fetchedAt=value.fetchedAt??Date.parse(value.updatedAt);
    if(!Array.isArray(value.models)||!Number.isFinite(fetchedAt))throw new Error(`Invalid legacy catalog: ${entry.path}`);
-   catalog.importRemote({models:value.models,fetchedAt,updatedAt:typeof value.updatedAt==="string"?value.updatedAt:new Date(fetchedAt).toISOString()});
-  }else catalog.importOverlays(value);
+   importRemoteCatalog({models:value.models,fetchedAt,updatedAt:typeof value.updatedAt==="string"?value.updatedAt:new Date(fetchedAt).toISOString()}, catalog);
+  }else importProviderOverlays(value, catalog);
   consumed.add(entry.path);
  }
  const config=entries.find(e=>e.kind==="config");
- new SettingsRepository(ctx.db).importConfig(config?decodeLegacyConfig(read(config)):getDefaultConfig());
+ writeConfig(config?decodeLegacyConfig(read(config)):getDefaultConfig(), ctx.db);
  if(config)consumed.add(config.path);
  for(const entry of entries){
   switch(entry.kind){
    case "model-credentials":{
     const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
     if(!Array.isArray(value.profiles)||value.migrations!==undefined&&!Array.isArray(value.migrations))throw new Error("Invalid legacy credential store");
-    const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,catalog.remote()?.models??[...bundledCatalog]);
-    new ModelCredentialsRepository(ctx.db).replace({profiles:normalized.profiles,migrations:normalized.migrations??[]});break;
+    const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,readRemoteCatalog(catalog)?.models??[...bundledCatalog]);
+    replaceCredentialStore({profiles:normalized.profiles,migrations:normalized.migrations??[]}, ctx.db);break;
    }
    case "mcp-oauth":{
     if(!entry.serverKey)throw new Error("Missing MCP OAuth source key");

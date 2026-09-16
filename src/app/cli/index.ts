@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { getDefaultConfig } from "../../config/settings.js";
+import { hashPassword } from "../../api/auth.js";
 import { ensureDirectory } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
-import { getDefaultConfig } from "../../config/config.js";
+
 import { inspectStartupSettings } from "../upgrade/inventory.js";
 import { waitForStartup, StartupWaitError } from "./startup-wait.js";
 import type { BossmodeConfig } from "../../kernel/types.js";
@@ -14,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { networkInterfaces } from "node:os";
 
-import { hashPassword } from "../../api/auth-service.js";
+
 import { isProcessRunning, readPidFile, removePidFile } from "../pid.js";
 
 const __filename = fileURLToPath(import.meta.url);

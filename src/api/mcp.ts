@@ -1,9 +1,10 @@
+import { readConfig, writeConfig } from "../config/settings.js";
 // MCP Settings API — Bossmode-managed pi-mcp-adapter config
 import { getDatabase } from "../data/database.js";
-import { updateMcpSettings, SettingsValidationError } from "../member/mcp/settings-service.js";
 import { addRoute, parseBody, sendJson } from "./index.js";
-import { readConfig } from "../config/config.js";
+
 import {
+  restoreRedactedMcpConfig, writeMcpConfig, countMcpServers,
   configFingerprint,
   getMcpServersObject,
   listMcpServers,
@@ -15,6 +16,29 @@ import {
 } from "../member/mcp/mcp-settings.js";
 import { checkMcpServerAvailability } from "../agent/tools/mcp-availability.js";
 import { getRoomMembers, listRooms } from "../chat/room-store.js";
+
+class SettingsValidationError extends Error {}
+function updateMcpSettings(body: {enabled?: boolean; configText?: string}): {enabled: boolean; savedServerCount?: number} {
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") throw new SettingsValidationError("Invalid MCP enabled state");
+  let submitted: Record<string, unknown> | undefined;
+  if (body.configText !== undefined) {
+    if (typeof body.configText !== "string") throw new SettingsValidationError("Invalid MCP configuration");
+    try { submitted = parseMcpConfigText(body.configText); }
+    catch { throw new SettingsValidationError("Invalid MCP configuration"); }
+  }
+  return getDatabase().transaction(() => {
+    // Existing secrets and enabled state are read in the same snapshot as writes.
+    const config = readConfig();
+    let serverCount: number | undefined;
+    if (submitted !== undefined) {
+      const restored = restoreRedactedMcpConfig(submitted, parseMcpConfigText(readMcpConfigText())) as Record<string,unknown>;
+      writeMcpConfig(restored); serverCount = countMcpServers(restored);
+    }
+    config.mcp = {...config.mcp, enabled: body.enabled ?? config.mcp?.enabled === true};
+    writeConfig(config);
+    return {enabled: config.mcp.enabled, ...(serverCount !== undefined ? {savedServerCount: serverCount} : {})};
+  });
+}
 
 function assignedServerCounts(): Record<string, number> {
   const counts: Record<string, number> = {};

@@ -1,9 +1,10 @@
+import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
 import { abortAgent, activateAgent, buildMemberAgentSession, getAgentInstanceForScope, initAgentManager, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
-import { getDefaultConfig, writeConfig } from "../src/config/config.js";
+
 import { createMember } from "../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../src/chat/room-store.js";
 import { addMessage } from "../src/chat/message-store.js";

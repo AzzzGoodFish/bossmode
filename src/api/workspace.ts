@@ -15,8 +15,8 @@ import { pageActivity as queryActivityPage } from "../data/repositories/event-re
 
 
 import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-resolver.js";
-import { getModelCredentialProfile } from "../config/model-credentials.js";
-import { normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
+import { getModelCredentialProfile } from "../config/models.js";
+import { normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import * as attachmentStore from "../files/attachment-store.js";
 import * as principlesStore from "../member/memory/principles-store.js";
 import * as mainlineStore from "../chat/mainline-store.js";

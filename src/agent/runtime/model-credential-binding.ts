@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createCredentialStore } from "../../config/pi-adapt/runtime-bridge.js";
+import { createCredentialStore } from "../../config/pi-adapt/credentials.js";
 
 type Profile = Parameters<typeof createCredentialStore>[0];
 

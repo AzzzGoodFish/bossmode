@@ -1,3 +1,4 @@
+
 // Unit tests for the single-namespace filesystem knowledge store (0.8.0)
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 
 // Use the isolated root established before application imports.
 let tmpDir: string = "";
-vi.mock("../../src/config/config.js", () => ({
+vi.mock("../../src/config/settings.js", () => ({
   writePidFile: () => {},
   removePidFile: () => {},
   readConfig: () => ({ auth: {}, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } }),

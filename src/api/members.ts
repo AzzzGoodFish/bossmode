@@ -1,4 +1,5 @@
-import { readConfig } from "../config/config.js";
+import { readConfig } from "../config/settings.js";
+
 import { postMessage } from "../chat/message-bus.js";
 import { archiveMember } from "../member/archive/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../member/profile/member-profile-update.js";

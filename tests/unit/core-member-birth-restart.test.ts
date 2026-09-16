@@ -1,10 +1,11 @@
+import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import { bindDatabase, type Database } from "../../src/data/database.js";
 import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/data/repositories/document-repository.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
 import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/member/member-registry.js";
 import { readMemberProfile } from "../../src/member/profile/member-profile.js";
 import { writeMemoryLayer } from "../../src/member/memory/member-memory-store.js";

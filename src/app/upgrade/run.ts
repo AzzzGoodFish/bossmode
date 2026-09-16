@@ -1,3 +1,4 @@
+import { writeConfig } from "../../config/settings.js";
 import { type Database, type StorageMigration, inspectDatabase, lockDatabase, backupDatabase, applyStorageMigrations, validateStorageMigrationHistory, openDatabase, checkpointDatabase, bindDatabase } from "../../data/database.js";
 import { type UpgradeProgress, type UpgradeImportContext, type UpgradeSource, discoverLegacyInventory, type LegacySourceEntry, assertNoMissingMemberDatabase } from "./inventory.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -12,7 +13,7 @@ import { importLegacyArchives, importLegacyDocuments, verifyActiveMemberAssets }
 import { importLegacyMembers, importLegacySettings, importLegacyExecution, importAgentTemplates } from "./records.js";
 import { importLegacyConversations } from "./conversations.js";
 import { archiveRetiredTasks, cleanupRetiredTopicSessionFiles, cleanupRetiredBackgroundSessionFiles, archiveRetiredScopeSessions, archiveLegacySharedMemory, cleanupMemberMemoryScopes, copyRoomPrinciplesToDescriptions } from "./retirements.js";
-import { SettingsRepository } from "../../data/repositories/settings.js";
+
 
 export interface UpgradeOptions {
   root: string;
@@ -311,7 +312,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
    add(importLegacySettings(ctx,entries,options.bundledCatalog??[]));
    if(options.initialConfig){
     if(entries.some(e=>e.kind==="config"))throw new Error("Initial account cannot replace existing configuration");
-    new SettingsRepository(ctx.db).importConfig(options.initialConfig);
+    writeConfig(options.initialConfig, ctx.db);
    }
    const templates=entries.filter(e=>e.kind==="agent-template-mixed");
    importAgentTemplates(ctx,templates.map(e=>{

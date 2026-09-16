@@ -1,5 +1,6 @@
+import { getUserDisplayName } from "../../config/settings.js";
 import type { RoomMessage } from "../../kernel/types.js";
-import { getUserDisplayName } from "../../config/user-identity.js";
+
 
 export type SenderRole = "user" | "member";
 

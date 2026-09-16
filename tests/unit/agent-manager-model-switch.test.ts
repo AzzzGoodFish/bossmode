@@ -1,3 +1,4 @@
+
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
@@ -127,7 +128,14 @@ vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-vi.mock("../../src/config/model-credentials.js", () => ({
+vi.mock("../../src/config/models.js", () => ({
+  normalizeModelRef: (model: string) => model,
+  listAvailableModels: vi.fn(() => availableModels),
+  assertModelAvailable: vi.fn((model: string) => {
+    if (!availableModels.some((m) => m.ref === model)) {
+      throw new Error(`Model is not available or credential is missing: ${model}`);
+    }
+  }),
   getModelCredentialProfile: vi.fn((id: string) => ({
     id,
     name: `profile ${id}`,
@@ -138,14 +146,10 @@ vi.mock("../../src/config/model-credentials.js", () => ({
   })),
 }));
 
-vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
-  normalizeModelRef: (model: string) => model,
-  listAvailableModels: vi.fn(() => availableModels),
-  assertModelAvailable: vi.fn((model: string) => {
-    if (!availableModels.some((m) => m.ref === model)) {
-      throw new Error(`Model is not available or credential is missing: ${model}`);
-    }
-  }),
+vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
+
+
+
   exportPiConfigForMember: vi.fn((args: any) => {
     exportedCalls.push(args);
     return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [], profile: { id: args.credentialId || "cred-a", name: "test" } };
@@ -178,7 +182,7 @@ const registry = {
 beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
-  (await import("../../src/config/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
+  (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
   const members = new MembersRepository(fixture.db);
   const conversations = new ConversationsRepository(fixture.db);
   for (const name of ["pm", "qa"]) {
@@ -724,7 +728,7 @@ describe("agent-manager model hot switch", () => {
 
   it("validates the credential before touching any instance", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const creds = await import("../../src/config/model-credentials.js");
+    const creds = await import("../../src/config/models.js");
     await manager.activateAgent("room", "pm");
 
     // Unknown profile → fail upfront, no setModel, no commit.

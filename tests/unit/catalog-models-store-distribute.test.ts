@@ -10,21 +10,59 @@ const state = vi.hoisted(() => ({ refreshAll: vi.fn(async () => ({ refreshed: 1,
 vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
   refreshAllInstanceModelRegistries: () => state.refreshAll(),
 }));
-import { connectBuiltinProviderApiKey, ensurePiCatalogWarm } from "../../src/config/model-credentials.js";
-import { buildProviderOverlaysFromFetch, createCredentialStore, distributeModelsStoreOverlays, getBossmodePiRuntimeRoot } from "../../src/config/pi-adapt/runtime-bridge.js";
-import {
-  commitRemoteCatalog, commitProviderOverlays, getProviderOverlays,
-  clearRemoteCatalogMemoryForTests, createDatabaseModelsStore,
-} from "../../src/config/model-catalog.js";
+import { connectBuiltinProviderApiKey } from "../../src/config/models.js";
+import { ensurePiCatalogWarm, refreshPiCatalogFromNetwork, getCatalog } from "../../src/config/catalog.js";
+import { buildProviderOverlaysFromFetch, publishProviderModels } from "../../src/config/catalog.js";
+import { createCredentialStore, getBossmodePiRuntimeRoot } from "../../src/config/pi-adapt/credentials.js";
+import { commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, clearRemoteCatalogMemoryForTests, createDatabaseModelsStore } from "../../src/config/catalog.js";
 
+import { wireConfiguration } from "../../src/app/wire.js";
+let dispose: () => void;
 let fixture: ReturnType<typeof coreFixture>;
 describe("catalog native SQL models-store distribution", () => {
   beforeEach(() => {
     fixture = coreFixture();
+    dispose = wireConfiguration();
     state.refreshAll.mockReset().mockResolvedValue({ refreshed: 1, failed: 0 });
     clearRemoteCatalogMemoryForTests();
   });
-  afterEach(() => { clearRemoteCatalogMemoryForTests(); fixture.close(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); dispose(); clearRemoteCatalogMemoryForTests(); fixture.close(); });
+
+  it("publishes only after the enclosing transaction commits and never after rollback", async () => {
+    const overlay = { xai: { models: [{ id: "committed", provider: "xai" }], checkedAt: 1 } };
+    fixture.db.transaction(() => {
+      publishProviderModels(overlay);
+      expect(state.refreshAll).not.toHaveBeenCalled();
+    });
+    await vi.waitFor(() => expect(state.refreshAll).toHaveBeenCalledTimes(1));
+    expect(() => fixture.db.transaction(() => {
+      publishProviderModels({ xai: { models: [{ id: "rolled-back", provider: "xai" }], checkedAt: 2 } });
+      throw new Error("rollback publication");
+    })).toThrow("rollback publication");
+    await Promise.resolve();
+    expect(state.refreshAll).toHaveBeenCalledTimes(1);
+    expect(getProviderOverlays()).toEqual(overlay);
+  });
+
+  it("keeps the entire last-good catalog when provider SQL publication fails", async () => {
+    await ensurePiCatalogWarm();
+    const old = [{ id: "last-good", provider: "xai" }];
+    commitRemoteCatalog(old, 100);
+    commitProviderOverlays({ xai: { models: old, checkedAt: 100 } });
+    vi.stubGlobal("fetch", vi.fn(async url => String(url).endsWith("/xai")
+      ? new Response(JSON.stringify([{ id: "new-model", provider: "xai" }]), { status: 200 })
+      : new Response("", { status: 404 })));
+    const run = fixture.db.run.bind(fixture.db);
+    vi.spyOn(fixture.db, "run").mockImplementation((sql, ...args) => {
+      if (sql === "INSERT OR REPLACE INTO catalog_snapshots VALUES (?,NULL,?,?,?)") throw new Error("injected provider write failure");
+      return run(sql, ...args);
+    });
+    const result = await refreshPiCatalogFromNetwork();
+    expect(result.error).toContain("injected provider write failure");
+    expect(getCatalog()).toMatchObject({ models: old, fetchedAt: 100 });
+    expect(getProviderOverlays()).toEqual({ xai: { models: old, checkedAt: 100 } });
+    expect(state.refreshAll).not.toHaveBeenCalled();
+  });
 
   it("buildProviderOverlaysFromFetch shapes ModelsStoreEntry with lastModified/etag", () => {
     const models = [
@@ -74,7 +112,7 @@ describe("catalog native SQL models-store distribution", () => {
     }
     const overlays = { xai: { models: [{ id: "grok-4.6", provider: "xai", contextWindow: 1e6 }],
       lastModified: 100, checkedAt: 200, etag: '"e1"' } };
-    expect(distributeModelsStoreOverlays(overlays)).toEqual({ dirs: 0, written: 0 });
+    expect(publishProviderModels(overlays)).toBeUndefined();
     await vi.waitFor(() => expect(state.refreshAll).toHaveBeenCalledTimes(1));
     fixture.reopen();
     expect(getProviderOverlays()).toEqual(overlays);
@@ -99,7 +137,7 @@ describe("catalog native SQL models-store distribution", () => {
   it("empty distribution preserves last-good rows and creates no runtime file tree", async () => {
     const overlays = { xai: { models: [{ id: "retained", provider: "xai" }], checkedAt: 100 } };
     commitProviderOverlays(overlays);
-    expect(distributeModelsStoreOverlays({})).toEqual({ dirs: 0, written: 0 });
+    expect(publishProviderModels({})).toBeUndefined();
     await vi.waitFor(() => expect(state.refreshAll).toHaveBeenCalledTimes(1));
     expect(getProviderOverlays()).toEqual(overlays);
     expect(existsSync(getBossmodePiRuntimeRoot())).toBe(false);
@@ -108,7 +146,7 @@ describe("catalog native SQL models-store distribution", () => {
   it("failed SQL distribution rolls back all providers and never notifies live registries", async () => {
     const original = { xai: { models: [{ id: "retained", provider: "xai" }], checkedAt: 100 } };
     commitProviderOverlays(original);
-    expect(() => distributeModelsStoreOverlays({
+    expect(() => publishProviderModels({
       xai: { models: [{ id: "replacement", provider: "xai" }], checkedAt: 200 },
       broken: { models: [{ noIdentity: true }], checkedAt: 200 },
     })).toThrow("identity");

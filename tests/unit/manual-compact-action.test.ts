@@ -1,3 +1,4 @@
+
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
@@ -110,14 +111,17 @@ vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-vi.mock("../../src/config/model-credentials.js", () => ({
-  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "pi-cli", enabled: true, providerSlug: "anthropic" })),
-}));
-
-vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
+vi.mock("../../src/config/models.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => [{ ref: "anthropic/claude-a" }]),
   assertModelAvailable: vi.fn(),
+  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "pi-cli", enabled: true, providerSlug: "anthropic" })),
+}));
+
+vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
+
+
+
   exportPiConfigForMember: vi.fn(() => ({ agentDir: "/tmp/agent", extensionPaths: [], profile: { id: "cred-a", name: "test" } })),
 }));
 
@@ -142,7 +146,7 @@ const registry = {
 beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
-  (await import("../../src/config/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
+  (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
   const members = new MembersRepository(fixture.db);
   const conversations = new ConversationsRepository(fixture.db);
   for (const name of ["pm", "qa"]) {

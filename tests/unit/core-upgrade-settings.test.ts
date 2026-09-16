@@ -1,3 +1,4 @@
+import { readConfig } from "../../src/config/settings.js";
 import {afterEach,expect,it} from "vitest";
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 import {join,dirname} from "node:path";
@@ -7,7 +8,7 @@ import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { decodeLegacyConfig, importLegacySettings } from "../../src/app/upgrade/records.js";
 import {McpOauthRepository,mcpOauthServerKey} from "../../src/data/repositories/mcp-oauth.js";
-import {SettingsRepository} from "../../src/data/repositories/settings.js";
+
 import {McpSettingsRepository} from "../../src/data/repositories/mcp-settings.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
@@ -24,13 +25,13 @@ const config={auth:{username:"owner",passwordHash:"unchanged-hash"},defaults:{ho
 it("imports only the snapshotted configuration and ignores the retired resume setting",()=>{
  const {ctx,entries}=setup({"config.json":config});writeFileSync(join(ctx.root,"config.json"),"poison live source");
  expect([...importLegacySettings(ctx,entries,[])]).toEqual(["config.json"]);
- expect(new SettingsRepository(ctx.db).read()).toMatchObject({auth:config.auth,defaults:config.defaults,apiKeys:config.apiKeys});
- expect(new SettingsRepository(ctx.db).read()).not.toHaveProperty("sessionResume");
- expect(new SettingsRepository(ctx.db).read()).not.toHaveProperty("runtime");
+ expect(readConfig(ctx.db)).toMatchObject({auth:config.auth,defaults:config.defaults,apiKeys:config.apiKeys});
+ expect(readConfig(ctx.db)).not.toHaveProperty("sessionResume");
+ expect(readConfig(ctx.db)).not.toHaveProperty("runtime");
 });
 it("creates empty setup configuration for a genuinely absent source",()=>{
  const {ctx,entries}=setup({});expect(importLegacySettings(ctx,entries,[]).size).toBe(0);
- expect(new SettingsRepository(ctx.db).read()?.auth).toEqual({username:"",passwordHash:""});
+ expect(readConfig(ctx.db)?.auth).toEqual({username:"",passwordHash:""});
 });
 it("imports orphaned hashed MCP OAuth data without guessing URL or resuming authorization",()=>{
  const key=mcpOauthServerKey("removed-server");const path=`mcp/runtime/oauth/sha256-${key}/tokens.json`;

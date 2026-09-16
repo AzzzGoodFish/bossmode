@@ -1,7 +1,6 @@
-// pi SDK catalog registry (config's marked adapter zone, P5).
-// Credential-less registry used only for static catalog metadata; not for real request auth.
+import { type Credential, type CredentialInfo, type CredentialStore, type ModelsStore, type ModelsStoreEntry } from "@earendil-works/pi-ai";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+
 class NoopCredentialStore implements CredentialStore {
   async read(): Promise<Credential | undefined> { return undefined; }
   async list(): Promise<readonly CredentialInfo[]> { return []; }
@@ -9,14 +8,10 @@ class NoopCredentialStore implements CredentialStore {
   async delete(): Promise<void> {}
 }
 
-// Credential-less registry used only for static catalog metadata (model list, provider display
-// names, OAuth-provider ids) — not for real request auth. ModelRuntime.create() is async, but the
-// many callers below (validateInput, sanitizeProfile, etc.) are synchronous; the cache is warmed
-// once (lazily, or eagerly via ensurePiCatalogWarm() at server startup) and read synchronously
-// afterward. Before the cache is warm, callers fall back to their pre-existing empty/default
-// behavior (unchanged from before this migration).
 let catalogRegistryPromise: Promise<ModelRegistry> | null = null;
+
 let catalogRegistrySync: ModelRegistry | null = null;
+
 let catalogRuntimeSync: ModelRuntime | null = null;
 
 export async function ensureCatalogRegistry(): Promise<ModelRegistry> {
@@ -49,4 +44,11 @@ export async function ensureCatalogRegistryRuntime(): Promise<ModelRuntime> {
   await ensureCatalogRegistry();
   if (!catalogRuntimeSync) throw new Error("pi model catalog is unavailable");
   return catalogRuntimeSync;
+}
+
+export class DatabaseModelsStore implements ModelsStore {
+  constructor(private readonly repository: { overlays(): Record<string, unknown>; importOverlay(provider: string, entry: any): void; deleteOverlay(provider: string): void }) {}
+  async read(providerId: string): Promise<ModelsStoreEntry | undefined> { return this.repository.overlays()[providerId] as ModelsStoreEntry | undefined; }
+  async write(providerId: string, entry: ModelsStoreEntry): Promise<void> { this.repository.importOverlay(providerId,{...entry,models:[...entry.models]}); }
+  async delete(providerId: string): Promise<void> { this.repository.deleteOverlay(providerId); }
 }

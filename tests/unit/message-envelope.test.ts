@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    readConfig: () => ({ auth: { username: "fish", passwordHash: "" }, apiKeys: {}, defaults: {} }),
-  };
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
+
+import { coreFixture } from "../helpers/core-fixture.js";
+import { writeConfig } from "../../src/config/settings.js";
+let fixture: ReturnType<typeof coreFixture>;
+beforeEach(() => {
+  fixture = coreFixture();
+  writeConfig({ auth: { username: "fish", passwordHash: "" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
 });
+afterEach(() => fixture.close());
 
 import {
   chatRefOf,

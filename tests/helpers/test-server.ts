@@ -1,3 +1,4 @@
+
 /** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
 import { beforeAll, afterAll } from "vitest";
 import http from "node:http";
@@ -20,8 +21,8 @@ export function getTestWorkspace() {
 export function setupTestWorkspace(): void {
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
-    const { getDefaultConfig, writeConfig } = await import("../../src/config/config.js");
-    const { hashPassword } = await import("../../src/api/auth-service.js");
+    const { getDefaultConfig, writeConfig } = await import("../../src/config/settings.js");
+    const { hashPassword } = await import("../../src/api/auth.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
   });
   afterAll(async () => {

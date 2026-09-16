@@ -50,8 +50,9 @@ import {
 import type { AgentHistoryEvent } from "../events/event-handler.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../runtime/types.js";
-import { getModelCredentialProfile } from "../../config/model-credentials.js";
-import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "../../config/pi-adapt/runtime-bridge.js";
+import { getModelCredentialProfile } from "../../config/models.js";
+import { exportPiConfigForMember } from "../../config/pi-adapt/credentials.js";
+import { normalizeModelRef, assertModelAvailable } from "../../config/models.js";
 import { settleMemberShellWaits } from "../terminal/shell-manager.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/types.js";
 
@@ -1588,7 +1589,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
     const normalizedModel = normalizeSwitchModelRef(binding.model);
     if (!normalizedModel) throw new Error("model is required");
     assertModelAvailable(normalizedModel, "switchMemberModel");
-    const { getModelCredentialProfile } = await import("../../config/model-credentials.js");
+    const { getModelCredentialProfile } = await import("../../config/models.js");
     const profile = getModelCredentialProfile(binding.credentialId);
     if (!profile || !profile.enabled) {
       throw new Error(`Credential profile not found or disabled: ${binding.credentialId}`);

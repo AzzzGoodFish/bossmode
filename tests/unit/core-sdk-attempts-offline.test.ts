@@ -1,3 +1,4 @@
+
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
@@ -10,7 +11,7 @@ import type { RuntimePromptDispatch } from "../../src/agent/runtime/types.js";
 // No private SDK fields, provider/account access, sockets, or hand-written SDK history.
 const mock = vi.hoisted(() => ({ root: "", modelRuntime: {} as any, onLoad: () => {} }));
 vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock("../../src/config/config.js", () => ({
+vi.mock("../../src/config/settings.js", () => ({
   readConfig: () => ({})
 }));
 vi.mock("../../src/member/assets/member-extensions.js", () => ({ builtinMcpAdapterPath: () => mock.root, discoverMemberExtensionEntries: () => [] }));
@@ -28,10 +29,10 @@ vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactor
       execute: async () => ({ content: [{ type: "text", text: "offline" }], details: {} }) });
   },
 }) }));
-vi.mock("../../src/config/model-credentials.js", () => ({
+vi.mock("../../src/config/models.js", () => ({
   getModelCredentialProfile: () => ({}),
 }));
-vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
+vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
   normalizeModelRef: (ref: string) => ref, resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => ({ agentDir: mock.root, profile: { id: "offline", providerSlug: "offline", authType: "api-key" } }),
   createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {},

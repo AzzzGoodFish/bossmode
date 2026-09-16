@@ -1,3 +1,4 @@
+import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import { getDatabase, type Database } from "../../src/data/database.js";

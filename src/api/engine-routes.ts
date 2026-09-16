@@ -4,8 +4,10 @@ import {
   getRegistry,
   invalidateModelCredentialProfile,
 } from "../agent/orchestrator/agent-manager.js";
-import { cancelOAuthLoginJob, connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, getOAuthLoginJob, listBuiltinModelProviders, listPublicModelCredentialProfiles, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/model-credentials.js";
-import { listAvailableModels } from "../config/pi-adapt/runtime-bridge.js";
+import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
+import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile } from "../config/models.js";
+import { listBuiltinModelProviders, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
+import { listAvailableModels } from "../config/models.js";
 
 // GET /api/capabilities — runtime capabilities
 addRoute("GET", "/api/capabilities", async (_req, res) => {

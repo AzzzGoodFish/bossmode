@@ -1,3 +1,4 @@
+
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,11 +8,11 @@ import { tmpdir } from "node:os";
 
 describe("password hashing", () => {
   // Import the functions - they're pure crypto, no fs side effects
-  let hashPassword: typeof import("../src/api/auth-service.js").hashPassword;
-  let verifyPassword: typeof import("../src/api/auth-service.js").verifyPassword;
+  let hashPassword: typeof import("../src/api/auth.js").hashPassword;
+  let verifyPassword: typeof import("../src/api/auth.js").verifyPassword;
 
   beforeEach(async () => {
-    const mod = await import("../src/api/auth-service.js");
+    const mod = await import("../src/api/auth.js");
     hashPassword = mod.hashPassword;
     verifyPassword = mod.verifyPassword;
   });
@@ -43,11 +44,11 @@ describe("password hashing", () => {
 });
 
 describe("resolveApiKey", () => {
-  let resolveApiKey: typeof import("../src/config/config.js").resolveApiKey;
+  let resolveApiKey: typeof import("../src/config/settings.js").resolveApiKey;
   const originalEnv = { ...process.env };
 
   beforeEach(async () => {
-    const mod = await import("../src/config/config.js");
+    const mod = await import("../src/config/settings.js");
     resolveApiKey = mod.resolveApiKey;
   });
 

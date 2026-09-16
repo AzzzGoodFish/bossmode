@@ -1,3 +1,4 @@
+import { importAuthSession } from "../../src/api/auth.js";
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -6,17 +7,19 @@ import { tmpdir } from "node:os";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
-import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
+import { importModelProfile, replaceCredentialStore, readCredentialStore, credentialRevision } from "../../src/config/models.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
 import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
-import { AuthSessionsRepository } from "../../src/data/repositories/settings.js";
+
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
-import { saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } from "../../src/config/model-credentials.js";
-import { createCredentialStore } from "../../src/config/pi-adapt/runtime-bridge.js";
+import { saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile } from "../../src/config/models.js";
+import { startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests } from "../../src/config/oauth.js";
+import { setPiCatalogModelsForTests } from "../../src/config/catalog.js";
+import { createCredentialStore } from "../../src/config/pi-adapt/credentials.js";
 import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/member/workspaces/workspace-registry.js";
 import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/member/mcp/mcp-settings.js";
 
-let root: string, db: Database, other: Database, repo: ModelCredentialsRepository;
+let root: string, db: Database, other: Database, repo: Database;
 function profile(id = "a", patch: Partial<ModelCredentialProfile> = {}): ModelCredentialProfile {
   return { id, profileKind: "custom_endpoint", name: id, providerSlug: id, protocol: "openai-completions", baseUrl: "https://example.test", authType: "api_key", apiKey: `key-${id}`, requestProfile: "standard", enabled: true, isDefault: false, models: [{ id: "model", reasoning: false }], createdAt: 1, updatedAt: 1, ...patch };
 }
@@ -26,7 +29,7 @@ beforeEach(() => {
   db = openDatabase(join(root, "core.sqlite"));
   applyStorageMigrations(db, [baseStorageMigration, settingsMigration]); bindDatabase(db);
   other = openDatabase(db.path); other.exec("PRAGMA busy_timeout=0");
-  repo = new ModelCredentialsRepository(db);
+  repo = db;
   setPiCatalogModelsForTests([{ provider: "anthropic", id: "model", api: "anthropic-messages", baseUrl: "https://example.test", input: ["text"] }]);
 });
 afterEach(() => { vi.restoreAllMocks(); setOAuthLoginAdapterForTests(null); setPiCatalogModelsForTests(null); other.close(); db.close(); rmSync(root, { recursive: true, force: true }); });
@@ -43,33 +46,27 @@ function interposeRead(sql: string, write: () => void) {
       blocked = true;
     }
   };
-  if (sql === "SELECT * FROM model_profiles ORDER BY position") {
-    const original = ModelCredentialsRepository.prototype.read;
-    vi.spyOn(ModelCredentialsRepository.prototype, "read").mockImplementation(function () {
-      const result = original.call(this); interpose(); return result;
-    });
-  } else {
-    const original = db.all.bind(db);
-    vi.spyOn(db, "all").mockImplementation((query, ...args) => {
-      const rows = original(query, ...args);
-      if (query === sql) interpose();
-      return rows;
-    });
-  }
+  if (sql === "SELECT * FROM model_profiles ORDER BY position") sql = "SELECT id FROM credential_migrations ORDER BY id";
+  const original = db.all.bind(db);
+  vi.spyOn(db, "all").mockImplementation((query, ...args) => {
+    const rows = original(query, ...args);
+    if (query === sql) interpose();
+    return rows;
+  });
   return () => { expect(attempted).toBe(true); if (blocked) write(); };
 }
 
 describe("review: concurrent service operations", () => {
   it("captures refresh identity and revision in one snapshot across the former read gap", async () => {
     const old = profile("a", { authType: "oauth", apiKey: undefined, oauthProviderId: "anthropic", oauthCredentials: { access: "old", refresh: "old-r", expires: 1 } });
-    repo.importProfile(old);
+    importModelProfile(old, undefined, repo);
     // After read() has assembled the complete profile, before revision() used to run.
-    const original = ModelCredentialsRepository.prototype.read;
+    const original = db.all.bind(db);
     let attempted = false, blocked = false;
-    const write = () => new ModelCredentialsRepository(other).importProfile({ ...old, oauthCredentials: { access: "edited", refresh: "edited-r", expires: 2 } });
-    vi.spyOn(ModelCredentialsRepository.prototype, "read").mockImplementation(function () {
-      const result = original.call(this);
-      if (!attempted) { attempted = true; try { write(); } catch (e) { if (!String(e).includes("database is locked")) throw e; blocked = true; } }
+    const write = () => importModelProfile({ ...old, oauthCredentials: { access: "edited", refresh: "edited-r", expires: 2 } }, undefined, other);
+    vi.spyOn(db, "all").mockImplementation((query, ...args) => {
+      const result = original(query, ...args);
+      if (query === "SELECT id FROM credential_migrations ORDER BY id" && !attempted) { attempted = true; try { write(); } catch (e) { if (!String(e).includes("database is locked")) throw e; blocked = true; } }
       return result;
     });
     const result = await createCredentialStore(old).modify("a", async current => {
@@ -82,10 +79,10 @@ describe("review: concurrent service operations", () => {
     expect(getModelCredentialProfile("a")?.oauthCredentials?.access).toBe("edited");
   });
   it.each(["save", "delete"])("%s preserves unrelated concurrent account secrets and additions", operation => {
-    repo.importProfile(profile()); repo.importProfile(profile("b"));
+    importModelProfile(profile(), undefined, repo); importModelProfile(profile("b"), undefined, repo);
     const finish = interposeRead("SELECT * FROM model_profiles ORDER BY position", () => other.transaction(() => {
-      const r = new ModelCredentialsRepository(other);
-      r.importProfile(profile("b", { apiKey: "rotated-b" })); r.importProfile(profile("c"));
+      const r = other;
+      importModelProfile(profile("b", { apiKey: "rotated-b" }), undefined, r); importModelProfile(profile("c"), undefined, r);
     }));
     if (operation === "save") saveModelCredentialProfile({ ...profile(), name: "renamed" });
     else expect(deleteModelCredentialProfile("a")).toBe(true);
@@ -110,7 +107,7 @@ describe("review: concurrent service operations", () => {
 
 describe("review: paused MOCK application OAuth login, no provider network", () => {
   it.each(["native", "legacy"] as const)("%s completes unchanged and new profiles", async path => {
-    repo.importProfile(profile("a", { providerSlug: "anthropic", profileKind: "builtin_provider" }));
+    importModelProfile(profile("a", { providerSlug: "anthropic", profileKind: "builtin_provider" }), undefined, repo);
     setOAuthLoginAdapterForTests({ login: async () => ({ access: "mock-access", refresh: "mock-refresh", expires: 99 }) });
     const job = await (path === "native" ? startNativeOAuthConnection({ providerId: "anthropic", profileId: "a" }) : startOAuthLoginJob({ providerId: "anthropic", profileId: "a", profile: { name: "reconnected" } }));
     expect(job.status).toBe("completed");
@@ -119,21 +116,21 @@ describe("review: paused MOCK application OAuth login, no provider network", () 
     expect(created.status).toBe("completed"); expect(created.profileId).not.toBe("a");
   });
   it.each(["native-delete", "native-edit", "native-recreate", "legacy-delete", "legacy-edit", "legacy-recreate"])("rejects %s without resurrecting or overwriting", async scenario => {
-    const original = profile("a", { providerSlug: "anthropic", profileKind: "builtin_provider" }); repo.importProfile(original);
+    const original = profile("a", { providerSlug: "anthropic", profileKind: "builtin_provider" }); importModelProfile(original, undefined, repo);
     let release!: (value: any) => void;
     setOAuthLoginAdapterForTests({ login: async (_provider, callbacks) => {
       callbacks.onAuth({ url: "https://mock.invalid/login" });
       return new Promise(resolve => { release = resolve; });
     } });
     const job = await (scenario.startsWith("native") ? startNativeOAuthConnection({ providerId: "anthropic", profileId: "a" }) : startOAuthLoginJob({ providerId: "anthropic", profileId: "a", profile: { name: "login captured" } }));
-    const writer = new ModelCredentialsRepository(other);
-    if (!scenario.endsWith("edit")) writer.replace({ profiles: [], migrations: [] });
-    if (!scenario.endsWith("delete")) writer.importProfile({ ...original, name: "concurrent", apiKey: "new-secret" });
-    const before = repo.read();
+    const writer = other;
+    if (!scenario.endsWith("edit")) replaceCredentialStore({ profiles: [], migrations: [] }, writer);
+    if (!scenario.endsWith("delete")) importModelProfile({ ...original, name: "concurrent", apiKey: "new-secret" }, undefined, writer);
+    const before = readCredentialStore(repo);
     release({ access: "stale-login", refresh: "stale-refresh", expires: 99 });
     await vi.waitFor(() => expect(getOAuthLoginJob(job.id)?.status).toBe("failed"));
     expect(getOAuthLoginJob(job.id)?.error).toMatch(/changed|deleted/i);
-    expect(repo.read()).toEqual(before);
+    expect(readCredentialStore(repo)).toEqual(before);
   });
 });
 
@@ -170,25 +167,25 @@ describe("review: settings import identities", () => {
     "INSERT INTO workspace_registries VALUES(NULL,'original')",
     "INSERT INTO auth_sessions VALUES(NULL,100)",
   ])("SQL NULL identity rejects atomically: %s", sql => {
-    repo.importProfile(profile()); const revision = repo.revision("a");
-    expect(() => db.transaction(() => { repo.importProfile(profile("a", { name: "rollback" })); db.run(sql); })).toThrow(/NOT NULL/);
-    expect(repo.read().profiles).toEqual([profile()]); expect(repo.revision("a")).toBe(revision);
+    importModelProfile(profile(), undefined, repo); const revision = credentialRevision("a", repo);
+    expect(() => db.transaction(() => { importModelProfile(profile("a", { name: "rollback" }), undefined, repo); db.run(sql); })).toThrow(/NOT NULL/);
+    expect(readCredentialStore(repo).profiles).toEqual([profile()]); expect(credentialRevision("a", repo)).toBe(revision);
   });
   it.each(["profile", "migration", "mcp-owner", "workspace-owner", "workspace-id", "ssh-owner", "session-hash"])("NULL %s rejects and rolls back an importer batch", kind => {
-    repo.importProfile(profile()); const before = repo.read();
+    importModelProfile(profile(), undefined, repo); const before = readCredentialStore(repo);
     expect(() => db.transaction(() => {
-      repo.importProfile(profile("a", { name: "must rollback" }));
+      importModelProfile(profile("a", { name: "must rollback" }), undefined, repo);
       switch (kind) {
-        case "profile": repo.importProfile({ ...profile(), id: null as any, models: [] }); break;
-        case "migration": repo.replace({ profiles: [profile()], migrations: [null as any] }); break;
+        case "profile": importModelProfile({ ...profile(), id: null as any, models: [] }, undefined, repo); break;
+        case "migration": replaceCredentialStore({ profiles: [profile()], migrations: [null as any] }, repo); break;
         case "mcp-owner": new McpSettingsRepository(db, null as any).importConfig({ mcpServers: {} }); break;
         case "workspace-owner": new WorkspacesRepository(db).importRegistry(null as any, { active: "original", workspaces: [originalWorkspace("m")] }); break;
         case "workspace-id": new WorkspacesRepository(db).importRegistry("m", { active: "original", workspaces: [originalWorkspace("m"), { ...ssh("x"), id: null as any }] }); break;
         case "ssh-owner": new SshCredentialsRepository(db).importKey(null as any, { privateKey: "private", publicKey: "public" }); break;
-        case "session-hash": new AuthSessionsRepository(db).importSessionHash(null as any, 100); break;
+        case "session-hash": importAuthSession(null as any, 100, db); break;
       }
     })).toThrow();
-    expect(repo.read()).toEqual(before);
+    expect(readCredentialStore(repo)).toEqual(before);
     for (const table of ["credential_migrations", "mcp_config", "workspace_registries", "workspaces", "ssh_credentials", "auth_sessions"]) expect(db.all(`SELECT * FROM ${table}`)).toEqual([]);
   });
 });

@@ -1,7 +1,9 @@
-import { configExists, readConfig, writeConfig, getDefaultConfig } from "../../src/config/config.js";
+import { configExists, readConfig, writeConfig, getDefaultConfig } from "../../src/config/settings.js";
+import { requireAuth, hashPassword, login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/api/auth.js";
+
 import { getBossmodeDir } from "../../src/files/layout.js";
 import { getMigration } from "../helpers/schema.js";
-import {requireAuth} from "../../src/api/auth.js";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -9,11 +11,11 @@ import { tmpdir } from "node:os";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
-import { SettingsRepository } from "../../src/data/repositories/settings.js";
+
 import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
 
-import { hashPassword, login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/api/auth-service.js";
+
 import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/member/mcp/mcp-settings.js";
 import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/member/workspaces/workspace-registry.js";
 import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/member/workspaces/ssh-keygen.js";
@@ -39,7 +41,7 @@ describe("settings and auth DB authority",()=>{
   it("rolls back all configuration fields on a failing import",()=>{
     writeConfig(getDefaultConfig());
     db.exec("CREATE TRIGGER reject_key BEFORE INSERT ON provider_api_keys BEGIN SELECT RAISE(ABORT,'injected'); END");
-    expect(()=>new SettingsRepository(db).importConfig({...getDefaultConfig(),defaults:{host:"changed",port:9000},apiKeys:{p:"secret"}})).toThrow("injected");
+    expect(()=>writeConfig({...getDefaultConfig(),defaults:{host:"changed",port:9000},apiKeys:{p:"secret"}}, db)).toThrow("injected");
     expect(readConfig()).toEqual(getDefaultConfig());
   });
   it("persists only token hashes, survives reopen, slides and expires",()=>{

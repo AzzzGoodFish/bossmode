@@ -1,5 +1,7 @@
+import { readConfig, configExists } from "../../src/config/settings.js";
+import { validateToken } from "../../src/api/auth.js";
 import { getBossmodeDir } from "../../src/files/layout.js";
-import { readConfig, configExists } from "../../src/config/config.js";
+
 import { expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -7,9 +9,9 @@ import { getDatabase } from "../../src/data/database.js";
 
 import { readPidFile } from "../../src/app/pid.js";
 import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp/mcp-settings.js";
-import { getCatalog } from "../../src/config/model-catalog.js";
-import { loadModelCredentialProfiles } from "../../src/config/model-credentials.js";
-import { validateToken } from "../../src/api/auth-service.js";
+import { getCatalog } from "../../src/config/catalog.js";
+import { loadModelCredentialProfiles } from "../../src/config/models.js";
+
 import { readWorkspaces } from "../../src/member/workspaces/workspace-registry.js";
 import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/workspaces/ssh-keygen.js";
 

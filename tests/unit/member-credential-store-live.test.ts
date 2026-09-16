@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
+import { importModelProfile } from "../../src/config/models.js";
 let fixture: ReturnType<typeof coreFixture>;
 
 function gate() {
@@ -11,7 +11,7 @@ function gate() {
 }
 
 async function setup() {
-  const credentials = await import("../../src/config/model-credentials.js"); const credentialsBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
+  const credentials = await import("../../src/config/models.js"); const credentialsBridge = await import("../../src/config/pi-adapt/credentials.js");
   const { ModelCredentialBinding } = await import("../../src/agent/runtime/model-credential-binding.js");
   const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
   const profiles = ["A", "B"].map((id) => ({
@@ -20,7 +20,7 @@ async function setup() {
     oauthCredentials: { access: `${id}-old`, refresh: `${id}-refresh`, expires: Date.now() - 60_000 },
     models: [], createdAt: Date.now(), updatedAt: Date.now(),
   }));
-  for (const profile of profiles) new ModelCredentialsRepository(fixture.db).importProfile(profile as any);
+  for (const profile of profiles) importModelProfile(profile as any, undefined, fixture.db);
   const binding = new ModelCredentialBinding(profiles[0]);
   const runtime = await ModelRuntime.create({ credentials: binding, modelsPath: null, allowModelNetwork: false });
   binding.attach(runtime);
@@ -90,7 +90,7 @@ describe("model snapshot credentials through real SDK getAuth", () => {
   });
 
   it.each(["disabled", "another-provider"])("stops reading a bound profile after it becomes %s", async (change) => {
-    const credentials = await import("../../src/config/model-credentials.js"); const credentialsBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
+    const credentials = await import("../../src/config/models.js"); const credentialsBridge = await import("../../src/config/pi-adapt/credentials.js");
     const input = {
       profileKind: "custom_endpoint" as const, name: "Account", providerSlug: "fixture-provider",
       protocol: "openai-responses" as const, baseUrl: "http://127.0.0.1:1", authType: "api_key" as const,

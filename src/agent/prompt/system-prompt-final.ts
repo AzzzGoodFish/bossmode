@@ -18,7 +18,7 @@ import {
   loadProjectContextFiles,
   loadSkills,
 } from "../runtime/pi-prompt-api.js";
-import { exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/runtime-bridge.js";
+import { exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { resolvePiSystemPromptSources } from "../runtime/pi-sdk.js";
 import type { AgentMemberConfig } from "../../kernel/types.js";
 

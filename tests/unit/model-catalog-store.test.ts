@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import * as mod from "../../src/config/model-catalog.js";
-import { CatalogRepository } from "../../src/config/pi-adapt/models-store.js";
+import * as mod from "../../src/config/catalog.js";
+import { readRemoteCatalog } from "../../src/config/catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -51,7 +51,7 @@ describe("CatalogStore SQL authority", () => {
     expect(snap.fetchedAt).toBe(1_700_000_000_000);
     expect(snap.models.some((m: any) => m.id === "k3-256k")).toBe(true);
 
-    const stored = new CatalogRepository(fixture.db).remote()!;
+    const stored = readRemoteCatalog(fixture.db)!;
     expect(stored.models.map((m) => m.id)).toEqual(["k3-256k", "k2"]);
     expect(stored.fetchedAt).toBe(1_700_000_000_000);
     expect(stored.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
@@ -75,7 +75,7 @@ describe("CatalogStore SQL authority", () => {
     mod.commitRemoteCatalog([{ provider: "kimi-coding", id: "k3-256k" }], 1_700_000_100_000);
     mod.clearRemoteCatalogMemoryForTests();
     fixture.reopen();
-    mod.hydrateCatalogFromDisk();
+    mod.getCatalog();
     expect(mod.getCatalog()).toMatchObject({
       source: "remote", models: [{ provider: "kimi-coding", id: "k3-256k" }],
       fetchedAt: 1_700_000_100_000,
@@ -96,17 +96,17 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("dropdown === validation: listAvailableModels sees new models after refresh", async () => {
-    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
+    const cred = await import("../../src/config/models.js"), __cred_catalog = await import("../../src/config/catalog.js"); const credBridge = await import("../../src/config/pi-adapt/credentials.js"), __credBridge_models = await import("../../src/config/models.js");
 
     mod.commitRemoteCatalog([
       { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
     ]);
 
     const profile = cred.connectBuiltinProviderApiKey({ providerSlug: "kimi-coding", apiKey: "sk-kimi" });
-    expect(credBridge.listAvailableModels().map((m) => m.ref)).toContain("kimi-coding/k2");
-    expect(credBridge.listAvailableModels().map((m) => m.ref)).not.toContain("kimi-coding/k3-256k");
+    expect(__credBridge_models.listAvailableModels().map((m) => m.ref)).toContain("kimi-coding/k2");
+    expect(__credBridge_models.listAvailableModels().map((m) => m.ref)).not.toContain("kimi-coding/k3-256k");
 
-    cred.setCatalogNetworkRefreshForTests(async () => {
+    __cred_catalog.setCatalogNetworkRefreshForTests(async () => {
       mod.commitRemoteCatalog([
         { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
         { provider: "kimi-coding", id: "k3-256k", name: "K3 256k", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 256000, input: ["text"] },
@@ -118,18 +118,18 @@ describe("CatalogStore SQL authority", () => {
     expect(refreshed.catalogSource).toBe("remote");
 
     fixture.reopen();
-    expect(new CatalogRepository(fixture.db).remote()?.models.map((m) => m.id)).toContain("k3-256k");
-    const available = credBridge.listAvailableModels().map((m) => m.ref);
+    expect(readRemoteCatalog(fixture.db)?.models.map((m) => m.id)).toContain("k3-256k");
+    const available = __credBridge_models.listAvailableModels().map((m) => m.ref);
     expect(available).toContain("kimi-coding/k3-256k");
-    expect(credBridge.isModelAvailable("kimi-coding/k3-256k")).toBe(true);
+    expect(__credBridge_models.isModelAvailable("kimi-coding/k3-256k")).toBe(true);
 
-    cred.setCatalogNetworkRefreshForTests(null);
-    cred.setPiCatalogModelsForTests(null);
+    __cred_catalog.setCatalogNetworkRefreshForTests(null);
+    __cred_catalog.setPiCatalogModelsForTests(null);
   });
 
   it("failed network refresh keeps prior remote overlay", async () => {
-    const cat = await import("../../src/config/model-catalog.js");
-    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
+    const cat = await import("../../src/config/catalog.js");
+    const cred = await import("../../src/config/models.js"), __cred_catalog = await import("../../src/config/catalog.js"); const credBridge = await import("../../src/config/pi-adapt/credentials.js");
 
     cat.clearRemoteCatalogMemoryForTests();
     cat.setBundledCatalogLoader(() => [
@@ -139,7 +139,7 @@ describe("CatalogStore SQL authority", () => {
       { provider: "kimi-coding", id: "k3-256k", contextWindow: 256000 },
     ], Date.now());
     cat.setPiCatalogModelsForTests(null);
-    cred.setPiCatalogModelsForTests(null);
+    __cred_catalog.setPiCatalogModelsForTests(null);
     cat.setCatalogNetworkRefreshForTests(null);
 
     expect(cat.getCatalog().models.some((m: any) => m.id === "k3-256k")).toBe(true);
@@ -150,7 +150,7 @@ describe("CatalogStore SQL authority", () => {
     }) as typeof fetch;
 
     try {
-      const result = await cred.refreshPiCatalogFromNetwork({ timeoutMs: 500 });
+      const result = await __cred_catalog.refreshPiCatalogFromNetwork({ timeoutMs: 500 });
       expect(cat.getCatalog().models.some((m: any) => m.id === "k3-256k")).toBe(true);
       expect(cat.getCatalog().source).toBe("remote");
       expect(result.error).toContain("ECONNREFUSED");
@@ -162,7 +162,7 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("builtin discover serves catalog without hitting provider /models", async () => {
-    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
+    const cred = await import("../../src/config/models.js"), __cred_catalog = await import("../../src/config/catalog.js"); const credBridge = await import("../../src/config/pi-adapt/credentials.js");
     mod.commitRemoteCatalog([
       { provider: "anthropic", id: "claude-fable-5", name: "Fable", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text"] },
     ]);
@@ -186,7 +186,7 @@ describe("CatalogStore SQL authority", () => {
       expect(result.models.map((m) => m.id)).toContain("claude-fable-5");
     } finally {
       globalThis.fetch = originalFetch;
-      cred.setPiCatalogModelsForTests(null);
+      __cred_catalog.setPiCatalogModelsForTests(null);
     }
   });
 });

@@ -1,10 +1,11 @@
+import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Database } from "../../src/data/database.js";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
 import { shortIdJournalPath, writeShortIdJournal } from "../../src/app/upgrade/ids.js";
 
 const fault = vi.hoisted(() => ({ ids: false }));

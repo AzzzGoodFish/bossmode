@@ -1,6 +1,7 @@
+import { readConfig, writeConfig } from "../../config/settings.js";
 import { ensureDirectory } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
-import { readConfig, writeConfig } from "../../config/config.js";
+
 import { recoverMemberArchives } from "../../member/archive/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
 import { prepareCoreStorage } from "../upgrade/run.js";
@@ -13,13 +14,15 @@ import { handleApiRequest } from "../../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
 
 import { removePidFile, writePidFile } from "../pid.js";
-import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../../config/model-credentials.js";
+import { ensurePiCatalogWarm } from "../../config/catalog.js";
+import { startCatalogAutoRefreshScheduler } from "../../config/models.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../../agent/orchestrator/agent-manager.js";
 
 import { RuntimeRegistry } from "../../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/assets/team-updates.js";
+import { wireConfiguration } from "../wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -63,6 +66,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
   initAgentManager(registry);
+  const unsubscribeConfiguration = wireConfiguration();
 
   // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();
@@ -115,6 +119,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     if (cleanupSettlement) return cleanupSettlement;
     accepting = false;
     unsubscribeRouter();
+    unsubscribeConfiguration();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);
     cleanupSettlement = (async () => {

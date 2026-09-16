@@ -1,3 +1,4 @@
+import { writeConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn, mockPromptFn } from "../helpers/mock-runtime.js";
@@ -8,7 +9,7 @@ import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/or
 import { postMessage } from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
-import { writeConfig } from "../../src/config/config.js";
+
 import { formatToolArgsFull, getSanitizedArgs } from "../../web/src/components/agent-event-utils.js";
 
 vi.mock("../../src/app/server/ws.js", () => ({

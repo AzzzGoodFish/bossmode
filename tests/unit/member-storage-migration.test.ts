@@ -1,9 +1,10 @@
+import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import type { Database } from "../../src/data/database.js";

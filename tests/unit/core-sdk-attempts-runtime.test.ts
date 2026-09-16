@@ -1,3 +1,4 @@
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
@@ -10,7 +11,7 @@ const mock = vi.hoisted(() => ({
   root: "", hosted: true,
 }));
 vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock("../../src/config/config.js", () => ({
+vi.mock("../../src/config/settings.js", () => ({
   readConfig: () => ({})
 }));
 vi.mock("../../src/member/assets/member-extensions.js", () => ({
@@ -24,10 +25,10 @@ vi.mock("../../src/member/mcp/mcp-settings.js", () => ({
 }));
 vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
 vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
-vi.mock("../../src/config/model-credentials.js", () => ({
+vi.mock("../../src/config/models.js", () => ({
   getModelCredentialProfile: () => ({}),
 }));
-vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
+vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
   normalizeModelRef: (ref: string) => ref,
   resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => { mock.stage("credentials"); return { agentDir: mock.root, profile: { id: "p", providerSlug: "mock", authType: "api-key" } }; },

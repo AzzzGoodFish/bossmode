@@ -2,14 +2,17 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import * as credentials from "../../src/config/model-credentials.js";
-import * as credentialsBridge from "../../src/config/pi-adapt/runtime-bridge.js";
-import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
-import { commitRemoteCatalog, commitProviderOverlays, clearRemoteCatalogMemoryForTests } from "../../src/config/model-catalog.js";
+import * as credentials from "../../src/config/models.js";
+import * as __credentials_catalog from "../../src/config/catalog.js";
+import * as credentialsBridge from "../../src/config/pi-adapt/credentials.js";
+import * as __credentialsBridge_catalog from "../../src/config/catalog.js";
+import * as __credentialsBridge_models from "../../src/config/models.js";
+import { importModelProfile, replaceCredentialStore, credentialRevision, readCredentialStore } from "../../src/config/models.js";
+import { commitRemoteCatalog, commitProviderOverlays, clearRemoteCatalogMemoryForTests } from "../../src/config/catalog.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 let f: ReturnType<typeof coreFixture>;
 beforeEach(() => { f = coreFixture(); clearRemoteCatalogMemoryForTests(); setCatalog([]); });
-afterEach(() => { credentials.setPiCatalogModelsForTests(null); clearRemoteCatalogMemoryForTests(); f.close(); });
+afterEach(() => { __credentials_catalog.setPiCatalogModelsForTests(null); clearRemoteCatalogMemoryForTests(); f.close(); });
 const base = {
   name: "Fixture", providerSlug: "proxy", protocol: "openai-responses" as const, baseUrl: "https://example.test/v1",
   authType: "api_key" as const, apiKey: "fixture-secret", requestProfile: "standard" as const, enabled: true, isDefault: true,
@@ -23,7 +26,7 @@ function setCatalog(models: any[]) {
   const complete = models.map(model => ({ cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, reasoning: false, ...model }));
   const now = Date.now();
   commitRemoteCatalog(complete, now);
-  commitProviderOverlays(credentialsBridge.buildProviderOverlaysFromFetch(complete, new Map(), now));
+  commitProviderOverlays(__credentialsBridge_catalog.buildProviderOverlaysFromFetch(complete, new Map(), now));
 }
 function native(profile: { id: string; providerSlug: string }) {
   return credentialsBridge.createDatabaseModelRuntime(credentialsBridge.createCredentialStore(profile), profile.id);
@@ -59,7 +62,7 @@ it("delivers catalog image/thinking metadata and explicit capacity edits to the 
   expect(runtime.getModel("proxy", "model")).toMatchObject({ contextWindow: 500000, maxTokens: 64000, input: ["text", "image"] });
   const unknown = credentials.saveModelCredentialProfile({ ...base, providerSlug: "unknown-proxy", models: [{ id: "unknown" }] });
   expect(unknown.models[0].contextWindow).toBeUndefined();
-  expect(credentialsBridge.listConfiguredModels().find(model => model.profileId === unknown.id)?.contextWindow).toBeUndefined();
+  expect(__credentialsBridge_models.listConfiguredModels().find(model => model.profileId === unknown.id)?.contextWindow).toBeUndefined();
   const unknownRuntime = await native(unknown);
   expect(unknownRuntime.getModel("unknown-proxy", "unknown")).toMatchObject({ contextWindow: 128000, input: ["text"] });
 });
@@ -86,14 +89,14 @@ it("applies and clears built-in model visibility, capacity and API URL customiza
   expect(runtime.getModel("anthropic", "model")?.baseUrl).toBe("https://proxy.example.test");
   const edited = credentials.saveModelCredentialProfile({ ...profile, apiKey: "", models: [{ id: "model", contextWindow: 500000, input: ["text", "image"] }] });
   expect(edited.modelCustomizations).toMatchObject({ disabled: ["other"], contextWindowOverride: { model: 500000 } });
-  expect(credentialsBridge.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model"]);
+  expect(__credentialsBridge_models.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model"]);
   await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "model")).toMatchObject({ contextWindow: 500000, maxTokens: 128000 });
   const restored = credentials.saveModelCredentialProfile({ ...profile, apiKey: "", baseUrl: "", models: profile.models });
   expect(restored.modelCustomizations).toBeUndefined();
   await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "model")).toMatchObject({ contextWindow: 1000000, baseUrl: "https://api.anthropic.com" });
-  expect(credentialsBridge.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model", "anthropic/other"]);
+  expect(__credentialsBridge_models.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model", "anthropic/other"]);
 });
 
 it("rotates API keys and OAuth data in SQL while preserving the selected profile", async () => {
@@ -101,9 +104,9 @@ it("rotates API keys and OAuth data in SQL while preserving the selected profile
   const store = credentialsBridge.createCredentialStore(first);
   await store.modify("proxy", async () => ({ type: "api_key", key: "rotated-key" }));
   expect(credentials.getModelCredentialProfile(first.id)?.apiKey).toBe("rotated-key");
-  const repo = new ModelCredentialsRepository(f.db);
+  const repo = f.db;
   const oauth: ModelCredentialProfile = { ...credentials.getModelCredentialProfile(first.id)!, authType: "oauth", apiKey: undefined, oauthCredentials: { access: "old", refresh: "old-refresh", expires: 1 } };
-  repo.importProfile(oauth);
+  importModelProfile(oauth, undefined, repo);
   await store.modify("proxy", async () => ({ type: "oauth", access: "new", refresh: "new-refresh", expires: Date.now() + 3600000 }));
   expect(credentials.getModelCredentialProfile(first.id)?.oauthCredentials).toMatchObject({ access: "new", refresh: "new-refresh" });
   expect(existsSync(join(f.root, "model-credentials.json"))).toBe(false);
@@ -121,16 +124,16 @@ it("normalizes legacy metadata only in the explicit importer, retaining source b
   expect(JSON.stringify(legacy)).toBe(before);
   f.reopen();
   expect(normalized.migrations).toContain("existing-marker");
-  const repo = new ModelCredentialsRepository(f.db);
-  repo.replace(normalized);
-  const revision = repo.revision("legacy");
+  const repo = f.db;
+  replaceCredentialStore(normalized, repo);
+  const revision = credentialRevision("legacy", repo);
   credentials.loadModelCredentialProfiles();
-  expect(repo.revision("legacy")).toBe(revision);
-  expect(repo.read().migrations).toContain("existing-marker");
+  expect(credentialRevision("legacy", repo)).toBe(revision);
+  expect(readCredentialStore(repo).migrations).toContain("existing-marker");
   credentials.saveModelCredentialProfile({ ...credentials.getModelCredentialProfile("legacy")!, name: "Edited import" });
-  expect(repo.read().migrations).toContain("existing-marker");
+  expect(readCredentialStore(repo).migrations).toContain("existing-marker");
   credentials.deleteModelCredentialProfile("legacy");
-  expect(repo.read().migrations).toContain("existing-marker");
+  expect(readCredentialStore(repo).migrations).toContain("existing-marker");
 });
 
 it("keeps user-added image models across catalog changes without getter writes or duplicate effective IDs", async () => {
@@ -142,7 +145,7 @@ it("keeps user-added image models across catalog changes without getter writes o
   const before = credentials.getModelCredentialProfile(profile.id);
   setCatalog([...catalog, { ...catalog[0], id: "custom", contextWindow: 64000 }]);
   expect(credentials.getModelCredentialProfile(profile.id)).toEqual(before);
-  expect(credentialsBridge.listConfiguredModels().filter(model => model.ref === "anthropic/custom")).toHaveLength(1);
+  expect(__credentialsBridge_models.listConfiguredModels().filter(model => model.ref === "anthropic/custom")).toHaveLength(1);
   await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "custom")).toBeTruthy();
 });

@@ -1,3 +1,4 @@
+import { writeConfig } from "../../src/config/settings.js";
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -16,8 +17,8 @@ const { applyStorageMigrations, bindDatabase, getDatabase, openDatabase } = awai
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
 const membersMigration = getMigration("core-members-v1");
-const { SettingsRepository } = await import("../../src/data/repositories/settings.js");
-const { getDefaultConfig } = await import("../../src/config/config.js");
+
+const { getDefaultConfig } = await import("../../src/config/settings.js");
 const assetsMigration = getMigration("core-assets-v1");
 const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/data/repositories/document-repository.js");
 const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/memory/principles-store.js");
@@ -47,7 +48,7 @@ function ready(bind = true): Database {
   createLegacyMemberStorageFixture(join(root, "bossmode.db"));
   const database = openDatabase(join(root, "bossmode.db"));
   applyStorageMigrations(database, [baseStorageMigration, membersMigration, settingsMigration, assetsMigration]);
-  new SettingsRepository(database).importConfig(getDefaultConfig());
+  writeConfig(getDefaultConfig(), database);
   database.run("INSERT INTO scopes VALUES (?, 'room', ?, NULL)", room, room);
   database.run("INSERT INTO scopes VALUES (?, 'dm', NULL, ?)", `dm:${member}`, member);
   if (bind) bindDatabase(database);

@@ -1,4 +1,5 @@
-import { getDefaultConfig, writeConfig } from "../src/config/config.js";
+import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
+
 import { mainSessionDirectory } from "../src/files/layout.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";

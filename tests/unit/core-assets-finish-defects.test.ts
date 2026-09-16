@@ -1,8 +1,9 @@
+import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, rmSync } from "node:fs";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getDefaultConfig } from "../../src/config/config.js";
-import { SettingsRepository } from "../../src/data/repositories/settings.js";
+
+
 import { createMember } from "../../src/member/member-registry.js";
 import { createRoom, inviteGlobalMember } from "../../src/chat/room-store.js";
 import { addMessage } from "../../src/chat/message-store.js";
@@ -20,7 +21,7 @@ describe.each(["room", "dm"] as const)("hidden reply target in %s", kind => {
 
   beforeEach(async () => {
     fixture = coreFixture();
-    new SettingsRepository(fixture.db).importConfig(getDefaultConfig());
+    writeConfig(getDefaultConfig(), fixture.db);
     const member = createMember({ name: "reader" });
     const room = createRoom("Visibility", undefined, []);
     inviteGlobalMember(room.id, { id: member.id, name: member.name });

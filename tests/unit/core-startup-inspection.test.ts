@@ -1,3 +1,4 @@
+import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
@@ -7,8 +8,8 @@ import { inspectStartupSettings } from "../../src/app/upgrade/inventory.js";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
-import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { getDefaultConfig } from "../../src/config/config.js";
+
+
 let root:string,db:Database|undefined;
 beforeEach(()=>{root=mkdtempSync(join(tmpdir(),"bm-startup-peek-"));});
 afterEach(()=>{db?.close();db=undefined;rmSync(root,{recursive:true,force:true});});
@@ -24,7 +25,7 @@ it("reads only pre-cutover legacy setup/display fields without rewriting their b
 });
 it("uses authoritative DB settings and never parses leftover config files",()=>{
  db=openDatabase(join(root,"bossmode.db"));applyStorageMigrations(db,[baseStorageMigration,settingsMigration]);
- new SettingsRepository(db).importConfig({...getDefaultConfig(),defaults:{host:"localhost",port:12521}});
+ writeConfig({...getDefaultConfig(),defaults:{host:"localhost",port:12521}}, db);
  db.run("INSERT INTO storage_meta VALUES('core-authority',?)",JSON.stringify({format:1,schema:"test"}));
  writeFileSync(join(root,"config.json"),"poison legacy file");
  expect(inspectStartupSettings(root)).toEqual({configured:true,source:"database",host:"localhost",port:12521});
