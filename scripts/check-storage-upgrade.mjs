@@ -135,7 +135,15 @@ try {
   running = NEW_REPO;
 
   // 3) verify data survived and new migrations landed
-  const messages = await fetch(`http://127.0.0.1:${port}/api/rooms/${roomId}/messages?limit=100`, {headers: H});
+  // QA-patched: short-id migration renames the room; resolve old->new before asserting.
+  let activeRoomId = roomId;
+  try {
+    const db = new DatabaseSync(join(ROOT, 'bossmode.db'), {readOnly: true});
+    const row = db.prepare('SELECT new_id FROM id_migration_map WHERE kind=? AND old_id=?').get('room', roomId);
+    db.close();
+    if (row && row.new_id) activeRoomId = row.new_id;
+  } catch {}
+  const messages = await fetch(`http://127.0.0.1:${port}/api/rooms/${activeRoomId}/messages?limit=100`, {headers: H});
   const listBody = await messages.json();
   const list = listBody.messages ?? listBody;
   if (!list.some((m) => String(m.content).includes('upgrade baseline message'))) {
