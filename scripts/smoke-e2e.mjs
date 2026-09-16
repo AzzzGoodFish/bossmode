@@ -39,8 +39,8 @@ const ONLY = typeof argVal("--only") === "string" ? argVal("--only").toUpperCase
 const CLI = path.join(DIST, "dist", "cli", "index.js");
 const USER = "smoke", PASS = "smoke-pass";
 
-const nodeMajor = Number(process.versions.node.split(".")[0]);
-if (nodeMajor < 22) { console.error(`smoke-e2e: node >= 22 required (running ${process.version})`); process.exit(2); }
+try { requireBuiltin("node:sqlite"); }
+catch { console.error(`smoke-e2e: node:sqlite unavailable on ${process.version} — node >= 24 required (22.5+ needs --experimental-sqlite)`); process.exit(2); }
 if (!fs.existsSync(CLI)) { console.error(`smoke-e2e: ${CLI} not found — run \`npm run build\` (or pass --dist <package-root>)`); process.exit(2); }
 
 // ---- isolated sandbox ----
@@ -378,7 +378,8 @@ async function phaseRestart() {
   // r1: slow turn truly in flight
   const n = mockLog.length;
   mode = { id: "r1", kind: "slow", delayMs: 8000, text: "slow-done" };
-  await postMessage(`@${M1} r1`);
+  const r1Msg = await postMessage(`@${M1} r1`);
+  assert(r1Msg?.id, "r1 message id missing in POST response");
   await mockWait(n, (e) => e.id === "r1" && e.toolCount === 0, "r1 in-flight request", 60000);
   const statusInFlight = await memberStatus();
   check("statusInFlight", statusInFlight);
@@ -427,10 +428,13 @@ async function phaseRestart() {
   }, 60000, "queue settle (no pending/dispatched)");
   const dbq = new DatabaseSync(path.join(DIR, "bossmode.db"), { readOnly: true });
   const unavailable = dbq.prepare("SELECT COUNT(*) n FROM queued_inputs WHERE diagnosis LIKE '%member unavailable%'").get().n;
+  const r1Row = dbq.prepare("SELECT status, outcome FROM queued_inputs WHERE message_id=?").get(r1Msg.id);
   dbq.close();
   check("queueGroups", groups);
   check("queueMemberUnavailable", unavailable);
+  check("inFlightTurn", r1Row);
   assert(unavailable === 0, `queue has member-unavailable rows: ${unavailable}`);
+  assert(r1Row && (r1Row.status === "uncertain" || r1Row.outcome === "cancelled"), `in-flight turn not cancelled by graceful restart: ${JSON.stringify(r1Row)}`);
   step("队列落定", groups.map((g) => `${g.status}:${g.n}`).join(" "));
 }
 
