@@ -10,6 +10,12 @@ const testPasswordHash = (() => {
   return `${salt}:${hash}`;
 })();
 
+vi.mock("../src/app/pid.js", () => ({
+  writePidFile: () => {},
+  removePidFile: () => {},
+  readPidFile: () => null,
+  isProcessRunning: () => false,
+}));
 vi.mock("../src/config/config.js", () => ({
   readConfig: () => ({
     auth: { username: "testuser", passwordHash: testPasswordHash },

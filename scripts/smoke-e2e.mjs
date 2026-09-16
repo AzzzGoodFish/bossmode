@@ -36,7 +36,9 @@ const argVal = (name) => { const i = argv.indexOf(name); if (i < 0) return undef
 const DIST = typeof argVal("--dist") === "string" ? path.resolve(argVal("--dist")) : REPO;
 const KEEP = argv.includes("--keep");
 const ONLY = typeof argVal("--only") === "string" ? argVal("--only").toUpperCase() : null;
-const CLI = path.join(DIST, "dist", "cli", "index.js");
+// New layout (P9): dist/app/cli; old release trees keep dist/cli — accept both.
+const CLI = [path.join(DIST, "dist", "app", "cli", "index.js"), path.join(DIST, "dist", "cli", "index.js")]
+  .find(p => fs.existsSync(p)) ?? path.join(DIST, "dist", "app", "cli", "index.js");
 const USER = "smoke", PASS = "smoke-pass";
 
 try { requireBuiltin("node:sqlite"); }

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { expect, it, vi } from "vitest";
-import { closeHttpServer, listenAndPublish } from "../../src/server/startup-listener.js";
+import { closeHttpServer, listenAndPublish } from "../../src/app/server/startup-listener.js";
 
 it("awaits cleanup after publication failure, releases the port and permits a fresh retry", async () => {
   const server=createServer();let port=0;let cleanupStarted!:()=>void;let release!:()=>void;

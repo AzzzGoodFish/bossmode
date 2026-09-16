@@ -8,14 +8,14 @@
  * migration ordering, upgrade-time data damage.
  *
  * usage: node scripts/check-storage-upgrade.mjs <oldRepo> <newRepo> [workDir]
- *  - oldRepo/newRepo: build trees containing dist/cli/index.js
+ *  - oldRepo/newRepo: build trees containing dist/app/cli/index.js (old trees: dist/cli/index.js)
  *  - workDir: evidence kept here (default: fresh temp dir); wiped first
  *
  * Scenario: seed config -> OLD build `on` -> create member/room/message via HTTP
  * -> `off` -> NEW build `on` -> verify member/message intact + migrations grew
  * -> `off` -> PASS/FAIL exit code.
  */
-import {mkdirSync, writeFileSync, rmSync, mkdtempSync} from 'node:fs';
+import {mkdirSync, writeFileSync, rmSync, mkdtempSync, existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
@@ -70,7 +70,9 @@ const env = {
   npm_config_update_notifier: 'false',
 };
 const run = (repo, args, timeout = 120000) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [join(repo, 'dist/cli/index.js'), ...args], {
+  // New layout (P9): dist/app/cli; old release trees keep dist/cli — accept both.
+  const cli = [join(repo, 'dist/app/cli/index.js'), join(repo, 'dist/cli/index.js')].find(existsSync) ?? join(repo, 'dist/app/cli/index.js');
+  const child = spawn(process.execPath, [cli, ...args], {
     cwd: repo,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -7,11 +7,11 @@ import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 import { postMessage } from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
-import { broadcastToAgentSubscribers } from "../../src/communication/ws.js";
+import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
 import { writeConfig } from "../../src/config/config.js";
 import { formatToolArgsFull, getSanitizedArgs } from "../../web/src/components/agent-event-utils.js";
 
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn(),
 }));
 

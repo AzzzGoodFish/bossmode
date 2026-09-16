@@ -1,6 +1,6 @@
 import { getDatabase } from "../data/database.js";
 import { SettingsRepository } from "../data/repositories/settings.js";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -74,37 +74,4 @@ export function getDefaultConfig(): BossmodeConfig {
   };
 }
 
-// PID file management
-const PID_PATH = join(BOSSMODE_DIR, "bossmode.pid");
-
-export function writePidFile(pid: number): void {
-  ensureBossmodeDir();
-  writeFileSync(PID_PATH, String(pid), "utf-8");
-}
-
-export function readPidFile(): number | null {
-  try {
-    const raw = readFileSync(PID_PATH, "utf-8").trim();
-    const pid = parseInt(raw, 10);
-    return isNaN(pid) ? null : pid;
-  } catch {
-    return null;
-  }
-}
-
-export function removePidFile(): void {
-  try {
-    unlinkSync(PID_PATH);
-  } catch {
-    // ignore
-  }
-}
-
-export function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// PID file management moved to app/pid.ts (P9).

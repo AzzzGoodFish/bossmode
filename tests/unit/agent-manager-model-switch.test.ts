@@ -122,7 +122,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));
@@ -287,7 +287,7 @@ describe("agent-manager model hot switch", () => {
 
   it("reports busy status during a threshold auto-compaction between turns and returns to idle after", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/app/server/ws.js");
     await manager.activateAgent("room", "pm");
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
 
@@ -462,7 +462,7 @@ describe("agent-manager model hot switch", () => {
 
   it("drops an idle active agent when its deleted credential can no longer export", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/app/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     exportReturnsNull = true;
@@ -477,7 +477,7 @@ describe("agent-manager model hot switch", () => {
 
   it("drops an idle active agent when refresh/rebind fails with a non-transient error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/app/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failSetModel = true;
@@ -832,7 +832,7 @@ describe("agent-manager model hot switch", () => {
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const messageBus = await import("../../src/chat/message-bus.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/app/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 

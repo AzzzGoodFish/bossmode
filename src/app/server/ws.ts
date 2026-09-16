@@ -1,9 +1,9 @@
-import {logger} from "../kernel/logger.js";
+import {logger} from "../../kernel/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { WsClientCommand, WsServerEvent } from "../kernel/types.js";
-import { validateToken } from "../services/auth-service.js";
-import { findMemberByName } from "../member/member-registry.js";
+import type { WsClientCommand, WsServerEvent } from "../../kernel/types.js";
+import { validateToken } from "../../services/auth-service.js";
+import { findMemberByName } from "../../member/member-registry.js";
 
 interface ClientState {
   ws: WebSocket;

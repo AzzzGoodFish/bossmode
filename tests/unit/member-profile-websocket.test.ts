@@ -12,7 +12,7 @@ import { findMemberByName } from "../../src/member/member-registry.js";
 import {
   broadcastMemberProfileChanged, broadcastToAgentSubscribers, createWebSocketServer,
   getConnectedClientCount, shutdownWebSocket,
-} from "../../src/communication/ws.js";
+} from "../../src/app/server/ws.js";
 
 let server: Server;
 let url: string;

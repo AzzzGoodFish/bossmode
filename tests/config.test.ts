@@ -88,12 +88,12 @@ describe("resolveApiKey", () => {
 
 describe("PID file management", () => {
   it("isProcessRunning returns true for current process", async () => {
-    const { isProcessRunning } = await import("../src/config/config.js");
+    const { isProcessRunning } = await import("../src/app/pid.js");
     expect(isProcessRunning(process.pid)).toBe(true);
   });
 
   it("isProcessRunning returns false for non-existent PID", async () => {
-    const { isProcessRunning } = await import("../src/config/config.js");
+    const { isProcessRunning } = await import("../src/app/pid.js");
     // PID 999999 is almost certainly not running
     expect(isProcessRunning(999999)).toBe(false);
   });

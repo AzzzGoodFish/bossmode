@@ -8,7 +8,7 @@ vi.mock("../../src/config/config.js", () => ({
 }));
 
 const wsMocks = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToRoom: wsMocks.broadcastToRoom,
 }));
 

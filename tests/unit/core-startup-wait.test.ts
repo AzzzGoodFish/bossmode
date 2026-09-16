@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { StartupWaitError, waitForStartup } from "../../src/cli/startup-wait.js";
+import { StartupWaitError, waitForStartup } from "../../src/app/cli/startup-wait.js";
 let child: EventEmitter;
 const processHandle = () => child as unknown as ChildProcess;
 beforeEach(()=>{ vi.useFakeTimers(); child=new EventEmitter(); });

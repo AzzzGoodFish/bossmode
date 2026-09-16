@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { inspectStartupSettings } from "../data/upgrade/startup-inspection.js";
+import { inspectStartupSettings } from "../../data/upgrade/startup-inspection.js";
 import { waitForStartup, StartupWaitError } from "./startup-wait.js";
-import type { BossmodeConfig } from "../kernel/types.js";
+import type { BossmodeConfig } from "../../kernel/types.js";
 
 import { fork } from "node:child_process";
 import { stopDaemonProcess, processIsAlive } from "./stop-process.js";
@@ -15,10 +15,8 @@ import {
   getBossmodeDir,
   getDefaultConfig,
   hashPassword,
-  isProcessRunning,
-  readPidFile,
-  removePidFile,
-} from "../config/config.js";
+} from "../../config/config.js";
+import { isProcessRunning, readPidFile, removePidFile } from "../pid.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

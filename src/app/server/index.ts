@@ -1,21 +1,22 @@
-import { recoverMemberArchives } from "../member/archive/member-archive-service.js";
+import { recoverMemberArchives } from "../../member/archive/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
-import { prepareCoreStorage } from "../data/core-startup.js";
-import type { UpgradeProgress } from "../data/upgrade/upgrade-runner.js";
-import type { BossmodeConfig } from "../kernel/types.js";
+import { prepareCoreStorage } from "../../data/core-startup.js";
+import type { UpgradeProgress } from "../../data/upgrade/upgrade-runner.js";
+import type { BossmodeConfig } from "../../kernel/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
-import { handleApiRequest } from "../api/index.js";
-import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
-import { removePidFile, writePidFile, ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
-import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../config/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../agent/orchestrator/agent-manager.js";
+import { handleApiRequest } from "../../api/index.js";
+import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
+import { ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../../config/config.js";
+import { removePidFile, writePidFile } from "../pid.js";
+import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../../config/model-credentials.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../../agent/orchestrator/agent-manager.js";
 
-import { RuntimeRegistry } from "../agent/runtime/registry.js";
-import { PiSdkRuntime } from "../agent/runtime/pi-sdk.js";
-import { logger } from "../kernel/logger.js";
-import { seedBuiltinAssets } from "../member/assets/team-updates.js";
+import { RuntimeRegistry } from "../../agent/runtime/registry.js";
+import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
+import { logger } from "../../kernel/logger.js";
+import { seedBuiltinAssets } from "../../member/assets/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",

@@ -105,7 +105,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));

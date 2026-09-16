@@ -24,8 +24,8 @@ vi.mock("../../src/config/config.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/communication/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
+vi.mock("../../src/app/server/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/server/ws.js")>();
   return { ...actual, broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn() };
 });
 

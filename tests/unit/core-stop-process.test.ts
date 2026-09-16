@@ -3,7 +3,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { processIsAlive, stopDaemonProcess } from "../../src/cli/stop-process.js";
+import { processIsAlive, stopDaemonProcess } from "../../src/app/cli/stop-process.js";
 let root:string|undefined,child:ChildProcess|undefined;
 async function start(ignore=false) {
  root=mkdtempSync(join(tmpdir(),"bm-stop-process-")); const script=join(root,"child.cjs");
