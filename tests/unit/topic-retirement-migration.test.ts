@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { openDatabase, applyStorageMigrations, type Database } from "../../src/storage/database.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { cleanupRetiredTopicSessionFiles } from "../../src/storage/topic-session-cleanup.js";
-import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
-import { importMessage, importMessageNextSequence } from "../../src/storage/message-repository.js";
-import { importAgentEvent } from "../../src/storage/event-repository.js";
+import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { cleanupRetiredTopicSessionFiles } from "../../src/data/migrations/topic-session-cleanup.js";
+import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import { importMessage, importMessageNextSequence } from "../../src/data/repositories/message-repository.js";
+import { importAgentEvent } from "../../src/data/repositories/event-repository.js";
 
 // Topic feature retirement (fish #19358): direct delete, no migration/export/archive.
 // These assertions lock the safety properties: every topic-owned row is gone,
@@ -151,7 +151,7 @@ describe("core-topic-retirement-v1", () => {
 
 describe("upgrade path end to end (prepareStorageUpgrade)", () => {
   it("migrates a pre-retirement DB, deletes topic data, cleans topic session files, and re-runs as a no-op", async () => {
-    const { prepareStorageUpgrade } = await import("../../src/storage/upgrade-runner.js");
+    const { prepareStorageUpgrade } = await import("../../src/data/upgrade/upgrade-runner.js");
     // "Previous version": full schema minus the topic retirement migration, with topic rows seeded.
     const prev = openDatabase(join(root, "previous.sqlite"));
     applyStorageMigrations(prev, withoutRetirement());

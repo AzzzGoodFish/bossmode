@@ -1,6 +1,6 @@
 /** DB-backed catalog; packaged SDK models remain immutable bundled defaults. */
-import { getDatabase } from "../storage/database.js";
-import { CatalogRepository, DatabaseModelsStore } from "../storage/repositories/catalog-settings.js";
+import { getDatabase } from "../data/database.js";
+import { CatalogRepository, DatabaseModelsStore } from "../data/repositories/catalog-settings.js";
 import { logger } from "../kernel/logger.js";
 function repository(): CatalogRepository { return new CatalogRepository(getDatabase()); }
 export function createDatabaseModelsStore(): DatabaseModelsStore { return new DatabaseModelsStore(repository()); }

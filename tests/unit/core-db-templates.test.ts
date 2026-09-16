@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyStorageMigrations, openDatabase, type Database } from "../../src/storage/database.js";
-import { templatesMigration } from "../../src/storage/schema/templates.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
+import { templatesMigration } from "../../src/data/schema/templates.js";
+import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/workforce/template-files.js";
 
 let root: string;

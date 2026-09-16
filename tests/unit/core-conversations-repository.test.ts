@@ -7,7 +7,7 @@ import { getRoom, listRooms, getRoomMembersFromRoom, stampGlobalMemberIds, resol
   getCursors, setCursor, deleteCursor, inviteGlobalMember, updateRoomName, updateRoomPromptLeader, updateRoomDocsPath, updateRoomRuleDocs,
   updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom, roomDir } from "../../src/workspace/room-store.js";
 import { chatScopeRoomId } from "../../src/shared/conversation-ref.js";
-import { ensureDmScope } from "../../src/storage/repositories/conversations.js";
+import { ensureDmScope } from "../../src/data/repositories/conversations.js";
 
 let f: ReturnType<typeof conversationsFixture>;
 beforeEach(() => { f = conversationsFixture(); });

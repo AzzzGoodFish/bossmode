@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createMember, updateMember } from "../../src/workspace/member-registry.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;

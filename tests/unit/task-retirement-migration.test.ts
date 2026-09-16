@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { openDatabase, applyStorageMigrations, type Database } from "../../src/storage/database.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { archiveRetiredTasks } from "../../src/storage/task-retirement.js";
+import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { archiveRetiredTasks } from "../../src/data/migrations/task-retirement.js";
 
 // Task feature retirement (fish #19259): the four task tables are exported to a
 // verified archive BEFORE the core-task-retirement-v1 migration drops them.
@@ -93,7 +93,7 @@ describe("task feature retirement migration", () => {
   it("does not silently drop: export happens on the pre-migration schema in the upgrade flow", async () => {
     // End-to-end through prepareStorageUpgrade: a DB with the pre-retirement schema
     // but no authority marker forces the upgrade path; the archive step must run.
-    const { prepareStorageUpgrade } = await import("../../src/storage/upgrade-runner.js");
+    const { prepareStorageUpgrade } = await import("../../src/data/upgrade/upgrade-runner.js");
     const withoutRetirement = coreStorageMigrations.slice(0, coreStorageMigrations.findIndex((m) => m.id === "core-task-retirement-v1"));
     // Build a "previous" database at the pre-retirement schema.
     const prevPath = join(root, "previous.sqlite");
@@ -108,7 +108,7 @@ describe("task feature retirement migration", () => {
     copyFileSync(prevPath, join(root, "bossmode.db"));
 
     let archived: Awaited<ReturnType<typeof archiveRetiredTasks>> = null;
-    const { archiveRetiredTasks: archiveFn } = await import("../../src/storage/task-retirement.js");
+    const { archiveRetiredTasks: archiveFn } = await import("../../src/data/migrations/task-retirement.js");
     const result = await prepareStorageUpgrade({
       root,
       formatVersion: 999, // differs from the DB → forces migration

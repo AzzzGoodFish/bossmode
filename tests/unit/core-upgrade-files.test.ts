@@ -27,9 +27,9 @@ vi.mock("node:fs", async importOriginal => {
   };
 });
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, readlinkSync } from "node:fs";
-import { prepareStorageUpgrade } from "../../src/storage/upgrade-runner.js";
-import { baseStorageMigration } from "../../src/storage/base-schema.js";
-import { copyDurably, publishAssetDurably, ensurePrivateDirectory } from "../../src/storage/upgrade-files.js";
+import { prepareStorageUpgrade } from "../../src/data/upgrade/upgrade-runner.js";
+import { baseStorageMigration } from "../../src/data/base-schema.js";
+import { copyDurably, publishAssetDurably, ensurePrivateDirectory } from "../../src/data/upgrade/upgrade-files.js";
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bm-upgrade-files-")); trace.syncs.length = 0; trace.chmods.length = 0; trace.failCopy = false; trace.failLeasePermission = false; trace.failSyncPath = undefined; trace.failAfterLink = false; });
 afterEach(() => rmSync(root, { recursive: true, force: true }));

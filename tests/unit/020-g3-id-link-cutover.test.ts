@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 let fixture: ReturnType<typeof coreFixture>;
 function historicalRoom(names: string[]) {
   // Explicit historical import, never inferred from today's names or template files.

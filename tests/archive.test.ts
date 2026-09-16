@@ -5,7 +5,7 @@ import type { coreFixture } from "./helpers/core-fixture.js";
 let fixture: ReturnType<typeof coreFixture>;
 
 let tempDir: string;
-let database: import("../src/storage/database.js").Database;
+let database: import("../src/data/database.js").Database;
 
 vi.mock("../src/shared/config.js", () => ({
   getBossmodeDir: () => tempDir,

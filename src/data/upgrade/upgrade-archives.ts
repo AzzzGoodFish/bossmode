@@ -3,9 +3,9 @@ import type {UpgradeImportContext} from "./upgrade-runner.js";
 import type {LegacySourceEntry} from "./legacy-inventory.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {parseLegacyMemberPersona,parseLegacyMemberRecord} from "./upgrade-member-parser.js";
-import {catalogFromFiredExport,catalogFromLegacyManifest} from "../workspace/member-archive.js";
-import {MemberArchivesRepository} from "./repositories/member-archives.js";
-import {MembersRepository} from "./repositories/members.js";
+import {catalogFromFiredExport,catalogFromLegacyManifest} from "../../workspace/member-archive.js";
+import {MemberArchivesRepository} from "../repositories/member-archives.js";
+import {MembersRepository} from "../repositories/members.js";
 
 function archiveTime(path:string):number|undefined{
  const match=path.match(/(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/);

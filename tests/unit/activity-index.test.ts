@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ACTIVITY_TYPES, appendAgentEvent, importAgentEvent, pageActivity, readAgentEvents } from "../../src/storage/event-repository.js";
+import { ACTIVITY_TYPES, appendAgentEvent, importAgentEvent, pageActivity, readAgentEvents } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const owner = { ownerKey: "mem_one", memberId: "mem_one" };

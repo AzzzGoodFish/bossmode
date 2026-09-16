@@ -1,5 +1,5 @@
-import {getDatabase} from "../storage/database.js";
-import {DeliveryRepository,type CapturedMessage,type DeliveryKind} from "../storage/repositories/delivery-repository.js";
+import {getDatabase} from "../data/database.js";
+import {DeliveryRepository,type CapturedMessage,type DeliveryKind} from "../data/repositories/delivery-repository.js";
 // Mention parsers and commit-time captured-target router.
 // Does NOT directly call activateAgent — uses injected callbacks for decoupling.
 

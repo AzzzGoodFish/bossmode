@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/storage/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
-import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
-import { importAgentEvent, readAgentEvents, readStats, rebuildEventAggregates } from "../../src/storage/event-repository.js";
+import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/upgrade/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
+import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { importAgentEvent, readAgentEvents, readStats, rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {

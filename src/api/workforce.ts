@@ -12,7 +12,7 @@ import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token
 import { readMemberStats } from "../workspace/member-stats-store.js";
 import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
-import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
+import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
 
 // ── Skill CRUD ──

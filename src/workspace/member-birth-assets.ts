@@ -3,7 +3,7 @@ import { closeSync, fsyncSync, lstatSync, mkdtempSync, openSync, readFileSync, r
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
-import type { SshCredentialMaterial } from "../storage/repositories/workspace-settings.js";
+import type { SshCredentialMaterial } from "../data/repositories/workspace-settings.js";
 export function prepareMemberSshCredential(memberId: string): SshCredentialMaterial {
   const dir = mkdtempSync(join(tmpdir(), "bossmode-member-birth-"));
   try {

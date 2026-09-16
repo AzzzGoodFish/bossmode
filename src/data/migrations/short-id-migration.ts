@@ -19,10 +19,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { logger } from "../kernel/logger.js";
-import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../shared/conversation-ref.js";
-import { MEMBER_ID_PREFIX, newMemberId, newRoomId } from "../kernel/short-id.js";
-import type { Database } from "./database.js";
+import { logger } from "../../kernel/logger.js";
+import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../../shared/conversation-ref.js";
+import { MEMBER_ID_PREFIX, newMemberId, newRoomId } from "../../kernel/short-id.js";
+import type { Database } from "../database.js";
 
 export const SHORT_ID_MIGRATION_ID = "core-short-ids-v1";
 

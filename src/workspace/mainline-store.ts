@@ -5,7 +5,7 @@
 // References are resolved at read/inject time; unresolvable lines are honestly
 // marked `[stale]`, never silently deleted.
 import { existsSync, readFileSync } from "node:fs";
-import { documentContentMeta } from "../storage/document-repository.js";
+import { documentContentMeta } from "../data/repositories/document-repository.js";
 import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";

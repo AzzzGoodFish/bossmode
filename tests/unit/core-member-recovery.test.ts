@@ -3,7 +3,7 @@ import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, 
 import { resetMocks, mockPromptFn, MockRuntime } from "../helpers/mock-runtime.js";
 import { shutdownAll, initAgentManager, resumePendingRuntimeInputs, getActiveInstanceCount } from "../../src/engine/agent-manager.js";
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 setupTestWorkspace();
 
 const barrier = () => { let release!: () => void; const promise = new Promise<void>((r) => (release = r)); return { promise, release }; };

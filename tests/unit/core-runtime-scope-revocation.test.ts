@@ -1,8 +1,8 @@
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn, MockRuntime, MockAgentHandle } from "../helpers/mock-runtime.js";
-import { getDatabase } from "../../src/storage/database.js";
-import { ReplyObligationRepository } from "../../src/storage/repositories/reply-obligation-repository.js";
+import { getDatabase } from "../../src/data/database.js";
+import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
 import { resolveRoomMemberRef } from "../../src/workspace/room-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { getAgentInstanceForScope } from "../../src/engine/agent-manager.js";

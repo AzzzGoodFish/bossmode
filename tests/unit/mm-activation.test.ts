@@ -1,7 +1,7 @@
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn } from "../helpers/mock-runtime.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { mmScopeIdOf } from "../../src/shared/conversation-ref.js";
 setupTestWorkspace();

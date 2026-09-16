@@ -1,8 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { appendAgentEvent, importAgentEvent } from "../../src/storage/event-repository.js";
+import { appendAgentEvent, importAgentEvent } from "../../src/data/repositories/event-repository.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../../src/workspace/token-usage-store.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const member = { ownerKey: "mem_dev", memberId: "mem_dev" };

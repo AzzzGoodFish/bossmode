@@ -1,18 +1,18 @@
 import {createHash} from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
-import type {Database} from "./database.js";
+import type {Database} from "../database.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import {readLegacyJson,readLegacyJsonl,readLegacyEventJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
-import {archiveRawRetiredSource} from "./task-retirement.js";
-import {ConversationsRepository} from "./repositories/conversations.js";
-import {MessageArchivesRepository,type ArchiveSummary} from "./repositories/message-archives.js";
-import {UserCursorRepository} from "./repositories/user-cursor-repository.js";
-import {executionScopeId} from "./repositories/execution-identity.js";
-import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "./message-repository.js";
-import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "./event-repository.js";
-import type {Room,RoomMessage} from "../kernel/types.js";
+import {archiveRawRetiredSource} from "../migrations/task-retirement.js";
+import {ConversationsRepository} from "../repositories/conversations.js";
+import {MessageArchivesRepository,type ArchiveSummary} from "../repositories/message-archives.js";
+import {UserCursorRepository} from "../repositories/user-cursor-repository.js";
+import {executionScopeId} from "../repositories/execution-identity.js";
+import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "../repositories/message-repository.js";
+import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "../repositories/event-repository.js";
+import type {Room,RoomMessage} from "../../kernel/types.js";
 
 function object(value:unknown,path:string):Record<string,any>{
  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy conversation object: ${path}`);

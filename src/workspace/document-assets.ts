@@ -3,9 +3,9 @@ import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openS
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import { assertDocumentIdentity, commitDocumentRevision, documentContentMeta, documentSnapshotPath, getDocument, validateDocumentPath,
-  type DocumentIdentity } from "../storage/document-repository.js";
+  type DocumentIdentity } from "../data/repositories/document-repository.js";
 import type { PrinciplesMeta } from "../kernel/types.js";
 
 export function documentIdentity(path: string, layer: DocumentIdentity["layer"], memberId?: string, scopeId?: string): DocumentIdentity {

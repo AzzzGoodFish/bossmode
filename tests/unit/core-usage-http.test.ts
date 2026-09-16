@@ -2,9 +2,9 @@ import { expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { closeTestServer, createTestServer, createMockRoom, getTestBossmodeDir, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
-import { appendAgentEvent } from "../../src/storage/event-repository.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { appendAgentEvent } from "../../src/data/repositories/event-repository.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { getDatabase } from "../../src/data/database.js";
 import { stampGlobalMemberIds } from "../../src/workspace/room-store.js";
 setupTestWorkspace();
 

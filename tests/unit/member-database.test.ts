@@ -6,7 +6,7 @@ import type { MemberRecord } from "../../src/workspace/member-registry.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 import * as registry from "../../src/workspace/member-registry.js";
 import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
-import { rebuildEventAggregates } from "../../src/storage/event-repository.js";
+import { rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 beforeEach(() => { fixture = coreFixture(); dir = fixture.root; });

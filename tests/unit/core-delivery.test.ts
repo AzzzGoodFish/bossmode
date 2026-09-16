@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { applyStorageMigrations, openDatabase, type Database } from "../../src/storage/database.js";
-import { baseStorageMigration } from "../../src/storage/base-schema.js";
-import { messagesMigration } from "../../src/storage/schema/messages.js";
-import { runtimeInputsMigration } from "../../src/storage/schema/runtime-inputs.js";
-import { deliveryMigration } from "../../src/storage/schema/delivery.js";
-import { executionMigration } from "../../src/storage/schema/execution.js";
-import { ExecutionAttemptRepository } from "../../src/storage/repositories/execution-attempt-repository.js";
-import { appendMessageInTransaction } from "../../src/storage/message-repository.js";
-import { acceptCapturedDelivery, DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../src/storage/repositories/delivery-repository.js";
-import { ReplyObligationRepository } from "../../src/storage/repositories/reply-obligation-repository.js";
-import { InputQueueRepository, type QueuedInput } from "../../src/storage/repositories/input-queue-repository.js";
+import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
+import { baseStorageMigration } from "../../src/data/base-schema.js";
+import { messagesMigration } from "../../src/data/schema/messages.js";
+import { runtimeInputsMigration } from "../../src/data/schema/runtime-inputs.js";
+import { deliveryMigration } from "../../src/data/schema/delivery.js";
+import { executionMigration } from "../../src/data/schema/execution.js";
+import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
+import { appendMessageInTransaction } from "../../src/data/repositories/message-repository.js";
+import { acceptCapturedDelivery, DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../src/data/repositories/delivery-repository.js";
+import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
+import { InputQueueRepository, type QueuedInput } from "../../src/data/repositories/input-queue-repository.js";
 
 let db: Database;
 let root: string;

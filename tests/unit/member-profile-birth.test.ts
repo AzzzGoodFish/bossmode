@@ -1,7 +1,7 @@
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

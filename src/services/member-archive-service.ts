@@ -1,4 +1,4 @@
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { MemberArchiveService } from "../workspace/member-archive-lifecycle.js";
 import { quiesceMember } from "../engine/agent-manager.js";

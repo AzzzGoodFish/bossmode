@@ -31,7 +31,7 @@ describe("member APIs use database identity exclusively", () => {
       mkdirSync(events, { recursive: true });
       writeFileSync(join(events, `${id}.jsonl`), JSON.stringify({ type: "message_end", ts: 1, usage: { inputTokens: 900, outputTokens: 0 } }) + "\n");
       expect(JSON.parse((await call("GET", "/token-usage")).body)).toEqual({ totalTokens: 0 });
-      const { appendAgentEvent } = await import("../../src/storage/event-repository.js");
+      const { appendAgentEvent } = await import("../../src/data/repositories/event-repository.js");
       appendAgentEvent(`dm:${id}`, { ownerKey: id, memberId: id }, { type: "message_end", ts: 1, usage: { inputTokens: 8, outputTokens: 2 } }, "fixture-usage");
       expect(JSON.parse((await call("GET", "/token-usage")).body)).toEqual({ totalTokens: 10 });
       expect((await call("PATCH", "", { name: "Renamed-成员_γ" })).status).toBe(200);

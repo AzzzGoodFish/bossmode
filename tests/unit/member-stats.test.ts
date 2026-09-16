@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { appendAgentEvent, importAgentEvent, rebuildEventAggregates, type EventPayload } from "../../src/storage/event-repository.js";
+import { appendAgentEvent, importAgentEvent, rebuildEventAggregates, type EventPayload } from "../../src/data/repositories/event-repository.js";
 import { computeStatsFromEvents, readMemberStats } from "../../src/workspace/member-stats-store.js";
 
 let fixture: ReturnType<typeof coreFixture>;

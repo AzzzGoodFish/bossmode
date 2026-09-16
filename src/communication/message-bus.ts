@@ -1,10 +1,10 @@
-import {pendingScopeNotifications} from "../storage/notification-repository.js";
+import {pendingScopeNotifications} from "../data/repositories/notification-repository.js";
 // Unified message write + broadcast + listener notification
 // All messages (user, agent, system) go through here.
 
 import * as messageStore from "../workspace/message-store.js";
 import { appendCapturedMessage } from "../services/message-service.js";
-import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../storage/message-dispatch-repository.js";
+import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../data/repositories/message-dispatch-repository.js";
 import { broadcastToRoom } from "./ws.js";
 import { logger } from "../kernel/logger.js";
 import type { RoomMessage } from "../kernel/types.js";

@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 
 export function memberDir(memberId: string): string {

@@ -2,12 +2,12 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/storage/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
-import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { openDatabase } from "../../src/storage/database.js";
-import { importAgentEvent } from "../../src/storage/event-repository.js";
+import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/upgrade/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
+import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { openDatabase } from "../../src/data/database.js";
+import { importAgentEvent } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });

@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
-import { getDatabase } from "../storage/database.js";
-import { ModelCredentialsRepository } from "../storage/repositories/model-settings.js";
+import { getDatabase } from "../data/database.js";
+import { ModelCredentialsRepository } from "../data/repositories/model-settings.js";
 function credentialRepository(): ModelCredentialsRepository { return new ModelCredentialsRepository(getDatabase()); }
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";

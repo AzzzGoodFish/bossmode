@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { Database } from "./database.js";
-import type { PrinciplesMeta } from "../kernel/types.js";
+import type { Database } from "../database.js";
+import type { PrinciplesMeta } from "../../kernel/types.js";
 
 export interface DocumentIdentity {
   /** POSIX path relative to BOSSMODE_DIR, also the stable document key. */

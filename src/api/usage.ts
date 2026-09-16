@@ -1,6 +1,6 @@
 // Usage reports read authoritative SQL facts and stable identity metadata.
 import { addRoute, sendJson } from "./index.js";
-import { readUsageReport } from "../storage/usage-repository.js";
+import { readUsageReport } from "../data/repositories/usage-repository.js";
 import { getRoom } from "../workspace/room-store.js";
 import { logger } from "../kernel/logger.js";
 

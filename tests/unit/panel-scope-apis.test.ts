@@ -1,4 +1,4 @@
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 flagship ② — unified member panel scope plumbing (backend half).

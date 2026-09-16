@@ -1,4 +1,4 @@
-import { readStats, hasStats, rebuildEventAggregates } from "../storage/event-repository.js";
+import { readStats, hasStats, rebuildEventAggregates } from "../data/repositories/event-repository.js";
 export interface MemberStats {
   turns: number;
   toolCalls: number;

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { logger } from "../kernel/logger.js";
-import type { Database } from "./database.js";
+import { logger } from "../../kernel/logger.js";
+import type { Database } from "../database.js";
 
 const FLAG = "core-background-session-cleanup-v1";
 const MEMBER_ID = /^mem_[A-Za-z0-9-]+$/;

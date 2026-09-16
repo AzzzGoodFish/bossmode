@@ -1,7 +1,7 @@
 /** Archive catalog DTO conversion. The member-import feature was retired (fish 2026-09-11);
  * the archive side (fire flow + startup cataloging) stays. This module performs no file IO. */
 import type { MemberRecord } from "./member-registry.js";
-import { validateArchivePath, type ArchiveCatalogSource } from "../storage/repositories/member-archives.js";
+import { validateArchivePath, type ArchiveCatalogSource } from "../data/repositories/member-archives.js";
 
 export interface FiredArchiveSource {
   archivePath: string;

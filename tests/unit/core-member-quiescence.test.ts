@@ -3,7 +3,7 @@ import { existsSync,mkdirSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTestServer,closeTestServer,createMockRoom,loginAndGetToken,jsonRequest,setupTestWorkspace,getTestBossmodeDir } from "../helpers/test-server.js";
 import { buildMemberAgentSession,getRegistry,shutdownAll,destroyInstance,resetAgentSession } from "../../src/engine/agent-manager.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 import { createShell } from "../../src/engine/shell-manager.js";
 setupTestWorkspace();
 

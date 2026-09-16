@@ -49,7 +49,7 @@ describe("Authenticated member panel scope APIs", () => {
     const created = await jsonRequest(ts.port, "POST", "/api/rooms", { token, body: { name: "Panel", memberIds: [memberId] } });
     expect(created.status).toBe(200);
     const room = JSON.parse(created.body);
-    const { appendAgentEvent, readAgentEvents } = await import("../../src/storage/event-repository.js");
+    const { appendAgentEvent, readAgentEvents } = await import("../../src/data/repositories/event-repository.js");
     const scopes = [
       { id: room.id, api: `room:${room.id}`, path: `rooms/${room.id}` },
       { id: `dm:${memberId}`, api: `dm:${memberId}`, path: `rooms/dm:${memberId}` },

@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 let fixture: ReturnType<typeof coreFixture>;
 const roomId = "runtime-room";
 beforeEach(() => {

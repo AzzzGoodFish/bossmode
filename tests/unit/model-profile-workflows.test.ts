@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import * as credentials from "../../src/engine/model-credentials.js";
-import { ModelCredentialsRepository } from "../../src/storage/repositories/model-settings.js";
+import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import { commitRemoteCatalog, commitProviderOverlays, clearRemoteCatalogMemoryForTests } from "../../src/engine/model-catalog.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 let f: ReturnType<typeof coreFixture>;

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { prepareCoreStorage } from "../../src/storage/core-startup.js";
-import { bindDatabase, type Database } from "../../src/storage/database.js";
-import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/storage/document-repository.js";
+import { prepareCoreStorage } from "../../src/data/core-startup.js";
+import { bindDatabase, type Database } from "../../src/data/database.js";
+import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/data/repositories/document-repository.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/workspace/member-registry.js";
 import { readMemberProfile } from "../../src/workspace/member-profile.js";

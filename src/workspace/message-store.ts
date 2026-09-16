@@ -1,7 +1,7 @@
 // Application messages are authoritative DB facts; scopes are created by ConversationService.
 import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { appendMessage, readMessages, pageMessages, messagesSince, latestMessage, patchMessage, replaceMessages, searchMessageFacts } from "../storage/message-repository.js";
+import { appendMessage, readMessages, pageMessages, messagesSince, latestMessage, patchMessage, replaceMessages, searchMessageFacts } from "../data/repositories/message-repository.js";
 
 export const addMessage = appendMessage;
 export function getMessages(...args: Parameters<typeof pageMessages>): RoomMessage[] { return pageMessages(...args).map(limitRuntimeFailureRoomMessage); }

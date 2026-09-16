@@ -185,7 +185,7 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
   it("startup backfill generates pairs for legacy members, idempotently", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const { memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/workspace/ssh-keygen.js");
-    const { SshCredentialsRepository } = await import("../../src/storage/repositories/workspace-settings.js");
+    const { SshCredentialsRepository } = await import("../../src/data/repositories/workspace-settings.js");
     const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
     // Import a pre-key member rather than deleting current authoritative credentials.
     const legacy = reg.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",

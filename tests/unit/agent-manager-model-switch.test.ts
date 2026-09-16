@@ -1,7 +1,7 @@
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getDatabase } from "../../src/storage/database.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { getDatabase } from "../../src/data/database.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";

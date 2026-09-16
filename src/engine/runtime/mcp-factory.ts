@@ -1,8 +1,8 @@
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { getDatabase } from "../../storage/database.js";
-import { createMcpOauthStorage } from "../../storage/repositories/mcp-oauth.js";
+import { getDatabase } from "../../data/database.js";
+import { createMcpOauthStorage } from "../../data/repositories/mcp-oauth.js";
 
 /** Native vendor entry with an explicitly bound SQL credential authority. */
 export async function loadDatabaseMcpFactory(adapterPath: string): Promise<{ name: string; factory: ExtensionFactory }> {

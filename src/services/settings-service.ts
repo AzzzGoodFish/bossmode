@@ -1,4 +1,4 @@
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import { readConfig, writeConfig } from "../shared/config.js";
 import { parseMcpConfigText, readMcpConfigText, restoreRedactedMcpConfig, writeMcpConfig, countMcpServers } from "../shared/mcp-settings.js";
 

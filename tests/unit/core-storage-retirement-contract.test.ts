@@ -5,11 +5,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
-import { prepareCoreStorage } from "../../src/storage/core-startup.js";
+import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
-import { getDatabase, type Database } from "../../src/storage/database.js";
+import { getDatabase, type Database } from "../../src/data/database.js";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 let root: string;

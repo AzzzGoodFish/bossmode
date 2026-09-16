@@ -1,9 +1,9 @@
 import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { importAgentEvent, readAgentEvents } from "../../src/storage/event-repository.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { importAgentEvent, readAgentEvents } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 

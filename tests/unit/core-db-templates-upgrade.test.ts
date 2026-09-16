@@ -3,11 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Database } from "../../src/storage/database.js";
-import { baseStorageMigration } from "../../src/storage/base-schema.js";
-import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/storage/upgrade-runner.js";
-import { templatesMigration } from "../../src/storage/schema/templates.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import type { Database } from "../../src/data/database.js";
+import { baseStorageMigration } from "../../src/data/base-schema.js";
+import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
+import { templatesMigration } from "../../src/data/schema/templates.js";
+import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/workforce/template-files.js";
 
 const ioFailure = vi.hoisted(() => ({
@@ -203,7 +203,7 @@ it("does not retire changed legacy data after cutover, keeps catalog authority a
 it("requires the verified backup for retirement on restart", async () => {
   await expect(run({ checkpoint: phase => { if (phase === "activated") throw new Error("stop before retirement"); } })).rejects.toThrow("stop before retirement");
   // Read the recorded path from the already authoritative catalog, not filesystem discovery.
-  const { openDatabase } = await import("../../src/storage/database.js");
+  const { openDatabase } = await import("../../src/data/database.js");
   const db = openDatabase(join(root, "bossmode.db"));
   const backup = db.get<{backup_path: string}>("SELECT backup_path FROM storage_upgrade_files WHERE path='agents/lookup.md'")!.backup_path;
   db.close();

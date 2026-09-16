@@ -1,8 +1,8 @@
 // Archive facts and summaries are SQL authority. This module performs no file IO.
-import {getDatabase} from "../storage/database.js";
-import {MessageArchivesRepository} from "../storage/repositories/message-archives.js";
-import {readArchivedMessages} from "../storage/message-repository.js";
-import {executionScopeId} from "../storage/repositories/execution-identity.js";
+import {getDatabase} from "../data/database.js";
+import {MessageArchivesRepository} from "../data/repositories/message-archives.js";
+import {readArchivedMessages} from "../data/repositories/message-repository.js";
+import {executionScopeId} from "../data/repositories/execution-identity.js";
 import type {RoomMessage} from "../kernel/types.js";
 export function archiveMessages(scopeId:string,keepCount=50){return new MessageArchivesRepository(getDatabase()).archive(scopeId,keepCount);}
 export function saveArchiveSummary(scopeId:string,summary:string,messages:RoomMessage[],timestamp:number):void{

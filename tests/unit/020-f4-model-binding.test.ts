@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 import { randomUUID } from "node:crypto";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;

@@ -5,9 +5,9 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { getCatalog, hydrateCatalogFromDisk, setBundledCatalogLoader } from "../../src/engine/model-catalog.js";
 import { readConfig } from "../../src/shared/config.js";
 import { readMcpConfigText } from "../../src/shared/mcp-settings.js";
-import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
-import { importLegacySettings } from "../../src/storage/upgrade-settings.js";
-import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
+import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
+import { importLegacySettings } from "../../src/data/upgrade/upgrade-settings.js";
+import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
 
 // Intentionally no fixture/bootstrap for this negative case.
 it("settings, MCP and bundled catalog access require explicit database bootstrap", () => {

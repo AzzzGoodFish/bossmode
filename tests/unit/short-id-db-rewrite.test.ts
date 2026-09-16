@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyStorageMigrations, openDatabase, type Database } from "../../src/storage/database.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { loadShortIdMapping, migrateShortIds, replayShortIdJournalFromDisk, writeShortIdJournal } from "../../src/storage/short-id-migration.js";
+import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { loadShortIdMapping, migrateShortIds, replayShortIdJournalFromDisk, writeShortIdJournal } from "../../src/data/migrations/short-id-migration.js";
 import { mmScopeIdOf } from "../../src/shared/conversation-ref.js";
 
 const M1 = "mem_11111111-1111-4111-8111-111111111111";

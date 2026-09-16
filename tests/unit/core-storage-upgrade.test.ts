@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { baseStorageMigration } from "../../src/storage/base-schema.js";
-import { getDatabase, type Database } from "../../src/storage/database.js";
-import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/storage/upgrade-runner.js";
+import { baseStorageMigration } from "../../src/data/base-schema.js";
+import { getDatabase, type Database } from "../../src/data/database.js";
+import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
 
 let root: string;
 let opened: Database[];

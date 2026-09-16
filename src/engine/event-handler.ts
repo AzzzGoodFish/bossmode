@@ -1,8 +1,8 @@
 // Agent event handling — stream accumulation, authoritative persistence, commit-safe WS push
 import { randomUUID } from "node:crypto";
-import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../storage/message-dispatch-repository.js";
-import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../storage/event-repository.js";
-import { getDatabase } from "../storage/database.js";
+import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../data/repositories/message-dispatch-repository.js";
+import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../data/repositories/event-repository.js";
+import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
 import { refreshContextUsage } from "./agent-manager.js";

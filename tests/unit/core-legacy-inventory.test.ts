@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discoverLegacyInventory, LegacySourceError, readLegacyJson, readLegacyJsonl,
   validateLegacyPath, validateLegacySources, type LegacyKind,
-} from "../../src/storage/legacy-inventory.js";
+} from "../../src/data/upgrade/legacy-inventory.js";
 
 vi.mock("node:fs", async importOriginal => {
   const actual = await importOriginal<typeof import("node:fs")>();

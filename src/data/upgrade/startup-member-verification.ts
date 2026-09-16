@@ -1,8 +1,8 @@
 // Startup-only read-only guards. Neither files nor historical journals can replace SQL identity.
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { managedPath, requireRegularFile } from "./upgrade-files.js";
-import type { Database } from "./database.js";
-import { MemberArchivesRepository, validateArchivePath } from "./repositories/member-archives.js";
+import type { Database } from "../database.js";
+import { MemberArchivesRepository, validateArchivePath } from "../repositories/member-archives.js";
 
 /** Any historical conversion journal can indicate lost authority, regardless of status or syntax.
  * Do not parse it into permission to create a new, empty database. Preserve the evidence. */

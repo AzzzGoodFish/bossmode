@@ -92,7 +92,7 @@ export interface TestServer {
 }
 
 export async function createTestServer(): Promise<TestServer> {
-  const { getDatabase } = await import("../../src/storage/database.js");
+  const { getDatabase } = await import("../../src/data/database.js");
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/communication/ws.js");

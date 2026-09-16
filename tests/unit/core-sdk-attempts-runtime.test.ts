@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { openDatabase } from "../../src/storage/database.js";
+import { openDatabase } from "../../src/data/database.js";
 import { PiSdkAgentHandle, PiSdkRuntime } from "../../src/engine/runtime/pi-sdk.js";
 import type { CreateAgentOpts, RuntimePromptDispatch } from "../../src/engine/runtime/types.js";
 

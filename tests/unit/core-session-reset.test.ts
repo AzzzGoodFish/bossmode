@@ -2,7 +2,7 @@ import { it,expect } from "vitest";
 import { mkdirSync,writeFileSync,readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace,createTestServer,closeTestServer,loginAndGetToken,createMockRoom } from "../helpers/test-server.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 import { resetAgentSession } from "../../src/engine/agent-manager.js";
 import * as sessions from "../../src/workspace/session-store.js";
 import * as rooms from "../../src/workspace/room-store.js";

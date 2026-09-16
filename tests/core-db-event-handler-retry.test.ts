@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../src/storage/database.js";
-import { baseStorageMigration } from "../src/storage/base-schema.js";
-import { messagesMigration, eventSourceMigration } from "../src/storage/schema/messages.js";
-import { appendAgentEvent, readAgentEvents, readStats } from "../src/storage/event-repository.js";
+import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../src/data/database.js";
+import { baseStorageMigration } from "../src/data/base-schema.js";
+import { messagesMigration, eventSourceMigration } from "../src/data/schema/messages.js";
+import { appendAgentEvent, readAgentEvents, readStats } from "../src/data/repositories/event-repository.js";
 import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/engine/event-handler.js";
 import type { AgentStreamEvent } from "../src/engine/runtime/types.js";
 

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { logger } from "../kernel/logger.js";
-import type { Database } from "./database.js";
+import { logger } from "../../kernel/logger.js";
+import type { Database } from "../database.js";
 
 const FLAG = "core-member-session-archive-v1";
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

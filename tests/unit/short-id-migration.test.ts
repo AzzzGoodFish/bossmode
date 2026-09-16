@@ -15,7 +15,7 @@ import {
   replayShortIdJournal,
   writeShortIdJournal,
   type ShortIdMapping,
-} from "../../src/storage/short-id-migration.js";
+} from "../../src/data/migrations/short-id-migration.js";
 
 const M1 = "mem_11111111-1111-4111-8111-111111111111";
 const M2 = "mem_22222222-2222-4222-8222-222222222222";

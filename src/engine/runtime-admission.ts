@@ -1,4 +1,4 @@
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 let stopping = false;
 export function openRuntimeAdmission(): void { stopping = false; }
 export function closeRuntimeAdmission(): void { stopping = true; }

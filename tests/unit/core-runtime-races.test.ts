@@ -3,9 +3,9 @@ import {setupTestWorkspace,createTestServer,closeTestServer,createMockRoom,login
 import {resetMocks,mockPromptFn,mockAbortFn,MockRuntime,emitMockEvent} from "../helpers/mock-runtime.js";
 import {resetAgentSession,reloadMemberSession,shutdownAll,initAgentManager,resumePendingRuntimeInputs} from "../../src/engine/agent-manager.js";
 import {RuntimeRegistry} from "../../src/engine/runtime/registry.js";
-import {getDatabase} from "../../src/storage/database.js";
-import {ReplyObligationRepository} from "../../src/storage/repositories/reply-obligation-repository.js";
-import {readMessages} from "../../src/storage/message-repository.js";
+import {getDatabase} from "../../src/data/database.js";
+import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
+import {readMessages} from "../../src/data/repositories/message-repository.js";
 import {postMessage} from "../../src/communication/message-bus.js";
 import * as bus from "../../src/communication/message-bus.js";
 setupTestWorkspace();

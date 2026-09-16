@@ -9,8 +9,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { Database } from "./database.js";
-import { ensurePrivateDirectory, syncDirectory, syncFile, writeDurably } from "./upgrade-files.js";
+import type { Database } from "../database.js";
+import { ensurePrivateDirectory, syncDirectory, syncFile, writeDurably } from "../upgrade/upgrade-files.js";
 
 const TASK_TABLES = ["tasks", "task_references", "task_subscribers", "task_comments"] as const;
 

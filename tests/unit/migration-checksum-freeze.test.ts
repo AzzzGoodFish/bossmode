@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
 
 /**
  * Frozen sha256 of every registered migration's SQL text.
  *
  * Applied migrations are checksum-verified against `storage_schema_versions` in every
- * existing database (validateStorageMigrationHistory in src/storage/database.ts).
+ * existing database (validateStorageMigrationHistory in src/data/database.ts).
  * Editing any byte of an applied migration's SQL — even a comment added for clarity —
  * makes all previously converted databases refuse to start. That happened on
  * 2026-09-11: comments added inside core-base-v1 / core-conversations-v1 broke every

@@ -2,10 +2,10 @@
 import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Database } from "../storage/database.js";
-import { MembersRepository } from "../storage/repositories/members.js";
-import { MemberArchivesRepository, validateArchivePath, type MemberArchiveIntent } from "../storage/repositories/member-archives.js";
-import { ConversationsRepository } from "../storage/repositories/conversations.js";
+import type { Database } from "../data/database.js";
+import { MembersRepository } from "../data/repositories/members.js";
+import { MemberArchivesRepository, validateArchivePath, type MemberArchiveIntent } from "../data/repositories/member-archives.js";
+import { ConversationsRepository } from "../data/repositories/conversations.js";
 
 /** Resolve a logical relative or old absolute member-owned reference, including immutable D/E snapshots.
  * External references stay external; this is relocation, NOT authorization for arbitrary file reads. */

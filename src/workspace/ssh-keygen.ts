@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { memberDir } from "./member-profile.js";
-import { getDatabase } from "../storage/database.js";
-import { SshCredentialsRepository } from "../storage/repositories/workspace-settings.js";
+import { getDatabase } from "../data/database.js";
+import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 function repository(): SshCredentialsRepository { return new SshCredentialsRepository(getDatabase()); }
 
 /** Legacy/default path references only. These helpers never materialize or read a key. */

@@ -16,8 +16,8 @@ import { getMember, updateMember } from "../../src/workspace/member-registry.js"
 import { memberProfilePath } from "../../src/workspace/member-profile.js";
 import { getRuntimeStateEntry } from "../../src/workspace/runtime-state.js";
 import { getCurrentSession } from "../../src/workspace/session-store.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";
 import type { AgentMemberConfig } from "../../src/kernel/types.js";
 

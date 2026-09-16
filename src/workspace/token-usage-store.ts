@@ -1,5 +1,5 @@
 import { resolveRoomMemberRef } from "./room-store.js";
-import { memberTokenTotal } from "../storage/event-repository.js";
+import { memberTokenTotal } from "../data/repositories/event-repository.js";
 export interface MemberTokenUsageSummary { totalTokens: number }
 export function getRoomMemberTokenUsage(roomId: string,memberRef: string): MemberTokenUsageSummary {
   const member = resolveRoomMemberRef(roomId,memberRef);

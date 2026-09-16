@@ -2,7 +2,7 @@ import type { StorageMigration } from "../database.js";
 
 /**
  * Short-id migration (batch 5): durable old→new mapping produced by the
- * `core-short-ids-v1` startup data step (src/storage/short-id-migration.ts).
+ * `core-short-ids-v1` startup data step (src/data/migrations/short-id-migration.ts).
  * The table is populated inside the rewrite transaction; afterwards it is
  * read-only history — old ids kept in historical records resolve through it.
  */

@@ -1,7 +1,7 @@
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 
@@ -103,7 +103,7 @@ describe("principles-store", () => {
     writePrinciples({ roomId: "room-a", scope: "room", content: "v1 content", actor: { type: "member", memberId: "rm_1" }, reason: "first" });
     writePrinciples({ roomId: "room-a", scope: "room", content: "v2 content", actor: { type: "user" }, reason: "user correction" });
     const { readFileSync } = await import("node:fs");
-    const { listDocumentHistory } = await import("../../src/storage/document-repository.js");
+    const { listDocumentHistory } = await import("../../src/data/repositories/document-repository.js");
     const history = listDocumentHistory(fixture.db, "rooms/room-a/memory/room-principles.md");
     expect(history).toHaveLength(2);
     expect(readFileSync(join(tmpDir, history[0].snapshotPath), "utf8")).toBe("v1 content");

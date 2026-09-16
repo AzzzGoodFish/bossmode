@@ -7,7 +7,7 @@
  */
 import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { appendMessage, readMessages, latestMessage, readMemberCursor, writeMemberCursor } from "../storage/message-repository.js";
+import { appendMessage, readMessages, latestMessage, readMemberCursor, writeMemberCursor } from "../data/repositories/message-repository.js";
 import { mmScopeIdOf, parseMmScopeId } from "../shared/conversation-ref.js";
 
 export { mmScopeIdOf } from "../shared/conversation-ref.js";

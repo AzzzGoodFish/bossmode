@@ -5,12 +5,12 @@
  */
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getDatabase, type Database } from "../storage/database.js";
-import { MembersRepository } from "../storage/repositories/members.js";
-import { documentContentMeta, insertInitialDocument } from "../storage/document-repository.js";
-import { ConversationsRepository } from "../storage/repositories/conversations.js";
+import { getDatabase, type Database } from "../data/database.js";
+import { MembersRepository } from "../data/repositories/members.js";
+import { documentContentMeta, insertInitialDocument } from "../data/repositories/document-repository.js";
+import { ConversationsRepository } from "../data/repositories/conversations.js";
 import { prepareMemberSshCredential, syncMemberBirthAssets } from "./member-birth-assets.js";
-import { SshCredentialsRepository } from "../storage/repositories/workspace-settings.js";
+import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 import { newMemberId } from "../kernel/short-id.js";
 import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";

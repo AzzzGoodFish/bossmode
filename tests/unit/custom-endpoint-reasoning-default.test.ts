@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ModelCredentialsRepository } from "../../src/storage/repositories/model-settings.js";
+import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import * as catalog from "../../src/engine/model-catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;

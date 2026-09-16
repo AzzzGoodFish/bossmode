@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { getDatabase, type Database } from "./database.js";
-import type { UsageDelta } from "../workspace/db/token-rollup.js";
-import type { MemberStats } from "../workspace/member-stats-store.js";
+import { getDatabase, type Database } from "../database.js";
+import type { UsageDelta } from "../../workspace/db/token-rollup.js";
+import type { MemberStats } from "../../workspace/member-stats-store.js";
 
 export const ACTIVITY_TYPES = new Set(["agent_start","agent_end","message_end","tool_start","tool_end","compaction_start","compaction_end","user_prompt","user_steer","system"]);
 export interface EventPayload { type: string; ts?: number; usage?: UsageDelta; model?: string }

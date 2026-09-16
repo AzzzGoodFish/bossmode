@@ -3,9 +3,9 @@ import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken
 import { createMemberWithPersona } from "../../src/workspace/member-registry.js";
 import { updateProfileForMember } from "../../src/engine/member-profile-update.js";
 import { createRoom } from "../../src/workspace/room-store.js";
-import { appendMessage, readMessages } from "../../src/storage/message-repository.js";
-import { getDatabase } from "../../src/storage/database.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
+import { appendMessage, readMessages } from "../../src/data/repositories/message-repository.js";
+import { getDatabase } from "../../src/data/database.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
 setupTestWorkspace();
 
 it("serves only canonical ID/name pairs, including retained archives, without reading their config/bodies", async () => {

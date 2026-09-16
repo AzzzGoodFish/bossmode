@@ -1,8 +1,8 @@
 import {isDeepStrictEqual} from "node:util";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 import {readLegacyJson,type LegacySourceEntry} from "./legacy-inventory.js";
-import {RuntimeRepository} from "./repositories/runtime-repository.js";
-import {executionScopeId,importExecutionAmbiguity} from "./repositories/execution-identity.js";
+import {RuntimeRepository} from "../repositories/runtime-repository.js";
+import {executionScopeId,importExecutionAmbiguity} from "../repositories/execution-identity.js";
 import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js";
 
 function object(value:unknown,path:string):Record<string,any>{

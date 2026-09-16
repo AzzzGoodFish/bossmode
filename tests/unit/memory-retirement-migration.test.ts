@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { archiveLegacySharedMemory, cleanupMemberMemoryScopes } from "../../src/storage/memory-retirement-migration.js";
+import { archiveLegacySharedMemory, cleanupMemberMemoryScopes } from "../../src/data/migrations/memory-retirement-migration.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;

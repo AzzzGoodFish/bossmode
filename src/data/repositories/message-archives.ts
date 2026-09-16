@@ -1,5 +1,5 @@
 import type {Database} from "../database.js";
-import {readMessages,importArchivedMessage} from "../message-repository.js";
+import {readMessages,importArchivedMessage} from "./message-repository.js";
 import {executionScopeId} from "./execution-identity.js";
 import type {RoomMessage} from "../../kernel/types.js";
 export interface ArchiveSummary{summary:string;archivedCount:number;range:[string,string];ts:number}

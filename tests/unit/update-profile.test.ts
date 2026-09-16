@@ -1,4 +1,4 @@
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -89,7 +89,7 @@ describe("self-only profile_update", () => {
 
   it("rolls back both fields when SQLite rejects the write, and one contender wins a collision", async () => {
     const f = await fixture();
-    const { getDatabase } = await import("../../src/storage/database.js");
+    const { getDatabase } = await import("../../src/data/database.js");
     getDatabase().exec("CREATE TEMP TRIGGER fail_profile BEFORE UPDATE ON members BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
     try { expect(await f.call("profile_update", { name: "failed-name", description: "failed-title" })).toMatchObject({ ok: false, code: "persistence_failed" }); }
     finally { getDatabase().exec("DROP TRIGGER fail_profile"); }

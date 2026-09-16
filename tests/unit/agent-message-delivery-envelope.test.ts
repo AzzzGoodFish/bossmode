@@ -5,7 +5,7 @@ import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
 import { createMember } from "../../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/workspace/room-store.js";
-import { importMessage } from "../../src/storage/message-repository.js";
+import { importMessage } from "../../src/data/repositories/message-repository.js";
 import { writeConfig } from "../../src/shared/config.js";
 
 vi.mock("../../src/communication/ws.js", () => ({

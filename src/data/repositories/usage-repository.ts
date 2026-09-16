@@ -1,4 +1,4 @@
-import { getDatabase } from "./database.js";
+import { getDatabase } from "../database.js";
 
 export interface UsageRow {
   room_id: string; member_id: string; date: string; model: string;

@@ -1,12 +1,12 @@
 import {readFileSync} from "node:fs";
-import {MembersRepository} from "./repositories/members.js";
-import {ConversationsRepository} from "./repositories/conversations.js";
+import {MembersRepository} from "../repositories/members.js";
+import {ConversationsRepository} from "../repositories/conversations.js";
 import {parseLegacyMemberPersona,parseLegacyMemberRecord} from "./upgrade-member-parser.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {assertLegacyMemberDirectories} from "./startup-member-verification.js";
 import type {LegacySourceEntry} from "./legacy-inventory.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
-import type {MemberRecord} from "../workspace/member-registry.js";
+import type {MemberRecord} from "../../workspace/member-registry.js";
 
 export interface MemberSourceImport {
  consumed:Set<string>;

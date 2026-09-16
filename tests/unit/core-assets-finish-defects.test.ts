@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, rmSync } from "node:fs";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { createMember } from "../../src/workspace/member-registry.js";
 import { createRoom, inviteGlobalMember } from "../../src/workspace/room-store.js";
 import { addMessage } from "../../src/workspace/message-store.js";

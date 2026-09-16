@@ -1,5 +1,5 @@
-import { getDatabase } from "../storage/database.js";
-import { SettingsRepository } from "../storage/repositories/settings.js";
+import { getDatabase } from "../data/database.js";
+import { SettingsRepository } from "../data/repositories/settings.js";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";

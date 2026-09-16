@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { readConfig, verifyPassword } from "../shared/config.js";
 import type { SessionToken } from "../kernel/types.js";
 
-import { getDatabase } from "../storage/database.js";
-import { AuthSessionsRepository } from "../storage/repositories/settings.js";
+import { getDatabase } from "../data/database.js";
+import { AuthSessionsRepository } from "../data/repositories/settings.js";
 function sessions(): AuthSessionsRepository { return new AuthSessionsRepository(getDatabase()); }
 
 /** Full idle TTL. Sliding renewal extends back to this on active use. */

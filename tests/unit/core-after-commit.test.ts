@@ -2,7 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase, type Database } from "../../src/storage/database.js";
+import { openDatabase, type Database } from "../../src/data/database.js";
 let root:string,db:Database;
 const observerError=vi.fn();
 beforeEach(()=>{root=mkdtempSync(join(tmpdir(),"bm-after-commit-"));observerError.mockReset();db=openDatabase(join(root,"db.sqlite"),{onPostCommitError:observerError});db.exec("CREATE TABLE records(id TEXT PRIMARY KEY)");});

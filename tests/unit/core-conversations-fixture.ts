@@ -1,5 +1,5 @@
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 
 /** Domain seed helpers over the shared complete current schema, never an old projection. */
 export function conversationsFixture() {

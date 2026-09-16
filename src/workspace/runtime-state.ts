@@ -1,8 +1,8 @@
 // DB-owned runtime recovery metadata. Module import never initializes storage.
 // ① B8 / C3: runtime checkpoints are member-level — one entry per member,
 // independent of the chat being served.
-import { getDatabase } from "../storage/database.js";
-import { RuntimeRepository } from "../storage/repositories/runtime-repository.js";
+import { getDatabase } from "../data/database.js";
+import { RuntimeRepository } from "../data/repositories/runtime-repository.js";
 
 export interface MountStale {
   since: number;

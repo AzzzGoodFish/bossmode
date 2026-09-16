@@ -13,7 +13,7 @@ import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
 import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-import { pageActivity as queryActivityPage } from "../storage/event-repository.js";
+import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";

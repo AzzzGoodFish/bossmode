@@ -2,8 +2,8 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { memberDir } from "./member-profile.js";
 import { getBossmodeDir } from "../shared/config.js";
-import { getDatabase } from "../storage/database.js";
-import { SessionRepository } from "../storage/repositories/session-repository.js";
+import { getDatabase } from "../data/database.js";
+import { SessionRepository } from "../data/repositories/session-repository.js";
 import type { AgentSession } from "../kernel/types.js";
 
 function repository(): SessionRepository { return new SessionRepository(getDatabase()); }

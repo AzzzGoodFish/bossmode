@@ -2,9 +2,9 @@
 // made visible as a system note. The final-text fallback (autoDelivered) was
 // retired 2026-09-11 (fish #19368/#19381; plan-retire-chat-fallback-v1).
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getDatabase } from "../../src/storage/database.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { getDatabase } from "../../src/data/database.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";

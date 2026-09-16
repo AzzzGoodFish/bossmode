@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import * as mod from "../../src/engine/model-catalog.js";
-import { CatalogRepository } from "../../src/storage/repositories/catalog-settings.js";
+import { CatalogRepository } from "../../src/data/repositories/catalog-settings.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 

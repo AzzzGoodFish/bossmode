@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 import { getBossmodeDir, getConfigPath, readPidFile, readConfig, configExists } from "../../src/shared/config.js";
 import { readMcpConfigText, readMemberMcpConfig } from "../../src/shared/mcp-settings.js";
 import { getCatalog } from "../../src/engine/model-catalog.js";

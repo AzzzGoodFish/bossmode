@@ -11,9 +11,9 @@ vi.mock("../../src/kernel/short-id.js", async (original) => {
   return { ...actual, newMemberId: () => "mem_agx4g1idiv", newRoomId: () => "rm_zzzzzzzzzz" };
 });
 
-import { applyStorageMigrations, openDatabase, type Database } from "../../src/storage/database.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { migrateShortIds } from "../../src/storage/short-id-migration.js";
+import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { migrateShortIds } from "../../src/data/migrations/short-id-migration.js";
 
 let root: string;
 let db: Database | undefined;

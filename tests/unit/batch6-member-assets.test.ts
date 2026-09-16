@@ -37,7 +37,7 @@ async function seedMcpOwner(id: string) {
   importMemberRecord({ id, name: id, agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
     global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
     scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-  const { ConversationsRepository } = await import("../../src/storage/repositories/conversations.js");
+  const { ConversationsRepository } = await import("../../src/data/repositories/conversations.js");
   new ConversationsRepository(fixture.db).upsertRoom({ id: "r1", name: "MCP", members: [id], globalMemberIds: [id], createdAt: 1 });
   mkdirSync(join(dir, "members", id), { recursive: true });
 }

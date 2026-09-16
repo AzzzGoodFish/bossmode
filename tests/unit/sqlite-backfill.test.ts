@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
-import type { UpgradeImportContext } from "../../src/storage/upgrade-runner.js";
-import { readUsageReport } from "../../src/storage/usage-repository.js";
-import { readStats, rebuildEventAggregates } from "../../src/storage/event-repository.js";
+import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
+import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { readUsageReport } from "../../src/data/repositories/usage-repository.js";
+import { readStats, rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let sourceRoot: string;

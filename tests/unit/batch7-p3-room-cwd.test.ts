@@ -32,7 +32,7 @@ describe("room attachments migration", () => {
     // Imported pre-batch-7 room metadata retains cwd in SQL.
     const roomId = "legacy-room-1";
     mkdirSync(join(dir, "rooms", roomId), { recursive: true });
-    const { ConversationsRepository } = await import("../../src/storage/repositories/conversations.js");
+    const { ConversationsRepository } = await import("../../src/data/repositories/conversations.js");
     new ConversationsRepository(fixture.db).upsertRoom({
       id: roomId, name: "proj-room", cwd: legacyRoot, members: [], roomMembers: [], createdAt: 1,
     });

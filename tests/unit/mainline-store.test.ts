@@ -1,7 +1,7 @@
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SettingsRepository } from "../../src/storage/repositories/settings.js";
+import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ describe("mainline-store", () => {
     expect(saved.revision).toBe(1);
     expect(readMainline("room-a", "rm_1").content).toBe(content);
     const { readFileSync } = await import("node:fs");
-    const { listDocumentHistory } = await import("../../src/storage/document-repository.js");
+    const { listDocumentHistory } = await import("../../src/data/repositories/document-repository.js");
     const history = listDocumentHistory(fixture.db, "rooms/room-a/memory/members/rm_1/mainline.md");
     expect(history).toHaveLength(1);
     expect(readFileSync(join(tmpDir, history[0].snapshotPath), "utf8")).toBe(content);

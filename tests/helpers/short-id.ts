@@ -1,4 +1,4 @@
-import type { Database } from "../../src/storage/database.js";
+import type { Database } from "../../src/data/database.js";
 
 /**
  * Short-id migration (batch 5) re-keys members/rooms on first startup. Tests that

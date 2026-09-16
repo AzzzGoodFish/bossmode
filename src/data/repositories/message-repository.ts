@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase, type Database } from "./database.js";
-import type { RoomMessage } from "../kernel/types.js";
-import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
-import type { SearchOptions, SearchResult } from "../workspace/message-store.js";
+import { getDatabase, type Database } from "../database.js";
+import type { RoomMessage } from "../../kernel/types.js";
+import { limitRuntimeFailureRoomMessage } from "../../kernel/runtime-error-limit.js";
+import type { SearchOptions, SearchResult } from "../../workspace/message-store.js";
 
 const lists = {
   mentions: ["mention", "label"], mentionMemberIds: ["mention", "id"],

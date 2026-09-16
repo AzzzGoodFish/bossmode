@@ -6,8 +6,8 @@ import type {MemberSourceImport} from "./upgrade-members.js";
 import {readLegacyJson,readLegacyJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
 import {managedPath,requireRegularFile,syncFile,syncDirectoryChain} from "./upgrade-files.js";
 import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js";
-import {documentContentMeta,importDocument,type DocumentImport,type DocumentIdentity,type ImportedDocumentHistory} from "./document-repository.js";
-import type {PrinciplesMeta} from "../kernel/types.js";
+import {documentContentMeta,importDocument,type DocumentImport,type DocumentIdentity,type ImportedDocumentHistory} from "../repositories/document-repository.js";
+import type {PrinciplesMeta} from "../../kernel/types.js";
 
 function object(value:unknown,path:string):Record<string,any>{
  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy document object: ${path}`);

@@ -1,7 +1,7 @@
 // Mock runtime for testing — implements AgentRuntime + AgentHandle
 import { vi } from "vitest";
 import {randomUUID} from "node:crypto";
-import {getDatabase} from "../../src/storage/database.js";
+import {getDatabase} from "../../src/data/database.js";
 import type {
   AgentRuntime,
   AgentHandle,

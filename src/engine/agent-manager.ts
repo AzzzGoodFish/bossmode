@@ -1,11 +1,11 @@
 import {randomUUID} from "node:crypto";
 import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../services/runtime-input-service.js";
-import {InputQueueRepository,type QueuedInput} from "../storage/repositories/input-queue-repository.js";
-import {ReplyObligationRepository,type ReplyDisposition} from "../storage/repositories/reply-obligation-repository.js";
-import type {CapturedMessage} from "../storage/repositories/delivery-repository.js";
+import {InputQueueRepository,type QueuedInput} from "../data/repositories/input-queue-repository.js";
+import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
+import type {CapturedMessage} from "../data/repositories/delivery-repository.js";
 import {readMemberProfile,isBlankPersona} from "../workspace/member-profile.js";
 import type {MentionActivationCtx} from "../communication/router.js";
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
 // Prompt assembly → engine/prompt-assembler.ts

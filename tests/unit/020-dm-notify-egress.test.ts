@@ -254,7 +254,7 @@ describe("DM instance unified event wiring (G1)", () => {
 });
 
 describe("DM historical messages through ordinary storage startup", () => {
-  let database: import("../../src/storage/database.js").Database | undefined;
+  let database: import("../../src/data/database.js").Database | undefined;
   beforeEach(() => {
     vi.resetModules();
     dir = process.env.BOSSMODE_DIR!;
@@ -267,13 +267,13 @@ describe("DM historical messages through ordinary storage startup", () => {
   });
 
   async function startup() {
-    const { prepareCoreStorage } = await import("../../src/storage/core-startup.js");
+    const { prepareCoreStorage } = await import("../../src/data/core-startup.js");
     const result = await prepareCoreStorage({ root: dir, bundledCatalog: [], initialConfig: {
       auth: { username: "test", passwordHash: "fixture" }, apiKeys: {},
       defaults: { host: "127.0.0.1", port: 8080 }, runtime: {},
     } });
     database = result.db;
-    (await import("../../src/storage/database.js")).bindDatabase(database);
+    (await import("../../src/data/database.js")).bindDatabase(database);
     return result;
   }
 

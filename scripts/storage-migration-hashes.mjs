@@ -13,10 +13,10 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const repo = process.argv[2] ?? '.';
-const mod = await import(pathToFileURL(join(repo, 'dist/storage/migrations.js')).href);
+const mod = await import(pathToFileURL(join(repo, 'dist/data/migrations.js')).href);
 const migrations = mod.coreStorageMigrations;
 if (!Array.isArray(migrations) || !migrations.length) {
-  throw new Error(`coreStorageMigrations missing from ${repo}/dist/storage/migrations.js`);
+  throw new Error(`coreStorageMigrations missing from ${repo}/dist/data/migrations.js`);
 }
 for (const migration of migrations) {
   console.log(`${migration.id} ${createHash('sha256').update(migration.sql).digest('hex')}`);

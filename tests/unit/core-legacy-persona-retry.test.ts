@@ -2,12 +2,12 @@ import {it,expect} from "vitest";
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from "node:fs";
 import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
-import {prepareStorageUpgrade,type UpgradeOptions} from "../../src/storage/upgrade-runner.js";
-import {coreStorageMigrations} from "../../src/storage/migrations.js";
-import {discoverLegacyInventory} from "../../src/storage/legacy-inventory.js";
-import {importLegacyMembers} from "../../src/storage/upgrade-members.js";
-import {importLegacyDocuments} from "../../src/storage/upgrade-documents.js";
-import {listDocumentHistory,documentSnapshotPath,documentContentMeta} from "../../src/storage/document-repository.js";
+import {prepareStorageUpgrade,type UpgradeOptions} from "../../src/data/upgrade/upgrade-runner.js";
+import {coreStorageMigrations} from "../../src/data/migrations.js";
+import {discoverLegacyInventory} from "../../src/data/upgrade/legacy-inventory.js";
+import {importLegacyMembers} from "../../src/data/upgrade/upgrade-members.js";
+import {importLegacyDocuments} from "../../src/data/upgrade/upgrade-documents.js";
+import {listDocumentHistory,documentSnapshotPath,documentContentMeta} from "../../src/data/repositories/document-repository.js";
 it("ordinary coordinator retry reuses published older-persona history without replacing source bodies",async()=>{
  const root=mkdtempSync(join(tmpdir(),"legacy-persona-retry-"));let db:Awaited<ReturnType<typeof prepareStorageUpgrade>>["db"]|undefined;
  const path="members/mem_one/persona.md",current="  exact current\r\n",previous="earlier revision\n";

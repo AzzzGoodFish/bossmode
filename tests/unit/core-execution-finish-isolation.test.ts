@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
-import { SessionRepository } from "../../src/storage/repositories/session-repository.js";
-import { RuntimeRepository } from "../../src/storage/repositories/runtime-repository.js";
-import { UserCursorRepository } from "../../src/storage/repositories/user-cursor-repository.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
+import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import * as runtime from "../../src/workspace/runtime-state.js";
 import * as sessions from "../../src/workspace/session-store.js";
 import * as cursors from "../../src/workspace/user-read-cursors.js";

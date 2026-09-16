@@ -1,11 +1,11 @@
 import {beforeEach,afterEach,it,expect,vi} from "vitest";
 import {coreFixture} from "../helpers/core-fixture.js";
-import {MembersRepository} from "../../src/storage/repositories/members.js";
-import {ConversationsRepository} from "../../src/storage/repositories/conversations.js";
-import {DeliveryRepository} from "../../src/storage/repositories/delivery-repository.js";
+import {MembersRepository} from "../../src/data/repositories/members.js";
+import {ConversationsRepository} from "../../src/data/repositories/conversations.js";
+import {DeliveryRepository} from "../../src/data/repositories/delivery-repository.js";
 import {postMessage} from "../../src/communication/message-bus.js";
 import {initRouter} from "../../src/communication/router.js";
-import {patchMessage,archiveMessagesInTransaction,readMessages} from "../../src/storage/message-repository.js";
+import {patchMessage,archiveMessagesInTransaction,readMessages} from "../../src/data/repositories/message-repository.js";
 let fixture:ReturnType<typeof coreFixture>;let members:MembersRepository;let rooms:ConversationsRepository;let captures:DeliveryRepository;
 const transport=vi.hoisted(()=>({broadcast:vi.fn()}));
 vi.mock("../../src/communication/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
@@ -86,7 +86,7 @@ it("self mentions are silent and other targets keep the ordinary path",async()=>
 });
 
 it("message/debt settlement rolls back together and only the stable own-chat sender settles debt",async()=>{
-  const {ReplyObligationRepository}=await import("../../src/storage/repositories/reply-obligation-repository.js");const replies=new ReplyObligationRepository(fixture.db);
+  const {ReplyObligationRepository}=await import("../../src/data/repositories/reply-obligation-repository.js");const replies=new ReplyObligationRepository(fixture.db);
   const request=postMessage("capture-room","user","@Alpha answer",["Alpha"]);
   expect(replies.listPending("capture-room","mem_a").map(row=>row.messageId)).toEqual([request.id]);
   members.update({...members.get("mem_a")!,name:"Renamed"});members.update({...members.get("mem_c")!,name:"Alpha"});
@@ -101,7 +101,7 @@ it("message/debt settlement rolls back together and only the stable own-chat sen
 });
 
 it("notification keys are scoped even when two scopes use the same local message ID",async()=>{
-  const {enqueueScopeNotification,pendingScopeNotifications}=await import("../../src/storage/notification-repository.js");
+  const {enqueueScopeNotification,pendingScopeNotifications}=await import("../../src/data/repositories/notification-repository.js");
   for(const scopeId of ["capture-room","dm:mem_a"])enqueueScopeNotification(scopeId,"shared-message",{type:"task:deleted",roomId:scopeId,taskId:"same-local-task"});
   expect(pendingScopeNotifications().map(row=>row.scopeId)).toEqual(["capture-room","dm:mem_a"]);
 });

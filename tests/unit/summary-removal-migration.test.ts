@@ -9,8 +9,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory } from "../../src/storage/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/storage/upgrade-conversations.js";
+import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
+import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
 let dir: string;
 let sequence: number;
 let fixture: ReturnType<typeof coreFixture>;

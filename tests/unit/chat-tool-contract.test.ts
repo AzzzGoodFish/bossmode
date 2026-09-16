@@ -6,7 +6,7 @@ import { createMember } from "../../src/workspace/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/workspace/room-store.js";
 import { postMessage } from "../../src/communication/message-bus.js";
 import { initRouter } from "../../src/communication/router.js";
-import { ReplyObligationRepository } from "../../src/storage/repositories/reply-obligation-repository.js";
+import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
 import { handleToolCallback, loadScopeMessages } from "../../src/engine/tools.js";
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 import * as attachments from "../../src/engine/agent-attachments.js";

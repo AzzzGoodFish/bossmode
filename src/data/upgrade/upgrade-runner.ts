@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { isAbsolute, join, relative } from "node:path";
-import { applyStorageMigrations, validateStorageMigrationHistory, openDatabase, type Database, type StorageMigration } from "./database.js";
+import { applyStorageMigrations, validateStorageMigrationHistory, openDatabase, type Database, type StorageMigration } from "../database.js";
 import { copyDurably, publishAssetDurably, ensurePrivateDirectory, hashFile, managedPath, moveDurably, requireRegularFile, syncDirectory, syncDirectoryChain, syncFile, writeDurably } from "./upgrade-files.js";
 
 type NativeSqlite = typeof import("node:sqlite");

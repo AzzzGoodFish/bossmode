@@ -1,7 +1,7 @@
 import { recoverMemberArchives } from "../services/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
-import { prepareCoreStorage } from "../storage/core-startup.js";
-import type { UpgradeProgress } from "../storage/upgrade-runner.js";
+import { prepareCoreStorage } from "../data/core-startup.js";
+import type { UpgradeProgress } from "../data/upgrade/upgrade-runner.js";
 import type { BossmodeConfig } from "../kernel/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";

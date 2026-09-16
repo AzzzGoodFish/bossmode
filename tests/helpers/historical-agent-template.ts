@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Database } from "../../src/storage/database.js";
+import type { Database } from "../../src/data/database.js";
 import { importAgentTemplates } from "../../src/workforce/template-files.js";
 
 /** Explicit historical source fixture, never a current member/template creation API. */

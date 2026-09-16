@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn, mockPromptFn } from "../helpers/mock-runtime.js";
-import { MembersRepository } from "../../src/storage/repositories/members.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { MembersRepository } from "../../src/data/repositories/members.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
 import { postMessage } from "../../src/communication/message-bus.js";

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { openDatabase, applyStorageMigrations, type Database } from "../../src/storage/database.js";
-import { coreStorageMigrations } from "../../src/storage/migrations.js";
-import { archiveRetiredScopeSessions } from "../../src/storage/member-session-archive.js";
+import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
+import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { archiveRetiredScopeSessions } from "../../src/data/migrations/member-session-archive.js";
 
 // Member-centric sessions (① A2/A3, fish #20025): the per-scope session layout is
 // retired. Its files are parked under `members/<id>/archive/sessions/` so nothing is

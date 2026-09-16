@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, jsonRequest, getTestBossmodeDir } from "../helpers/test-server.js";
 import { createMemberWithPersona } from "../../src/workspace/member-registry.js";
-import { getDatabase } from "../../src/storage/database.js";
+import { getDatabase } from "../../src/data/database.js";
 setupTestWorkspace();
 const countRooms = () => getDatabase().get<{n:number}>("SELECT COUNT(*) n FROM rooms")!.n;
 

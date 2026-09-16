@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { inspectStartupSettings } from "../storage/startup-inspection.js";
+import { inspectStartupSettings } from "../data/upgrade/startup-inspection.js";
 import { waitForStartup, StartupWaitError } from "./startup-wait.js";
 import type { BossmodeConfig } from "../kernel/types.js";
 

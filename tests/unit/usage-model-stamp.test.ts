@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { readStats } from "../../src/storage/event-repository.js";
+import { readStats } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 
 vi.mock("../../src/communication/ws.js", () => ({

@@ -1,7 +1,7 @@
 import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
-import { getDatabase } from "../storage/database.js";
+import { getDatabase } from "../data/database.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { appendMessage, readMessages, latestMessage, readDmMemberCursor, writeDmMemberCursor } from "../storage/message-repository.js";
+import { appendMessage, readMessages, latestMessage, readDmMemberCursor, writeDmMemberCursor } from "../data/repositories/message-repository.js";
 
 export function readAllDmMessages(memberId: string): RoomMessage[] { return readMessages(`dm:${memberId}`).map(limitRuntimeFailureRoomMessage); }
 export function addDmMessage(memberId: string,msg: Omit<RoomMessage,"id" | "ts" | "seq">): RoomMessage { return appendMessage(`dm:${memberId}`,msg); }

@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { prepareCoreStorage } from "../../src/storage/core-startup.js";
+import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import * as registry from "../../src/workspace/member-registry.js";
-import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
+import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { resolveRoomMember } from "../../src/workforce/room-member-resolver.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
-import { TemplateRepository } from "../../src/storage/repositories/templates.js";
+import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { readTemplateBody } from "../../src/workforce/template-files.js";
 import { readMemberProfile } from "../../src/workspace/member-profile.js";
-import type { Database } from "../../src/storage/database.js";
+import type { Database } from "../../src/data/database.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 
 describe("stable identity and body-free metadata", () => {

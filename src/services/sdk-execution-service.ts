@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase, type Database } from "../storage/database.js";
-import { ExecutionAttemptRepository, type ExecutionAttempt } from "../storage/repositories/execution-attempt-repository.js";
+import { getDatabase, type Database } from "../data/database.js";
+import { ExecutionAttemptRepository, type ExecutionAttempt } from "../data/repositories/execution-attempt-repository.js";
 
 /** One actual SDK call, not completion of a parent input, reply, or background task. */
 export class SdkExecutionAttempt {

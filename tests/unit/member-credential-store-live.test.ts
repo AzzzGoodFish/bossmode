@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ModelCredentialsRepository } from "../../src/storage/repositories/model-settings.js";
+import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 let fixture: ReturnType<typeof coreFixture>;
 
 function gate() {
