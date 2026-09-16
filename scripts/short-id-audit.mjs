@@ -197,9 +197,10 @@ const EXCLUDED_DIR_NAMES = new Set(["backups", ".migration-snapshots"]);
 const EXCLUDED_DIR_RE = /^migration-backup-/;
 const EXCLUDED_FILE_RE = /^members\.json$|\.pre-[^.]*$/;
 const LIBRARY_TOPS = new Set(["memory"]);
-// Legacy room trees rename the room directory only; member segments below
+// Legacy room trees rename the room directory only; member segments directly below
 // rooms/<room>/memory/members/ stay as-is by design (archive semantics, §3.3).
-const ROOM_MEMORY_KEEP = /^rooms\/[^/]+\/memory\/members\//;
+// Exact segment depth — anything deeper is regular migration surface.
+const ROOM_MEMORY_KEEP = /^rooms\/[^/]+\/memory\/members\/[^/]+$/;
 let scanned = 0;
 const zones = { surface: { entries: 0, byTop: {} }, excluded: { entries: 0, samples: [] }, library: { entries: 0, byTop: {} }, archive: { entries: 0, byTop: {} }, kept: { entries: 0, byTop: {} } };
 const bump = (zone, top, shape, path) => {
