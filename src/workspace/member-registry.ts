@@ -12,7 +12,7 @@ import { ConversationsRepository } from "../data/repositories/conversations.js";
 import { prepareMemberSshCredential, syncMemberBirthAssets } from "../files/member-birth-assets.js";
 import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 import { newMemberId } from "../kernel/short-id.js";
-import { getBossmodeDir } from "../shared/config.js";
+import { membersRoot, memberDir } from "../files/layout.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
 import { writeMemberProfileSkeleton } from "./member-profile.js";
@@ -74,14 +74,6 @@ export class MemberNotFoundError extends Error {
     super(`Member not found: ${id}`);
     this.name = "MemberNotFoundError";
   }
-}
-
-function membersRoot(): string {
-  return join(getBossmodeDir(), "members");
-}
-
-export function memberDir(memberId: string): string {
-  return join(membersRoot(), memberId);
 }
 
 function ensureMembersRoot(): void {

@@ -13,7 +13,7 @@ it("serves SQL-owned MCP definitions, member file assets and the generated publi
   const id = JSON.parse(created.body).member.memberId;
   const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
   writeMemberMcpConfig(id, { mcpServers: { one: { command: "fixture-unused" }, two: { url: "https://example.test/mcp" } } });
-  const { memberExtensionsDir, memberSkillsDir } = await import("../../src/workspace/member-profile.js");
+  const { memberExtensionsDir, memberSkillsDir } = await import("../../src/files/layout.js");
   const extension = join(memberExtensionsDir(id), "member-extension");
   mkdirSync(extension, { recursive: true });
   writeFileSync(join(extension, "index.ts"), "export default () => {};\n");

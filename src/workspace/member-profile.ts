@@ -2,14 +2,9 @@
  * persona.md — literal free-form Markdown. Member identity lives in the database.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { memberDir, memberProfilePath, memberSkillsDir, memberExtensionsDir, memberArchiveDir } from "../files/layout.js";
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
-
-export function memberDir(memberId: string): string {
-  return join(getBossmodeDir(), "members", memberId);
-}
 
 export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 
@@ -21,23 +16,6 @@ export interface MemberProfile {
   path: string;
   exists: boolean;
   overBudget: boolean;
-}
-
-export function memberProfilePath(memberId: string): string {
-  return join(memberDir(memberId), "persona.md");
-}
-
-export function memberSkillsDir(memberId: string): string {
-  return join(memberDir(memberId), "skills");
-}
-
-/** Batch 6 §1.3: member-owned lightweight extensions. Directory present = loaded. */
-export function memberExtensionsDir(memberId: string): string {
-  return join(memberDir(memberId), "extensions");
-}
-
-export function memberArchiveDir(memberId: string): string {
-  return join(memberDir(memberId), "archive");
 }
 
 /** Birth creates an empty persona and its skills directory. */

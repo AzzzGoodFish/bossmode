@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { createMember, updateMember } from "../../src/workspace/member-registry.js";
+import { roomDir } from "../../src/files/layout.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
@@ -94,7 +95,7 @@ async function currentMemberFixture() {
     sourceMemberId: member.id, createdAt: 1, updatedAt: 1,
     config: { model: "shadow-model", credentialId: "shadow-credential", thinkingLevel: "high", skills: ["shadow-skill"], mcpServers: ["shadow-mcp"], contextLimit: 99 },
   };
-  const path = join(roomStore.roomDir(room.id), "room.json");
+  const path = join(roomDir(room.id), "room.json");
   // createRoom now always sets a global roster, even when empty. This fixture
   // represents a pre-cutover local roster with an explicit current-member link.
   new ConversationsRepository(db).upsertRoom({ ...room, globalMemberIds: undefined, roomMembers: [shadow] });

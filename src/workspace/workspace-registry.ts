@@ -3,7 +3,7 @@ import { getDatabase } from "../data/database.js";
 import { WorkspacesRepository } from "../data/repositories/workspace-settings.js";
 function repository(): WorkspacesRepository { return new WorkspacesRepository(getDatabase()); }
 import { join } from "node:path";
-import { memberDir } from "./member-profile.js";
+import { memberDir } from "../files/layout.js";
 
 export interface OriginalWorkspace {
   id: string;

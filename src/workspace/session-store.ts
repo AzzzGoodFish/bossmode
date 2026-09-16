@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { memberDir } from "./member-profile.js";
+import { memberDir } from "../files/layout.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { getDatabase } from "../data/database.js";
 import { SessionRepository } from "../data/repositories/session-repository.js";

@@ -577,7 +577,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
+    const { readMemberProfile } = await import("../workspace/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -668,7 +668,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     if (layer === "profile") {
-      const { readMemberProfile, memberProfilePath } = await import("../workspace/member-profile.js");
+      const { readMemberProfile } = await import("../workspace/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
       const profile = readMemberProfile(m.id);
       sendJson(res, 200, {
         layer: "profile",

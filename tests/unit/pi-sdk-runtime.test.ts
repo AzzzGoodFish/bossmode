@@ -348,7 +348,7 @@ describe("PiSdkRuntime", () => {
 
   it("member extensions dir expands into file entries in the loader paths (qa rc.14 ①)", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
+    const { memberExtensionsDir } = await import("../../src/files/layout.js");
     const extDir = memberExtensionsDir("pm");
     mkdirSync(extDir, { recursive: true });
     writeFileSync(join(extDir, "my-tool.ts"), "export default () => {};\n", "utf-8");

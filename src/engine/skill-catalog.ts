@@ -6,7 +6,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseFrontmatter } from "../kernel/frontmatter.js";
-import { memberSkillsDir } from "../workspace/member-profile.js";
+import { memberSkillsDir } from "../files/layout.js";
 
 export type SkillCatalogMode =
   | "under_budget"

@@ -119,7 +119,7 @@ describe("batch 6 migration (behavior invariants)", () => {
 describe("member dir asset paths (pi loader join)", () => {
   it("present dirs included, absent dirs empty", async () => {
     const { memberDirLoaderAssetPaths } = await import("../../src/engine/runtime/pi-sdk.js");
-    const { memberSkillsDir, memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
+    const { memberSkillsDir, memberExtensionsDir } = await import("../../src/files/layout.js");
     // absent → empty
     expect(memberDirLoaderAssetPaths("mem_none")).toEqual({ skills: [], extensions: [] });
     // present → skills dir as-is; extensions dir expanded into file entries

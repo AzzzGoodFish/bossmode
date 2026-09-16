@@ -6,21 +6,9 @@ import { latestMessage } from "../data/repositories/message-repository.js";
 import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../kernel/types.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../data/repositories/conversations.js";
 export { ensureDmScope, ensureMmScope } from "../data/repositories/conversations.js";
-import { memberDir } from "./member-profile.js";
+import { memberDir, roomDir } from "../files/layout.js";
 import { readWorkspaces } from "./workspace-registry.js";
 import { newRoomId } from "../kernel/short-id.js";
-
-function roomsDir(): string {
-  return join(getBossmodeDir(), "rooms");
-}
-
-export function getRoomsDir(): string {
-  return roomsDir();
-}
-
-export function roomDir(roomId: string): string {
-  return join(roomsDir(), roomId);
-}
 
 /** Batch 7 P3: cwd is peeled on write — it exists on disk only until the
  * attachment migration has consumed it. */

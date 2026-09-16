@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { memberDir } from "./member-profile.js";
+import { memberDir } from "../files/layout.js";
 import { getDatabase } from "../data/database.js";
 import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 function repository(): SshCredentialsRepository { return new SshCredentialsRepository(getDatabase()); }

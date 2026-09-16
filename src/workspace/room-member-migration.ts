@@ -2,24 +2,24 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFi
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
 import { logger } from "../kernel/logger.js";
-import * as roomStore from "./room-store.js";
+import { roomDir, getRoomsDir } from "../files/layout.js";
 import { getBossmodeDir } from "../shared/config.js";
 import type { AgentMemberConfig, AgentSession, CursorMap, LegacyMemberConfig, Room, RoomMemberConfig, RoomMemberRecord } from "../kernel/types.js";
 
 function roomJsonPath(roomId: string): string {
-  return join((roomStore as any).roomDir(roomId), "room.json");
+  return join(roomDir(roomId), "room.json");
 }
 
 function cursorsPath(roomId: string): string {
-  return join((roomStore as any).roomDir(roomId), "cursors.json");
+  return join(roomDir(roomId), "cursors.json");
 }
 
 function sessionsPath(roomId: string): string {
-  return join((roomStore as any).roomDir(roomId), "sessions.json");
+  return join(roomDir(roomId), "sessions.json");
 }
 
 function eventsDir(roomId: string): string {
-  return join((roomStore as any).roomDir(roomId), "agent-events");
+  return join(roomDir(roomId), "agent-events");
 }
 
 function readJson<T>(path: string, fallback: T): T {
@@ -139,7 +139,7 @@ function normalizeLegacyMember(raw: LegacyMemberConfig | AgentMemberConfig): Age
 }
 
 function loadLegacyMembers(): AgentMemberConfig[] {
-  const roomsDir = "getRoomsDir" in roomStore ? (roomStore as any).getRoomsDir() : null;
+  const roomsDir = getRoomsDir();
   if (!roomsDir) return [];
   const membersPath = join(roomsDir, "..", "members.json");
   const raw = readJson<Array<LegacyMemberConfig | AgentMemberConfig>>(membersPath, []);
@@ -258,7 +258,7 @@ function ensurePersistenceKeys(room: Room): { cursors: number; sessions: number;
 }
 
 export function runRoomMemberMigration(): void {
-  const roomsDir = "getRoomsDir" in roomStore ? (roomStore as any).getRoomsDir() : null;
+  const roomsDir = getRoomsDir();
   if (!roomsDir || !existsSync(roomsDir)) return;
 
   for (const entry of readdirSync(roomsDir)) {

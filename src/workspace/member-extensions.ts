@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { memberExtensionsDir } from "./member-profile.js";
+import { memberExtensionsDir } from "../files/layout.js";
 
 /** Filesystem discovery only: entries are not evidence of successful execution. */
 export interface ExtensionAsset {

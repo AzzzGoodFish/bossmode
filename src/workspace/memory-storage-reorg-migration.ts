@@ -15,7 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
-import { getRoomsDir } from "./room-store.js";
+import { getRoomsDir } from "../files/layout.js";
 
 const MIGRATION_ID = "memory-storage-reorg-v1";
 

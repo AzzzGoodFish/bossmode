@@ -8,6 +8,7 @@ import { membersMigration } from "../../src/data/schema/members.js";
 import { settingsMigration } from "../../src/data/schema/settings.js";
 import { conversationsMigration } from "../../src/data/schema/conversations.js";
 import { executionMigration } from "../../src/data/schema/execution.js";
+import { memberDir, memberProfilePath } from "../../src/files/layout.js";
 import { memberArchivesMigration } from "../../src/data/schema/member-archives.js";
 import { assetsMigration } from "../../src/data/schema/assets.js";
 import { memberSessionsMigration } from "../../src/data/schema/member-sessions.js";
@@ -94,7 +95,7 @@ describe("explicit member authority and birth", () => {
     expect(new SshCredentialsRepository(db).read(member.id)?.publicKey).toMatch(/^ssh-ed25519 /);
     expect(profile.readMemberProfile(member.id).body).toBe(persona);
     expect(profile.formatMemberPromptSegment(profile.readMemberProfile(member.id),member.name)).toBe(`# Persona\n\nI am 言 实, an AI teammate in Bossmode.\n\n${persona.trim()}`);
-    expect(existsSync(join(registry.memberDir(member.id),"member.json"))).toBe(false);
+    expect(existsSync(join(memberDir(member.id),"member.json"))).toBe(false);
     reopen(); expect(registry.getMember(member.id)).toEqual(member);
   });
   it.each(["all"," USER ","SyStEm"])("reserves creation, rename and import names: %s", name => {
@@ -111,8 +112,8 @@ describe("explicit member authority and birth", () => {
     expect(registry.getMember(a.id)).toEqual(a);
     expect(registry.updateMemberIdentity(a.id,{name:"Älice",title:"First"}).updatedAt).toBe(a.updatedAt);
     expect(registry.updateMemberIdentity(a.id,{title:""}).title).toBeUndefined();
-    const before = readFileSync(profile.memberProfilePath(a.id));
-    registry.renameMember(a.id,"新 名"); expect(readFileSync(profile.memberProfilePath(a.id))).toEqual(before);
+    const before = readFileSync(memberProfilePath(a.id));
+    registry.renameMember(a.id,"新 名"); expect(readFileSync(memberProfilePath(a.id))).toEqual(before);
   });
   it("keeps accepted global config and rolls back its stale bookkeeping on SQL failure", () => {
     const m = registry.createMember({name:"Global",model:"p/old",skills:["skill"]});
@@ -186,7 +187,7 @@ describe("durable quiescent archive and recovery", () => {
     expect(s.pending()).toHaveLength(1);
     expect(() => resolveMemberArtifactPath(db,root,m.id,"persona.md")).toThrow("member_archive_pending");
     const second = service(quiesce).archive(m.id,{confirm:true}); expect(second).toBe(first);
-    expect(existsSync(registry.memberDir(m.id))).toBe(true);
+    expect(existsSync(memberDir(m.id))).toBe(true);
     expect(existsSync(join(root,s.pending()[0].archivePath))).toBe(false);
     release(); const result = await first;
     expect(quiesce).toHaveBeenCalledTimes(1);
@@ -203,7 +204,7 @@ describe("durable quiescent archive and recovery", () => {
     conversations.upsertRoom({id:"r",name:"Room",createdAt:1,members:["historical label"],globalMemberIds:[m.id,other.id],
       roomMembers:[historical],promptLeaderMemberId:m.id,promptLeaderGlobalMemberId:m.id});
     const session = "sessions/2026-09-09/main/sdk.jsonl";
-    file(join(registry.memberDir(m.id),session),'{"type":"session","id":"unchanged"}\r\n');
+    file(join(memberDir(m.id),session),'{"type":"session","id":"unchanged"}\r\n');
     new SessionRepository(db).importAssociation({memberId:m.id,referenceKind:"member-relative",createdAt:1,updatedAt:2,
       session:{runtime:"pi-sdk",sessionId:"unchanged",sessionFile:session}});
     const logicalSnapshot = `members/${m.id}/history/persona/hash.md`; file(join(root,logicalSnapshot),"historical E bytes");
@@ -234,7 +235,7 @@ describe("durable quiescent archive and recovery", () => {
   it("quiesce failure leaves assets in place and the persisted admission block survives reopen", async () => {
     const m = registry.createMember({name:"Quiesce"});
     await expect(service(async () => {throw new Error("still running");}).archive(m.id,{confirm:true})).rejects.toThrow("still running");
-    expect(existsSync(registry.memberDir(m.id))).toBe(true);
+    expect(existsSync(memberDir(m.id))).toBe(true);
     reopen(); expect(service().admission(m.id)).toBe("pending");
     await service().recoverPending(); expect(registry.getMember(m.id)).toBeNull();
   });
@@ -242,7 +243,7 @@ describe("durable quiescent archive and recovery", () => {
     const m = registry.createMember({name:"Intent"}); const quiesce = vi.fn(async () => {});
     db.exec("CREATE TRIGGER fail_intent BEFORE INSERT ON member_archive_intents BEGIN SELECT RAISE(ABORT,'intent failure'); END;");
     await expect(service(quiesce).archive(m.id,{confirm:true})).rejects.toThrow("intent failure");
-    expect(quiesce).not.toHaveBeenCalled(); expect(existsSync(registry.memberDir(m.id))).toBe(true);
+    expect(quiesce).not.toHaveBeenCalled(); expect(existsSync(memberDir(m.id))).toBe(true);
     expect(service().admission(m.id)).toBe("active");
   });
   it.each(["rename","sync","SQL"])("recovers after %s failure without claiming success or rewriting retained files", async phase => {
@@ -253,7 +254,7 @@ describe("durable quiescent archive and recovery", () => {
     await expect(service().archive(m.id,{confirm:true})).rejects.toThrow();
     expect(registry.getMember(m.id)).toEqual(m); expect(new MemberArchivesRepository(db).list()).toEqual([]);
     const intent = service().pending()[0];
-    expect(existsSync(registry.memberDir(m.id))).toBe(phase === "rename");
+    expect(existsSync(memberDir(m.id))).toBe(phase === "rename");
     failRename = false; failSyncAfterRename = false;
     if (phase === "SQL") db.exec("DROP TRIGGER fail_archive");
     reopen(); await service().recoverPending();
@@ -264,7 +265,7 @@ describe("durable quiescent archive and recovery", () => {
     const m = registry.createMember({name:"Conflict"});
     await expect(service(async () => {throw new Error("stop");}).archive(m.id,{confirm:true})).rejects.toThrow("stop");
     const intent = service().pending()[0];
-    const dest = join(root,intent.archivePath); const source = registry.memberDir(m.id);
+    const dest = join(root,intent.archivePath); const source = memberDir(m.id);
     if (conflict === "both") file(join(dest,"sentinel"),"do not overwrite");
     if (conflict === "neither") renameSync(source,join(root,"quarantined"));
     if (conflict === "replaced") {renameSync(source,join(root,"quarantined")); mkdirSync(source);}

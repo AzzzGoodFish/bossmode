@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { memberDir } from "../workspace/member-profile.js";
+import { memberDir } from "./layout.js";
 
 /**
  * Member-level session directory (① A2): a member has one session across all

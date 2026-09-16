@@ -16,7 +16,7 @@ import {
 import { SdkExecutionService, type SdkExecutionAttempt } from "../../services/sdk-execution-service.js";
 import { logger } from "../../kernel/logger.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
-import { memberExtensionsDir, memberSkillsDir } from "../../workspace/member-profile.js";
+import { memberExtensionsDir, memberSkillsDir } from "../../files/layout.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, normalizeModelRef, getModelCredentialProfile, resolvePiAgentDir } from "../model-credentials.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";

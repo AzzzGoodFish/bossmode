@@ -11,7 +11,7 @@ vi.mock("../../src/shared/config.js", () => ({
   ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
 }));
 
-vi.mock("../../src/workspace/room-store.js", () => ({
+vi.mock("../../src/files/layout.js", () => ({
   roomDir: (roomId: string) => join(dir, "rooms", roomId),
   getRoomsDir: () => join(dir, "rooms"),
 }));

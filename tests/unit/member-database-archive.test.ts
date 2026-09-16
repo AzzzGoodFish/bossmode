@@ -11,7 +11,7 @@ let root: string;
 beforeEach(() => { fixture = coreFixture(); root = fixture.root; });
 afterEach(() => fixture.close());
 it("archive retains SQL metadata and literal persona bytes", async () => {
-  const { createMember, getMember, memberDir } = await import("../../src/workspace/member-registry.js");
+  const { createMember, getMember } = await import("../../src/workspace/member-registry.js"); const { memberDir } = await import("../../src/files/layout.js");
   const m = createMember({ name: "before", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: ["skill-a"], mcpServers: ["server-a"] });
   const markdown = "---\nname: this is Markdown, not identity\n---\n\n自由正文\n\n";
   writeFileSync(join(memberDir(m.id), "persona.md"), markdown);
@@ -23,7 +23,7 @@ it("archive retains SQL metadata and literal persona bytes", async () => {
   expect(existsSync(join(root, archived, "member.json"))).toBe(false);
 });
 it("recoverPending finishes a pending intent across a short-id migration", async () => {
-  const { createMember, getMember, memberDir } = await import("../../src/workspace/member-registry.js");
+  const { createMember, getMember } = await import("../../src/workspace/member-registry.js"); const { memberDir } = await import("../../src/files/layout.js");
   const m = createMember({ name: "pending-recover", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: [], mcpServers: [] });
   writeFileSync(join(memberDir(m.id), "persona.md"), "p\n");
   // As if an archive began and the process died before the move: intent is pending.

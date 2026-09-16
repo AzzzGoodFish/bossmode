@@ -25,7 +25,7 @@ import {
 } from "../shared/mcp-settings.js";
 import { listMembers } from "./member-registry.js";
 import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "./ssh-keygen.js";
-import { memberDir } from "./member-profile.js";
+import { memberDir } from "../files/layout.js";
 
 export interface MemberAssetsMigrationReport {
   ran: boolean;

@@ -5,6 +5,7 @@ import { conversationsFixture } from "./unit/core-conversations-fixture.js";
 const location = vi.hoisted(() => ({ root: "" }));
 vi.mock("../src/shared/config.js", async original => ({ ...await original<typeof import("../src/shared/config.js")>(), getBossmodeDir: () => location.root }));
 import * as rooms from "../src/workspace/room-store.js";
+import { roomDir } from "../src/files/layout.js";
 import * as messages from "../src/workspace/message-store.js";
 
 let f: ReturnType<typeof conversationsFixture>;
@@ -17,7 +18,7 @@ it("creates and reopens room metadata and document bindings without file authori
   expect(room).toMatchObject({ name: "Product room", members: [], docsPath: "product-room/" });
   expect(room.cwd).toBeUndefined();
   expect(existsSync(join(f.root, "memory/projects/product-room"))).toBe(true);
-  for (const name of ["room.json", "messages.jsonl", "cursors.json"]) expect(existsSync(join(rooms.roomDir(room.id), name))).toBe(false);
+  for (const name of ["room.json", "messages.jsonl", "cursors.json"]) expect(existsSync(join(roomDir(room.id), name))).toBe(false);
   rooms.createRoom("Other", undefined, [], undefined, { docsPath: "bossmode" });
   expect(rooms.listRooms()).toHaveLength(2);
   expect(rooms.updateRoomDocsPath(room.id, "custom/docs")?.docsPath).toBe("custom/docs/");
@@ -92,7 +93,7 @@ it("derives legacy overrides only from the supplied room, never from retired mem
 it("serves message windows after restart and ignores retired JSONL rewrites", () => {
   const room = rooms.createRoom("Messages", undefined, []);
   const records = ["one", "two", "three"].map(content => messages.addMessage(room.id, { sender: "user", content, mentions: [] }));
-  const retired = join(rooms.roomDir(room.id), "messages.jsonl");
+  const retired = join(roomDir(room.id), "messages.jsonl");
   writeFileSync(retired, "not a valid JSONL message\n");
   f.reopen();
   expect(messages.getMessages(room.id, { limit: 2 })).toEqual(records.slice(1));

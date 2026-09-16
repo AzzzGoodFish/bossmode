@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
 import * as roomStore from "./room-store.js";
+import { roomDir } from "../files/layout.js";
 import { createMember, findMemberByName } from "./member-registry.js";
 import { ensureMemorySkeleton, writeMemoryLayer } from "./member-memory-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
@@ -78,8 +79,8 @@ function collectManifest(): Manifest {
   for (const room of rooms) {
     const roomMembers = roomStore.getRoomMembers(room.id);
     for (const rm of roomMembers) {
-      const principlesPath = join(roomStore.roomDir(room.id), "memory", "members", rm.id, "principles.md");
-      const mainlinePath = join(roomStore.roomDir(room.id), "memory", "members", rm.id, "mainline.md");
+      const principlesPath = join(roomDir(room.id), "memory", "members", rm.id, "principles.md");
+      const mainlinePath = join(roomDir(room.id), "memory", "members", rm.id, "mainline.md");
       let principlesMtime = 0;
       if (existsSync(principlesPath)) {
         try {

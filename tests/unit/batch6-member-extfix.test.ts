@@ -23,7 +23,7 @@ afterEach(() => {
 describe("discoverMemberExtensionEntries (qa ①)", () => {
   it("root-level .ts/.js files, subdirectory index.ts, and package.json manifests all become file entries", async () => {
     const { memberDirLoaderAssetPaths, discoverMemberExtensionEntries } = await import("../../src/engine/runtime/pi-sdk.js");
-    const { memberExtensionsDir } = await import("../../src/workspace/member-profile.js");
+    const { memberExtensionsDir } = await import("../../src/files/layout.js");
     const extDir = memberExtensionsDir("mem_a");
     mkdirSync(extDir, { recursive: true });
 

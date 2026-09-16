@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "./skill-store.js";
 import { seedBuiltinAssets } from "./team-updates.js";
 import { buildSkillCatalog, listMemberSkills } from "../engine/skill-catalog.js";
-import { memberSkillsDir } from "../workspace/member-profile.js";
+import { memberSkillsDir } from "../files/layout.js";
 
 const memberId = "impeccable-skill-fixture";
 afterEach(() => { rmSync(memberSkillsDir(memberId), { recursive: true, force: true }); });

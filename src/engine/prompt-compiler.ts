@@ -11,13 +11,15 @@ import { logger } from "../kernel/logger.js";
 import { getBossmodeDir } from "../shared/config.js";
 import {
   formatMemberPromptSegment,
+  readMemberProfile,
+} from "../workspace/member-profile.js";
+import {
   memberArchiveDir,
   memberDir,
   memberExtensionsDir,
   memberProfilePath,
   memberSkillsDir,
-  readMemberProfile,
-} from "../workspace/member-profile.js";
+} from "../files/layout.js";
 import { buildSkillCatalog } from "./skill-catalog.js";
 
 export type PromptSectionId = "persona" | "environment" | "communication" | "memory" | "workspace" | "assets";

@@ -13,7 +13,7 @@ import {
   reloadMemberResources, reloadMemberSession, resolveSkills,
 } from "../../src/engine/agent-manager.js";
 import { getMember, updateMember } from "../../src/workspace/member-registry.js";
-import { memberProfilePath } from "../../src/workspace/member-profile.js";
+import { memberProfilePath } from "../../src/files/layout.js";
 import { getRuntimeStateEntry } from "../../src/workspace/runtime-state.js";
 import { getCurrentSession } from "../../src/workspace/session-store.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
