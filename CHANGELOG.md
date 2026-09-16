@@ -4,6 +4,14 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.26.0] — 2026-09-16
+
+### Release
+- Promotes the accepted 0.26.0-rc.1 runtime to the stable 0.26.0 release; no additional runtime, dependency or storage-format changes.
+- Members become the unit of session and runtime: one session and one live runtime per member, replies land in the chat that produced them, and member-to-member private chats ship with a read-only view for the user.
+- Short member and room ids (`mem_<id>` / `rm_<id>`) apply to new members and rooms, and existing installations migrate automatically during ordinary startup — journaled, fail-safe, with an interrupted run resuming on the next start.
+- The member prompt (v2), the rebuilt tool family, the `terminal_*` tool names, room descriptions and the pi SDK 0.85.1 upgrade ship as described under 0.26.0-rc.1.
+
 ## [0.26.0-rc.1] — 2026-09-16
 
 ### Changed
