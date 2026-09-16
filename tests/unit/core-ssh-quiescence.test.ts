@@ -31,6 +31,10 @@ afterEach(async()=>{
   await Promise.all([dropSftpConnectionsForMember(),closeAllShellsForMember()]);fixture.close();openRuntimeAdmission();
 }, 30000);
 it("concurrent first SFTP calls share one owned connection and cleanup awaits its close event",async()=>{
+  // C-type flake (qa probe 2026-09-16): with two concurrent first dynamic imports,
+  // vi.mock("ssh2") intermittently failed to intercept one of them and real ssh2
+  // resolved test.invalid. Warm the mocked module once, sequentially, first.
+  await import("ssh2");
   const results=await Promise.all([workspaceReadTool("mem_ssh",{path:"a",workspace:"remote"}),workspaceReadTool("mem_ssh",{path:"b",workspace:"remote"})]);
   expect(control.connections).toHaveLength(1);expect(results[0].content[0]).toMatchObject({text:"remote fixture"});
   control.delayClose=true;let finished=false;const closing=dropSftpConnectionsForMember("mem_ssh").then(()=>finished=true);
