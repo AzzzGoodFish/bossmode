@@ -447,7 +447,11 @@ export async function execInShell(args: {
 
   const exec = {
     id: `e${++shell.execCounter}`,
-    lineStart: shell.lineCount,
+    // Window start: the output's first fragment merges into the shell's last
+    // buffered line (the trailing line left by the previous command), so the
+    // window must start there. Starting at lineCount made read-by-exec skip
+    // the command's own output (found by the smoke net, 2026-09-16).
+    lineStart: shell.lines.length > 0 ? shell.lineCount - 1 : shell.lineCount,
     lineEnd: null,
     exitCode: null,
     output: "",

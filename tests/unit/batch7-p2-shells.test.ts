@@ -220,6 +220,57 @@ false`;
     }
   }, 15000);
 
+  it("read by exec returns the command's own lines after earlier output (window regression)", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.terminalId;
+
+    // Let the shell's own startup output settle: the exec is then submitted
+    // while the shell already holds a trailing line — the real-world condition
+    // under which read-by-exec used to skip the command's own output.
+    await new Promise((r) => setTimeout(r, 900));
+
+    const first = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo ONE", blockUntilMs: 8000 });
+    expect(first.ok && first.status).toBe("done");
+    const w1 = sm.readShell({ memberId: "mem_sh", shell: s, exec: first.ok ? first.exec : "e1" });
+    expect(w1.ok && w1.status === "done").toBe(true);
+    if (w1.ok && w1.status === "done") {
+      const text = w1.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("ONE");
+    }
+
+    const second = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "echo TWO", blockUntilMs: 8000 });
+    expect(second.ok && second.status).toBe("done");
+    const w2 = sm.readShell({ memberId: "mem_sh", shell: s, exec: second.ok ? second.exec : "e2" });
+    expect(w2.ok && w2.status === "done").toBe(true);
+    if (w2.ok && w2.status === "done") {
+      const text = w2.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("TWO");
+      expect(text).not.toContain("ONE");
+    }
+  }, 15000);
+
+  it("read by exec collects a backgrounded command's output after earlier shell output", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) return;
+    const s = created.terminalId;
+    await new Promise((r) => setTimeout(r, 900));
+
+    const bg = await sm.execInShell({ memberId: "mem_sh", shell: s, command: "sleep 1; echo LATE-BG", blockUntilMs: 0 });
+    expect(bg.ok && bg.status).toBe("running");
+    const execId = bg.ok ? bg.exec : "e1";
+    const done = await sm.waitShell({ memberId: "mem_sh", shell: s, exec: execId, blockUntilMs: 5000 });
+    expect(done.ok && done.status).toBe("done");
+    const read = sm.readShell({ memberId: "mem_sh", shell: s, exec: execId });
+    expect(read.ok && read.status === "done").toBe(true);
+    if (read.ok && read.status === "done") {
+      const text = read.lines.map((l) => l.text).join("\n");
+      expect(text).toContain("LATE-BG");
+    }
+  }, 15000);
+
   it("busy shell rejects a new command: no exec allocated, nothing queued, read/wait still work (fish 2026-09-05)", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });
