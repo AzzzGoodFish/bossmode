@@ -3,7 +3,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { readStats } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/server/ws.js", () => ({
+vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 

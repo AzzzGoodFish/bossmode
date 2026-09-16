@@ -4,7 +4,7 @@ import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDeliver
 import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../../data/repositories/event-repository.js";
 import { getDatabase } from "../../data/database.js";
 import { logger } from "../../kernel/logger.js";
-import { broadcastToAgentSubscribers } from "../../server/ws.js";
+import { broadcastToAgentSubscribers } from "../../communication/ws.js";
 import { refreshContextUsage } from "../orchestrator/agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../../chat/room-store.js";

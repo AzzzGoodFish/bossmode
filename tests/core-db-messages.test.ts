@@ -14,7 +14,7 @@ import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentE
 import type { RoomMessage } from "../src/kernel/types.js";
 
 const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
-vi.mock("../src/server/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
+vi.mock("../src/communication/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
 vi.mock("../src/agent/orchestrator/agent-manager.js",() => ({refreshContextUsage:vi.fn()}));
 vi.mock("../src/agent/events/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity:vi.fn()}));
 vi.mock("../src/chat/room-store.js",() => ({getRoom:vi.fn()}));

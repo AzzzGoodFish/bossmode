@@ -23,8 +23,8 @@ function dispatch(message: string, options?: PromptOptions) {
 
 const { broadcastToRoom } = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
 
-vi.mock("../../src/server/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/server/ws.js")>();
+vi.mock("../../src/communication/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
   return {
     ...actual,
     broadcastToRoom: (...args: unknown[]) => broadcastToRoom(...args),

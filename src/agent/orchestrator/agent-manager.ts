@@ -25,7 +25,7 @@ import { mainSessionDirectory } from "../../files/member-session-paths.js";
 import * as attachmentStore from "../../files/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/message-bus.js";
 import { initRouter } from "../../chat/router.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../../server/ws.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../../communication/ws.js";
 import { compileMemberPrompt } from "../prompt/prompt-compiler.js";
 import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversation-ref.js";
 import { listRoomsForMember } from "../../member/scope-access.js";

@@ -11,7 +11,7 @@ vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => process.env.BOSSMODE_DIR!,
 }));
 
-vi.mock("../../src/server/ws.js", () => ({
+vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
 }));
 
 import { handleAgentEvent, loadEventsFromDisk, type AgentHistoryEvent } from "../../src/agent/events/event-handler.js";
-import { broadcastToAgentSubscribers } from "../../src/server/ws.js";
+import { broadcastToAgentSubscribers } from "../../src/communication/ws.js";
 
 describe("event-handler status authority", () => {
   beforeEach(() => {
