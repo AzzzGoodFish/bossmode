@@ -21,11 +21,12 @@ function setup(files:Record<string,unknown>){
  return {ctx,entries};
 }
 const config={auth:{username:"owner",passwordHash:"unchanged-hash"},defaults:{host:"127.0.0.1",port:12521},apiKeys:{provider:"private-key"},sessionResume:false};
-it("imports only the snapshotted configuration and explicitly converts old resume settings",()=>{
+it("imports only the snapshotted configuration and ignores the retired resume setting",()=>{
  const {ctx,entries}=setup({"config.json":config});writeFileSync(join(ctx.root,"config.json"),"poison live source");
  expect([...importLegacySettings(ctx,entries,[])]).toEqual(["config.json"]);
- expect(new SettingsRepository(ctx.db).read()).toMatchObject({auth:config.auth,defaults:config.defaults,apiKeys:config.apiKeys,runtime:{sessionResume:false}});
+ expect(new SettingsRepository(ctx.db).read()).toMatchObject({auth:config.auth,defaults:config.defaults,apiKeys:config.apiKeys});
  expect(new SettingsRepository(ctx.db).read()).not.toHaveProperty("sessionResume");
+ expect(new SettingsRepository(ctx.db).read()).not.toHaveProperty("runtime");
 });
 it("creates empty setup configuration for a genuinely absent source",()=>{
  const {ctx,entries}=setup({});expect(importLegacySettings(ctx,entries,[]).size).toBe(0);

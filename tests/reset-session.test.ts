@@ -59,14 +59,6 @@ afterEach(async () => {
 });
 
 describe("resetAgentSession", () => {
-  it.each([true, false])("passes resumeSession only when enabled=%s", async enabled => {
-    writeConfig({ ...getDefaultConfig(), runtime: { sessionResume: enabled } });
-    const create = vi.spyOn(runtime, "createAgent");
-    await activateAgent(roomId, memberId);
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create.mock.calls[0][0].resumeSession).toEqual(enabled ? saved : undefined);
-  });
-
   it("resumes the member's one session from any chat", async () => {
     const create = vi.spyOn(runtime, "createAgent");
     await activateAgent(roomId, memberId);

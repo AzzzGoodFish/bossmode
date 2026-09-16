@@ -174,17 +174,6 @@ it("uses UTF-16 budgets, exact limits, reason validation and unchanged over-budg
   expect(readPrinciples(room, "room").revision).toBe(2);
 });
 
-it("honors configured budgets without changing rejected content or revision", () => {
-  new SettingsRepository(db).importConfig({...getDefaultConfig(), memoryBudgets: {persona:2,mainline:3,memberPrinciples:4,roomPrinciples:5}});
-  write("config.json", JSON.stringify({ memoryBudgets: { persona: 9999 } })); // retired file is inert
-  writeMemoryLayer(member, "persona", "😀", user);
-  expect(() => writeMemoryLayer(member, "persona", "😀x", user)).toThrow(AssetBudgetError);
-  expect(() => writeMainline({ roomId: room, memberId: member, content: "1234", actor, reason: "r" })).toThrow(AssetBudgetError);
-  expect(() => writePrinciples({ roomId: room, scope: "member", memberId: member, content: "12345", actor, reason: "r" })).toThrow(AssetBudgetError);
-  expect(() => writePrinciples({ roomId: room, scope: "room", content: "123456", actor, reason: "r" })).toThrow(AssetBudgetError);
-  expect(readMemoryLayerInfo(member, "persona").revision).toBe(1);
-});
-
 it("rejects ownership collisions and absent shared scope references", () => {
   writeMemoryLayer(member, "principles", "first", actor, { scopeId: `dm:${member}` });
   expect(() => readMemoryLayerInfo(member, "principles", "dm:other")).toThrow("ownership mismatch");

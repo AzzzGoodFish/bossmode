@@ -26,7 +26,7 @@ describe("settings and auth DB authority",()=>{
     mkdirSync(dirname(getConfigPath()),{recursive:true});
     writeFileSync(getConfigPath(),'{"legacy-secret":"not-authority"}');
     expect(configExists()).toBe(false); expect(()=>readConfig()).toThrow("not initialized");
-    const config={...getDefaultConfig(),auth:{username:"fish",passwordHash:hashPassword("password")},apiKeys:{provider:"secret"},memoryBudgets:{persona:4000},catalog:{autoRefreshIntervalDays:0}};
+    const config={...getDefaultConfig(),auth:{username:"fish",passwordHash:hashPassword("password")},apiKeys:{provider:"secret"},catalog:{autoRefreshIntervalDays:0}};
     writeConfig(config); expect(readConfig()).toEqual(config);
     expect(readFileSync(getConfigPath(),"utf8")).toContain("not-authority");
     expect(db.get<any>("SELECT host,port FROM app_settings")).toEqual({host:"127.0.0.1",port:8080});
