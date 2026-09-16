@@ -45,18 +45,22 @@ describe("room-member-resolver — no implicit model default", () => {
   it("retains imported legacy model history without making an unlinked snapshot executable", async () => {
     const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
-    // Retained historical converter runs on files; resolution sees only the explicitly imported SQL DTO.
-    const { runRoomMemberMigration } = await import("../../src/chat/migrations/room-member-migration.js");
-    const path = join(dir,"rooms/legacy-room/room.json");
+    // The retired historical converter's SQL DTO, constructed directly: a retained
+    // legacy model history (never executable) that resolution must not activate.
+    const room = {
+      id: "legacy-room", name: "Legacy", members: ["developer"], createdAt: 1,
+      roomMembers: [{
+        id: "legacy-developer", roomId: "legacy-room", name: "developer",
+        sourceAgent: "developer", sourceMemberId: "legacy-developer",
+        config: { model: "claude-sonnet-4-6", thinkingLevel: "off" },
+        createdAt: 1, updatedAt: 1,
+        migratedFrom: { memberName: "developer", memberId: "legacy-developer" },
+      }],
+    };
+    new ConversationsRepository(fixture.db).upsertRoom(room as any);
     mkdirSync(join(dir,"rooms/legacy-room"),{recursive:true});
-    writeFileSync(path,JSON.stringify({id:"legacy-room",name:"Legacy",members:["developer"],createdAt:1}));
-    writeFileSync(join(dir,"members.json"),JSON.stringify([{id:"legacy-developer",name:"developer",agent:"developer",runtime:"pi-cli",model:"claude-sonnet-4-6",thinkingLevel:"off"}]));
-    runRoomMemberMigration();
-    const room = JSON.parse(readFileSync(path,"utf8"));
-    expect(room.roomMembers[0].config.model).toBe("claude-sonnet-4-6");
-    new ConversationsRepository(fixture.db).upsertRoom(room);
     writeFileSync(join(dir,"members.json"),"invalid retired data");
-    writeFileSync(path,"invalid retired room");
+    writeFileSync(join(dir,"rooms/legacy-room/room.json"),"invalid retired room");
 
     const resolved = resolveRoomMember(room.id, "developer");
     expect(roomStore.getRoomMemberOverride(room.id, "developer")).toMatchObject({ model: "claude-sonnet-4-6" });

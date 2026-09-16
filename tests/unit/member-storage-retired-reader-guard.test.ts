@@ -10,7 +10,7 @@ function sources(dir: string): string[] {
 }
 
 describe("retired member storage boundary", () => {
-  it("has no live member-store module/import and only the historical room converter can read members.json", () => {
+  it("has no live member-store module/import and no remaining members.json readers", () => {
     expect(existsSync("src/workforce/member-store.ts")).toBe(false);
     const readers: string[] = [];
     for (const path of sources("src")) {
@@ -18,6 +18,6 @@ describe("retired member storage boundary", () => {
       expect(text, path).not.toMatch(/(?:from\s*|import\s*\()["'][^"']*member-store(?:\.js)?["']/);
       if (/["'`]members\.json["'`]/.test(text)) readers.push(relative("src", path));
     }
-    expect(readers.sort()).toEqual(["chat/migrations/room-member-migration.ts"]);
+    expect(readers.sort()).toEqual([]);
   });
 });

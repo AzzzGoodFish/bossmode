@@ -1,7 +1,7 @@
 /**
  * Batch 7 P3 (spec §5): rooms unbind cwd — attachments live in the room data
- * dir (startup migration moves legacy dirs), create paths stop requiring cwd,
- * and path policy covers member homes + workspace roots.
+ * dir, create paths stop requiring cwd, and path policy covers member homes +
+ * workspace roots.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
@@ -22,35 +22,6 @@ beforeEach(async () => {
 afterEach(() => {
   fixture.close();
   rmSync(projDir, { recursive: true, force: true });
-});
-
-describe("room attachments migration", () => {
-  it("moves legacy room.cwd/.bossmode-attachments into rooms/<id>/attachments, idempotently", async () => {
-    const legacyRoot = projDir;
-    mkdirSync(join(legacyRoot, ".bossmode-attachments"), { recursive: true });
-    writeFileSync(join(legacyRoot, ".bossmode-attachments", "img.png"), "png", "utf-8");
-    // Imported pre-batch-7 room metadata retains cwd in SQL.
-    const roomId = "legacy-room-1";
-    mkdirSync(join(dir, "rooms", roomId), { recursive: true });
-    const { ConversationsRepository } = await import("../../src/data/repositories/conversations.js");
-    new ConversationsRepository(fixture.db).upsertRoom({
-      id: roomId, name: "proj-room", cwd: legacyRoot, members: [], roomMembers: [], createdAt: 1,
-    });
-
-    const mig = await import("../../src/chat/migrations/room-attachments-migration.js");
-    expect(mig.needsRoomAttachmentsMigration()).toBe(true);
-    const report = mig.runRoomAttachmentsMigration();
-    expect(report.movedRooms).toContain(roomId);
-    const target = join(dir, "rooms", roomId, "attachments", "img.png");
-    expect(existsSync(target)).toBe(true);
-    expect(existsSync(join(legacyRoot, ".bossmode-attachments"))).toBe(false);
-
-    // idempotent second run: nothing left to move
-    expect(mig.needsRoomAttachmentsMigration()).toBe(false);
-    const again = mig.runRoomAttachmentsMigration();
-    expect(again.movedRooms).toHaveLength(0);
-    expect(readFileSync(target, "utf-8")).toBe("png");
-  });
 });
 
 describe("rooms without cwd", () => {
