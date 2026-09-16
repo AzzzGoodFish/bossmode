@@ -4,6 +4,12 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.26.1] — 2026-09-16
+
+### Fixed
+- Member-to-member private chats no longer lock members out of their tools: while a member's current chat is the pair chat (`mm:` scope), the tool dispatcher's scope pre-check accepts the scope instead of denying every call, so chat, profile and gateway tools work normally inside the pair chat.
+- Renaming a member no longer breaks a member whose runtime was created inside a pair chat: the profile refresh handles `mm:` scopes without a null dereference, so the next message batch runs instead of failing with `Cannot read properties of null` in all chats, including rooms and DMs.
+
 ## [0.26.0] — 2026-09-16
 
 ### Release
