@@ -491,9 +491,13 @@ function mapMemberValue(value: string, mapping: ShortIdMapping): string {
 }
 
 function containsOldId(value: string, mapping: ShortIdMapping): boolean {
-  for (const old of mapping.members.keys()) if (value.includes(old)) return true;
+  // A generated new id can itself contain a legacy id as a substring when the legacy
+  // id is short (e.g. `mem_a` inside `mem_agx4g1idiv`) — that is the replacement, not
+  // a residue. Mask new-shaped tokens before the substring checks.
+  const masked = value.replace(/mem_[0-9a-z]{10}/g, "\u0000").replace(/rm_[0-9a-z]{10}/g, "\u0000");
+  for (const old of mapping.members.keys()) if (masked.includes(old)) return true;
   for (const old of mapping.rooms.keys()) {
-    if (value.includes(`rooms/${old}`) || value.includes(`room-${old}`) || value.includes(`room_${old}`)) return true;
+    if (masked.includes(`rooms/${old}`) || masked.includes(`room-${old}`) || masked.includes(`room_${old}`)) return true;
   }
   return false;
 }
