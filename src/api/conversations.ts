@@ -9,7 +9,7 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import * as roomStore from "../chat/room-store.js";
 import { findMemberByName, getMember } from "../member/member-registry.js";
-import { toolSurfaceForScope } from "../engine/scope-tool-surface.js";
+import { toolSurfaceForScope } from "../agent/tools/scope-tool-surface.js";
 import {
   abortAgent,
   getAgentContextUsage,
@@ -19,8 +19,8 @@ import {
   resetAgentSession,
   compactMember,
   getMemberBusyState,
-} from "../engine/agent-manager.js";
-import { loadEventsPaginated } from "../engine/event-handler.js";
+} from "../agent/orchestrator/agent-manager.js";
+import { loadEventsPaginated } from "../agent/events/event-handler.js";
 import { logger } from "../kernel/logger.js";
 
 function decodeScope(raw: string): ScopeId | null {

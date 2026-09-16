@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, SessionManager, SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { BossmodeResourceLoader, PiSdkAgentHandle, resolvePiSystemPromptSources } from "../../src/engine/runtime/pi-sdk.js";
+import { BossmodeResourceLoader, PiSdkAgentHandle, resolvePiSystemPromptSources } from "../../src/agent/runtime/pi-sdk.js";
 
 // Real installed SDK, local in-memory session only. No provider calls or credentials.
 describe("real SDK prompt refresh", () => {

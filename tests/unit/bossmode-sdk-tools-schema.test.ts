@@ -6,12 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 // caught history reads / list_tasks swallowing ok:false). Batch 3 keeps
 // the rule for chat_send / chat_read / chat_search / chat_list and the
 // bossmode gateway `call` path.
-vi.mock("../../src/engine/tools.js", () => ({
+vi.mock("../../src/agent/tools/tools.js", () => ({
   handleToolCallback: vi.fn(async () => ({ ok: false, error: "boom: explicit error" })),
 }));
 
-import { handleToolCallback } from "../../src/engine/tools.js";
-import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
+import { handleToolCallback } from "../../src/agent/tools/tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
 
 // Defensive contract: every custom tool must serialize its JSON Schema with an
 // explicit `required` array. TypeBox omits it when all properties are optional

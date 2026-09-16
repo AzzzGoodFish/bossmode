@@ -27,7 +27,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
  * - room / DM instances all key by their real scopeId
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentHandle, AgentStreamEvent } from "../../src/engine/runtime/types.js";
+import type { AgentHandle, AgentStreamEvent } from "../../src/agent/runtime/types.js";
 
 const handles: TestHandle[] = [];
 const { loggerError, loggerWarn, loggerInfo } = vi.hoisted(() => ({ loggerError: vi.fn(), loggerWarn: vi.fn(), loggerInfo: vi.fn() }));
@@ -162,7 +162,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const handle of handles) { handle.holdPrompt = false; handle.resolvePendingPrompt(); handle.resolvePendingCompact(); }
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();
@@ -172,13 +172,13 @@ describe("manual compaction conversation action", () => {
   beforeEach(async () => {
     handles.splice(0);
     vi.clearAllMocks();
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
     manager.initAgentManager(registry as any);
   });
 
   it("compacts an idle instance via its real scopeId and settles the lifecycle", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -190,7 +190,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("no live instance → builds the session for a configured member; unresolvable member fails honestly", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
 
     // The room /compact command can precede activation — the session is built
     // (never prompted), then compacted.
@@ -204,7 +204,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("busy is marked BEFORE the first await: a message during a held compact queues and never cancels", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdCompact = true;
@@ -230,7 +230,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("working turn settles first: abort + waitForIdle happen BEFORE compact starts", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdPrompt = true;
@@ -261,7 +261,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("Stop in the gap (old prompt settled, compact not started) cancels the request — no compact after Stop", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdPrompt = true;
@@ -291,7 +291,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("the member's single runtime serves the DM compaction too (① B1)", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const handle = handles[0];
 

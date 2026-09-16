@@ -1,7 +1,7 @@
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { createMemberWithPersona } from "../../src/member/member-registry.js";
-import { updateProfileForMember } from "../../src/engine/member-profile-update.js";
+import { updateProfileForMember } from "../../src/member/member-profile-update.js";
 import { createRoom } from "../../src/chat/room-store.js";
 import { appendMessage, readMessages } from "../../src/data/repositories/message-repository.js";
 import { getDatabase } from "../../src/data/database.js";

@@ -11,7 +11,7 @@ import {
   activateDmMember, activateAgent, buildMemberAgentSession,
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
   reloadMemberResources, reloadMemberSession, resolveSkills,
-} from "../../src/engine/agent-manager.js";
+} from "../../src/agent/orchestrator/agent-manager.js";
 import { getMember, updateMember } from "../../src/member/member-registry.js";
 import { memberProfilePath } from "../../src/files/layout.js";
 import { getRuntimeStateEntry } from "../../src/member/runtime-state.js";

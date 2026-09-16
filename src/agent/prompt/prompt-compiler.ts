@@ -7,20 +7,20 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { logger } from "../kernel/logger.js";
-import { getBossmodeDir } from "../config/config.js";
+import { logger } from "../../kernel/logger.js";
+import { getBossmodeDir } from "../../config/config.js";
 import {
   formatMemberPromptSegment,
   readMemberProfile,
-} from "../member/member-profile.js";
+} from "../../member/member-profile.js";
 import {
   memberArchiveDir,
   memberDir,
   memberExtensionsDir,
   memberProfilePath,
   memberSkillsDir,
-} from "../files/layout.js";
-import { buildSkillCatalog } from "./skill-catalog.js";
+} from "../../files/layout.js";
+import { buildSkillCatalog } from "../../member/skill-catalog.js";
 
 export type PromptSectionId = "persona" | "environment" | "communication" | "memory" | "workspace" | "assets";
 

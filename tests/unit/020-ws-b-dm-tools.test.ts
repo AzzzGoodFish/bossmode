@@ -37,7 +37,7 @@ describe("batch 3 gateway tools", () => {
     const reg = await import("../../src/member/member-registry.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", title: "Product lead" });
     reg.createMember({ name: "developer", agentTemplate: "developer" });
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const result = await handleToolCallback("member_list", `dm:${pm.id}`, "pm", {}, { memberId: pm.id }) as any;
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
@@ -51,7 +51,7 @@ describe("batch 3 gateway tools", () => {
     const reg = await import("../../src/member/member-registry.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 
     const result = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {
       name: "Project X",
@@ -88,7 +88,7 @@ describe("batch 3 gateway tools", () => {
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const extra = reg.createMember({ name: "extra", agentTemplate: "general" });
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 
     const created = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {
       name: "R1",
@@ -108,7 +108,7 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("tool assembly is uniform: hot chat tools + gateway; wait and legacy names never registered", async () => {
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
     for (const scope of [
       { memberId: "mem_schema_fixture", roomId: "", scopeKind: "dm" as const },
       { memberId: "mem_schema_fixture", roomId: "r1", scopeKind: "room" as const },

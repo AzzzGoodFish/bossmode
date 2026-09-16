@@ -19,11 +19,11 @@ const agentManagerMocks = vi.hoisted(() => ({
   refreshContextUsage: vi.fn(),
 }));
 
-vi.mock("../../src/engine/agent-manager.js", () => ({
+vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
   refreshContextUsage: agentManagerMocks.refreshContextUsage,
 }));
 
-import { handleAgentEvent, loadEventsFromDisk, type AgentHistoryEvent } from "../../src/engine/event-handler.js";
+import { handleAgentEvent, loadEventsFromDisk, type AgentHistoryEvent } from "../../src/agent/events/event-handler.js";
 import { broadcastToAgentSubscribers } from "../../src/communication/ws.js";
 
 describe("event-handler status authority", () => {

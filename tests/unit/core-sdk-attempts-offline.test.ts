@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { PiSdkRuntime } from "../../src/engine/runtime/pi-sdk.js";
-import type { RuntimePromptDispatch } from "../../src/engine/runtime/types.js";
+import { PiSdkRuntime } from "../../src/agent/runtime/pi-sdk.js";
+import type { RuntimePromptDispatch } from "../../src/agent/runtime/types.js";
 
 // Real installed SDK, real SQL, and an explicitly injected in-process model runtime.
 // No private SDK fields, provider/account access, sockets, or hand-written SDK history.
@@ -17,8 +17,8 @@ vi.mock("../../src/shared/mcp-settings.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "unused-mcp.json"), serverNames: [], dispose() {} }),
 }));
-vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
-vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => ({
+vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
+vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => ({
   name: "pi-mcp-adapter", factory: (pi: any) => {
     mock.onLoad();
     pi.registerFlag("mcp-config", { description: "Unused offline fixture", type: "string" });
@@ -34,7 +34,7 @@ vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   exportPiConfigForMember: () => ({ agentDir: mock.root, profile: { id: "offline", providerSlug: "offline", authType: "api-key" } }),
   createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {},
 }));
-vi.mock("../../src/engine/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
+vi.mock("../../src/agent/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
   attach() {} bind(model: unknown) { return model; } followSession() {}
 } }));
 let fixture: ReturnType<typeof coreFixture>;

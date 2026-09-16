@@ -71,7 +71,7 @@ it("capture failure rolls back message, sequence and outbox with no callback",as
 });
 
 it("a member chat call cannot post into another member's DM",async()=>{
-  const {handleToolCallback}=await import("../../src/engine/tools.js");
+  const {handleToolCallback}=await import("../../src/agent/tools/tools.js");
   const denied=await handleToolCallback("chat","dm:mem_b","Alpha",{message:"wrong owner"},{memberId:"mem_a"});
   expect(denied).toMatchObject({ok:false,code:"scope_access_denied"});
   expect(readMessages("dm:mem_b")).toEqual([]);

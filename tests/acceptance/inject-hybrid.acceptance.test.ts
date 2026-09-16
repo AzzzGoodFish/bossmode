@@ -61,7 +61,7 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
     expect(prompts[0]).toContain("@pm status?");
 
     // Read-to-clear: member queries the backlog (as its tool would)
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const res = await handleToolCallback("chat_read", room.id, "pm", { from_seq: 0, limit: 50 });
     expect(Array.isArray(res)).toBe(true);
     const roomStore = await import("../../src/chat/room-store.js");

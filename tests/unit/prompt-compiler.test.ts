@@ -58,7 +58,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
       "utf-8",
     );
 
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     const prompt = compiled.fullPrompt;
 
@@ -90,7 +90,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   });
 
   it("birth state: no persona.md → identity only; platform guide present; no archive line", async () => {
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     expect(compiled.fullPrompt).toContain("I am qa, an AI teammate in Bossmode.");
     // Platform bossmode-guide is always catalogued; member skills/ may still be empty of private skills.
@@ -100,7 +100,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   });
 
   it("description joins the identity sentence; an empty description is omitted", async () => {
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const withDescription = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa", description: "Tester of prompts" });
     expect(withDescription.fullPrompt).toContain("I am qa (Tester of prompts), an AI teammate in Bossmode.");
     const without = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
@@ -111,7 +111,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   it("persona is literal Markdown; identity comes only from the current member name", async () => {
     const raw = "---\nname: DisplayQA\ntitle: Tester\ndescription: finds bugs\n---\n\nBody only.\n";
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), raw, "utf-8");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     const section = compiled.sections.find((s) => s.id === "persona")!.content;
     expect(section).toBe(`# Persona\n\nI am qa, an AI teammate in Bossmode.\n\n${raw.trim()}`);
@@ -127,7 +127,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   ])("normalizes only the prompt boundary (%j)", async (raw, body) => {
     const path = join(tmpDir, "members", "mem_qa", "persona.md");
     writeFileSync(path, raw, "utf-8");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const { readMemberProfile } = await import("../../src/member/member-profile.js");
     const expected = `# Persona\n\nI am qa, an AI teammate in Bossmode.${body ? `\n\n${body}` : ""}`;
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
@@ -141,7 +141,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   it("marks profileOverBudget when persona.md exceeds 4000 chars without truncating", async () => {
     const body = "x".repeat(4500);
     writeFileSync(join(tmpDir, "members", "mem_qa", "persona.md"), `---\nname: qa\n---\n\n${body}\n`, "utf-8");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     expect(compiled.profileOverBudget).toBe(true);
     expect(compiled.fullPrompt).toContain("x".repeat(4500));
@@ -150,7 +150,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   it("shows the archive line only when the archive is non-empty", async () => {
     mkdirSync(join(tmpDir, "members", "mem_qa", "archive"), { recursive: true });
     writeFileSync(join(tmpDir, "members", "mem_qa", "archive", "old.md"), "legacy", "utf-8");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const withArch = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     expect(withArch.fullPrompt).toContain("history migrated from the old system");
     expect(withArch.fullPrompt).toContain(join(tmpDir, "members", "mem_qa", "archive"));

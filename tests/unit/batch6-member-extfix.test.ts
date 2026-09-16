@@ -22,7 +22,7 @@ afterEach(() => {
 
 describe("discoverMemberExtensionEntries (qa ①)", () => {
   it("root-level .ts/.js files, subdirectory index.ts, and package.json manifests all become file entries", async () => {
-    const { memberDirLoaderAssetPaths, discoverMemberExtensionEntries } = await import("../../src/engine/runtime/pi-sdk.js");
+    const { memberDirLoaderAssetPaths, discoverMemberExtensionEntries } = await import("../../src/agent/runtime/pi-sdk.js");
     const { memberExtensionsDir } = await import("../../src/files/layout.js");
     const extDir = memberExtensionsDir("mem_a");
     mkdirSync(extDir, { recursive: true });
@@ -55,7 +55,7 @@ describe("discoverMemberExtensionEntries (qa ①)", () => {
   });
 
   it("absent dir → empty; loader never receives the bare directory path", async () => {
-    const { memberDirLoaderAssetPaths } = await import("../../src/engine/runtime/pi-sdk.js");
+    const { memberDirLoaderAssetPaths } = await import("../../src/agent/runtime/pi-sdk.js");
     const assets = memberDirLoaderAssetPaths("mem_none");
     expect(assets.extensions).toEqual([]);
     expect(assets.skills).toEqual([]);

@@ -2,9 +2,9 @@ import { expect, it, vi } from "vitest";
 import { existsSync,mkdirSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTestServer,closeTestServer,createMockRoom,loginAndGetToken,jsonRequest,setupTestWorkspace,getTestBossmodeDir } from "../helpers/test-server.js";
-import { buildMemberAgentSession,getRegistry,shutdownAll,destroyInstance,resetAgentSession } from "../../src/engine/agent-manager.js";
+import { buildMemberAgentSession,getRegistry,shutdownAll,destroyInstance,resetAgentSession } from "../../src/agent/orchestrator/agent-manager.js";
 import { getDatabase } from "../../src/data/database.js";
-import { createShell } from "../../src/engine/shell-manager.js";
+import { createShell } from "../../src/agent/terminal/shell-manager.js";
 setupTestWorkspace();
 
 it("DELETE closes admission before awaiting a pending builder and archives only after its handle is released", async()=>{
@@ -108,7 +108,7 @@ it("shutdown waits for the application prompt continuation beyond a runtime's id
     mock.setMockPromptFn(vi.fn(async()=>{entered=true;await gate;}));
     const {addMessage}=await import("../../src/chat/message-store.js");
     addMessage(room.id,{sender:"user",content:"finish this work",mentions:[],mentionMemberIds:[id]});
-    const {activateAgent}=await import("../../src/engine/agent-manager.js");const activation=activateAgent(room.id,id);
+    const {activateAgent}=await import("../../src/agent/orchestrator/agent-manager.js");const activation=activateAgent(room.id,id);
     await vi.waitFor(()=>expect(entered).toBe(true));let finished=false;
     const stopping=shutdownAll().then(()=>finished=true);
     await new Promise(resolve=>setTimeout(resolve,20));expect(finished).toBe(false);

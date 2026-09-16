@@ -1,6 +1,6 @@
 // System Prompt five-layer assembly — pure functions, zero side effects
-import { logger } from "../kernel/logger.js";
-import type { AgentDefinition, KnowledgeEntry, KnowledgeTreeNode } from "../kernel/types.js";
+import { logger } from "../../kernel/logger.js";
+import type { AgentDefinition, KnowledgeEntry, KnowledgeTreeNode } from "../../kernel/types.js";
 
 /** Result of prompt assembly — split for runtime injection strategy */
 export interface AssembledPrompt {

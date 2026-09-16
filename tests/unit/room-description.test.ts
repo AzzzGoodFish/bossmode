@@ -61,7 +61,7 @@ describe("room description (⑤ A)", () => {
   it("chat_create / chat_edit / chat_info / chat_list carry the room description", async () => {
     const reg = await import("../../src/member/member-registry.js");
     const roomStore = await import("../../src/chat/room-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const pm = reg.createMember({ name: "pm" });
     const dev = reg.createMember({ name: "dev" });
 

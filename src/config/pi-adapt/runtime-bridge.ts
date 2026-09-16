@@ -350,7 +350,7 @@ export function distributeModelsStoreOverlays(
 
 async function refreshLiveInstanceModelRegistries(): Promise<void> {
   try {
-    const { refreshAllInstanceModelRegistries } = await import("../../engine/agent-manager.js");
+    const { refreshAllInstanceModelRegistries } = await import("../../agent/orchestrator/agent-manager.js");
     if (typeof refreshAllInstanceModelRegistries === "function") {
       await refreshAllInstanceModelRegistries();
     }

@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 let fixture: ReturnType<typeof coreFixture>;
-let tools: typeof import("../../src/engine/tools.js");
+let tools: typeof import("../../src/agent/tools/tools.js");
 let roomStore: typeof import("../../src/chat/room-store.js");
 let registryMod: typeof import("../../src/member/member-registry.js");
 let bus: typeof import("../../src/communication/message-bus.js");
@@ -16,7 +16,7 @@ let roomId = "";
 
 beforeEach(async () => {
   fixture = coreFixture();
-  tools = await import("../../src/engine/tools.js");
+  tools = await import("../../src/agent/tools/tools.js");
   roomStore = await import("../../src/chat/room-store.js");
   registryMod = await import("../../src/member/member-registry.js");
   bus = await import("../../src/communication/message-bus.js");

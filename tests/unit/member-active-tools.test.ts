@@ -20,7 +20,7 @@ describe("member active tools", () => {
 
   it("returns empty session when member has no running instance", async () => {
     const roomStore = await import("../../src/chat/room-store.js");
-    const agentManager = await import("../../src/engine/agent-manager.js");
+    const agentManager = await import("../../src/agent/orchestrator/agent-manager.js");
     const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
     const result = agentManager.getMemberActiveTools(room.id, "pm");
     expect(result.sessionActive).toBe(false);

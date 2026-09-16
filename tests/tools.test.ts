@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { MockRuntime, MockAgentHandle } from "./helpers/mock-runtime.js";
-import { truncateToolResult } from "../src/engine/tools.js";
+import { truncateToolResult } from "../src/agent/tools/tools.js";
 
 describe("MockRuntime", () => {
   it("should have correct name and capabilities", () => {

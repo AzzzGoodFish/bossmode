@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mapContextUsage } from "../../src/engine/runtime/pi-events.js";
+import { mapContextUsage } from "../../src/agent/runtime/pi-events.js";
 
 /**
  * Unit tests for context usage feature:

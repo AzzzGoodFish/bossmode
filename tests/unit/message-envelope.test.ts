@@ -14,7 +14,7 @@ import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
   type ChatLabel,
-} from "../../src/engine/message-envelope.js";
+} from "../../src/agent/orchestrator/message-envelope.js";
 import type { RoomMessage } from "../../src/kernel/types.js";
 
 function makeMsg(sender: string, content: string, seq?: number, ts?: number, senderMemberId?: string): RoomMessage {

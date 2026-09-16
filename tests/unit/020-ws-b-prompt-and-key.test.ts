@@ -40,7 +40,7 @@ describe("020 WS-B prompt + instanceKey", () => {
 
   it("compileMemberPrompt (② batch 2) is Persona → Environment → Communication → Memory → Workspace → Assets", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
 
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     // Grow persona body beyond birth skeleton.
@@ -67,7 +67,7 @@ describe("020 WS-B prompt + instanceKey", () => {
 
   it("compileMemberPrompt (dm-side member) shares one scope-free prompt", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
 
     const member = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const compiled = compileMemberPrompt({ memberId: member.id, memberName: "pm" });
@@ -80,7 +80,7 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("tool surface: dm has chat_create family; wait family retired", async () => {
-    const { toolSurfaceForScope, familyEnabled } = await import("../../src/engine/scope-tool-surface.js");
+    const { toolSurfaceForScope, familyEnabled } = await import("../../src/agent/tools/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
     expect(dm.families).toContain("chat_create");

@@ -50,7 +50,7 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import {
   activateAgent,
   destroyInstance,
@@ -58,7 +58,7 @@ import {
   initAgentManager,
   refreshContextUsage,
   shutdownAll,
-} from "../../src/engine/agent-manager.js";
+} from "../../src/agent/orchestrator/agent-manager.js";
 
 beforeEach(async () => {
   fixture = coreFixture();
@@ -81,7 +81,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   fixture.close();
 });
 

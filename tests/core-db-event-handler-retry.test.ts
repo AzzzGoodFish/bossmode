@@ -5,13 +5,13 @@ import { openDatabase, bindDatabase, applyStorageMigrations, type Database } fro
 import { baseStorageMigration } from "../src/data/base-schema.js";
 import { messagesMigration, eventSourceMigration } from "../src/data/schema/messages.js";
 import { appendAgentEvent, readAgentEvents, readStats } from "../src/data/repositories/event-repository.js";
-import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/engine/event-handler.js";
-import type { AgentStreamEvent } from "../src/engine/runtime/types.js";
+import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/agent/events/event-handler.js";
+import type { AgentStreamEvent } from "../src/agent/runtime/types.js";
 
 const transport = vi.hoisted(() => ({ agent: vi.fn(), refresh: vi.fn(), knowledge: vi.fn() }));
 vi.mock("../src/communication/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));
-vi.mock("../src/engine/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
-vi.mock("../src/engine/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
+vi.mock("../src/agent/orchestrator/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
+vi.mock("../src/agent/events/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
 vi.mock("../src/chat/room-store.js", () => ({ getRoom: vi.fn() }));
 vi.mock("../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 

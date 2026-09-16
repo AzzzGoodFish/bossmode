@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/communication/message-bus.js";
-import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 import { getMember, updateMember } from "../../src/member/member-registry.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
@@ -21,7 +21,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
 });
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentHandle, AgentStreamEvent } from "../../src/engine/runtime/types.js";
+import type { AgentHandle, AgentStreamEvent } from "../../src/agent/runtime/types.js";
 
 let availableModels: Array<{ ref: string }>;
 let exportedCalls: any[];
@@ -198,7 +198,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const handle of handles) { handle.holdPrompt = false; handle.resolvePendingPrompt(); }
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();
@@ -211,13 +211,13 @@ describe("agent-manager model hot switch", () => {
     exportReturnsNull = false;
     handles.splice(0);
     vi.clearAllMocks();
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
     manager.initAgentManager(registry as any);
   });
 
   it("uses fast session.setModel path for same credential/provider model changes", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     expect(handles).toHaveLength(1);
 
@@ -232,7 +232,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("applies cross-credential/provider switches via setModel without recreating the handle", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -248,7 +248,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("applies same-provider credential changes via setModel without recreating (live credential store)", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -262,7 +262,7 @@ describe("agent-manager model hot switch", () => {
 
   it("applies proxy→builtin switches via setModel without recreating", async () => {
     updateMember("mem_pm", { global: { model: "anthropic-proxy/claude-fable-5", credentialId: "cred-proxy" } });
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -274,7 +274,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("reports member busy while dispatch is not idle", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     expect(manager.getMemberBusyState("room", "pm")).toEqual({ busy: false });
 
@@ -286,7 +286,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("reports busy status during a threshold auto-compaction between turns and returns to idle after", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
@@ -308,7 +308,7 @@ describe("agent-manager model hot switch", () => {
     // guard (`dispatchState === "idle"`) never became true in this window, so
     // compaction_end could never fall back to idle — the member stayed "working"
     // forever. The fix gates on `turnActive` (agent_start..agent_end) instead.
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
@@ -338,7 +338,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("queues a message that arrives while compaction_end has settled status to idle but prompt() has not yet resolved, and delivers it once settlement drains the queue", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     const baseline = first.promptCalls.length;
@@ -370,7 +370,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("queues activation during a threshold auto-compaction instead of steering or prompting immediately", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     const baseline = first.promptCalls.length;
@@ -389,7 +389,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("clears the compacting flag on the next agent_end so a missed compaction_end cannot leave status stuck working", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -404,7 +404,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("applies a cross-provider switch immediately even while working (no queue)", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.emit({ type: "agent_start" });
@@ -418,7 +418,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("refreshes an idle active agent when its credential profile changes", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
 
     const result = await manager.invalidateModelCredentialProfile("cred-a", "anthropic");
@@ -433,7 +433,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("queues credential refresh while working and applies it after agent_end", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.emit({ type: "agent_start" });
@@ -450,7 +450,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("does not refresh agents using another credential profile", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
 
     const result = await manager.invalidateModelCredentialProfile("cred-b", "anthropic");
@@ -461,7 +461,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("drops an idle active agent when its deleted credential can no longer export", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -476,7 +476,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("drops an idle active agent when refresh/rebind fails with a non-transient error", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -491,7 +491,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("does not drop the instance when credential refresh hits a transient network error", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const bus = await import("../../src/communication/message-bus.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -512,7 +512,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("does not commit the global config when setModel fails — instance is restored", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
@@ -533,7 +533,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("commits the global config exactly once, only after a successful live apply", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
@@ -547,7 +547,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("applies the switch to the member's single live instance, whatever chat it serves", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
@@ -566,7 +566,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("one instance per member: a failed switch rolls back the single runtime and commits nothing", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
@@ -588,7 +588,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("rollback that fails again stops the member's instance and names it in the error", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
@@ -604,7 +604,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("rejects a second concurrent switch for the same member", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failSetModel = true;
@@ -621,7 +621,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("thinking level applies to the member's single instance; a busy instance queues it", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
     // ① B1: one runtime per member.
@@ -640,7 +640,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("a build during a switch reuses the member's live instance (no latecomer)", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     // Hold the switch in setModel so the gate stays closed.
@@ -668,7 +668,7 @@ describe("agent-manager model hot switch", () => {
   }, 15000);
 
   it("§10: the switch WAITS for an in-flight creation — its snapshot includes it (no timeout path)", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
 
     // No live instance yet: latch the member's very first creation.
     let releaseCreate!: () => void;
@@ -706,7 +706,7 @@ describe("agent-manager model hot switch", () => {
   }, 15000);
 
   it("§10: invalid requests export nothing; a valid switch refreshes the instance catalog", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
 
     // Entry validation is read-only — a rejected switch never writes models.json.
@@ -723,7 +723,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("validates the credential before touching any instance", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const creds = await import("../../src/config/model-credentials.js");
     await manager.activateAgent("room", "pm");
 
@@ -738,7 +738,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("filters all member runtime failure system messages from activation prompts", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const now = Date.now();
     const messages = [
       { id: "err", type: "chat", sender: "system", content: 'Member "pm" request failed. Error: context_length_exceeded', mentions: [], ts: now, seq: 1 },
@@ -769,7 +769,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("reloads active member resources in place without destroying the instance", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     updateMember("mem_pm", { global: { skills: ["review"] } });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -785,7 +785,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failReload = true;
@@ -798,7 +798,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("blocks activation for an Unconfigured member without creating a runtime or guessing a credential", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");
     updateMember("mem_pm", { global: { model: null, credentialId: null } });
 
@@ -809,7 +809,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("compact with no live instance builds for a configured member; an unresolvable one fails honestly", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
 
     const result = await manager.compactMember("room:room2", "mem_pm");
     expect(result).toEqual({ ok: true, action: "compacted" }); // built, never prompted
@@ -819,7 +819,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("blocks activation when a member has a model but no bound credential", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");
     updateMember("mem_pm", { global: { credentialId: null } });
 
@@ -830,7 +830,7 @@ describe("agent-manager model hot switch", () => {
   });
 
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const messageBus = await import("../../src/communication/message-bus.js");
     const ws = await import("../../src/communication/ws.js");
     await manager.activateAgent("room", "pm");

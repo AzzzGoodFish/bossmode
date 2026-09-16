@@ -26,7 +26,7 @@ vi.mock("../../src/communication/ws.js", async (importOriginal) => {
 
 describe("query renderer (member view)", () => {
   it("row renderer: seq header + replyTo quote + content + attachment, unavailable variant", async () => {
-    const { renderQueryRowForMember, renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
+    const { renderQueryRowForMember, renderQueryRowsForMember } = await import("../../src/agent/tools/query-render.js");
     const row = {
       seq: 42,
       sender: "qa",
@@ -53,7 +53,7 @@ describe("query renderer (member view)", () => {
   });
 
   it("sender display-name mapping: user renders as the auth username, members untouched", async () => {
-    const { renderQueryRowForMember } = await import("../../src/engine/query-render.js");
+    const { renderQueryRowForMember } = await import("../../src/agent/tools/query-render.js");
     const row = {
       seq: 7,
       sender: "user",
@@ -103,7 +103,7 @@ describe("query renderer (member view)", () => {
       replyTo: { seq: base.seq, messageId: base.id },
     });
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const rows = (await handleToolCallback("chat_read", room.id, "pm", { limit: 1 })) as any[];
     const row = rows[0];
     expect(row.seq).toBe(base.seq + 1);
@@ -112,7 +112,7 @@ describe("query renderer (member view)", () => {
     expect(row.attachments[0].path).toContain("rep1.md");
 
     // SDK renderer consumes the same rows
-    const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
+    const { renderQueryRowsForMember } = await import("../../src/agent/tools/query-render.js");
     const text = renderQueryRowsForMember(rows);
     expect(text).toContain(`[No.${row.seq} · fish ·`);
     expect(text).toContain(`[In reply to msg:#${base.seq} from pm]: "please run checks"`);
@@ -140,7 +140,7 @@ describe("query renderer (member view)", () => {
       replyTo: { seq: base.seq, messageId: base.id },
     });
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const fileRes = (await handleToolCallback("chat_read", room.id, "pm", {
       output: "file",
     })) as any;
@@ -176,7 +176,7 @@ describe("query renderer (member view)", () => {
       replyTo: { seq: 9999, messageId: "missing" },
     });
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const rows = (await handleToolCallback("chat_read", room.id, "pm", {
       from_seq: old.seq,
     })) as any[];
@@ -186,7 +186,7 @@ describe("query renderer (member view)", () => {
 
     const lost = rows.find((r) => r.content === "replying into the void");
     expect(lost?.replyTo.unavailable).toBe(true);
-    const { renderQueryRowForMember } = await import("../../src/engine/query-render.js");
+    const { renderQueryRowForMember } = await import("../../src/agent/tools/query-render.js");
     expect(renderQueryRowForMember(lost)).toContain(
       "[In reply to msg:#9999 — original not visible in this context]",
     );
@@ -197,8 +197,8 @@ describe("query renderer (member view)", () => {
     const { createRoom, inviteGlobalMember } = await import("../../src/chat/room-store.js");
     const { addMessage } = await import("../../src/chat/message-store.js");
     const { getDmAttachmentPath } = await import("../../src/files/attachment-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
+    const { renderQueryRowsForMember } = await import("../../src/agent/tools/query-render.js");
     const { dirname } = await import("node:path");
     const member = createMember({ name: "reader" });
     const room = createRoom("Read scopes", undefined, []);
@@ -217,7 +217,7 @@ describe("query renderer (member view)", () => {
       ],
     });
     fixture.reopen();
-    const rows = await handleToolCallback("chat_read", scope, member.id, {}) as import("../../src/engine/query-render.js").QueryRow[];
+    const rows = await handleToolCallback("chat_read", scope, member.id, {}) as import("../../src/agent/tools/query-render.js").QueryRow[];
     expect(rows).toHaveLength(1);
     expect(rows[0].replyTo).toMatchObject({ messageId: foreign.id, unavailable: true });
     expect(rows[0].attachments).toEqual([

@@ -40,7 +40,7 @@ describe("member↔member private chat (⑤ B)", () => {
 
   it("send opens the pair scope, captures the peer target, and read/list/info work for both", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const ref = await import("../../src/shared/conversation-ref.js");
     const alice = reg.createMember({ name: "alice" });
     const bob = reg.createMember({ name: "bob" });
@@ -97,7 +97,7 @@ describe("member↔member private chat (⑤ B)", () => {
 
   it("first send posts a read-only jump notice into the receiver's user DM; later sends do not duplicate it", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const chatApi = await import("../../src/api/member-chats.js");
     const ref = await import("../../src/shared/conversation-ref.js");
     const alice = reg.createMember({ name: "alice" });

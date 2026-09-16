@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapPiAgentEvent } from "../../src/engine/runtime/pi-events.js";
+import { mapPiAgentEvent } from "../../src/agent/runtime/pi-events.js";
 
 describe("pi event mapping", () => {
   it("maps compaction lifecycle events", () => {

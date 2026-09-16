@@ -4,7 +4,7 @@ import {
   clearAllActivationSources,
   getActivationSource,
   setActivationSource,
-} from "../../src/engine/activation-context.js";
+} from "../../src/agent/orchestrator/activation-context.js";
 
 describe("activation-context", () => {
   afterEach(() => {

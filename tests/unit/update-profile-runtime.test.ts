@@ -9,8 +9,8 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 it("renames a running member across room/DM without abort; next prompt refreshes self and peers", async () => {
   const reg = await import("../../src/member/member-registry.js");
   const roomStore = await import("../../src/chat/room-store.js");
-  const manager = await import("../../src/engine/agent-manager.js");
-  const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
+  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const suffix = randomUUID().slice(0, 6);
   const own = reg.createMember({ name: `Before-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const peer = reg.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
@@ -43,7 +43,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
     postMessage(room.id, "user", "Start the running turn");
     const pending = manager.activateAgent(room.id, own.id, { senderName: "peer", needResponseMemberIds: [] });
     await started.promise;
-    const { handleToolCallback, loadScopeMessages } = await import("../../src/engine/tools.js");
+    const { handleToolCallback, loadScopeMessages } = await import("../../src/agent/tools/tools.js");
     const next = `言实 ${suffix}`;
     expect(await handleToolCallback("profile_update", room.id, own.name, { name: next, description: "Engineer" }, { memberId: own.id })).toMatchObject({ ok: true, member: { name: next } });
     expect(manager.getAgentStatus(room.id, own.id)).toBe("working");
@@ -73,8 +73,8 @@ it("renames a running member across room/DM without abort; next prompt refreshes
 
 it("reconciles a rename while handle construction is awaiting", async () => {
   const reg = await import("../../src/member/member-registry.js");
-  const manager = await import("../../src/engine/agent-manager.js");
-  const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
+  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const member = reg.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any; handle.refreshPrompt = vi.fn();
@@ -84,7 +84,7 @@ it("reconciles a rename while handle construction is awaiting", async () => {
   try {
     const building = manager.buildMemberAgentSession(member.id, scope);
     await entered.promise;
-    const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
     const next = `Constructed-${randomUUID()}`;
     updateProfileForMember(member.id, { name: next });
     release.resolve();
@@ -97,10 +97,10 @@ it("reconciles a rename while handle construction is awaiting", async () => {
 it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
   const reg = await import("../../src/member/member-registry.js");
   const rooms = await import("../../src/chat/room-store.js");
-  const manager = await import("../../src/engine/agent-manager.js");
-  const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
+  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { postMessage } = await import("../../src/communication/message-bus.js");
-  const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
+  const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
   const suffix = randomUUID().slice(0, 6);
   const own = reg.createMember({ name: `Queued-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
   const peer = reg.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });

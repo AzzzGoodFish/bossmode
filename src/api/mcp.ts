@@ -13,7 +13,7 @@ import {
   readRedactedMcpConfigText,
   writeMcpStatusCache,
 } from "../shared/mcp-settings.js";
-import { checkMcpServerAvailability } from "../engine/mcp-availability.js";
+import { checkMcpServerAvailability } from "../agent/tools/mcp-availability.js";
 import { getRoomMembers, listRooms } from "../chat/room-store.js";
 
 function assignedServerCounts(): Record<string, number> {

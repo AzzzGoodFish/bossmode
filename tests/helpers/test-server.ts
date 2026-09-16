@@ -26,7 +26,7 @@ export function setupTestWorkspace(): void {
   afterAll(async () => {
     const errors: unknown[] = [];
     for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
-    try { const { shutdownAll } = await import("../../src/engine/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }
+    try { const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }
     try { storage?.close(); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, "HTTP fixture cleanup failed");
   });
@@ -96,8 +96,8 @@ export async function createTestServer(): Promise<TestServer> {
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/communication/ws.js");
-  const { initAgentManager, wireMentionRouter } = await import("../../src/engine/agent-manager.js");
-  const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
+  const { initAgentManager, wireMentionRouter } = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
   // Initialize mock runtime for tests
@@ -136,7 +136,7 @@ export async function closeTestServer(ts: TestServer): Promise<void> {
   ts.stopRouter();
   const { shutdownWebSocket } = await import("../../src/communication/ws.js");
   await shutdownWebSocket();
-  const { shutdownAll } = await import("../../src/engine/agent-manager.js");
+  const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js");
   await shutdownAll();
   ts.server.closeAllConnections();
   if (ts.server.listening) await new Promise<void>((resolve, reject) => ts.server.close(error => error ? reject(error) : resolve()));

@@ -29,7 +29,7 @@ describe("knowledge-activity", () => {
     vi.resetModules();
     fixture = (await import("../helpers/core-fixture.js")).coreFixture();
     tmpDir = fixture.root;
-    const { _resetDedup } = await import("../../src/engine/knowledge-activity.js");
+    const { _resetDedup } = await import("../../src/agent/events/knowledge-activity.js");
     _resetDedup();
   });
 
@@ -39,7 +39,7 @@ describe("knowledge-activity", () => {
   });
 
   it("emits a knowledge_event card for write tool inside docs root without parsing frontmatter", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k1");
     const abs = writeDoc("proj/arch.md", "---\ntitle: 架构总览\n---\n\n# 架构\n内容");
     maybeEmitKnowledgeActivity("k1", "architect", "write", { path: abs }, false, "/tmp");
@@ -53,7 +53,7 @@ describe("knowledge-activity", () => {
   });
 
   it("falls back to first heading then filename for title", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k2");
     const abs = writeDoc("proj/no-fm.md", "# Heading Title\n\nbody");
     maybeEmitKnowledgeActivity("k2", "pm", "edit", { path: abs }, false, "/tmp");
@@ -62,7 +62,7 @@ describe("knowledge-activity", () => {
   });
 
   it("ignores writes outside docs root", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k3");
     maybeEmitKnowledgeActivity("k3", "dev", "write", { path: "/tmp/some-code.ts" }, false, "/tmp");
     const messages = await getRoomMessages("k3");
@@ -70,7 +70,7 @@ describe("knowledge-activity", () => {
   });
 
   it("ignores non-write tools and errored calls", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k4");
     const abs = writeDoc("proj/x.md", "# X");
     maybeEmitKnowledgeActivity("k4", "dev", "bash", { command: `echo hi > ${abs}` }, false, "/tmp");
@@ -80,7 +80,7 @@ describe("knowledge-activity", () => {
   });
 
   it("dedups repeated writes to the same doc within the window", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k5");
     const abs = writeDoc("proj/repeat.md", "# R");
     maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false, "/tmp");
@@ -91,7 +91,7 @@ describe("knowledge-activity", () => {
   });
 
   it("resolves relative paths against room cwd", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k6");
     writeDoc("proj/rel.md", "# Rel");
     const docsRoot = join(tmpDir, "memory", "projects");
@@ -101,7 +101,7 @@ describe("knowledge-activity", () => {
   });
 
   it("marks doc writes outside the room docsPath", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/engine/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
     await ensureRoom("k7", { docsPath: "bossmode/" });
     const inside = writeDoc("bossmode/inside.md", "# In");
     const outside = writeDoc("other/outside.md", "# Out");

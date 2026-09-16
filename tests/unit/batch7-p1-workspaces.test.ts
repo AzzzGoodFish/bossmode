@@ -73,7 +73,7 @@ describe("workspace registry", () => {
 describe("file tools (original workspace)", () => {
   it("relative paths resolve against the member dir; write→read→edit round-trip", async () => {
     seedMemberDir();
-    const ft = await import("../../src/engine/tools/file-tools.js");
+    const ft = await import("../../src/agent/tools/file-tools.js");
     const w = await ft.workspaceWriteTool(MEMBER, { path: "notes/a.txt", content: "line1\nline2\nline3" });
     expect(w.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Wrote") });
     expect(existsSync(join(dir, "members", MEMBER, "notes", "a.txt"))).toBe(true);
@@ -136,7 +136,7 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
       expect(created.ok).toBe(true);
       reg.useWorkspace(MEMBER, "web1");
 
-      const ft = await import("../../src/engine/tools/file-tools.js");
+      const ft = await import("../../src/agent/tools/file-tools.js");
       const w = await ft.workspaceWriteTool(MEMBER, { path: "conf/app.conf", content: "mode=prod\n" });
       expect((w.content[0] as any).text).toContain("ssh:web1");
       expect(remoteFiles.get("/srv/app/conf/app.conf")).toBe("mode=prod\n");
@@ -157,7 +157,7 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
 describe("Workspace prompt chapter", () => {
   it("compile carries the Workspace chapter (per-chat current-workspace line retired with prompt v2)", async () => {
     seedMemberDir();
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: MEMBER, memberName: "wsbot" });
     expect(compiled.fullPrompt).toContain("## Workspace");
     expect(compiled.fullPrompt).toContain("workspace_list");

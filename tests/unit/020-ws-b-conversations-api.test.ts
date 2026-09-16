@@ -37,7 +37,7 @@ describe("020 conversations / scope surface", () => {
   });
 
   it("tools endpoint data sources: surface + families", async () => {
-    const { toolSurfaceForScope } = await import("../../src/engine/scope-tool-surface.js");
+    const { toolSurfaceForScope } = await import("../../src/agent/tools/scope-tool-surface.js");
     const dm = toolSurfaceForScope("dm:mem_x");
     expect(dm.kind).toBe("dm");
     expect(dm.families).toEqual(expect.arrayContaining(["chat_create", "member_list"]));
@@ -72,7 +72,7 @@ describe("020 conversations / scope surface", () => {
   it("member-level compile via compileMemberPrompt (② batch 2)", async () => {
     const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "architect", agentTemplate: "architect" });
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: m.id, memberName: "architect" });
     expect(compiled.manifestHash).toBeTruthy();
     // One prompt for every chat: no scope marker, no private-chat line.

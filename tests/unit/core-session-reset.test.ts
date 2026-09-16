@@ -3,7 +3,7 @@ import { mkdirSync,writeFileSync,readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace,createTestServer,closeTestServer,loginAndGetToken,createMockRoom } from "../helpers/test-server.js";
 import { getDatabase } from "../../src/data/database.js";
-import { resetAgentSession } from "../../src/engine/agent-manager.js";
+import { resetAgentSession } from "../../src/agent/orchestrator/agent-manager.js";
 import * as sessions from "../../src/member/session-store.js";
 import * as rooms from "../../src/chat/room-store.js";
 import * as runtime from "../../src/member/runtime-state.js";

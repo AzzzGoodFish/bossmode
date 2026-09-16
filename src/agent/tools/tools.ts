@@ -3,24 +3,24 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { postMessage } from "../communication/message-bus.js";
-import * as messageStore from "../chat/message-store.js";
-import * as roomStore from "../chat/room-store.js";
-import * as mainlineStore from "../chat/mainline-store.js";
-import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../member/member-memory-store.js";
-import { getMember, resolveMemberRef } from "../member/member-registry.js";
-import { assertMemberScopeAccess, listRoomsForMember } from "../member/scope-access.js";
-import { unknownMemberToolMessage } from "../shared/member-tool-names.js";
-import { readAllDmMessages } from "../chat/dm-message-store.js";
-import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
-import type { RoomMessage } from "../kernel/types.js";
-import { parseMentions, parseMentionMemberIds } from "../communication/router.js";
-import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
-import { logger } from "../kernel/logger.js";
-import { processAgentAttachments } from "./agent-attachments.js";
-import * as attachmentStore from "../files/attachment-store.js";
+import { postMessage } from "../../communication/message-bus.js";
+import * as messageStore from "../../chat/message-store.js";
+import * as roomStore from "../../chat/room-store.js";
+import * as mainlineStore from "../../chat/mainline-store.js";
+import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/member-memory-store.js";
+import { getMember, resolveMemberRef } from "../../member/member-registry.js";
+import { assertMemberScopeAccess, listRoomsForMember } from "../../member/scope-access.js";
+import { unknownMemberToolMessage } from "../../shared/member-tool-names.js";
+import { readAllDmMessages } from "../../chat/dm-message-store.js";
+import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../shared/conversation-ref.js";
+import type { RoomMessage } from "../../kernel/types.js";
+import { parseMentions, parseMentionMemberIds } from "../../communication/router.js";
+import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
+import { logger } from "../../kernel/logger.js";
+import { processAgentAttachments } from "../orchestrator/agent-attachments.js";
+import * as attachmentStore from "../../files/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
-import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../../kernel/attachments.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
@@ -269,7 +269,7 @@ export async function handleToolCallback(
       const input: { name?: unknown; title?: unknown } = {};
       if (params?.name !== undefined) input.name = params.name;
       if (params?.description !== undefined) input.title = params.description;
-      const { updateProfileForMember } = await import("./member-profile-update.js");
+      const { updateProfileForMember } = await import("../../member/member-profile-update.js");
       try {
         const result = updateProfileForMember(context.memberId, input);
         return {
@@ -572,7 +572,7 @@ export async function handleToolCallback(
       };
     }
     case "member_info": {
-      const { resolveMemberRef } = await import("../member/member-registry.js");
+      const { resolveMemberRef } = await import("../../member/member-registry.js");
       const ref = params?.member !== undefined ? String(params.member).trim() : "";
       if (!ref) return { ok: false, error: "member is required — pass a name or id (see member_list)" };
       const member = resolveMemberRef(ref);
@@ -580,7 +580,7 @@ export async function handleToolCallback(
       // ① B4: member-level live status — one runtime per member, one status.
       let status = "idle";
       try {
-        const am = await import("./agent-manager.js");
+        const am = await import("../orchestrator/agent-manager.js");
         status = am.getMemberLiveStatus(member.id) === "working" ? "working" : "idle";
       } catch { /* runtime cold — idle */ }
       return { ok: true, member: { id: member.id, name: member.name, description: member.title ?? "", status } };
@@ -590,7 +590,7 @@ export async function handleToolCallback(
     case "workspace_use":
     case "workspace_remove": {
       const wsMemberId = resolveCallerMemberId(roomId, actorRef);
-      const reg = await import("../member/workspace-registry.js");
+      const reg = await import("../../member/workspace-registry.js");
       if (tool === "workspace_list") {
         const list = reg.listWorkspaces(wsMemberId);
         return {
@@ -624,7 +624,7 @@ export async function handleToolCallback(
     case "edit": {
       // Batch 7 P1: workspace-aware file tools (shadow pi built-ins by name).
       const fileMemberId = resolveCallerMemberId(roomId, actorRef);
-      const fileTools = await import("./tools/file-tools.js");
+      const fileTools = await import("./file-tools.js");
       if (tool === "read") return fileTools.workspaceReadTool(fileMemberId, params || {});
       if (tool === "write") return fileTools.workspaceWriteTool(fileMemberId, params || {});
       return fileTools.workspaceEditTool(fileMemberId, params || {});
@@ -636,7 +636,7 @@ export async function handleToolCallback(
     case "terminal_list":
     case "terminal_close": {
       // Batch 7 P2: persistent terminals — member-owned, cross-scope.
-      const shell = await import("./shell-manager.js");
+      const shell = await import("../terminal/shell-manager.js");
       const shellMemberId = resolveCallerMemberId(roomId, actorRef);
       if (tool === "terminal_create") {
         const result = await shell.createShell({
@@ -688,7 +688,7 @@ export async function handleToolCallback(
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.
       // roomId arrives scope-shaped ("dm:<id>" / room id).
-      const { reloadMemberSession } = await import("./agent-manager.js");
+      const { reloadMemberSession } = await import("../orchestrator/agent-manager.js");
       const reloadMemberId = resolveCallerMemberId(roomId, actorRef);
       const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
       return {
@@ -702,7 +702,7 @@ export async function handleToolCallback(
     }
     case "member_list": {
       // Global member directory (gateway tool). id/name/description for member refs.
-      const { listMembers } = await import("../member/member-registry.js");
+      const { listMembers } = await import("../../member/member-registry.js");
       const q = String(params?.query ?? "").trim().toLowerCase();
       let members = listMembers().map((m) => ({ id: m.id, name: m.name, description: m.title ?? "" }));
       if (q) {
@@ -723,7 +723,7 @@ export async function handleToolCallback(
       if (params?.cwd !== undefined) return { ok: false, error: "unknown parameter 'cwd' — chats no longer bind a working directory" };
       if (params?.memberIds !== undefined) return { ok: false, error: "unknown parameter 'memberIds' — use 'members' (member ids)" };
       if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
-      const { getMember } = await import("../member/member-registry.js");
+      const { getMember } = await import("../../member/member-registry.js");
       const creator = getMember(actorRef);
       if (!creator) return { ok: false, error: `Creator member not found: ${actorName()}` };
 
@@ -762,7 +762,7 @@ export async function handleToolCallback(
       if (params?.roomId !== undefined) return { ok: false, error: "unknown parameter 'roomId' — use 'chat' (a chat id or name)" };
       if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
       if (params?.addMemberIds !== undefined || params?.removeMemberIds !== undefined) return { ok: false, error: "unknown parameter — use 'add_members' / 'remove_members' (member ids)" };
-      const { getMember } = await import("../member/member-registry.js");
+      const { getMember } = await import("../../member/member-registry.js");
       const actorGlobal = getMember(actorRef);
       if (!actorGlobal) return { ok: false, error: `Member not found: ${actorName()}` };
 

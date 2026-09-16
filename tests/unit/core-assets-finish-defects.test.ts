@@ -6,8 +6,8 @@ import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { createMember } from "../../src/member/member-registry.js";
 import { createRoom, inviteGlobalMember } from "../../src/chat/room-store.js";
 import { addMessage } from "../../src/chat/message-store.js";
-import { handleToolCallback } from "../../src/engine/tools.js";
-import { renderQueryRowsForMember, type QueryRow } from "../../src/engine/query-render.js";
+import { handleToolCallback } from "../../src/agent/tools/tools.js";
+import { renderQueryRowsForMember, type QueryRow } from "../../src/agent/tools/query-render.js";
 
 // Parent-owned tools.ts applies member visibility to rows, but not reply targets.
 // Keep these desired-behavior regressions separate from the 44 modernized cases.

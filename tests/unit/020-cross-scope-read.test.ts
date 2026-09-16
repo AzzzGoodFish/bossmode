@@ -80,7 +80,7 @@ describe("cross-scope reads (flagship ①)", () => {
     messageStore.addMessage(roomB.id, { sender: "pm", mentions: [], content: "beta decision: ship it" });
     messageStore.addMessage(roomB.id, { sender: "system", mentions: [], content: "[Member failure notice] hidden" });
 
-    const tools = await import("../../src/engine/tools.js");
+    const tools = await import("../../src/agent/tools/tools.js");
     // Cross-scope read from roomA into roomB.
     const res = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: `room:${roomB.id}` }, { memberId: dev.id })) as any[];
     expect(Array.isArray(res)).toBe(true);
@@ -111,7 +111,7 @@ describe("cross-scope reads (flagship ①)", () => {
     dmStore.addDmMessage(dev.id, { sender: "user", mentions: [], content: "private beta question" });
     dmStore.addDmMessage(dev.id, { sender: "dev", mentions: [], content: "private answer" });
 
-    const tools = await import("../../src/engine/tools.js");
+    const tools = await import("../../src/agent/tools/tools.js");
     const fromRoom = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { chat: `dm:${dev.id}` }, { memberId: dev.id })) as any[];
     expect(fromRoom.map((m) => m.content)).toEqual(["private beta question", "private answer"]);
 
@@ -122,7 +122,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("retired task tools are gone from the member surface", async () => {
     const { dev, roomA } = await seedWorld();
-    const tools = await import("../../src/engine/tools.js");
+    const tools = await import("../../src/agent/tools/tools.js");
     for (const tool of ["list_tasks", "get_task", "create_task", "update_task", "comment_task"]) {
       await expect(tools.handleToolCallback(tool, roomA.id, "dev", {}, { memberId: dev.id }))
         .rejects.toThrow(/Unknown tool/);
@@ -131,7 +131,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("supported query tools reject retired target_scope without silent fallback", async () => {
     const { dev, roomA } = await seedWorld();
-    const tools = await import("../../src/engine/tools.js");
+    const tools = await import("../../src/agent/tools/tools.js");
     // Retired target_scope on chat_read (QA's silent-fallback trap).
     const q = (await tools.handleToolCallback("chat_read", roomA.id, "dev", { target_scope: `room:${roomA.id}` }, { memberId: dev.id })) as any;
     expect(Array.isArray(q)).toBe(false);
@@ -141,7 +141,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("chat_list: rooms (id+name) + own DM; excludes non-member rooms", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
-    const tools = await import("../../src/engine/tools.js");
+    const tools = await import("../../src/agent/tools/tools.js");
     const res = (await tools.handleToolCallback("chat_list", roomA.id, "dev", {}, { memberId: dev.id })) as any;
     expect(res.ok).toBe(true);
     const scopes = res.chats.map((s: any) => s.id);
@@ -155,7 +155,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("DM prompt scope injection lists real rooms (was [scopeId] only — room-blind)", async () => {
     const { dev, roomA, roomB } = await seedWorld();
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const labels = manager.buildDmScopeLabels(dev.id, `dm:${dev.id}`);
     expect(labels.some((l) => l.includes("alpha") && l.includes(`room:${roomA.id}`))).toBe(true);
     expect(labels.some((l) => l.includes("beta") && l.includes(`room:${roomB.id}`))).toBe(true);

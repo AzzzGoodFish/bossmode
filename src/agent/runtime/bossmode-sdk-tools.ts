@@ -1,7 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { buildChatSendToolDescription, CHAT_SEND_TO_PARAM_DESCRIPTION, CHAT_SEND_MESSAGE_PARAM_DESCRIPTION, CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION } from "../../shared/chat-tool-description.js";
-import { renderQueryRowsForMember } from "../query-render.js";
+import { renderQueryRowsForMember } from "../tools/query-render.js";
 import {
   CHAT_READ_DESCRIPTION,
   CHAT_SEARCH_DESCRIPTION,
@@ -228,7 +228,7 @@ export function createBossmodeSdkTools(opts: {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
   const chatIdOf = () => opts.resolveChatId?.() || opts.roomId;
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
-    const { handleToolCallback } = await import("../tools.js");
+    const { handleToolCallback } = await import("../tools/tools.js");
     return handleToolCallback(tool, chatIdOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 

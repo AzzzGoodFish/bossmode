@@ -2,15 +2,15 @@
 import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { checkPath, type PathPolicy } from "../kernel/path-security.js";
-import { copyToAttachment, MAX_UPLOAD_SIZE } from "../files/attachment-store.js";
-import * as roomStore from "../chat/room-store.js";
-import { memberDir } from "../files/layout.js";
-import { readWorkspaces } from "../member/workspace-registry.js";
-import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../chat/room-store.js";
-import { chatScopeRoomId } from "../shared/conversation-ref.js";
-import { getBossmodeDir } from "../config/config.js";
-import { logger } from "../kernel/logger.js";
+import { checkPath, type PathPolicy } from "../../kernel/path-security.js";
+import { copyToAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
+import * as roomStore from "../../chat/room-store.js";
+import { memberDir } from "../../files/layout.js";
+import { readWorkspaces } from "../../member/workspace-registry.js";
+import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/room-store.js";
+import { chatScopeRoomId } from "../../shared/conversation-ref.js";
+import { getBossmodeDir } from "../../config/config.js";
+import { logger } from "../../kernel/logger.js";
 
 export interface AttachmentSuccess {
   ok: true;

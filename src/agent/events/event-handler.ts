@@ -1,16 +1,16 @@
 // Agent event handling — stream accumulation, authoritative persistence, commit-safe WS push
 import { randomUUID } from "node:crypto";
-import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../data/repositories/message-dispatch-repository.js";
-import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../data/repositories/event-repository.js";
-import { getDatabase } from "../data/database.js";
-import { logger } from "../kernel/logger.js";
-import { broadcastToAgentSubscribers } from "../communication/ws.js";
-import { refreshContextUsage } from "./agent-manager.js";
+import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../../data/repositories/message-dispatch-repository.js";
+import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../../data/repositories/event-repository.js";
+import { getDatabase } from "../../data/database.js";
+import { logger } from "../../kernel/logger.js";
+import { broadcastToAgentSubscribers } from "../../communication/ws.js";
+import { refreshContextUsage } from "../orchestrator/agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
-import { getRoom } from "../chat/room-store.js";
-import type { AgentStreamEvent } from "./runtime/types.js";
-import type { AgentStatus } from "../kernel/types.js";
-import { limitRuntimeErrorEvent } from "../kernel/runtime-error-limit.js";
+import { getRoom } from "../../chat/room-store.js";
+import type { AgentStreamEvent } from "../runtime/types.js";
+import type { AgentStatus } from "../../kernel/types.js";
+import { limitRuntimeErrorEvent } from "../../kernel/runtime-error-limit.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent

@@ -131,14 +131,14 @@ const curLegacyTotal = [...current.pairs.entries()]
   .reduce((a, [, c]) => a + c, 0);
 
 // Quarantine rule (P5): @earendil-works/* is importable only from the marked adapter zones.
-const QUARANTINE_ALLOW = ["src/engine/runtime/", "src/config/pi-adapt/"];
+const QUARANTINE_ALLOW = ["src/agent/runtime/", "src/config/pi-adapt/"];
 const quarantine = [];
 for (const abs of walk(SRC)) {
   const rel = relative(ROOT, abs).split(sep).join("/");
   if (QUARANTINE_ALLOW.some((a) => rel.startsWith(a))) continue;
   if (/@earendil-works\//.test(readFileSync(abs, "utf8"))) quarantine.push(rel);
 }
-if (quarantine.length) violations.push(...quarantine.map((f) => `quarantine: ${f} imports @earendil-works/* (allowed: engine/runtime/**, config/pi-adapt/**)`));
+if (quarantine.length) violations.push(...quarantine.map((f) => `quarantine: ${f} imports @earendil-works/* (allowed: agent/runtime/**, config/pi-adapt/**)`));
 
 console.log(`modules: ${baseline.modules.length} frozen; src files scanned: ${current.fileCount}`);
 console.log(`burn line: ${baseline.totalRefs} frozen refs -> ${curLegacyTotal} current (burned ${burned})`);

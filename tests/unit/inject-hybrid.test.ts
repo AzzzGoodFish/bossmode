@@ -31,7 +31,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   afterEach(() => fixture.close());
 
   it("hint: senders user-first + event clause omitted when zero + from_seq points at first-1", async () => {
-    const { buildUnreadBacklogHint } = await import("../../src/engine/agent-manager.js");
+    const { buildUnreadBacklogHint } = await import("../../src/agent/orchestrator/agent-manager.js");
     const hint = buildUnreadBacklogHint([
       { id: "m1", sender: "pm", content: "a", mentions: [], ts: 1, seq: 101 } as any,
       { id: "m2", sender: "user", content: "b", mentions: [], ts: 2, seq: 102 } as any,
@@ -44,7 +44,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("hint: task/knowledge event counts appear when present; empty backlog → null", async () => {
-    const { buildUnreadBacklogHint } = await import("../../src/engine/agent-manager.js");
+    const { buildUnreadBacklogHint } = await import("../../src/agent/orchestrator/agent-manager.js");
     const hint = buildUnreadBacklogHint([
       { id: "t1", sender: "system", content: "task", mentions: [], ts: 1, seq: 50, type: "task_event" } as any,
       { id: "k1", sender: "system", content: "kb", mentions: [], ts: 2, seq: 51, type: "knowledge_event" } as any,
@@ -54,7 +54,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("over-limit backlog: hint carries the TRUE total + latest-window marker + from_seq at the cursor", async () => {
-    const { buildUnreadBacklogHint } = await import("../../src/engine/agent-manager.js");
+    const { buildUnreadBacklogHint } = await import("../../src/agent/orchestrator/agent-manager.js");
     // 55-message backlog, hint window truncated to 50 (contextLimit default)
     const backlog = Array.from({ length: 55 }, (_, i) => ({ id: `m${i}`, sender: "user", content: `m${i}`, mentions: [], ts: i, seq: 100 + i }) as any);
     const window = backlog.slice(-50);
@@ -90,7 +90,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     const roomStore = await import("../../src/chat/room-store.js");
     const reg = await import("../../src/member/member-registry.js");
     const msgStore = await import("../../src/chat/message-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
@@ -112,7 +112,7 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
     const roomStore = await import("../../src/chat/room-store.js");
     const reg = await import("../../src/member/member-registry.js");
     const msgStore = await import("../../src/chat/message-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const roomA = roomStore.createRoom("ra", dir, [], undefined);
     roomStore.stampGlobalMemberIds(roomA.id, [pm.id], pm.id);

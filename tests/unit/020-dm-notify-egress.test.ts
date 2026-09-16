@@ -118,7 +118,7 @@ describe("DM instance unified event wiring (G1)", () => {
   });
 
   afterEach(async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
     fixture.close();
   });
@@ -131,7 +131,7 @@ describe("DM instance unified event wiring (G1)", () => {
       model: "anthropic/claude-sonnet",
       credentialId: "cred-1",
     });
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
     return { reg, member, manager };
   }
@@ -186,7 +186,7 @@ describe("DM instance unified event wiring (G1)", () => {
   it("unconfigured DM member posts a user-visible notice instead of silent return", async () => {
     const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" }); // no model/credential
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
 
     await manager.activateDmMember(member.id);

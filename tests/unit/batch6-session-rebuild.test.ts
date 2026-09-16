@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTestServer, closeTestServer, createMockRoom, getTestWorkspace, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
 import { resetMocks, setMockCompactFn, setMockPromptFn } from "../helpers/mock-runtime.js";
-import { pendingRuntimeInputCount, runtimeInputOwner } from "../../src/services/runtime-input-service.js";
+import { pendingRuntimeInputCount, runtimeInputOwner } from "../../src/agent/orchestrator/runtime-input-service.js";
 
 setupTestWorkspace();
 afterEach(() => { vi.restoreAllMocks(); resetMocks(); });
@@ -27,7 +27,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let releaseCleanup = () => {};
     let reloading: Promise<unknown> | undefined;
     try {
-      const manager = await import("../../src/engine/agent-manager.js");
+      const manager = await import("../../src/agent/orchestrator/agent-manager.js");
       const { saveCurrentSession, getCurrentSession } = await import("../../src/member/session-store.js");
       saveCurrentSession(memberId, { runtime: "pi-cli", sessionId: "retained-session" });
       // An empty room builds an idle instance, not an invented human instruction.
@@ -61,7 +61,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let release = () => {};
     let compacting: Promise<unknown> | undefined;
     try {
-      const manager = await import("../../src/engine/agent-manager.js");
+      const manager = await import("../../src/agent/orchestrator/agent-manager.js");
       const instance = await manager.buildMemberAgentSession(memberId, scopeId);
       const gate = new Promise<void>(resolve => { release = resolve; });
       const compact = vi.fn(() => gate);
@@ -89,7 +89,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let release = () => {};
     let compacting: Promise<unknown> | undefined;
     try {
-      const manager = await import("../../src/engine/agent-manager.js");
+      const manager = await import("../../src/agent/orchestrator/agent-manager.js");
       const { addDmMessage } = await import("../../src/chat/dm-message-store.js");
       const { addMessage } = await import("../../src/chat/message-store.js");
       const scopeId = kind === "dm" ? `dm:${memberId}` : `room:${roomId}`;
@@ -135,7 +135,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
 
   it("assembly is unified: exactly one runtime.createAgent call site in agent-manager", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(here, "../../src/engine/agent-manager.ts"), "utf-8");
+    const src = readFileSync(join(here, "../../src/agent/orchestrator/agent-manager.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
     // ① batch 2 / C1: the scope-aware compiler is gone; no call site passes a scope.
     expect(src.match(/compileMemberPromptForScope/g)).toBeNull();

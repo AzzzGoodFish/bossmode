@@ -10,11 +10,11 @@ vi.mock("../../src/communication/ws.js", () => ({
 const agentManagerMocks = vi.hoisted(() => ({
   refreshContextUsage: vi.fn(),
 }));
-vi.mock("../../src/engine/agent-manager.js", () => ({
+vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
   refreshContextUsage: agentManagerMocks.refreshContextUsage,
 }));
 
-vi.mock("../../src/engine/knowledge-activity.js", () => ({
+vi.mock("../../src/agent/events/knowledge-activity.js", () => ({
   maybeEmitKnowledgeActivity: vi.fn(),
 }));
 
@@ -23,7 +23,7 @@ function usageEvent(usage: Record<string, number>) {
 }
 
 async function loadModules() {
-  const eh = await import("../../src/engine/event-handler.js");
+  const eh = await import("../../src/agent/events/event-handler.js");
   return { eh, db: fixture.db };
 }
 

@@ -3,14 +3,14 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
-import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
-import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
+import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
+import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
 import { getDefaultConfig, writeConfig } from "../src/config/config.js";
 import { createMember, updateMemberIdentity } from "../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/room-store.js";
 import { addMessage } from "../src/chat/message-store.js";
 import * as sessionStore from "../src/member/session-store.js";
-import { loadEventsFromDisk } from "../src/engine/event-handler.js";
+import { loadEventsFromDisk } from "../src/agent/events/event-handler.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/communication/ws.js";
 
 vi.mock("../src/communication/ws.js", () => ({

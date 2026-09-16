@@ -76,7 +76,7 @@ describe("chat_read attachments", () => {
       attachments: [{ storedFilename: "abc123.md", originalFilename: "report.md", size: 8 }],
     } as any);
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const rows = (await handleToolCallback("chat_read", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("report attached"));
     expect(hit?.attachments).toEqual([
@@ -108,7 +108,7 @@ describe("chat_read attachments", () => {
       attachments: [{ storedFilename: "nope.md", originalFilename: "ghost.md", size: 4 }],
     } as any);
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const rows = (await handleToolCallback("chat_read", room.id, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("gone file"));
     expect(hit?.attachments).toEqual([
@@ -140,7 +140,7 @@ describe("chat_read attachments", () => {
       attachments: [{ storedFilename: "dmf1.png", originalFilename: "shot.png", size: 3 }],
     } as any);
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const rows = (await handleToolCallback("chat_read", `dm:${m.id}`, "pm", {}, { memberId: m.id })) as any[];
     const hit = rows.find((r) => r.content.includes("dm attach"));
     expect(hit?.attachments).toEqual([
@@ -151,7 +151,7 @@ describe("chat_read attachments", () => {
 
 describe("envelope attachment rendering (lock)", () => {
   it("activation-context message content carries Attachment lines with absolute paths", async () => {
-    const am = await import("../../src/engine/agent-manager.js");
+    const am = await import("../../src/agent/orchestrator/agent-manager.js");
     // renderMessageForAgent is module-private; assert through exported surface is
     // heavier than needed — instead lock the format string used by the envelope
     // through the shared fixture: this test pins the exact line format contract.

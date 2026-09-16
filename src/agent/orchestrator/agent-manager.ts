@@ -1,40 +1,40 @@
 import {randomUUID} from "node:crypto";
-import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../services/runtime-input-service.js";
-import {InputQueueRepository,type QueuedInput} from "../data/repositories/input-queue-repository.js";
-import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
-import type {CapturedMessage} from "../data/repositories/delivery-repository.js";
-import {readMemberProfile,isBlankPersona} from "../member/member-profile.js";
-import type {MentionActivationCtx} from "../communication/router.js";
-import { getDatabase } from "../data/database.js";
+import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "./runtime-input-service.js";
+import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
+import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
+import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
+import {readMemberProfile,isBlankPersona} from "../../member/member-profile.js";
+import type {MentionActivationCtx} from "../../communication/router.js";
+import { getDatabase } from "../../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
-// Prompt assembly → engine/prompt-assembler.ts
-// Event handling → engine/event-handler.ts
-// Tool callbacks → engine/tools.ts
+// Prompt assembly → agent/prompt/prompt-assembler.ts
+// Event handling → agent/events/event-handler.ts
+// Tool callbacks → agent/tools/tools.ts
 
 import { join } from "node:path";
-import { logger } from "../kernel/logger.js";
-import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
-import { activeWorkspaceRoot } from "../member/workspace-registry.js";
-import { resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getBossmodeDir } from "../config/config.js";
-import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
-import * as roomStore from "../chat/room-store.js";
-import * as sessionStore from "../member/session-store.js";
-import { mainSessionDirectory } from "../files/member-session-paths.js";
-import * as attachmentStore from "../files/attachment-store.js";
-import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
-import { initRouter } from "../communication/router.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
-import { compileMemberPrompt } from "./prompt-compiler.js";
-import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { listRoomsForMember } from "../member/scope-access.js";
-import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../member/member-registry.js";
-import { readAllDmMessages } from "../chat/dm-message-store.js";
-import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
-import { loadScopeMessages } from "./tools.js";
-import { MEMBER_CONTRACT_VERSION } from "../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../member/runtime-state.js";
+import { logger } from "../../kernel/logger.js";
+import { resolveGlobalSkillPaths } from "../../workforce/skill-store.js";
+import { activeWorkspaceRoot } from "../../member/workspace-registry.js";
+import { resolveRoomMember } from "../../workforce/room-member-resolver.js";
+import { getBossmodeDir } from "../../config/config.js";
+import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
+import * as roomStore from "../../chat/room-store.js";
+import * as sessionStore from "../../member/session-store.js";
+import { mainSessionDirectory } from "../../files/member-session-paths.js";
+import * as attachmentStore from "../../files/attachment-store.js";
+import { postMessage, getMessagesSince, getLatestMessageId } from "../../communication/message-bus.js";
+import { initRouter } from "../../communication/router.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../../communication/ws.js";
+import { compileMemberPrompt } from "../prompt/prompt-compiler.js";
+import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../shared/conversation-ref.js";
+import { listRoomsForMember } from "../../member/scope-access.js";
+import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../../member/member-registry.js";
+import { readAllDmMessages } from "../../chat/dm-message-store.js";
+import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events/event-handler.js";
+import { loadScopeMessages } from "../tools/tools.js";
+import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../../member/runtime-state.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -46,13 +46,13 @@ import {
   clearActivationSource,
   clearAllActivationSources,
 } from "./activation-context.js";
-import type { AgentHistoryEvent } from "./event-handler.js";
-import type { RuntimeRegistry } from "./runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
-import { getModelCredentialProfile } from "../config/model-credentials.js";
-import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
-import { settleMemberShellWaits } from "./shell-manager.js";
-import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../kernel/types.js";
+import type { AgentHistoryEvent } from "../events/event-handler.js";
+import type { RuntimeRegistry } from "../runtime/registry.js";
+import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../runtime/types.js";
+import { getModelCredentialProfile } from "../../config/model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "../../config/pi-adapt/runtime-bridge.js";
+import { settleMemberShellWaits } from "../terminal/shell-manager.js";
+import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/types.js";
 
 // -- Registry injection --
 
@@ -1587,7 +1587,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
     const normalizedModel = normalizeSwitchModelRef(binding.model);
     if (!normalizedModel) throw new Error("model is required");
     assertModelAvailable(normalizedModel, "switchMemberModel");
-    const { getModelCredentialProfile } = await import("../config/model-credentials.js");
+    const { getModelCredentialProfile } = await import("../../config/model-credentials.js");
     const profile = getModelCredentialProfile(binding.credentialId);
     if (!profile || !profile.enabled) {
       throw new Error(`Credential profile not found or disabled: ${binding.credentialId}`);
@@ -1629,7 +1629,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
 
     // Commit the global config exactly once, after every instance accepted.
     try {
-      const { updateMember } = await import("../member/member-registry.js");
+      const { updateMember } = await import("../../member/member-registry.js");
       updateMember(memberId, { global: { model: normalizedModel, credentialId: binding.credentialId } });
     } catch (saveErr) {
       const reason = String((saveErr as Error)?.message || saveErr);
@@ -2090,9 +2090,9 @@ export function getMemberInstances(memberName: string): Array<{
   runtime: string;
   pid?: number;
   spawnArgs?: string[];
-  runtimeParams?: import("./runtime/types.js").AgentRuntimeParams;
+  runtimeParams?: import("../runtime/types.js").AgentRuntimeParams;
 }> {
-  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("./runtime/types.js").AgentRuntimeParams }> = [];
+  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("../runtime/types.js").AgentRuntimeParams }> = [];
   for (const instance of instances.values()) {
     if (instance.agentName === memberName || instance.memberId === memberName) {
       const roomId = instance.roomId;
@@ -2506,13 +2506,13 @@ export async function quiesceMember(memberId: string): Promise<void> {
   const errors: unknown[] = [];
   for(const row of getDatabase().all<{scope:string}>("SELECT DISTINCT scope_id scope FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId))cancelPendingRuntimeInputs(runtimeInputOwner(row.scope,memberId),"member archived");
   settleMemberShellWaits(memberId);
-  const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+  const {dropSftpConnectionsForMember}=await import("../tools/file-tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}
   for (const instance of instances.values()) if (instance.memberId===memberId) {
     try {requestInstanceStop(instance);} catch(error){errors.push(error);}
   }
   await Promise.allSettled([...pendingCreationsFor(memberId), ...(memberSwitchGates.has(memberId) ? [memberSwitchGates.get(memberId)!] : [])]);
-  const {closeAllShellsForMember}=await import("./shell-manager.js");
+  const {closeAllShellsForMember}=await import("../terminal/shell-manager.js");
   const resources = await Promise.allSettled([closeAllShellsForMember(memberId)]);
   for (const result of resources) if (result.status === "rejected") errors.push(result.reason);
   for (const [key,instance] of [...instances]) if(instance.memberId===memberId) {
@@ -2537,7 +2537,7 @@ export async function shutdownAll(): Promise<void> {
   closeRuntimeAdmission(); shutdownRunning = true;
   shutdownSettlement = (async () => {
     const failures: unknown[] = [];
-    const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+    const {dropSftpConnectionsForMember}=await import("../tools/file-tools.js");
     try {await dropSftpConnectionsForMember();}catch(error){failures.push(error);}
     for (const instance of instances.values()) {
       try { requestInstanceStop(instance); } catch (error) { failures.push(error); }
@@ -2545,7 +2545,7 @@ export async function shutdownAll(): Promise<void> {
     for (const pending of await Promise.allSettled([...pendingCreations.values(), ...memberSwitchGates.values()])) {
       if (pending.status === "rejected") failures.push(pending.reason);
     }
-    const {closeAllShellsForMember}=await import("./shell-manager.js");
+    const {closeAllShellsForMember}=await import("../terminal/shell-manager.js");
     const resources = await Promise.allSettled([closeAllShellsForMember()]);
     for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
     if (registry) for (const rt of registry.getAll()) {

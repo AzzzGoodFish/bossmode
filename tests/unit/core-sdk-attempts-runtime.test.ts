@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { openDatabase } from "../../src/data/database.js";
-import { PiSdkAgentHandle, PiSdkRuntime } from "../../src/engine/runtime/pi-sdk.js";
-import type { CreateAgentOpts, RuntimePromptDispatch } from "../../src/engine/runtime/types.js";
+import { PiSdkAgentHandle, PiSdkRuntime } from "../../src/agent/runtime/pi-sdk.js";
+import type { CreateAgentOpts, RuntimePromptDispatch } from "../../src/agent/runtime/types.js";
 
 const mock = vi.hoisted(() => ({
   stage: vi.fn(), create: vi.fn(), reload: vi.fn(), configDispose: vi.fn(),
@@ -20,8 +20,8 @@ vi.mock("../../src/shared/mcp-settings.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "mcp.json"), serverNames: [], dispose: mock.configDispose }),
 }));
-vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
-vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
+vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
+vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
 vi.mock("../../src/config/model-credentials.js", () => ({
   getModelCredentialProfile: () => ({}),
 }));
@@ -32,7 +32,7 @@ vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   createDatabaseModelRuntime: async () => { mock.stage("model runtime"); return {}; },
   refreshDatabaseModelRuntime: async () => {},
 }));
-vi.mock("../../src/engine/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
+vi.mock("../../src/agent/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
   attach() {} bind(model: unknown) { return model; } followSession() {}
 } }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({

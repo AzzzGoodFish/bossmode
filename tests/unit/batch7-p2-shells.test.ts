@@ -19,12 +19,12 @@ beforeEach(() => {
   }
 });
 afterEach(async () => {
-  const m=await import("../../src/engine/shell-manager.js");
+  const m=await import("../../src/agent/terminal/shell-manager.js");
   await m.closeAllShellsForMember("mem_sh");await m.closeAllShellsForMember("mem_other");fixture.close();
 }, 30000);
 
 async function fresh() {
-  return import("../../src/engine/shell-manager.js");
+  return import("../../src/agent/terminal/shell-manager.js");
 }
 
 describe("persistent terminal (real PTY)", () => {

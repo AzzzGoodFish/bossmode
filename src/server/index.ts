@@ -10,10 +10,10 @@ import { handleApiRequest } from "../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "../communication/ws.js";
 import { removePidFile, writePidFile, ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../config/model-credentials.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../engine/agent-manager.js";
+import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../agent/orchestrator/agent-manager.js";
 
-import { RuntimeRegistry } from "../engine/runtime/registry.js";
-import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
+import { RuntimeRegistry } from "../agent/runtime/registry.js";
+import { PiSdkRuntime } from "../agent/runtime/pi-sdk.js";
 import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../workforce/team-updates.js";
 

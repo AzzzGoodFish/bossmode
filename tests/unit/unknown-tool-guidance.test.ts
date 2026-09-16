@@ -9,7 +9,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
 setupTestWorkspace();
 
 const unknownMessage = async (tool: string): Promise<string> => {
-  const { handleToolCallback } = await import("../../src/engine/tools.js");
+  const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
   try {
     // No trusted member context: the call lands on the dispatcher default (an
     // unknown name never reaches a store) and must throw the guided error.
@@ -47,7 +47,7 @@ describe("unknown tool guidance", () => {
   });
 
   it("keeps the SDK registration and the canonical name lists in lockstep", async () => {
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
     const tools = createBossmodeSdkTools({ roomId: "r1", memberId: "mem_drift_fixture" });
     expect(tools.map((tool) => tool.name)).toEqual([...MEMBER_DIRECT_TOOL_NAMES]);
 

@@ -14,7 +14,7 @@ async function fixture() {
   const peer = registry.createMember({ name: `Peer-${suffix}` });
   const room = rooms.createRoom(`Room-${suffix}`, undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
-  const { handleToolCallback } = await import("../../src/engine/tools.js");
+  const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
   const call = (tool: string, params: any, scope = room.id) => handleToolCallback(tool, scope, own.name, params, { memberId: own.id });
   return { registry, rooms, own, peer, room, call };
 }
@@ -52,22 +52,22 @@ describe("self-only profile_update", () => {
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     expect(f.registry.getMember(f.peer.id)).toEqual(f.peer);
     for (const name of ["all", "USER", " System "]) expect(() => f.registry.createMember({ name })).toThrow("reserved_member_name");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     expect(await handleToolCallback("profile_update", f.room.id, f.own.name, { description: "bad" })).toMatchObject({ ok: false, code: "invalid_caller" });
     expect(await f.call("profile_update", { description: "bad" }, `dm:${f.peer.id}`)).toMatchObject({ ok: false, code: "scope_access_denied" });
   });
 
   it("keeps room/DM and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
     const f = await fixture();
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
-    const { loadScopeMessages, handleToolCallback } = await import("../../src/engine/tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { loadScopeMessages, handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const scopes = [f.room.id, `dm:${f.own.id}`];
     const toolSets = scopes.map(roomId => createBossmodeSdkTools({ roomId, memberId: f.own.id }));
     await f.call("chat_send", { message: "historical snapshot" });
     const originalName = f.own.name;
     const next = `New ${randomUUID().slice(0, 6)}`;
     await f.call("profile_update", { name: next });
-    const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
     updateProfileForMember(f.peer.id, { name: originalName });
     for (const tools of toolSets) {
       await (tools.find(t => t.name === "chat_send")!.execute as any)("chat-id", { message: "after rename" });
@@ -95,7 +95,7 @@ describe("self-only profile_update", () => {
     finally { getDatabase().exec("DROP TRIGGER fail_profile"); }
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     const target = `Collision-${randomUUID()}`;
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const results = await Promise.all([
       f.call("profile_update", { name: target }),
       handleToolCallback("profile_update", f.room.id, f.peer.name, { name: target.toUpperCase(), description: "must roll back" }, { memberId: f.peer.id }),
@@ -119,7 +119,7 @@ describe("self-only profile_update", () => {
       await Promise.resolve();
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });
       const originalContext = captured.ctx;
-      const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
+      const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
       const next = `${f.own.name}-renamed`;
       await f.call("profile_update", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
@@ -138,7 +138,7 @@ describe("self-only profile_update", () => {
 
   it("creates chats with current Unicode identity and keeps historical template tools ID-bound", async () => {
     const f = await fixture();
-    const { updateProfileForMember } = await import("../../src/engine/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
     const pending = f.call("chat_create", { name: "Creator race", members: [f.peer.id] }, `dm:${f.own.id}`);
     const next = `创建者 ${randomUUID().slice(0, 6)}`;
     updateProfileForMember(f.own.id, { name: next });
@@ -151,7 +151,7 @@ describe("self-only profile_update", () => {
     new ConversationsRepository(getTestWorkspace().db).upsertRoom(legacyRoom);
     const local = f.rooms.getRoomMembers(legacyRoom.id)[0];
     const unrelated = f.registry.createMember({ name: local.name });
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
     const tools = createBossmodeSdkTools({ roomId: legacyRoom.id, memberId: local.id });
     await expect(tools.find(t => t.name === "chat_send")!.execute("legacy-chat", { message: "Existing local tool" }, undefined, undefined, undefined as any)).resolves.toBeTruthy();
     await expect((tools.find(t => t.name === "bossmode")!.execute as any)("legacy-profile", { action: "call", tool: "profile_update", args: { description: "Do not claim DB names" } })).rejects.toThrow("database member ID");

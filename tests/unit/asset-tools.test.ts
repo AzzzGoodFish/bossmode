@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe("asset tools retired", () => {
   it("read/edit/write_memory are unknown tools", async () => {
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     for (const tool of ["read_memory", "edit_memory", "write_memory"]) {
       await expect(handleToolCallback(tool, "room-x", "pm", { asset: "mainline" })).rejects.toThrow(/Unknown tool/);
     }

@@ -3,7 +3,7 @@ import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "./skill-store.js";
 import { seedBuiltinAssets } from "./team-updates.js";
-import { buildSkillCatalog, listMemberSkills } from "../engine/skill-catalog.js";
+import { buildSkillCatalog, listMemberSkills } from "../member/skill-catalog.js";
 import { memberSkillsDir } from "../files/layout.js";
 
 const memberId = "impeccable-skill-fixture";

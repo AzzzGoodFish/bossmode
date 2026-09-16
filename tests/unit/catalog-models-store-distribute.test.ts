@@ -7,7 +7,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 
 const state = vi.hoisted(() => ({ refreshAll: vi.fn(async () => ({ refreshed: 1, failed: 0 })) }));
 // Only live execution is stubbed; catalog persistence and the SDK reader are real.
-vi.mock("../../src/engine/agent-manager.js", () => ({
+vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
   refreshAllInstanceModelRegistries: () => state.refreshAll(),
 }));
 import { connectBuiltinProviderApiKey, ensurePiCatalogWarm } from "../../src/config/model-credentials.js";

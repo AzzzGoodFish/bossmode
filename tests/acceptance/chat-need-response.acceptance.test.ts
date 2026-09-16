@@ -92,7 +92,7 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
       emitMockEvent({ type: "message_end", text: "qa work note (invisible)", stopReason: "stop" });
     });
 
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const res = await handleToolCallback("chat_send", room.id, "pm", { message: "@qa heads up" });
     expect((res as any).ok).toBe(true);
 
@@ -107,8 +107,8 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
 
   it("④ chat_send exposes only to/message/attachments and rejects unknown parameters before posting", async () => {
     const room = await createRoomWithMembers("ftd-chat-tool", ["pm"]);
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
 
     // SDK tool surface exposes only current supported arguments.
     const chatTool = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: room.id })[0];

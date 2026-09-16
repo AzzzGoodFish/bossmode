@@ -1,8 +1,8 @@
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn, MockRuntime } from "../helpers/mock-runtime.js";
-import { shutdownAll, initAgentManager, resumePendingRuntimeInputs, getActiveInstanceCount } from "../../src/engine/agent-manager.js";
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
+import { shutdownAll, initAgentManager, resumePendingRuntimeInputs, getActiveInstanceCount } from "../../src/agent/orchestrator/agent-manager.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { getDatabase } from "../../src/data/database.js";
 setupTestWorkspace();
 

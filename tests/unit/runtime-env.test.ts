@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getPiSpawnEnv } from "../../src/engine/runtime/env.js";
+import { getPiSpawnEnv } from "../../src/agent/runtime/env.js";
 
 describe("getPiSpawnEnv", () => {
   it("inherits process env without Claude-specific mutation", () => {

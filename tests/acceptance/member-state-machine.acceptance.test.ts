@@ -207,8 +207,8 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
   it("SM-5: write_summary tool and summarize routes are gone", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const tools = readFileSync(join(process.cwd(), "src/engine/tools.ts"), "utf-8");
-    const sdk = readFileSync(join(process.cwd(), "src/engine/runtime/bossmode-sdk-tools.ts"), "utf-8");
+    const tools = readFileSync(join(process.cwd(), "src/agent/tools/tools.ts"), "utf-8");
+    const sdk = readFileSync(join(process.cwd(), "src/agent/runtime/bossmode-sdk-tools.ts"), "utf-8");
     expect(tools).not.toContain('case "write_summary"');
     expect(sdk).not.toContain('name: "write_summary"');
   });
@@ -218,7 +218,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
   it("SM-6: AgentHandle interface does not declare isWorking property", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const src = readFileSync(join(process.cwd(), "src/engine/runtime/types.ts"), "utf-8");
+    const src = readFileSync(join(process.cwd(), "src/agent/runtime/types.ts"), "utf-8");
 
     // Find the AgentHandle interface block
     const ifaceStart = src.indexOf("interface AgentHandle");

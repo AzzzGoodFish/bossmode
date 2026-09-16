@@ -3,8 +3,8 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { createMember } from "../../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/chat/room-store.js";
 import { addMessage } from "../../src/chat/message-store.js";
-import { handleToolCallback } from "../../src/engine/tools.js";
-import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
+import { handleToolCallback } from "../../src/agent/tools/tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
 
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

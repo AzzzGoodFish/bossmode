@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/communication/message-bus.js";
-import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
 function dispatch(message: string, options?: PromptOptions) {
@@ -20,7 +20,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
 });
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentStreamEvent } from "../../src/engine/runtime/types.js";
+import type { AgentStreamEvent } from "../../src/agent/runtime/types.js";
 
 const state = vi.hoisted(() => ({
   promptImpl: vi.fn(async (_message: string) => {}),
@@ -57,10 +57,10 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: state.broadcastToAgentSubscribers,
 }));
 
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
-import { activateAgent, getAgentStatus, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
-import { mapPiAgentEvent } from "../../src/engine/runtime/pi-events.js";
-import { handleAgentEvent as processEvent } from "../../src/engine/event-handler.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { activateAgent, getAgentStatus, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { mapPiAgentEvent } from "../../src/agent/runtime/pi-events.js";
+import { handleAgentEvent as processEvent } from "../../src/agent/events/event-handler.js";
 
 async function setup() {
   await shutdownAll();
@@ -99,7 +99,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();

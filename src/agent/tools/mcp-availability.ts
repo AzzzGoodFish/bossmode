@@ -3,8 +3,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { McpServerAvailability } from "../kernel/types.js";
-import { sanitizeMcpError } from "../shared/mcp-settings.js";
+import type { McpServerAvailability } from "../../kernel/types.js";
+import { sanitizeMcpError } from "../../shared/mcp-settings.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 

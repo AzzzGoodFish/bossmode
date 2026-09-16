@@ -20,7 +20,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentStreamEvent } from "../../src/engine/runtime/types.js";
+import type { AgentStreamEvent } from "../../src/agent/runtime/types.js";
 
 const state = vi.hoisted(() => ({
   promptImpl: vi.fn(async (_message: string) => {}),
@@ -52,8 +52,8 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 
 async function setup() {
   await shutdownAll();
@@ -92,7 +92,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();

@@ -19,7 +19,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { PiSdkAgentHandle } from "../../src/engine/runtime/pi-sdk.js";
+import { PiSdkAgentHandle } from "../../src/agent/runtime/pi-sdk.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 let fixture: ReturnType<typeof coreFixture>;
@@ -144,7 +144,7 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
   });
 
   it("T6: shutdownAll awaits every teardown settlement and aggregates failures; concurrent calls share one settlement", async () => {
-    const { PiSdkRuntime } = await import("../../src/engine/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
     const rt = new PiSdkRuntime();
     let release: (() => void) | null = null;
     const gate = new Promise<void>((r) => { release = r; });

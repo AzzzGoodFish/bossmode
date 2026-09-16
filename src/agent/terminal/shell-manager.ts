@@ -1,5 +1,5 @@
 import {awaitResourceClose} from "./resource-close.js";
-import { memberRuntimeAllowed } from "./runtime-admission.js";
+import { memberRuntimeAllowed } from "../orchestrator/runtime-admission.js";
 /**
  * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
  * terminals. A terminal is a real PTY (node-pty locally, an ssh2 channel for
@@ -16,8 +16,8 @@ import { memberRuntimeAllowed } from "./runtime-admission.js";
  * Known limit (documented in guide): a shell started inside a terminal does
  * not emit markers — the outer exec stays "running" until it returns.
  */
-import { getWorkspace, type SshWorkspace } from "../member/workspace-registry.js";
-import { logger } from "../kernel/logger.js";
+import { getWorkspace, type SshWorkspace } from "../../member/workspace-registry.js";
+import { logger } from "../../kernel/logger.js";
 
 export const SHELL_COLS = 160;
 export const SHELL_ROWS = 1000;
@@ -362,7 +362,7 @@ async function createShellInternal(args: {
   if (args.workspace && !ws) {
     return { ok: false, error: `Workspace not found: ${args.workspace}` };
   }
-  const workspace = ws ?? (await import("../member/workspace-registry.js")).getActiveWorkspace(args.memberId);
+  const workspace = ws ?? (await import("../../member/workspace-registry.js")).getActiveWorkspace(args.memberId);
   const id = newShellId();
   try {
     let shell: LiveShell;

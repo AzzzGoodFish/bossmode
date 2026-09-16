@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { SdkExecutionAttempt, SdkExecutionService } from "../../src/services/sdk-execution-service.js";
+import { SdkExecutionAttempt, SdkExecutionService } from "../../src/agent/runtime/sdk-execution-service.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const owner = "mem_attempt_owner";

@@ -33,7 +33,7 @@ describe("member system-prompt preview", () => {
     expect(body.charCount).toBe(body.text.length);
 
     // Same-process compile with the exact member-level arguments (② batch 2).
-    const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
     const { getMember } = await import("../../src/member/member-registry.js");
     const m = getMember(memberId)!;
     const compiled = compileMemberPrompt({ memberId: m.id, memberName: m.name, description: m.title });

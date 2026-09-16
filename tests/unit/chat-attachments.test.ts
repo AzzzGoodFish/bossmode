@@ -84,7 +84,7 @@ describe("chat attachment artifacts", () => {
     servers.push(ts);
     const roomStore = await import("../../src/chat/room-store.js");
     const messageStore = await import("../../src/chat/message-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const room = roomStore.createRoom("Empty Chat", undefined, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
 
     const rejected = await handleToolCallback("chat_send", room.id, "developer", {
@@ -114,8 +114,8 @@ describe("chat attachment artifacts", () => {
     servers.push(ts);
     const roomStore = await import("../../src/chat/room-store.js");
     const messageStore = await import("../../src/chat/message-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const { createBossmodeSdkTools } = await import("../../src/engine/runtime/bossmode-sdk-tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
     const missingPath = join(cwd, "missing.md");
@@ -144,7 +144,7 @@ describe("chat attachment artifacts", () => {
     servers.push(ts);
     const roomStore = await import("../../src/chat/room-store.js");
     const messageStore = await import("../../src/chat/message-store.js");
-    const { handleToolCallback } = await import("../../src/engine/tools.js");
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-"));
     const sourcePath = join(cwd, "agent-note.html");

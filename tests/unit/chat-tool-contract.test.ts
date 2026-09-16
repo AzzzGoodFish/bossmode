@@ -7,9 +7,9 @@ import { createRoom, stampGlobalMemberIds } from "../../src/chat/room-store.js";
 import { postMessage } from "../../src/communication/message-bus.js";
 import { initRouter } from "../../src/communication/router.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
-import { handleToolCallback, loadScopeMessages } from "../../src/engine/tools.js";
-import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
-import * as attachments from "../../src/engine/agent-attachments.js";
+import { handleToolCallback, loadScopeMessages } from "../../src/agent/tools/tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
+import * as attachments from "../../src/agent/orchestrator/agent-attachments.js";
 
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

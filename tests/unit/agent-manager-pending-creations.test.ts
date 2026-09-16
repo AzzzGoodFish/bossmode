@@ -38,8 +38,8 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 
 beforeEach(async () => {
   fixture = coreFixture();
@@ -62,7 +62,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   fixture.close();
 });
 
@@ -200,7 +200,7 @@ describe("agent-manager pending creation dedup", () => {
   });
 
   it.each(["destroy", "reset"])("cancels a pending creation on %s and destroys its late handle without prompting", async (action) => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     const create = mocks.createAgent.getMockImplementation()!;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

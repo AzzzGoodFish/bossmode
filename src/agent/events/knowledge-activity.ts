@@ -1,6 +1,6 @@
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 //
-// Hooked from engine/event-handler.ts on tool_end events. When an agent's
+// Hooked from agent/events/event-handler.ts on tool_end events. When an agent's
 // write/edit tool touches a file under the knowledge docs root, we post a
 // `knowledge_event` system message so the room timeline stays the single
 // source of truth ("记录自动成为沟通").
@@ -8,11 +8,11 @@
 // Known limit: bash-driven writes are not detected (args are opaque).
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep, relative, isAbsolute, join } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
-import { postMessage } from "../communication/message-bus.js";
-import { logger } from "../kernel/logger.js";
-import * as roomStore from "../chat/room-store.js";
-import type { KnowledgeEventMeta } from "../kernel/types.js";
+import { getBossmodeDir } from "../../config/config.js";
+import { postMessage } from "../../communication/message-bus.js";
+import { logger } from "../../kernel/logger.js";
+import * as roomStore from "../../chat/room-store.js";
+import type { KnowledgeEventMeta } from "../../kernel/types.js";
 
 function docsRoot(): string {
   return resolve(join(getBossmodeDir(), "memory", "projects"));

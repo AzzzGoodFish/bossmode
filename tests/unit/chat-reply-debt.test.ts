@@ -23,7 +23,7 @@ vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentStreamEvent, CreateAgentOpts } from "../../src/engine/runtime/types.js";
+import type { AgentStreamEvent, CreateAgentOpts } from "../../src/agent/runtime/types.js";
 
 const state = vi.hoisted(() => ({
   promptImpl: vi.fn(async (_message: string) => {}),
@@ -56,8 +56,8 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
+import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 
 async function setup() {
   await shutdownAll();
@@ -107,7 +107,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/engine/agent-manager.js")).shutdownAll();
+  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();
@@ -219,7 +219,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
 
   it("abort (dispatchState aborting) delivers nothing", async () => {
     state.promptImpl = vi.fn(async () => {
-      const { abortAgent } = await import("../../src/engine/agent-manager.js");
+      const { abortAgent } = await import("../../src/agent/orchestrator/agent-manager.js");
       void abortAgent("room1", "developer");
       handle.emit({ type: "message_end", text: "I'll get right on it", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -276,7 +276,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
   });
 
   it("DM: a debt turn without chat delivers nothing — the silence note lands in the DM scope", async () => {
-    const manager = await import("../../src/engine/agent-manager.js");
+    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     bus.postMessage("dm:mem_developer", "user", "@developer scoped question", ["developer"]);
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "Scoped answer", stopReason: "stop" });

@@ -1,6 +1,6 @@
 import { logger } from "../kernel/logger.js";
-import { getMember, updateMemberIdentity, MemberNotFoundError } from "../member/member-registry.js";
-import { notifyMemberProfileChanged } from "./agent-manager.js";
+import { getMember, updateMemberIdentity, MemberNotFoundError } from "./member-registry.js";
+import { notifyMemberProfileChanged } from "../agent/orchestrator/agent-manager.js";
 import { broadcastMemberProfileChanged } from "../communication/ws.js";
 
 export class InvalidProfileError extends Error {

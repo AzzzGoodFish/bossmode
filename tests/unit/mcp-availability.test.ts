@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkMcpServerAvailability } from "../../src/engine/mcp-availability.js";
+import { checkMcpServerAvailability } from "../../src/agent/tools/mcp-availability.js";
 import { sanitizeMcpError } from "../../src/shared/mcp-settings.js";
 
 describe("MCP availability", () => {

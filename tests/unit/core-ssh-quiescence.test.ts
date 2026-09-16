@@ -16,9 +16,9 @@ vi.mock("ssh2",async()=>{
   }};
 });
 import { createWorkspace } from "../../src/member/workspace-registry.js";
-import { workspaceReadTool,dropSftpConnectionsForMember } from "../../src/engine/tools/file-tools.js";
-import { createShell,closeAllShellsForMember } from "../../src/engine/shell-manager.js";
-import { openRuntimeAdmission,closeRuntimeAdmission } from "../../src/engine/runtime-admission.js";
+import { workspaceReadTool,dropSftpConnectionsForMember } from "../../src/agent/tools/file-tools.js";
+import { createShell,closeAllShellsForMember } from "../../src/agent/terminal/shell-manager.js";
+import { openRuntimeAdmission,closeRuntimeAdmission } from "../../src/agent/orchestrator/runtime-admission.js";
 let fixture:ReturnType<typeof coreFixture>;
 beforeEach(()=>{
   fixture=coreFixture();openRuntimeAdmission();

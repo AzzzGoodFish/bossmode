@@ -1,7 +1,7 @@
 import { getDatabase } from "../data/database.js";
 import { getBossmodeDir } from "../config/config.js";
 import { MemberArchiveService } from "../member/member-archive-lifecycle.js";
-import { quiesceMember } from "../engine/agent-manager.js";
+import { quiesceMember } from "../agent/orchestrator/agent-manager.js";
 function service() { return new MemberArchiveService(getDatabase(),getBossmodeDir(),{quiesce:quiesceMember}); }
 export function archiveMember(memberId: string, options: {confirm?:boolean}): Promise<{archived:string}> {
   return service().archive(memberId,options);

@@ -3,7 +3,7 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import {
   getRegistry,
   invalidateModelCredentialProfile,
-} from "../engine/agent-manager.js";
+} from "../agent/orchestrator/agent-manager.js";
 import { cancelOAuthLoginJob, connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, getOAuthLoginJob, listBuiltinModelProviders, listPublicModelCredentialProfiles, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/model-credentials.js";
 import { listAvailableModels } from "../config/pi-adapt/runtime-bridge.js";
 

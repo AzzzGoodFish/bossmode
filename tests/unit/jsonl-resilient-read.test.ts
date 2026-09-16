@@ -12,7 +12,7 @@ import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/
 import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
 import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
 import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/chat/message-store.js";
-import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
+import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 import { parseJsonlLines } from "../../src/kernel/jsonl.js";
 
 let fixture: ReturnType<typeof coreFixture>;
