@@ -1,3 +1,4 @@
+import { mainSessionDirectory } from "../../files/layout.js";
 import {randomUUID} from "node:crypto";
 import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "./runtime-input-service.js";
 import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
@@ -17,11 +18,11 @@ import { logger } from "../../kernel/logger.js";
 import { resolveGlobalSkillPaths } from "../../member/skills/skill-store.js";
 import { activeWorkspaceRoot } from "../../member/workspaces/workspace-registry.js";
 import { resolveRoomMember } from "../../member/room-member-resolver.js";
-import { getBossmodeDir } from "../../config/config.js";
+
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
 import * as roomStore from "../../chat/room-store.js";
 import * as sessionStore from "../../member/session-store.js";
-import { mainSessionDirectory } from "../../files/member-session-paths.js";
+
 import * as attachmentStore from "../../files/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/message-bus.js";
 import { initRouter } from "../../chat/router.js";

@@ -1,7 +1,8 @@
+import { memberDir, getBossmodeDir } from "../files/layout.js";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { memberDir } from "../files/layout.js";
-import { getBossmodeDir } from "../config/config.js";
+
+
 import { getDatabase } from "../data/database.js";
 import { SessionRepository } from "../data/repositories/session-repository.js";
 import type { AgentSession } from "../kernel/types.js";
@@ -49,7 +50,7 @@ function archiveRelativePath(memberId: string, file: string): string {
   return rel;
 }
 
-export { mainSessionDirectory } from "../files/member-session-paths.js";
+
 
 /** The member's one session across every chat (① A1: key is the member alone). */
 export function getCurrentSession(memberId: string): AgentSession | undefined {

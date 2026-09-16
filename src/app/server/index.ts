@@ -1,3 +1,6 @@
+import { ensureDirectory } from "../../files/io.js";
+import { getBossmodeDir } from "../../files/layout.js";
+import { readConfig, writeConfig } from "../../config/config.js";
 import { recoverMemberArchives } from "../../member/archive/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
 import { prepareCoreStorage } from "../../data/core-startup.js";
@@ -8,7 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../../api/index.js";
 import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
-import { ensureBossmodeDir, readConfig, writeConfig, getBossmodeDir } from "../../config/config.js";
+
 import { removePidFile, writePidFile } from "../pid.js";
 import { ensurePiCatalogWarm, startCatalogAutoRefreshScheduler } from "../../config/model-credentials.js";
 import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../../agent/orchestrator/agent-manager.js";
@@ -46,7 +49,7 @@ export interface ServerOptions {
 }
 
 export async function startServer(opts: ServerOptions): Promise<void> {
-  ensureBossmodeDir();
+  ensureDirectory(getBossmodeDir());
   await prepareCoreStorage({root:getBossmodeDir(),initialConfig:opts.initialConfig,onProgress:opts.onProgress,
     activate:async()=>{await startApplication(opts);}});
 }

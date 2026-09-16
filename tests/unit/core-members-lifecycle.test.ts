@@ -1,6 +1,6 @@
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { applyStorageMigrations, bindDatabase, openDatabase, type Database } from "../../src/data/database.js";
@@ -32,7 +32,7 @@ let failSyncAfterRename = false;
 let moved = false;
 let forcedUUID: string | undefined;
 let forcedIdDraw: number | undefined;
-vi.mock("../../src/config/config.js", () => ({getBossmodeDir: () => root}));
+
 vi.mock("node:crypto", async original => {
   const actual = await original<typeof import("node:crypto")>();
   const drawInt = actual.randomInt as unknown as (...args: number[]) => number;
@@ -72,8 +72,8 @@ function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
 }
 beforeEach(() => {
   failRename = false; failSyncAfterRename = false; moved = false; forcedUUID = undefined; forcedIdDraw = undefined;
-  root = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!,"members-"));
-  mkdirSync(join(root,"knowledge"));
+  root = process.env.BOSSMODE_DIR!;
+  mkdirSync(join(root,"knowledge"), {recursive:true});
   db = openDatabase(join(root,"bossmode.db")); applyStorageMigrations(db,migrations); bindDatabase(db);
 });
 afterEach(() => { vi.restoreAllMocks(); db.close(); rmSync(root,{recursive:true,force:true}); });

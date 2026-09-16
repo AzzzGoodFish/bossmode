@@ -7,10 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 let dir = "";
-vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => dir,
-  ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-}));
+
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

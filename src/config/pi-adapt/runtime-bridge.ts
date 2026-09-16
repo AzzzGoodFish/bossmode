@@ -1,12 +1,13 @@
 // pi SDK runtime bridge (config's marked adapter zone, P5).
 // Owns the pi-coding-agent / pi-ai facing runtime, credential store and config export.
+import { getBossmodeDir } from "../../files/layout.js";
 export type { AuthInteraction } from "@earendil-works/pi-ai";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import type { ModelCredentialProfile, ModelOption, AvailableModelOption, PublicModelCredentialProfile } from "../../kernel/types.js";
-import { getBossmodeDir } from "../config.js";
+
 import { logger } from "../../kernel/logger.js";
 import { DUMMY_API_KEY, hasCompleteOAuthCredentials, getModelCredentialProfile, profileModifications, sanitizeProfile, loadModelCredentialProfiles, now, sanitizeOAuthCredentials, isNewerOAuthCredential, credentialRepository, shouldUseSdkBuiltinCatalog, normalizeRuntimeBaseUrl, getCatalogStatus, type OAuthCredentials } from "../model-credentials.js";
 import { createDatabaseModelsStore, getProviderOverlays, commitProviderOverlays, type ProviderModelsStoreEntry } from "../model-catalog.js";

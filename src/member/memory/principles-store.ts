@@ -1,8 +1,9 @@
+import { roomDir as roomDataDir } from "../../files/layout.js";
 import { existsSync, readFileSync } from "node:fs";
 import { documentContentMeta } from "../../data/repositories/document-repository.js";
 import { documentIdentity, readDocumentMeta, saveDocument } from "../assets/document-assets.js";
 import { join } from "node:path";
-import { getBossmodeDir } from "../../config/config.js";
+
 import { getMemoryBudget } from "./memory-budgets.js";
 import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../../kernel/types.js";
 
@@ -58,10 +59,6 @@ export class AssetBudgetError extends Error {
     this.budget = args.budget;
     this.attemptedLength = args.attemptedLength;
   }
-}
-
-function roomDataDir(roomId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId);
 }
 
 function memoryDir(roomId: string): string {

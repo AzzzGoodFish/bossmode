@@ -1,3 +1,4 @@
+import { readConfig } from "../config/config.js";
 import { postMessage } from "../chat/message-bus.js";
 import { archiveMember } from "../member/archive/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../member/profile/member-profile-update.js";
@@ -5,7 +6,6 @@ import { updateProfileForMember, InvalidProfileError } from "../member/profile/m
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
 import {
@@ -37,7 +37,7 @@ import { switchMemberModel, switchMemberThinkingLevel } from "../agent/orchestra
 import * as roomStore from "../chat/room-store.js";
 import * as messageStore from "../chat/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
-import { readConfig } from "../config/config.js";
+
 import type { RoomMessage } from "../kernel/types.js";
 import { readMemberProfile } from "../member/profile/member-profile.js";
 
@@ -351,7 +351,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
 
     const { compileMemberPrompt } = await import("../agent/prompt/prompt-compiler.js");
     const { getRoom, resolveRoomMemberRef } = await import("../chat/room-store.js");
-    const { getBossmodeDir } = await import("../config/config.js");
+    const { getBossmodeDir } = await import("../files/layout.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../agent/prompt/system-prompt-final.js");
     const { memberRecordToConfig, resolveSkills } = await import("../agent/orchestrator/agent-manager.js");

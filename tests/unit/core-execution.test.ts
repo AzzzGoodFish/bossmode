@@ -1,6 +1,7 @@
+import { mainSessionDirectory } from "../../src/files/layout.js";
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/data/database.js";
@@ -19,7 +20,7 @@ import * as cursors from "../../src/chat/user-read-cursors.js";
 
 let sandbox: string;
 let db: Database;
-vi.mock("../../src/config/config.js", () => ({getBossmodeDir: () => sandbox}));
+
 const owner = "mem_owner";
 const other = "mem_other";
 function sessionFile(member = owner, filename = "session.jsonl"): string {
@@ -36,8 +37,8 @@ function restart(): void {
   bindDatabase(db);
 }
 beforeEach(() => {
-  sandbox = mkdtempSync(join(process.env.BOSSMODE_TEST_ROOT!, "execution-"));
-  mkdirSync(join(sandbox, "knowledge"));
+  sandbox = process.env.BOSSMODE_DIR!;
+  mkdirSync(join(sandbox, "knowledge"), {recursive:true});
   // Frozen historical schema on an absolute isolated path, closed before core
   // opens. No registry getter, default open, production data or SDK IO.
   const path = join(sandbox, "bossmode.db");
@@ -120,7 +121,7 @@ describe("DB member sessions, unchanged SDK files", () => {
   });
   it("keeps real SDK create/open/context/fork behavior file-backed across DB reopen", async () => {
     const {SessionManager} = await import("@earendil-works/pi-coding-agent");
-    const dir = sessions.mainSessionDirectory(owner);mkdirSync(dir,{recursive:true});
+    const dir = mainSessionDirectory(owner);mkdirSync(dir,{recursive:true});
     const manager=SessionManager.create(sandbox,dir);
     manager.appendMessage({role:"user",content:[{type:"text",text:"original user context"}]} as any);
     manager.appendMessage({role:"assistant",content:[{type:"text",text:"original answer"}]} as any);

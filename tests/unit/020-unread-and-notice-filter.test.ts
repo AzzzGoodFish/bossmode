@@ -13,14 +13,7 @@ import { join } from "node:path";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+
 
 function msg(sender: string, content: string, extra: Record<string, unknown> = {}) {
   return { id: `m-${Math.random().toString(36).slice(2, 8)}`, sender, content, mentions: [], ts: Date.now(), ...extra } as any;

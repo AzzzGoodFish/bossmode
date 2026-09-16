@@ -1,3 +1,4 @@
+import { mainSessionDirectory } from "../../src/files/layout.js";
 import { it,expect } from "vitest";
 import { mkdirSync,writeFileSync,readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +20,7 @@ it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and
     updateMemberIdentity(id,{name:other}); // legal ID-shaped name, not ownership
     const files:string[]=[];
     for(const member of [id,other]){
-      const directory=sessions.mainSessionDirectory(member);mkdirSync(directory,{recursive:true});
+      const directory=mainSessionDirectory(member);mkdirSync(directory,{recursive:true});
       const file=join(directory,"retained.jsonl");writeFileSync(file,`SDK history ${member}\n`);files.push(file);
       sessions.saveCurrentSession(member,{runtime:"pi-cli",sessionId:member,sessionFile:file});
       runtime.setContractFingerprint(member,"retained",1);

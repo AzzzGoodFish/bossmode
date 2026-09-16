@@ -7,9 +7,7 @@ let fixture: ReturnType<typeof coreFixture>;
 let tempDir: string;
 let database: import("../src/data/database.js").Database;
 
-vi.mock("../src/config/config.js", () => ({
-  getBossmodeDir: () => tempDir,
-}));
+
 
 describe("archive", () => {
   let roomStore: typeof import("../src/chat/room-store.js");

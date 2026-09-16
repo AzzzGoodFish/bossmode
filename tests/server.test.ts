@@ -32,11 +32,9 @@ vi.mock("../src/config/config.js", () => ({
     if (a.length !== b.length) return false;
     return timingSafeEqual(a, b);
   },
-  ensureBossmodeDir: () => {},
   writePidFile: () => {},
   removePidFile: () => {},
-  configExists: () => true,
-  getBossmodeDir: () => process.env.BOSSMODE_DIR!,
+  configExists: () => true
 }));
 
 function request(

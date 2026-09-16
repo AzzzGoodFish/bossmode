@@ -1,3 +1,5 @@
+import { configExists, readConfig, writeConfig, getDefaultConfig } from "../../src/config/config.js";
+import { getBossmodeDir } from "../../src/files/layout.js";
 import { getMigration } from "../helpers/schema.js";
 import {requireAuth} from "../../src/api/auth.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,7 +12,7 @@ const settingsMigration = getMigration("core-settings-v1");
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
-import { configExists, readConfig, writeConfig, getDefaultConfig, getConfigPath, getBossmodeDir } from "../../src/config/config.js";
+
 import { hashPassword, login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/api/auth-service.js";
 import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/member/mcp/mcp-settings.js";
 import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/member/workspaces/workspace-registry.js";
@@ -20,16 +22,16 @@ let root: string;
 let db: Database;
 function open() { db=openDatabase(join(root,"core.sqlite")); applyStorageMigrations(db,[baseStorageMigration,settingsMigration]); bindDatabase(db); }
 beforeEach(()=>{root=mkdtempSync(join(tmpdir(),"core-settings-fixture-"));open();});
-afterEach(()=>{db.close();rmSync(root,{recursive:true,force:true});rmSync(getConfigPath(),{force:true});});
+afterEach(()=>{db.close();rmSync(root,{recursive:true,force:true});rmSync(join(getBossmodeDir(), "config.json"),{force:true});});
 
 describe("settings and auth DB authority",()=>{
   it("does not consult or rewrite legacy configuration",()=>{
-    mkdirSync(dirname(getConfigPath()),{recursive:true});
-    writeFileSync(getConfigPath(),'{"legacy-secret":"not-authority"}');
+    mkdirSync(dirname(join(getBossmodeDir(), "config.json")),{recursive:true});
+    writeFileSync(join(getBossmodeDir(), "config.json"),'{"legacy-secret":"not-authority"}');
     expect(configExists()).toBe(false); expect(()=>readConfig()).toThrow("not initialized");
     const config={...getDefaultConfig(),auth:{username:"fish",passwordHash:hashPassword("password")},apiKeys:{provider:"secret"},catalog:{autoRefreshIntervalDays:0}};
     writeConfig(config); expect(readConfig()).toEqual(config);
-    expect(readFileSync(getConfigPath(),"utf8")).toContain("not-authority");
+    expect(readFileSync(join(getBossmodeDir(), "config.json"),"utf8")).toContain("not-authority");
     expect(db.get<any>("SELECT host,port FROM app_settings")).toEqual({host:"127.0.0.1",port:8080});
     expect(db.get<any>("SELECT api_key FROM provider_api_keys")?.api_key).toBe("secret");
     db.close();open();expect(readConfig()).toEqual(config);
@@ -57,7 +59,6 @@ describe("settings and auth DB authority",()=>{
   it("missing or closed DB fails instead of file fallback",()=>{
     writeConfig(getDefaultConfig()); db.close();
     expect(getBossmodeDir()).toBe(process.env.BOSSMODE_DIR);
-    expect(getConfigPath()).toContain("config.json");
     expect(()=>readConfig()).toThrow("bootstrap");
     expect(()=>readMcpConfigText()).toThrow("bootstrap");
     expect(()=>readWorkspaces("member")).toThrow("bootstrap");

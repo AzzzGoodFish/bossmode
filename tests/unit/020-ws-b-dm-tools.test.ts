@@ -10,14 +10,7 @@ import { join } from "node:path";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+
 
 describe("batch 3 gateway tools", () => {
   beforeEach(async () => {

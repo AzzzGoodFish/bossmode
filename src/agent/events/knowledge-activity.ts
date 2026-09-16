@@ -6,16 +6,17 @@
 // source of truth ("记录自动成为沟通").
 //
 // Known limit: bash-driven writes are not detected (args are opaque).
+import { documentsRoot } from "../../files/layout.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep, relative, isAbsolute, join } from "node:path";
-import { getBossmodeDir } from "../../config/config.js";
+
 import { postMessage } from "../../chat/message-bus.js";
 import { logger } from "../../kernel/logger.js";
 import * as roomStore from "../../chat/room-store.js";
 import type { KnowledgeEventMeta } from "../../kernel/types.js";
 
 function docsRoot(): string {
-  return resolve(join(getBossmodeDir(), "memory", "projects"));
+  return resolve(documentsRoot());
 }
 
 /** Dedup window: the same agent touching the same doc repeatedly (multi-edit

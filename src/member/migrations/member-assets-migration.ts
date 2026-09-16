@@ -13,9 +13,10 @@
  *
  * Dry-run is the default; pass dryRun: false (or --apply on the CLI) to write.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
+import { getBossmodeDir, memberDir } from "../../files/layout.js";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { basename, join } from "node:path";
-import { getBossmodeDir } from "../../config/config.js";
+
 import {
   getBossmodeMcpConfigPath,
   getAssignableMcpServerNames,
@@ -25,7 +26,7 @@ import {
 } from "../mcp/mcp-settings.js";
 import { listMembers } from "../member-registry.js";
 import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../workspaces/ssh-keygen.js";
-import { memberDir } from "../../files/layout.js";
+
 
 export interface MemberAssetsMigrationReport {
   ran: boolean;

@@ -2,33 +2,20 @@
  * identity-migration: needs detect, narrow snapshot, apply, startup skip.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  readdirSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 let boss = "";
 
-vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => boss,
-  ensureBossmodeDir: () => {
-    mkdirSync(boss, { recursive: true });
-  },
-}));
+
 
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 beforeEach(() => {
-  boss = mkdtempSync(join(tmpdir(), "bm-id-mig-"));
+  boss = process.env.BOSSMODE_DIR!;
+  mkdirSync(boss, {recursive:true});
   vi.resetModules();
 });
 

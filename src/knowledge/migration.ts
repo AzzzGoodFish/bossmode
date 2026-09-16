@@ -17,18 +17,17 @@
 // Both migrations are safe to run multiple times. The second checks whether
 // a KB directory has already been moved (rename → `.legacy`) and skips.
 
+import { knowledgeRoot as knowledgeDir, getRoomsDir as roomsDir } from "../files/layout.js";
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
   renameSync, cpSync, statSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
+
 import { logger } from "../kernel/logger.js";
 import { slugify } from "./store.js";
 
-function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
 function docsRootDir(): string { return join(knowledgeDir(), "docs"); }
-function roomsDir(): string { return join(getBossmodeDir(), "rooms"); }
 
 interface LegacyEntry {
   id: string;

@@ -4,6 +4,7 @@
  * Completion is judged by file presence (F1), not the done marker.
  * Snapshot covers only migration-touched subtrees (no agent-events / sessions).
  */
+import { getBossmodeDir } from "../../files/layout.js";
 import {
   existsSync,
   mkdirSync,
@@ -16,8 +17,8 @@ import {
   cpSync,
   rmSync,
 } from "node:fs";
-import { join, dirname, relative } from "node:path";
-import { getBossmodeDir } from "../../config/config.js";
+import { join, dirname } from "node:path";
+
 import { logger } from "../../kernel/logger.js";
 
 export interface IdentityMigrationAction {

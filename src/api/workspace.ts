@@ -1,8 +1,6 @@
 // Workspace API routes — Room, Message, Attachments
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join, extname, basename } from "node:path";
-import { createHash } from "node:crypto";
-import type { IncomingMessage } from "node:http";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/room-store.js";
@@ -15,7 +13,7 @@ import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAge
 import { loadEventsPaginated } from "../agent/events/event-handler.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
-import { readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
+
 import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-resolver.js";
 import { getModelCredentialProfile } from "../config/model-credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";

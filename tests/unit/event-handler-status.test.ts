@@ -7,9 +7,7 @@ import { importAgentEvent, readAgentEvents } from "../../src/data/repositories/e
 
 let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => process.env.BOSSMODE_DIR!,
-}));
+
 
 vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),

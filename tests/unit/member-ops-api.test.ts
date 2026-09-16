@@ -1,3 +1,4 @@
+import { mainSessionDirectory } from "../../src/files/layout.js";
 import { it, expect, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ it("member-level operations target the member directly across chats", async () =
     expect(parse(compact)).toMatchObject({ ok: true, action: "compacted" });
 
     // Reset clears the member's stored session from any interface.
-    const directory = sessions.mainSessionDirectory(id); mkdirSync(directory, { recursive: true });
+    const directory = mainSessionDirectory(id); mkdirSync(directory, { recursive: true });
     const file = join(directory, "retained.jsonl"); writeFileSync(file, "SDK history\n");
     sessions.saveCurrentSession(id, { runtime: "pi-cli", sessionId: id, sessionFile: file });
     const reset = await post(`/api/members/${id}/reset`);

@@ -7,20 +7,16 @@
 // Document ID = path relative to that root, e.g. "bossmode/architecture/overview.md".
 // Hierarchy is directory structure. Physical migrate from knowledge/docs is batch 3.
 
+import { documentsRoot as docsRoot } from "../files/layout.js";
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
   rmdirSync, unlinkSync, renameSync, statSync, rmSync,
   type Dirent,
 } from "node:fs";
 import { join, dirname, sep, posix, extname, basename } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
+
 import { logger } from "../kernel/logger.js";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../kernel/types.js";
-
-/** Resolved at call time so tests can override BOSSMODE_DIR. */
-function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }
-/** Project memory root (was knowledge/docs — batch 2.5 rename; migrate in batch 3). */
-function docsRoot(): string { return join(getBossmodeDir(), "memory", "projects"); }
 
 export type KnowledgeFileKind = "markdown" | "text" | "png";
 

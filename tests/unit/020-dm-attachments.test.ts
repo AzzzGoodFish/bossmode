@@ -12,14 +12,7 @@ import { Readable } from "node:stream";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+
 
 describe("DM attachments", () => {
   beforeEach(async () => {

@@ -47,8 +47,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
 }));
 
 vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => join(dir, ".bossmode"),
-  readConfig: () => bossmodeConfig,
+  readConfig: () => bossmodeConfig
 }));
 
 vi.mock("../../src/config/model-credentials.js", () => ({

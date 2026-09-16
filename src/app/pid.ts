@@ -1,13 +1,15 @@
 // Daemon PID file — app entry concern (moved out of config in P9).
 // Path semantics unchanged: <BOSSMODE_DIR>/bossmode.pid.
+import { ensureDirectory } from "../files/io.js";
+import { getBossmodeDir } from "../files/layout.js";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureBossmodeDir, getBossmodeDir } from "../config/config.js";
+
 
 const PID_PATH = join(getBossmodeDir(), "bossmode.pid");
 
 export function writePidFile(pid: number): void {
-  ensureBossmodeDir();
+  ensureDirectory(getBossmodeDir());
   writeFileSync(PID_PATH, String(pid), "utf-8");
 }
 

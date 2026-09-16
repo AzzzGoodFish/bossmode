@@ -4,11 +4,12 @@
 // The index stores pointers only — chat/docs remain the source of truth.
 // References are resolved at read/inject time; unresolvable lines are honestly
 // marked `[stale]`, never silently deleted.
+import { roomDir } from "../files/layout.js";
 import { existsSync, readFileSync } from "node:fs";
 import { documentContentMeta } from "../data/repositories/document-repository.js";
 import { documentIdentity, readDocumentMeta, saveDocument } from "../member/assets/document-assets.js";
 import { join } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
+
 import { getMemoryBudget } from "../member/memory/memory-budgets.js";
 import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../kernel/types.js";
 import { logger } from "../kernel/logger.js";
@@ -32,7 +33,7 @@ export const MAINLINE_FOCUS_HEADING = "## Focus";
 export const MAINLINE_INDEX_HEADING = "## Dynamic Index";
 
 function mainlinesDir(roomId: string): string {
-  return join(getBossmodeDir(), "rooms", roomId, "memory");
+  return join(roomDir(roomId), "memory");
 }
 
 function membersDir(roomId: string): string {

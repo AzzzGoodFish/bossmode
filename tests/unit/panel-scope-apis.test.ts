@@ -9,7 +9,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
  * members-shaped PATCH route and the room PATCH route delegate here, so a
  * model switch from the DM panel and from the room panel persist identically.
  */
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -17,14 +17,7 @@ let fixture: ReturnType<typeof coreFixture>;
 
 let dir: string;
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+
 
 async function seedMember(name: string, flags?: { unifiedModel?: boolean; unifiedExtensions?: boolean }) {
   const reg = await import("../../src/member/member-registry.js");

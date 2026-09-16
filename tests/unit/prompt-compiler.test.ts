@@ -1,7 +1,7 @@
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Room } from "../../src/kernel/types.js";
@@ -10,9 +10,7 @@ let fixture: ReturnType<typeof coreFixture>;
 
 let tmpDir = "";
 
-vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-}));
+
 
 beforeEach(() => {
   fixture = coreFixture();

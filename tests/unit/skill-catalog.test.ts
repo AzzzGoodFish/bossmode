@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 let tmpDir = "";
 
-vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-}));
+
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "bossmode-skill-cat-"));
+  tmpDir = process.env.BOSSMODE_DIR!;
+  mkdirSync(tmpDir, {recursive:true});
 });
 afterEach(() => {
   vi.resetModules();

@@ -1,3 +1,4 @@
+import { getBossmodeDir, memberDir } from "../../files/layout.js";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { getDatabase } from "../../data/database.js";
 import { McpSettingsRepository } from "../../data/repositories/mcp-settings.js";
@@ -5,7 +6,7 @@ function repository(): McpSettingsRepository { return new McpSettingsRepository(
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getBossmodeDir } from "../../config/config.js";
+
 import type { McpServerAvailability, McpServerSummary } from "../../kernel/types.js";
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";
@@ -232,7 +233,7 @@ export function disableDeferredMcpCapabilities(value: unknown, key?: string): un
 
 /** Legacy import path only; live member MCP configuration is database-owned. */
 export function getMemberMcpConfigPath(memberId: string): string {
-  return join(getBossmodeDir(), "members", safeSegment(memberId), "mcp.json");
+  return join(memberDir(safeSegment(memberId)), "mcp.json");
 }
 
 export function readMemberMcpConfig(memberId: string): Record<string, unknown> | null {

@@ -1,8 +1,9 @@
 // File preparation for DB-owned document metadata. No legacy metadata/history IO.
+import { getBossmodeDir } from "../../files/layout.js";
 import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { getBossmodeDir } from "../../config/config.js";
+
 import { getDatabase } from "../../data/database.js";
 import { assertDocumentIdentity, commitDocumentRevision, documentContentMeta, documentSnapshotPath, getDocument, validateDocumentPath,
   type DocumentIdentity } from "../../data/repositories/document-repository.js";

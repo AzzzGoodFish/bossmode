@@ -1,8 +1,10 @@
+import { getBossmodeDir } from "../../src/files/layout.js";
+import { readConfig, configExists } from "../../src/config/config.js";
 import { expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase } from "../../src/data/database.js";
-import { getBossmodeDir, getConfigPath, readConfig, configExists } from "../../src/config/config.js";
+
 import { readPidFile } from "../../src/app/pid.js";
 import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp/mcp-settings.js";
 import { getCatalog } from "../../src/config/model-catalog.js";
@@ -14,7 +16,6 @@ import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/works
 it("imports every settings consumer without initializing storage; only path/PID helpers work before boot",()=>{
   expect(()=>getDatabase()).toThrow("bootstrap");
   expect(getBossmodeDir()).toBe(process.env.BOSSMODE_DIR);
-  expect(getConfigPath()).toBe(join(getBossmodeDir(),"config.json"));
   expect(memberSshKeyPath("member")).toBe(join(getBossmodeDir(),"members/member/ssh/id_ed25519"));
   expect(readPidFile()).toBeNull();
   for(const call of [readConfig,configExists,readMcpConfigText,()=>readMemberMcpConfig("a"),getCatalog,loadModelCredentialProfiles,()=>validateToken("token"),()=>readWorkspaces("a"),()=>readMemberSshPublicKey("a")]) expect(call).toThrow("bootstrap");

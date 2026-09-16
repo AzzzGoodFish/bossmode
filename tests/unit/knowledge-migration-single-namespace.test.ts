@@ -8,19 +8,16 @@
 //   5. Fresh install (no KBs): just creates docs/ root
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 let tmpDir: string = "";
 vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-  ensureBossmodeDir: () => {},
   writePidFile: () => {},
   removePidFile: () => {},
   readConfig: () => ({ auth: {}, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } }),
   configExists: () => true,
-  seedTemplates: () => {},
+  seedTemplates: () => {}
 }));
 
 function setupKB(kbId: string, name: string, docs: Record<string, string>) {
@@ -52,7 +49,8 @@ function readRoom(roomId: string): any {
 
 describe("Knowledge migration: single namespace (0.8.0)", () => {
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bossmode-kb-mig-"));
+    tmpDir = process.env.BOSSMODE_DIR!;
+    mkdirSync(tmpDir, {recursive:true});
   });
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });

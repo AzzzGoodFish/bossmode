@@ -6,6 +6,6 @@ if(!root || !resolve(root).startsWith(resolve(tmpdir())+'/bossmode-test-run-') |
  throw new Error('Tests require the isolated launcher: npm test -- <vitest arguments>. Never run against a live BOSSMODE_DIR.');
 }
 if(realpathSync(root)===resolve(homedir(),'.bossmode')) throw new Error('Production Bossmode directory is forbidden for tests');
-// This runs before test-file imports; beforeEach alone is too late for config.ts.
+// This runs before test-file imports; beforeEach alone is too late for files/layout.ts.
 // Each test file gets its own asset root before application imports. SQL is still opt-in.
 process.env.BOSSMODE_DIR=mkdtempSync(join(realpathSync(root),'suite-'));

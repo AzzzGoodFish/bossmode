@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { ensureDirectory } from "../../files/io.js";
+import { getBossmodeDir } from "../../files/layout.js";
+import { getDefaultConfig } from "../../config/config.js";
 import { inspectStartupSettings } from "../../data/upgrade/startup-inspection.js";
 import { waitForStartup, StartupWaitError } from "./startup-wait.js";
 import type { BossmodeConfig } from "../../kernel/types.js";
@@ -10,11 +13,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { networkInterfaces } from "node:os";
-import {
-  ensureBossmodeDir,
-  getBossmodeDir,
-  getDefaultConfig,
-} from "../../config/config.js";
+
 import { hashPassword } from "../../api/auth-service.js";
 import { isProcessRunning, readPidFile, removePidFile } from "../pid.js";
 
@@ -129,7 +128,7 @@ function parseArgs(args: string[]): { command: string; flags: Record<string, str
 }
 
 async function cmdOn(flags: Record<string, string>): Promise<void> {
-  ensureBossmodeDir();
+  ensureDirectory(getBossmodeDir());
 
   const snapshot = inspectStartupSettings(getBossmodeDir());
   const existingPid = readPidFile();

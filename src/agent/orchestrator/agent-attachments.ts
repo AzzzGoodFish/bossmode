@@ -1,15 +1,15 @@
 // Agent attachment processing — validate paths + copy to room attachments
-import { join } from "node:path";
+import { knowledgeRoot } from "../../files/layout.js";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { checkPath, type PathPolicy } from "../../kernel/path.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
 import * as roomStore from "../../chat/room-store.js";
-import { memberDir } from "../../files/layout.js";
+
 import { readWorkspaces } from "../../member/workspaces/workspace-registry.js";
 import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/room-store.js";
 import { chatScopeRoomId } from "../../chat/conversation-ref.js";
-import { getBossmodeDir } from "../../config/config.js";
+
 import { logger } from "../../kernel/logger.js";
 
 export interface AttachmentSuccess {
@@ -37,7 +37,7 @@ function buildPolicy(roomId: string): PathPolicy {
     try { allowedPrefixes.push(realpathSync(root)); } catch { /* skip if unresolvable */ }
   }
   try { allowedPrefixes.push(realpathSync(tmpdir())); } catch { /* */ }
-  try { allowedPrefixes.push(realpathSync(join(getBossmodeDir(), "knowledge"))); } catch { /* */ }
+  try { allowedPrefixes.push(realpathSync(knowledgeRoot())); } catch { /* */ }
   return { allowedPrefixes, maxSizeBytes: MAX_UPLOAD_SIZE };
 }
 

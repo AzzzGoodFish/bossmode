@@ -4,7 +4,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
  * 触发消息全量注入；游标到触发点之间的背 log 压成一行提示；游标只推进到
  * 触发消息（读到即清：chat_read 覆盖区间 → 游标推进）。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,14 +12,7 @@ let fixture: ReturnType<typeof coreFixture>;
 
 let dir: string;
 
-vi.mock("../../src/config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
-  return {
-    ...actual,
-    getBossmodeDir: () => dir,
-    ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
-  };
-});
+
 
 describe("inject hybrid — hint shape + cursor semantics", () => {
   beforeEach(() => {

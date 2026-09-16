@@ -1,12 +1,13 @@
+import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { getBossmodeDir } from "../config/config.js";
+
 import { latestMessage } from "../data/repositories/message-repository.js";
 import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../kernel/types.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../data/repositories/conversations.js";
 export { ensureDmScope, ensureMmScope } from "../data/repositories/conversations.js";
-import { memberDir, roomDir } from "../files/layout.js";
+
 import { readWorkspaces } from "../member/workspaces/workspace-registry.js";
 import { newRoomId } from "../kernel/ids.js";
 
@@ -183,7 +184,7 @@ export function createRoom(name: string, cwd: string | undefined, memberIds: str
   };
   // Working directories belong to member workspaces; cwd is not persisted.
   mkdirSync(roomDir(room.id), { recursive: true });
-  if (room.docsPath) mkdirSync(join(getBossmodeDir(), "memory", "projects", room.docsPath), { recursive: true });
+  if (room.docsPath) mkdirSync(join(documentsRoot(), room.docsPath), { recursive: true });
   repository.db.transaction(() => {
     writeRoom(room);
     for (const id of ids) repository.setCursor(room.id, id, null);

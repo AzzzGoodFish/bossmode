@@ -1,3 +1,5 @@
+import { getDefaultConfig, writeConfig } from "../src/config/config.js";
+import { mainSessionDirectory } from "../src/files/layout.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -5,7 +7,7 @@ import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
 import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
-import { getDefaultConfig, writeConfig } from "../src/config/config.js";
+
 import { createMember, updateMemberIdentity } from "../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/room-store.js";
 import { addMessage } from "../src/chat/message-store.js";
@@ -26,7 +28,7 @@ let saved: { sessionId: string; sessionFile: string };
 
 /** One member session (① A1/A2): `members/<id>/sessions/<day>/main/`, no scope. */
 function retainSession(id: string) {
-  const directory = sessionStore.mainSessionDirectory(id);
+  const directory = mainSessionDirectory(id);
   mkdirSync(directory, { recursive: true });
   const manager = SessionManager.create(fixture.root, directory);
   manager.appendMessage({ role: "user", content: "retained requirement", timestamp: Date.now() });

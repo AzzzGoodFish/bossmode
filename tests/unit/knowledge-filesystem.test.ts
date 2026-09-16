@@ -1,24 +1,22 @@
 // Unit tests for the single-namespace filesystem knowledge store (0.8.0)
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-// Provide a mutable bossmode dir for the store to use each test
+// Use the isolated root established before application imports.
 let tmpDir: string = "";
 vi.mock("../../src/config/config.js", () => ({
-  getBossmodeDir: () => tmpDir,
-  ensureBossmodeDir: () => {},
   writePidFile: () => {},
   removePidFile: () => {},
   readConfig: () => ({ auth: {}, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } }),
   configExists: () => true,
-  seedTemplates: () => {},
+  seedTemplates: () => {}
 }));
 
 describe("Knowledge single-namespace store (0.8.0)", () => {
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bossmode-kb-"));
+    tmpDir = process.env.BOSSMODE_DIR!;
+    mkdirSync(tmpDir, {recursive:true});
   });
 
   afterEach(() => {

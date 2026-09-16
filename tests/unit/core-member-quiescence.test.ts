@@ -1,3 +1,4 @@
+import { mainSessionDirectory } from "../../src/files/layout.js";
 import { expect, it, vi } from "vitest";
 import { existsSync,mkdirSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,7 +59,7 @@ it.each(["room","dm"])("reset rejects a delayed %s creator's old session publica
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,`References ${kind}`,[`reference-${kind}`]);const id=room.globalMemberIds![0];
     const scope=kind==="dm"?`dm:${id}`:`room:${room.id}`;
     const sessions=await import("../../src/member/session-store.js");
-    const directory=sessions.mainSessionDirectory(id);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
+    const directory=mainSessionDirectory(id);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
     sessions.saveCurrentSession(id,{runtime:"pi-cli",sessionId:"old",sessionFile:file});
     const runtime=getRegistry()!.get("pi-cli")!;const original=runtime.createAgent.bind(runtime);
     let entered=false;const gate=new Promise<void>(resolve=>release=resolve);
@@ -91,7 +92,7 @@ it("shutdown preserves final session metadata from an already owned run",async()
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Final session metadata",["final-session"]);const id=room.globalMemberIds![0];
     const runtime=getRegistry()!.get("pi-cli")!;const create=vi.spyOn(runtime,"createAgent");
     await buildMemberAgentSession(id,`room:${room.id}`);
-    const sessions=await import("../../src/member/session-store.js");const directory=sessions.mainSessionDirectory(id);
+    const sessions=await import("../../src/member/session-store.js");const directory=mainSessionDirectory(id);
     mkdirSync(directory,{recursive:true});const file=join(directory,"final.jsonl");writeFileSync(file,"retained SDK history\n");
     const stopping=shutdownAll();
     create.mock.calls[0][0].onSessionChanged?.({sessionId:"final",sessionFile:file});
