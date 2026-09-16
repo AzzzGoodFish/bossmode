@@ -10,10 +10,8 @@ const state = vi.hoisted(() => ({ refreshAll: vi.fn(async () => ({ refreshed: 1,
 vi.mock("../../src/engine/agent-manager.js", () => ({
   refreshAllInstanceModelRegistries: () => state.refreshAll(),
 }));
-import {
-  buildProviderOverlaysFromFetch, createCredentialStore, distributeModelsStoreOverlays,
-  getBossmodePiRuntimeRoot, connectBuiltinProviderApiKey, ensurePiCatalogWarm,
-} from "../../src/config/model-credentials.js";
+import { connectBuiltinProviderApiKey, ensurePiCatalogWarm } from "../../src/config/model-credentials.js";
+import { buildProviderOverlaysFromFetch, createCredentialStore, distributeModelsStoreOverlays, getBossmodePiRuntimeRoot } from "../../src/config/pi-adapt/runtime-bridge.js";
 import {
   commitRemoteCatalog, commitProviderOverlays, getProviderOverlays,
   clearRemoteCatalogMemoryForTests, createDatabaseModelsStore,

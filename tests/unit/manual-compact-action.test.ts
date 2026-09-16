@@ -111,11 +111,14 @@ vi.mock("../../src/communication/ws.js", () => ({
 }));
 
 vi.mock("../../src/config/model-credentials.js", () => ({
+  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "pi-cli", enabled: true, providerSlug: "anthropic" })),
+}));
+
+vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => [{ ref: "anthropic/claude-a" }]),
   assertModelAvailable: vi.fn(),
   exportPiConfigForMember: vi.fn(() => ({ agentDir: "/tmp/agent", extensionPaths: [], profile: { id: "cred-a", name: "test" } })),
-  getModelCredentialProfile: vi.fn(() => ({ id: "cred-a", name: "pi-cli", enabled: true, providerSlug: "anthropic" })),
 }));
 
 const runtime = {

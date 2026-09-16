@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import * as credentials from "../../src/config/model-credentials.js";
+import * as credentialsBridge from "../../src/config/pi-adapt/runtime-bridge.js";
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import { commitRemoteCatalog, commitProviderOverlays, clearRemoteCatalogMemoryForTests } from "../../src/config/model-catalog.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
@@ -22,10 +23,10 @@ function setCatalog(models: any[]) {
   const complete = models.map(model => ({ cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, reasoning: false, ...model }));
   const now = Date.now();
   commitRemoteCatalog(complete, now);
-  commitProviderOverlays(credentials.buildProviderOverlaysFromFetch(complete, new Map(), now));
+  commitProviderOverlays(credentialsBridge.buildProviderOverlaysFromFetch(complete, new Map(), now));
 }
 function native(profile: { id: string; providerSlug: string }) {
-  return credentials.createDatabaseModelRuntime(credentials.createCredentialStore(profile), profile.id);
+  return credentialsBridge.createDatabaseModelRuntime(credentialsBridge.createCredentialStore(profile), profile.id);
 }
 
 it("keeps omitted/blank secrets, redacts public data, and clears active credentials when auth is disabled", async () => {
@@ -43,7 +44,7 @@ it("keeps omitted/blank secrets, redacts public data, and clears active credenti
   credentials.saveModelCredentialProfile({ ...base, id: saved.id, authType: "none", apiKey: undefined });
   expect(credentials.getModelCredentialProfile(saved.id)?.apiKey).toBeUndefined();
   expect(credentials.listPublicModelCredentialProfiles()[0].hasSecret).toBe(false);
-  await credentials.refreshDatabaseModelRuntime(runtime, saved.id);
+  await credentialsBridge.refreshDatabaseModelRuntime(runtime, saved.id);
   expect(runtime.getModel("proxy", "model")).toBeTruthy();
   expect(existsSync(join(f.root, "model-credentials.json"))).toBe(false);
 });
@@ -54,11 +55,11 @@ it("delivers catalog image/thinking metadata and explicit capacity edits to the 
   const runtime = await native(saved);
   expect(runtime.getModel("proxy", "model")).toMatchObject({ contextWindow: 1000000, maxTokens: 128000, input: ["text", "image"], reasoning: true, compat: { forceAdaptiveThinking: true }, thinkingLevelMap: { xhigh: "xhigh" } });
   credentials.saveModelCredentialProfile({ ...base, id: saved.id, protocol: "anthropic-messages", apiKey: "", models: [{ id: "model", contextWindow: 500000, maxTokens: 64000, input: ["text", "image"] }] });
-  await credentials.refreshDatabaseModelRuntime(runtime, saved.id);
+  await credentialsBridge.refreshDatabaseModelRuntime(runtime, saved.id);
   expect(runtime.getModel("proxy", "model")).toMatchObject({ contextWindow: 500000, maxTokens: 64000, input: ["text", "image"] });
   const unknown = credentials.saveModelCredentialProfile({ ...base, providerSlug: "unknown-proxy", models: [{ id: "unknown" }] });
   expect(unknown.models[0].contextWindow).toBeUndefined();
-  expect(credentials.listConfiguredModels().find(model => model.profileId === unknown.id)?.contextWindow).toBeUndefined();
+  expect(credentialsBridge.listConfiguredModels().find(model => model.profileId === unknown.id)?.contextWindow).toBeUndefined();
   const unknownRuntime = await native(unknown);
   expect(unknownRuntime.getModel("unknown-proxy", "unknown")).toMatchObject({ contextWindow: 128000, input: ["text"] });
 });
@@ -69,7 +70,7 @@ it("keeps the chosen account and model reference on its profile ID across provid
   const runtime = await native(second);
   expect(await runtime.getAuth(runtime.getModel("other-proxy", "model")!)).toMatchObject({ auth: { apiKey: "other-secret" } });
   const renamed = credentials.saveModelCredentialProfile({ ...base, id: second.id, providerSlug: "renamed-proxy", apiKey: "" });
-  const reference = credentials.exportPiConfigForMember({ roomId: "room", memberName: "member", modelRef: "proxy/model", credentialId: second.id });
+  const reference = credentialsBridge.exportPiConfigForMember({ roomId: "room", memberName: "member", modelRef: "proxy/model", credentialId: second.id });
   expect(reference?.profile).toMatchObject({ id: second.id, providerSlug: "renamed-proxy" });
   const renamedRuntime = await native(renamed);
   expect(renamedRuntime.getModel("renamed-proxy", "model")).toBeTruthy();
@@ -85,19 +86,19 @@ it("applies and clears built-in model visibility, capacity and API URL customiza
   expect(runtime.getModel("anthropic", "model")?.baseUrl).toBe("https://proxy.example.test");
   const edited = credentials.saveModelCredentialProfile({ ...profile, apiKey: "", models: [{ id: "model", contextWindow: 500000, input: ["text", "image"] }] });
   expect(edited.modelCustomizations).toMatchObject({ disabled: ["other"], contextWindowOverride: { model: 500000 } });
-  expect(credentials.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model"]);
-  await credentials.refreshDatabaseModelRuntime(runtime, profile.id);
+  expect(credentialsBridge.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model"]);
+  await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "model")).toMatchObject({ contextWindow: 500000, maxTokens: 128000 });
   const restored = credentials.saveModelCredentialProfile({ ...profile, apiKey: "", baseUrl: "", models: profile.models });
   expect(restored.modelCustomizations).toBeUndefined();
-  await credentials.refreshDatabaseModelRuntime(runtime, profile.id);
+  await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "model")).toMatchObject({ contextWindow: 1000000, baseUrl: "https://api.anthropic.com" });
-  expect(credentials.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model", "anthropic/other"]);
+  expect(credentialsBridge.listAvailableModels().map(model => model.ref)).toEqual(["anthropic/model", "anthropic/other"]);
 });
 
 it("rotates API keys and OAuth data in SQL while preserving the selected profile", async () => {
   const first = credentials.saveModelCredentialProfile(base);
-  const store = credentials.createCredentialStore(first);
+  const store = credentialsBridge.createCredentialStore(first);
   await store.modify("proxy", async () => ({ type: "api_key", key: "rotated-key" }));
   expect(credentials.getModelCredentialProfile(first.id)?.apiKey).toBe("rotated-key");
   const repo = new ModelCredentialsRepository(f.db);
@@ -141,7 +142,7 @@ it("keeps user-added image models across catalog changes without getter writes o
   const before = credentials.getModelCredentialProfile(profile.id);
   setCatalog([...catalog, { ...catalog[0], id: "custom", contextWindow: 64000 }]);
   expect(credentials.getModelCredentialProfile(profile.id)).toEqual(before);
-  expect(credentials.listConfiguredModels().filter(model => model.ref === "anthropic/custom")).toHaveLength(1);
-  await credentials.refreshDatabaseModelRuntime(runtime, profile.id);
+  expect(credentialsBridge.listConfiguredModels().filter(model => model.ref === "anthropic/custom")).toHaveLength(1);
+  await credentialsBridge.refreshDatabaseModelRuntime(runtime, profile.id);
   expect(runtime.getModel("anthropic", "custom")).toBeTruthy();
 });

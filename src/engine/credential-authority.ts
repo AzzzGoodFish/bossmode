@@ -1,4 +1,4 @@
 export {
   resolveRuntimeCredential,
   type RuntimeCredentialResolution,
-} from "../config/model-credentials.js";
+} from "../config/pi-adapt/runtime-bridge.js";

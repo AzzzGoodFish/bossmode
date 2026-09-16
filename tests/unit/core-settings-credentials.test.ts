@@ -8,7 +8,8 @@ import { settingsMigration } from "../../src/data/schema/settings.js";
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import { CatalogRepository } from "../../src/config/pi-adapt/models-store.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
-import { createCredentialStore, saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/config/model-credentials.js";
+import { saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport } from "../../src/config/model-credentials.js";
+import { createCredentialStore, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/config/pi-adapt/runtime-bridge.js";
 import { ModelCredentialBinding } from "../../src/engine/runtime/model-credential-binding.js";
 import { getCatalog, commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, createDatabaseModelsStore, clearRemoteCatalogMemoryForTests, setPiCatalogModelsForTests } from "../../src/config/model-catalog.js";
 

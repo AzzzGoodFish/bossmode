@@ -27,9 +27,12 @@ vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFacto
   },
 }) }));
 vi.mock("../../src/config/model-credentials.js", () => ({
+  getModelCredentialProfile: () => ({}),
+}));
+vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   normalizeModelRef: (ref: string) => ref, resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => ({ agentDir: mock.root, profile: { id: "offline", providerSlug: "offline", authType: "api-key" } }),
-  createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {}, getModelCredentialProfile: () => ({}),
+  createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {},
 }));
 vi.mock("../../src/engine/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
   attach() {} bind(model: unknown) { return model; } followSession() {}

@@ -17,7 +17,8 @@ import { pageActivity as queryActivityPage } from "../data/repositories/event-re
 
 import { readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
-import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/model-credentials.js";
+import { getModelCredentialProfile } from "../config/model-credentials.js";
+import { normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
 import * as attachmentStore from "../files/attachment-store.js";
 import * as principlesStore from "../member/principles-store.js";
 import * as mainlineStore from "../chat/mainline-store.js";

@@ -57,13 +57,17 @@ vi.mock("../../src/config/config.js", () => ({
 }));
 
 vi.mock("../../src/config/model-credentials.js", () => ({
+  getModelCredentialProfile: (id: string) => ({ id, providerSlug: "anthropic", enabled: true, name: "Test account" }),
+  loadModelCredentialProfiles: () => [{ id: "cred", providerSlug: "anthropic", enabled: true, name: "Test account" }],
+}));
+
+vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   createDatabaseModelRuntime: async (credentials: unknown, profileId: string) => { modelRegistryCreate(credentials, profileId); return modelRuntime; },
   refreshDatabaseModelRuntime: databaseRuntimeRefresh,
   exportPiConfigForMember: () => exportedConfig,
   normalizeModelRef: (modelRef: string) => modelRef,
   createCredentialStore: (profile: any) => ({ kind: "credentials", profile, read: vi.fn(), list: vi.fn(async () => []), modify: vi.fn(), delete: vi.fn() }),
-  getModelCredentialProfile: (id: string) => ({ id, providerSlug: "anthropic", enabled: true, name: "Test account" }),
   // Faithful room-scope shape (dm scope not exercised in this suite).
   resolvePiAgentDir: (roomIdOrScope: string, memberIdOrName: string) =>
     join(dir, "pi-agent", "runtime", String(roomIdOrScope).replace(/[^a-zA-Z0-9._-]+/g, "_"), String(memberIdOrName).replace(/[^a-zA-Z0-9._-]+/g, "_")),

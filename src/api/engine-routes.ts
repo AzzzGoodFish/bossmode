@@ -4,27 +4,8 @@ import {
   getRegistry,
   invalidateModelCredentialProfile,
 } from "../engine/agent-manager.js";
-import {
-  cancelOAuthLoginJob,
-  connectBuiltinProviderApiKey,
-  deleteModelCredentialProfile,
-  discoverModelCredentialModels,
-  getModelCredentialProfile,
-  getOAuthLoginJob,
-  listAvailableModels,
-  listBuiltinModelProviders,
-  listPublicModelCredentialProfiles,
-  getCatalogStatus,
-  getCatalogSettingsPublic,
-  getCatalogAutoRefreshIntervalDays,
-  setCatalogAutoRefreshIntervalDays,
-  refreshBuiltinCatalog,
-  refreshModelCredentialProfileModels,
-  saveModelCredentialProfile,
-  startNativeOAuthConnection,
-  startOAuthLoginJob,
-  submitOAuthLoginJobInput,
-} from "../config/model-credentials.js";
+import { cancelOAuthLoginJob, connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, getOAuthLoginJob, listBuiltinModelProviders, listPublicModelCredentialProfiles, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/model-credentials.js";
+import { listAvailableModels } from "../config/pi-adapt/runtime-bridge.js";
 
 // GET /api/capabilities — runtime capabilities
 addRoute("GET", "/api/capabilities", async (_req, res) => {

@@ -96,15 +96,15 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("dropdown === validation: listAvailableModels sees new models after refresh", async () => {
-    const cred = await import("../../src/config/model-credentials.js");
+    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
 
     mod.commitRemoteCatalog([
       { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
     ]);
 
     const profile = cred.connectBuiltinProviderApiKey({ providerSlug: "kimi-coding", apiKey: "sk-kimi" });
-    expect(cred.listAvailableModels().map((m) => m.ref)).toContain("kimi-coding/k2");
-    expect(cred.listAvailableModels().map((m) => m.ref)).not.toContain("kimi-coding/k3-256k");
+    expect(credBridge.listAvailableModels().map((m) => m.ref)).toContain("kimi-coding/k2");
+    expect(credBridge.listAvailableModels().map((m) => m.ref)).not.toContain("kimi-coding/k3-256k");
 
     cred.setCatalogNetworkRefreshForTests(async () => {
       mod.commitRemoteCatalog([
@@ -119,9 +119,9 @@ describe("CatalogStore SQL authority", () => {
 
     fixture.reopen();
     expect(new CatalogRepository(fixture.db).remote()?.models.map((m) => m.id)).toContain("k3-256k");
-    const available = cred.listAvailableModels().map((m) => m.ref);
+    const available = credBridge.listAvailableModels().map((m) => m.ref);
     expect(available).toContain("kimi-coding/k3-256k");
-    expect(cred.isModelAvailable("kimi-coding/k3-256k")).toBe(true);
+    expect(credBridge.isModelAvailable("kimi-coding/k3-256k")).toBe(true);
 
     cred.setCatalogNetworkRefreshForTests(null);
     cred.setPiCatalogModelsForTests(null);
@@ -129,7 +129,7 @@ describe("CatalogStore SQL authority", () => {
 
   it("failed network refresh keeps prior remote overlay", async () => {
     const cat = await import("../../src/config/model-catalog.js");
-    const cred = await import("../../src/config/model-credentials.js");
+    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
 
     cat.clearRemoteCatalogMemoryForTests();
     cat.setBundledCatalogLoader(() => [
@@ -162,7 +162,7 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("builtin discover serves catalog without hitting provider /models", async () => {
-    const cred = await import("../../src/config/model-credentials.js");
+    const cred = await import("../../src/config/model-credentials.js"); const credBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.commitRemoteCatalog([
       { provider: "anthropic", id: "claude-fable-5", name: "Fable", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text"] },
     ]);

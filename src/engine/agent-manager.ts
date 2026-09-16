@@ -49,7 +49,8 @@ import {
 import type { AgentHistoryEvent } from "./event-handler.js";
 import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
-import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "../config/model-credentials.js";
+import { getModelCredentialProfile } from "../config/model-credentials.js";
+import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../kernel/types.js";
 

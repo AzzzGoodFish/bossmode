@@ -36,7 +36,7 @@ describe("model credential profiles", () => {
   });
 
   it("validates provider slug, protocol, api key, and model metadata", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
 
     expect(() => mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "Bad Slug" })).toThrow("Invalid provider slug");
     expect(() => mod.saveModelCredentialProfile({ ...baseProfile, protocol: "bad" as any })).toThrow("Unsupported protocol");
@@ -45,16 +45,16 @@ describe("model credential profiles", () => {
   });
 
   it("lists credential-backed model options", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
-    expect(mod.listConfiguredModels()).toMatchObject([
+    expect(modBridge.listConfiguredModels()).toMatchObject([
       { ref: "openrouter/anthropic/claude-sonnet", providerSlug: "openrouter", profileId: saved.id, credentialStatus: "configured" },
     ]);
   });
 
   it("falls back to consistent pi catalog metadata across providers", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "cloud_a", id: "claude-opus-4-6", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
       { provider: "opencode", id: "claude-opus-4-6", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["image", "text"] },
@@ -93,33 +93,33 @@ describe("model credential profiles", () => {
   });
 
   it("rejects a credential that does not include the requested model", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     const saved = mod.saveModelCredentialProfile(baseProfile);
 
-    expect(() => mod.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic/claude-sonnet-4-6", credentialId: saved.id }))
+    expect(() => modBridge.exportPiConfigForMember({ roomId: "room", memberName: "dev", modelRef: "anthropic/claude-sonnet-4-6", credentialId: saved.id }))
       .toThrow("does not include model");
   });
 
   it("resolves strictly by credentialId and never guesses a default/first-match provider credential", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.saveModelCredentialProfile(baseProfile);
     mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "openrouter-2", isDefault: false, apiKey: "sk-secret-2" });
 
-    expect(mod.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet" })).toBeNull();
+    expect(modBridge.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet" })).toBeNull();
   });
 
   it("routes by the member's bound credential id even when multiple profiles share the same model", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.saveModelCredentialProfile(baseProfile);
     const second = mod.saveModelCredentialProfile({ ...baseProfile, providerSlug: "openrouter-2", isDefault: false, apiKey: "sk-secret-2" });
 
-    const resolved = mod.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet", credentialId: second.id });
+    const resolved = modBridge.resolveCredentialProfileForModel({ modelRef: "openrouter/anthropic/claude-sonnet", credentialId: second.id });
     expect(resolved?.id).toBe(second.id);
     expect(resolved?.providerSlug).toBe("openrouter-2");
   });
 
   it("CredentialStore.modify persists a newer OAuth credential back to the Bossmode profile", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     const saved = mod.saveModelCredentialProfile({
       name: "Codex OAuth",
       providerSlug: "openai-codex",
@@ -134,14 +134,14 @@ describe("model credential profiles", () => {
       models: [{ id: "gpt-5-codex", contextWindow: 128000, input: ["text"] }],
     });
 
-    const store = mod.createCredentialStore(mod.getModelCredentialProfile(saved.id)!);
+    const store = modBridge.createCredentialStore(mod.getModelCredentialProfile(saved.id)!);
     await store.modify("openai-codex", async () => ({ type: "oauth", access: "file-new-access", refresh: "file-new-refresh", expires: 999999 } as any));
 
     expect(mod.getModelCredentialProfile(saved.id)!.oauthCredentials).toMatchObject({ access: "file-new-access", refresh: "file-new-refresh", expires: 999999 });
   });
 
   it("creates a second built-in provider profile instead of overwriting the first", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     await mod.ensurePiCatalogWarm();
     mod.setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
@@ -156,14 +156,14 @@ describe("model credential profiles", () => {
     expect(second.isDefault).toBe(false);
     expect(mod.getModelCredentialProfile(first.id)!.baseUrl).toBe("http://127.0.0.1:3456");
     expect(mod.getModelCredentialProfile(second.id)!.baseUrl).toBe("https://api.anthropic.com");
-    const options = mod.listAvailableModels().filter((m) => m.ref === "anthropic/claude-fable-5");
+    const options = modBridge.listAvailableModels().filter((m) => m.ref === "anthropic/claude-fable-5");
     expect(options.map((m) => m.profileId).sort()).toEqual([first.id, second.id].sort());
     expect(options.map((m) => m.profileBaseUrl).sort()).toEqual(["http://127.0.0.1:3456", "https://api.anthropic.com"].sort());
     expect(() => mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant", baseUrlOverride: "ftp://bad.example" })).toThrow("baseUrl must be an http:// or https:// URL");
   });
 
   it("clears built-in provider API URL override on profile edit when baseUrl is blank", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text", "image"] },
     ]);
@@ -188,7 +188,7 @@ describe("model credential profiles", () => {
   });
 
   it("rejects a custom model id that already exists in the provider catalog", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "moonshotai", id: "kimi-for-coding", name: "Kimi for Coding", api: "anthropic-messages", baseUrl: "https://api.moonshot.ai/anthropic", contextWindow: 256000, input: ["text"] },
     ]);
@@ -211,7 +211,7 @@ describe("model credential profiles", () => {
   });
 
   it("rejects two custom models sharing the same id", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "moonshotai", id: "kimi-for-coding", name: "Kimi for Coding", api: "anthropic-messages", baseUrl: "https://api.moonshot.ai/anthropic", contextWindow: 256000, input: ["text"] },
     ]);
@@ -233,7 +233,7 @@ describe("model credential profiles", () => {
   });
 
   it("removing a custom model drops it from the effective model set", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "moonshotai", id: "kimi-for-coding", name: "Kimi for Coding", api: "anthropic-messages", baseUrl: "https://api.moonshot.ai/anthropic", contextWindow: 256000, input: ["text"] },
     ]);
@@ -271,7 +271,7 @@ describe("model credential profiles", () => {
   });
 
   it("lists built-in provider catalog and connects API key without baseUrl/protocol/models input", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "openai", id: "gpt-4.1", name: "GPT 4.1", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, maxTokens: 32768, reasoning: true, input: ["text", "image"] },
       { provider: "openai", id: "gpt-4.1-mini", name: "GPT 4.1 Mini", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, input: ["text"] },
@@ -296,7 +296,7 @@ describe("model credential profiles", () => {
   });
 
   it("falls back to packaged catalog with an honest message when remote refresh fails", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     mod.setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-static", name: "Claude Static", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, input: ["text"] },
     ]);
@@ -318,7 +318,7 @@ describe("model credential profiles", () => {
   });
 
   it("applies pi.dev k3 thinkingLevelMap (low/high/max) via direct catalog fetch (not credential-gated runtime.refresh)", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     // Packaged catalog: k3 max-only (the 0.80.10 baseline QA observed).
     mod.setPiCatalogModelsForTests([
       {
@@ -393,7 +393,7 @@ describe("model credential profiles", () => {
   });
 
   it("reports bundled when every pi.dev provider fetch fails (dead proxy)", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     await mod.ensurePiCatalogWarm();
     mod.setPiCatalogModelsForTests(null);
     mod.setCatalogNetworkRefreshForTests(null);
@@ -415,14 +415,14 @@ describe("model credential profiles", () => {
   });
 
   it("includes Claude Fable 5 in the upgraded Anthropic SDK catalog", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     await mod.ensurePiCatalogWarm();
     const profile = mod.connectBuiltinProviderApiKey({ providerSlug: "anthropic", apiKey: "sk-ant" });
     expect(profile.models.map((m) => m.id)).toContain("claude-fable-5");
   });
 
   it("includes GPT-5.6 models and max thinking in the upgraded OpenAI SDK catalog", async () => {
-    const mod = await import("../../src/config/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js"); const modBridge = await import("../../src/config/pi-adapt/runtime-bridge.js");
     await mod.ensurePiCatalogWarm();
 
     const openai = mod.connectBuiltinProviderApiKey({ providerSlug: "openai", apiKey: "sk-openai" });
@@ -450,7 +450,7 @@ describe("model credential profiles", () => {
       expect(codexPublic.models.find((m) => m.id === id)).toMatchObject({ id, thinkingLevelMap: expect.objectContaining({ max: "max" }) });
     }
 
-    const refs = mod.listAvailableModels().map((m) => m.ref);
+    const refs = modBridge.listAvailableModels().map((m) => m.ref);
     expect(refs).toEqual(expect.arrayContaining([
       "openai/gpt-5.6-luna",
       "openai/gpt-5.6-sol",

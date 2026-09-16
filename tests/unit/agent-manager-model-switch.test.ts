@@ -128,6 +128,17 @@ vi.mock("../../src/communication/ws.js", () => ({
 }));
 
 vi.mock("../../src/config/model-credentials.js", () => ({
+  getModelCredentialProfile: vi.fn((id: string) => ({
+    id,
+    name: `profile ${id}`,
+    enabled: true,
+    // Provider-per-credential so the explicit providerSlug match has real
+    // cases on both sides (same-provider key switch AND cross-provider).
+    providerSlug: id === "cred-proxy" ? "anthropic-proxy" : "anthropic",
+  })),
+}));
+
+vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => availableModels),
   assertModelAvailable: vi.fn((model: string) => {
@@ -139,14 +150,6 @@ vi.mock("../../src/config/model-credentials.js", () => ({
     exportedCalls.push(args);
     return exportReturnsNull ? null : { agentDir: "/tmp/agent", extensionPaths: [], profile: { id: args.credentialId || "cred-a", name: "test" } };
   }),
-  getModelCredentialProfile: vi.fn((id: string) => ({
-    id,
-    name: `profile ${id}`,
-    enabled: true,
-    // Provider-per-credential so the explicit providerSlug match has real
-    // cases on both sides (same-provider key switch AND cross-provider).
-    providerSlug: id === "cred-proxy" ? "anthropic-proxy" : "anthropic",
-  })),
 }));
 
 // Member registry (single-path commit target): switchMemberModel commits the
