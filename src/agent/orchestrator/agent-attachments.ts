@@ -2,7 +2,7 @@
 import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { checkPath, type PathPolicy } from "../../kernel/path-security.js";
+import { checkPath, type PathPolicy } from "../../kernel/path.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
 import * as roomStore from "../../chat/room-store.js";
 import { memberDir } from "../../files/layout.js";

@@ -222,3 +222,8 @@ export function applyStorageMigrations(db: Database, migrations: readonly Storag
     }
   }
 }
+
+/** Encode an optional boolean for a nullable SQLite integer column. */
+export function sqliteBoolean(value: boolean | undefined): number | null {
+  return value === undefined ? null : Number(value);
+}

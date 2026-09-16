@@ -6,7 +6,7 @@ import {DeliveryRepository,type CapturedMessage,type DeliveryKind} from "../data
 import { onMessage } from "./message-bus.js";
 import { logger } from "../kernel/logger.js";
 import type { RoomMemberRecord } from "../kernel/types.js";
-import { stripCodeSegments } from "../kernel/mention-text.js";
+import { stripCodeSegments } from "../kernel/markdown.js";
 
 /** Match literal current roster names, longest first (Unicode and spaces included). */
 function rosterMentions(content: string, names: string[]): string[] {

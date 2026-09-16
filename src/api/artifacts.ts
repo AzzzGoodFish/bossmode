@@ -4,7 +4,7 @@ import { addRoute, sendJson } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import * as roomStore from "../chat/room-store.js";
 import { roomMemberAssetRoots } from "../chat/room-store.js";
-import { checkPath } from "../kernel/path-security.js";
+import { checkPath } from "../kernel/path.js";
 import type { Room } from "../kernel/types.js";
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;

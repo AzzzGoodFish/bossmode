@@ -1,6 +1,6 @@
 import type { Database } from "../database.js";
 import type { McpServerAvailability } from "../../kernel/types.js";
-import { defined, objectJson, parseObject } from "./settings-codec.js";
+import { defined, objectJson, parseObject } from "../../kernel/json.js";
 export type McpStatusCache = Record<string, McpServerAvailability & { configHash?: string }>;
 
 type Field = readonly [key: string, column: string, type: "string" | "number" | "boolean"];

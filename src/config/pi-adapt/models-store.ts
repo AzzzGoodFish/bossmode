@@ -1,7 +1,7 @@
-import type { Database } from "../../data/database.js";
+import { sqliteBoolean, type Database } from "../../data/database.js";
 import type { DiskCatalogCache, ProviderModelsStoreEntry } from "../model-catalog.js";
 import type { ModelsStore, ModelsStoreEntry } from "@earendil-works/pi-ai";
-import { bool, defined, objectJson, parseObject } from "../../data/repositories/settings-codec.js";
+import { defined, objectJson, parseObject } from "../../kernel/json.js";
 
 /** SDK metadata is heterogeneous; queryable model identity/capabilities remain columns. */
 export class CatalogRepository {
@@ -20,7 +20,7 @@ export class CatalogRepository {
       const {provider, id:modelId, name,api,baseUrl,contextWindow,maxTokens,reasoning,input,...extension} = m;
       if (input !== undefined && !Array.isArray(input)) throw new Error("Invalid catalog model input");
       this.db.run("INSERT INTO catalog_models VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",id,provider,modelId,i,name ?? null,api ?? null,baseUrl ?? null,
-        contextWindow ?? null,maxTokens ?? null,bool(reasoning),input === undefined ? null : JSON.stringify(input),objectJson(extension));
+        contextWindow ?? null,maxTokens ?? null,sqliteBoolean(reasoning),input === undefined ? null : JSON.stringify(input),objectJson(extension));
     });
   }
   remote(): DiskCatalogCache | null {

@@ -1,13 +1,14 @@
+import { type JsonValue, canonicalJson } from "../../kernel/json.js";
 import type { Database } from "../database.js";
 
-export type DeliveryJson = null | boolean | number | string | DeliveryJson[] | { [key: string]: DeliveryJson };
+
 export type DeliveryKind = "ordinary" | "dm";
 export interface DeliveryActor { actorKey: string; memberId: string | null }
 export interface CapturedDeliverySnapshot {
   /** Original delivered bytes as JSON values, including historical labels/attachments.
    * Never use this snapshot as the current message/card/history read model. */
-  message: { [key: string]: DeliveryJson };
-  context: DeliveryJson;
+  message: { [key: string]: JsonValue };
+  context: JsonValue;
   origin: "user" | "member" | "system" | "unresolved";
   messageType: "chat" | "task_event" | "knowledge_event" | "notification";
   senderActorKey: string | null;
@@ -43,25 +44,7 @@ export function deliveryTime(at: number): void {
   if (!Number.isSafeInteger(at) || at < 0) throw new Error("Invalid delivery timestamp");
 }
 /** Strict, canonical JSON: no silent loss of undefined/functions/NaN/class data. */
-export function deliveryJson(value: unknown): string {
-  const ancestors = new Set<object>();
-  const encode = (v: unknown): string => {
-    if (v === null || typeof v === "boolean" || typeof v === "string") return JSON.stringify(v);
-    if (typeof v === "number" && Number.isFinite(v)) return JSON.stringify(v);
-    if (!v || typeof v !== "object" || ancestors.has(v)) throw new Error("Invalid delivery JSON");
-    ancestors.add(v);
-    try {
-      if (Array.isArray(v)) {
-        if (Object.keys(v).length !== v.length) throw new Error("Invalid delivery JSON array");
-        return `[${Array.from(v, encode).join(",")}]`;
-      }
-      if (Object.getPrototypeOf(v) !== Object.prototype && Object.getPrototypeOf(v) !== null) throw new Error("Invalid delivery JSON object");
-      if (Object.getOwnPropertySymbols(v).length) throw new Error("Invalid delivery JSON symbols");
-      return `{${Object.keys(v).sort().map(key => `${JSON.stringify(key)}:${encode((v as Record<string, unknown>)[key])}`).join(",")}}`;
-    } finally { ancestors.delete(v); }
-  };
-  return encode(value);
-}
+
 function validateCapture(c: CapturedMessage): string {
   deliveryText(c.scopeId, "scope ID");
   deliveryText(c.messageId, "message ID");
@@ -91,7 +74,7 @@ function validateCapture(c: CapturedMessage): string {
   if (!s.targets) throw new Error("Captured targets are required");
   for (const kind of ["ordinary", "dm"] as const) validateActors(s.targets[kind]);
   if (s.needResponse !== null) validateActors(s.needResponse);
-  return deliveryJson(s);
+  return canonicalJson(s, "Invalid delivery JSON");
 }
 export function deliveryKeyParams(key: DeliveryKey): [string, string, string, DeliveryKind] {
   deliveryText(key.scopeId, "scope ID");

@@ -1,3 +1,4 @@
+import { requireObject } from "../../kernel/json.js";
 import {readFileSync} from "node:fs";
 import {getDefaultConfig} from "../../config/config.js";
 import type {BossmodeConfig} from "../../kernel/types.js";
@@ -12,14 +13,11 @@ import {readLegacyJson,type LegacySourceEntry} from "./legacy-inventory.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
 
-function object(value:unknown,path:string):Record<string,any>{
- if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy settings object: ${path}`);
- return value as Record<string,any>;
-}
+
 export function decodeLegacyConfig(value:unknown):BossmodeConfig{
- const row=object(value,"config.json");const auth=object(row.auth,"config.json");const defaults=object(row.defaults,"config.json");
+ const row=requireObject(value, `Invalid legacy settings object: ${"config.json"}`);const auth=requireObject(row.auth, `Invalid legacy settings object: ${"config.json"}`);const defaults=requireObject(row.defaults, `Invalid legacy settings object: ${"config.json"}`);
  if(typeof auth.username!=="string"||typeof auth.passwordHash!=="string"||typeof defaults.host!=="string"||!defaults.host||!Number.isInteger(defaults.port)||defaults.port<1||defaults.port>65535)throw new Error("Invalid legacy application configuration");
- const apiKeys=object(row.apiKeys??{},"config.json");if(Object.values(apiKeys).some(v=>typeof v!=="string"))throw new Error("Invalid legacy provider keys");
+ const apiKeys=requireObject(row.apiKeys??{}, `Invalid legacy settings object: ${"config.json"}`);if(Object.values(apiKeys).some(v=>typeof v!=="string"))throw new Error("Invalid legacy provider keys");
  const base=getDefaultConfig();
  return {...base,...row,auth:{username:auth.username,passwordHash:auth.passwordHash},apiKeys,defaults:{host:defaults.host,port:defaults.port}};
 }
@@ -44,7 +42,7 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
  };
  const catalog=new CatalogRepository(ctx.db);
  for(const entry of entries.filter(e=>e.kind==="catalog-remote"||e.kind==="catalog-overlays")){
-  const value=object(read(entry),entry.path);
+  const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
   if(entry.kind==="catalog-remote"){
    const fetchedAt=value.fetchedAt??Date.parse(value.updatedAt);
    if(!Array.isArray(value.models)||!Number.isFinite(fetchedAt))throw new Error(`Invalid legacy catalog: ${entry.path}`);
@@ -58,7 +56,7 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
  for(const entry of entries){
   switch(entry.kind){
    case "model-credentials":{
-    const value=object(read(entry),entry.path);
+    const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
     if(!Array.isArray(value.profiles)||value.migrations!==undefined&&!Array.isArray(value.migrations))throw new Error("Invalid legacy credential store");
     const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,catalog.remote()?.models??[...bundledCatalog]);
     new ModelCredentialsRepository(ctx.db).replace({profiles:normalized.profiles,migrations:normalized.migrations??[]});break;
@@ -67,9 +65,9 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
     if(!entry.serverKey)throw new Error("Missing MCP OAuth source key");
     new McpOauthRepository(ctx.db).importHashedAuthEntry(entry.serverKey,decodeLegacyMcpOauthEntry(read(entry)));break;
    }
-   case "mcp-config":new McpSettingsRepository(ctx.db).importConfig(object(read(entry),entry.path));break;
+   case "mcp-config":new McpSettingsRepository(ctx.db).importConfig(requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`));break;
    case "member-mcp":{
-    new McpSettingsRepository(ctx.db).importMemberConfig(owner(entry.memberId),object(read(entry),entry.path));break;
+    new McpSettingsRepository(ctx.db).importMemberConfig(owner(entry.memberId),requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`));break;
    }
    case "mcp-status":new McpSettingsRepository(ctx.db).importStatus(read(entry) as any);break;
    case "workspaces":{

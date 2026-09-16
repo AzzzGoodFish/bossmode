@@ -1,3 +1,4 @@
+import { requireObject } from "../../kernel/json.js";
 import {createHash} from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import type {Database} from "../database.js";
@@ -14,10 +15,7 @@ import {importMessage,importMessageNextSequence,importArchivedMessage,writeMembe
 import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "../repositories/event-repository.js";
 import type {Room,RoomMessage} from "../../kernel/types.js";
 
-function object(value:unknown,path:string):Record<string,any>{
- if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy conversation object: ${path}`);
- return value as Record<string,any>;
-}
+
 /** Topic feature retired (fish #19358, 2026-09-11): topic scopes are never
  * imported. Legacy topic sources are consumed by the standard source-retire
  * flow instead of being imported; no topic archive copy is written. */
@@ -71,7 +69,7 @@ function importEventRows(db:Database,source:ImportEventSource):void{
  if(memberId!==null&&!db.get("SELECT id FROM members WHERE id=?",memberId))throw new Error("Unknown imported event member ID");
  const hash=sourceHash(e.path);
  for(const row of source.rows){
-  const event=object(row.value,e.path);
+  const event=requireObject(row.value, `Invalid legacy conversation object: ${e.path}`);
   if(typeof event.type!=="string"||!event.type)throw new Error(`Invalid legacy event: ${e.path}`);
   const sourceId=`legacy:${hash}:${row.ordinal}`;
   const id=row.proof===undefined?sourceId:`legacy-proven:${row.proof}`;
@@ -160,7 +158,7 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
  const read=(e:LegacySourceEntry)=>{check(e);return readLegacyJson(ctx.sourceRoot,e);};
  const conversations=new ConversationsRepository(ctx.db);
  for(const e of entries.filter(e=>e.kind==="room-metadata")){
-  const room=object(read(e),e.path) as Room;
+  const room=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`) as Room;
   if(room.id!==e.scopeId)throw new Error(`Room source ownership mismatch: ${e.path}`);
   conversations.upsertRoom(room);consumed.add(e.path);
  }
@@ -172,7 +170,7 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   // source-retire flow retains no unhandled domain; no topic archive copy is written.
   if(e.kind==="topic-metadata"||retiredTopicScope(e.scopeId)){consumed.add(e.path);continue;}
   if(e.kind==="user-cursors"){
-   const cursors=object(read(e),e.path);const repo=new UserCursorRepository(ctx.db);
+   const cursors=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`);const repo=new UserCursorRepository(ctx.db);
    for(const [key,cursor]of Object.entries(cursors)){
     if(retiredTopicScope(key))continue; // topic scope retired (fish #19358)
     ensureImportedScope(ctx.db,key);repo.importCursor(key,cursor);
@@ -212,10 +210,10 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   }
   const scope=ensureImportedScope(ctx.db,e.scopeId,e.path.startsWith("rooms/")?e.path.split("/")[1]:undefined);
   if(e.kind==="message-archive-summary"){
-   new MessageArchivesRepository(ctx.db).saveSummary(scope,Number(e.archiveTimestamp),object(read(e),e.path) as ArchiveSummary);
+   new MessageArchivesRepository(ctx.db).saveSummary(scope,Number(e.archiveTimestamp),requireObject(read(e), `Invalid legacy conversation object: ${e.path}`) as ArchiveSummary);
   }else if(e.kind==="message-sequence")importMessageNextSequence(ctx.db,scope,read(e) as number);
   else if(e.kind==="member-cursors"){
-   const cursors=object(read(e),e.path);for(const [actor,value]of Object.entries(cursors)){
+   const cursors=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`);for(const [actor,value]of Object.entries(cursors)){
     if(value!==null&&typeof value!=="string")throw new Error(`Invalid legacy member cursor: ${e.path}`);
     writeMemberCursor(scope,actor,value,ctx.db,Math.trunc(e.mtimeMs));
    }

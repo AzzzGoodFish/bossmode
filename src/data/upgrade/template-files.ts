@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "yaml";
-import { asString, asStringArray } from "../../kernel/frontmatter.js";
+import { asString, asStringArray } from "../../kernel/markdown.js";
 import type { Database } from "../database.js";
 import { TemplateRepository, templateMetadataKeys, validateTemplatePath, validateTemplateSlug, type TemplateMetadata } from "../repositories/templates.js";
 

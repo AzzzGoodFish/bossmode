@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { Database } from "../database.js";
+import { sqliteBoolean, type Database } from "../database.js";
 import type { BossmodeConfig } from "../../kernel/types.js";
-import { bool } from "./settings-codec.js";
+
 
 /** Secret-bearing internal settings API; public transports must select/redact fields. */
 export class SettingsRepository {
@@ -26,7 +26,7 @@ export class SettingsRepository {
       tx.run(`INSERT OR REPLACE INTO app_settings VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.defaults.host, c.defaults.port,
         1, "fork", // session_resume fixed on; topic_seed_mode retired (fish #19358): legacy column, no writer input
         null, null, null, // codex_transport / websocket_connect_timeout_ms / http_idle_timeout_ms retired (P1)
-        bool(c.mcp?.enabled), null, null, null, null, // memory budgets retired (P1)
+        sqliteBoolean(c.mcp?.enabled), null, null, null, null, // memory budgets retired (P1)
         c.catalog?.autoRefreshIntervalDays ?? null);
       tx.run("INSERT OR REPLACE INTO login_credentials VALUES (1,?,?)", c.auth.username, c.auth.passwordHash);
       tx.run("DELETE FROM provider_api_keys");

@@ -46,7 +46,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   },
 }));
 
-vi.mock("../../src/kernel/frontmatter.js", () => ({
+vi.mock("../../src/kernel/markdown.js", () => ({
   parseFrontmatter: vi.fn(() => ({ meta: {}, body: "" })),
 }));
 

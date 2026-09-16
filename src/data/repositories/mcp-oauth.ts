@@ -1,3 +1,4 @@
+import { requireObject } from "../../kernel/json.js";
 import { createHash } from "node:crypto";
 import type { Database } from "../database.js";
 
@@ -23,10 +24,7 @@ export function mcpOauthServerKey(serverName: string): string {
 function validateKey(key: string): void {
   if (typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid MCP OAuth storage key");
 }
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid MCP OAuth record");
-  return value as Record<string, unknown>;
-}
+
 function text(value: unknown, required = false): string | undefined {
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string") throw new Error("Invalid MCP OAuth text field");
@@ -41,13 +39,13 @@ function number(value: unknown): number | undefined {
 /** Pure decoder for the pinned adapter's tokens.json AuthEntry document.
  * No file lookup, schema initialization, fallback or import-on-read. */
 export function decodeLegacyMcpOauthEntry(value: unknown): McpOauthEntry {
-  const row = object(value);
+  const row = requireObject(value, "Invalid MCP OAuth record");
   const entry: McpOauthEntry = {};
   for (const key of ["serverUrl", "codeVerifier", "oauthState"] as const) {
     if (row[key] !== undefined) entry[key] = text(row[key]);
   }
   if (row.tokens !== undefined) {
-    const tokens = object(row.tokens);
+    const tokens = requireObject(row.tokens, "Invalid MCP OAuth record");
     entry.tokens = {
       accessToken: text(tokens.accessToken, true)!,
       ...(tokens.refreshToken !== undefined ? { refreshToken: text(tokens.refreshToken) } : {}),
@@ -56,7 +54,7 @@ export function decodeLegacyMcpOauthEntry(value: unknown): McpOauthEntry {
     };
   }
   if (row.clientInfo !== undefined) {
-    const client = object(row.clientInfo);
+    const client = requireObject(row.clientInfo, "Invalid MCP OAuth record");
     entry.clientInfo = {
       clientId: text(client.clientId, true)!,
       ...(client.clientSecret !== undefined ? { clientSecret: text(client.clientSecret) } : {}),

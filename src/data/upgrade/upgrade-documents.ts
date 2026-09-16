@@ -1,3 +1,4 @@
+import { requireObject } from "../../kernel/json.js";
 import {readFileSync} from "node:fs";
 import {isDeepStrictEqual} from "node:util";
 import {dirname} from "node:path";
@@ -9,10 +10,7 @@ import {ensureImportedScope,retiredTopicScope} from "./upgrade-conversations.js"
 import {documentContentMeta,importDocument,type DocumentImport,type DocumentIdentity,type ImportedDocumentHistory} from "../repositories/document-repository.js";
 import type {PrinciplesMeta} from "../../kernel/types.js";
 
-function object(value:unknown,path:string):Record<string,any>{
- if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy document object: ${path}`);
- return value as Record<string,any>;
-}
+
 function text(bytes:Uint8Array,path:string):string{
  try{return new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new Error(`Invalid document UTF-8: ${path}`);}
 }
@@ -70,12 +68,12 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   if(retiredTopicScope(e.scopeId))continue;
   check(e);
   if(e.kind==="document-meta"){
-   const meta=object(readLegacyJson(ctx.sourceRoot,e),e.path);
-   if(meta.room!==undefined)roomDocument(e).meta=object(meta.room,e.path) as PrinciplesMeta;
-   if(meta.members!==undefined)for(const [owner,value]of Object.entries(object(meta.members,e.path)))roomDocument(e,owner).meta=object(value,e.path) as PrinciplesMeta;
+   const meta=requireObject(readLegacyJson(ctx.sourceRoot,e), `Invalid legacy document object: ${e.path}`);
+   if(meta.room!==undefined)roomDocument(e).meta=requireObject(meta.room, `Invalid legacy document object: ${e.path}`) as PrinciplesMeta;
+   if(meta.members!==undefined)for(const [owner,value]of Object.entries(requireObject(meta.members, `Invalid legacy document object: ${e.path}`)))roomDocument(e,owner).meta=requireObject(value, `Invalid legacy document object: ${e.path}`) as PrinciplesMeta;
   }else{
    for await(const row of readLegacyJsonl(ctx.sourceRoot,e)){
-    const event=object(row.value,e.path);
+    const event=requireObject(row.value, `Invalid legacy document object: ${e.path}`);
     if(obsoleteSupplementHistory(e,event)){if(++completed%128===0)ctx.progress(completed);continue;}
     const p=e.layout==="member"?direct(e):roomDocument(e,event.scope==="room"?undefined:event.memberId);
     if(e.layout!=="member"&&event.scope!=="room"&&typeof event.memberId!=="string")throw new Error(`Missing document history subject: ${e.path}`);

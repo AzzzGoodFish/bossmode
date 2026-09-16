@@ -1,5 +1,5 @@
 /** Historical JSONL imports are strict and recoverable. Live reads use SQL only;
- * tolerant parsing remains available for retained, non-authoritative archives. */
+ * Corrupt historical events are quarantined rather than becoming live fallback reads. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,7 +13,6 @@ import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conver
 import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
 import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/chat/message-store.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
-import { parseJsonlLines } from "../../src/kernel/jsonl.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let upgraded: Awaited<ReturnType<typeof prepareStorageUpgrade>> | undefined;
@@ -161,10 +160,4 @@ describe("historical JSONL import and SQL queries", () => {
     assertOriginalUntouched(path, body);
   });
 
-  it("parseJsonlLines retains tolerant archive-only middle/trailing/all-good/empty behavior", () => {
-    expect(parseJsonlLines("", { category: "test" })).toEqual([]);
-    expect(parseJsonlLines('{"a":1}\n{"a":2}\n', { category: "test" })).toEqual([{ a: 1 }, { a: 2 }]);
-    expect(parseJsonlLines('{"a":1}\nNOPE\n{"a":3}\n', { category: "test" })).toEqual([{ a: 1 }, { a: 3 }]);
-    expect(parseJsonlLines('{"a":1}\n{"a":2,"unterminated', { category: "test" })).toEqual([{ a: 1 }]);
-  });
 });

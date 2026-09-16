@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/data/database.js";
+import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, sqliteBoolean, type Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 
 let root: string;
@@ -17,6 +17,12 @@ beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bm-core-db-unit-")); datab
 afterEach(() => { for (const db of databases) db.close(); rmSync(root, { recursive: true, force: true }); });
 
 describe("explicit core database lifecycle", () => {
+  it("encodes optional SQL booleans without opening or binding a database", () => {
+    expect(sqliteBoolean(undefined)).toBeNull();
+    expect(sqliteBoolean(false)).toBe(0);
+    expect(sqliteBoolean(true)).toBe(1);
+    expect(() => getDatabase()).toThrow("not initialized");
+  });
   it("does not open a database when an uninitialized consumer asks for one", () => {
     expect(() => getDatabase()).toThrow("bootstrap");
     expect(existsSync(join(root, "bossmode.db"))).toBe(false);

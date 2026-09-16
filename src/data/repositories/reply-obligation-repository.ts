@@ -1,5 +1,6 @@
+import { canonicalJson } from "../../kernel/json.js";
 import type { Database } from "../database.js";
-import { DeliveryRepository, deliveryJson, deliveryText, deliveryTime, type CapturedMessage } from "./delivery-repository.js";
+import { DeliveryRepository, deliveryText, deliveryTime, type CapturedMessage } from "./delivery-repository.js";
 
 export type ReplyDisposition = "failed" | "cancelled" | "silent" | "broadcast-skipped" | "continuation-exhausted";
 
@@ -74,7 +75,7 @@ export class ReplyObligationRepository {
     deliveryText(input.actorKey, "reply actor key");
     if (input.selection.mode !== "all-pending" && input.selection.mode !== "reply-target") throw new Error("Invalid reply settlement selection");
     if (input.selection.mode === "reply-target") deliveryText(input.selection.messageId, "reply target ID");
-    const selection = deliveryJson(input.selection);
+    const selection = canonicalJson(input.selection, "Invalid delivery JSON");
     return this.db.transaction(tx => {
       const capture = new DeliveryRepository(tx).getCapture(input.scopeId, input.replyMessageId);
       if (!capture || capture.snapshot.origin !== "member" || capture.snapshot.messageType !== "chat" || capture.snapshot.senderActorKey !== input.actorKey) {

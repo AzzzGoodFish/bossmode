@@ -8,7 +8,7 @@ import { ConversationsRepository, getConversationMember as getMember } from "../
 export { ensureDmScope, ensureMmScope } from "../data/repositories/conversations.js";
 import { memberDir, roomDir } from "../files/layout.js";
 import { readWorkspaces } from "../member/workspaces/workspace-registry.js";
-import { newRoomId } from "../kernel/short-id.js";
+import { newRoomId } from "../kernel/ids.js";
 
 /** Batch 7 P3: cwd is peeled on write — it exists on disk only until the
  * attachment migration has consumed it. */

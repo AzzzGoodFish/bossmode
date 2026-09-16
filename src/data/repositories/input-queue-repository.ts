@@ -1,10 +1,11 @@
+import { canonicalJson, type JsonValue } from "../../kernel/json.js";
 import type { Database } from "../database.js";
-import { DeliveryRepository, deliveryJson, deliveryKeyParams, deliveryText, deliveryTime, type DeliveryJson, type DeliveryKey } from "./delivery-repository.js";
+import { DeliveryRepository, deliveryKeyParams, deliveryText, deliveryTime, type DeliveryKey } from "./delivery-repository.js";
 
 export type QueuedInputStatus = "pending" | "dispatched" | "settled" | "interrupted" | "uncertain";
 export interface QueuedInput extends DeliveryKey {
   id: number;
-  payload: DeliveryJson;
+  payload: JsonValue;
   trigger: string;
   placement: "front" | "tail";
   status: QueuedInputStatus;
@@ -16,7 +17,7 @@ export interface QueuedInput extends DeliveryKey {
    * the SAME SQL transaction; this repository does not create SDK attempts. */
   executionAttemptId: string | null;
   outcome: "completed" | "failed" | "cancelled" | null;
-  result: DeliveryJson;
+  result: JsonValue;
   diagnosis: string | null;
 }
 export interface QueuedInputOwner { id: number; scopeId: string; targetActorKey: string }
@@ -47,13 +48,13 @@ export class InputQueueRepository {
     return row && decode(row);
   }
 
-  enqueue(input: DeliveryKey & { payload: DeliveryJson; trigger: string; placement?: "front" | "tail" }, at: number): { enqueued: boolean; input: QueuedInput } {
+  enqueue(input: DeliveryKey & { payload: JsonValue; trigger: string; placement?: "front" | "tail" }, at: number): { enqueued: boolean; input: QueuedInput } {
     deliveryTime(at);
     deliveryText(input.trigger, "input trigger");
     const placement=input.placement??"tail";
     if(placement!=="front"&&placement!=="tail")throw new Error("Invalid queued input placement");
     const key = deliveryKeyParams(input);
-    const payload = deliveryJson(input.payload);
+    const payload = canonicalJson(input.payload, "Invalid delivery JSON");
     return this.db.transaction(tx => {
       if (!new DeliveryRepository(tx).getDelivery(input)) throw new Error("Queued input requires captured delivery acceptance");
       const old = tx.get<Row>(`${SELECT} WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...key);
@@ -119,11 +120,11 @@ export class InputQueueRepository {
   /** Only a verified SDK/provider settlement belongs here, not routing callback
    * acceptance. This does not settle chat obligations or imply tool side effects
    * were atomic. The token guards stale/other-dispatch callbacks. */
-  settle(owner: QueuedInputOwner, token: string, result: { outcome: "completed" | "failed" | "cancelled"; result: DeliveryJson }, at: number): boolean {
+  settle(owner: QueuedInputOwner, token: string, result: { outcome: "completed" | "failed" | "cancelled"; result: JsonValue }, at: number): boolean {
     deliveryTime(at);
     deliveryText(token, "dispatch token");
     if (!["completed", "failed", "cancelled"].includes(result.outcome)) throw new Error("Invalid queued input outcome");
-    const json = deliveryJson(result.result);
+    const json = canonicalJson(result.result, "Invalid delivery JSON");
     return !!this.db.get(`UPDATE queued_inputs SET status='settled',ended_at=?,outcome=?,result_json=?
       WHERE id=? AND scope_id=? AND target_actor_key=? AND status='dispatched' AND dispatch_token=? RETURNING id`,
     at, result.outcome, json, ...ownerParams(owner), token);

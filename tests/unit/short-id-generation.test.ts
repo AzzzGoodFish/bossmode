@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { isShortMemberId, isShortRoomId } from "../../src/kernel/short-id.js";
+import { isShortMemberId, isShortRoomId } from "../../src/kernel/ids.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;

@@ -1,6 +1,7 @@
+import { type JsonValue } from "../../kernel/json.js";
 import {randomUUID} from "node:crypto";
 import {getDatabase} from "../../data/database.js";
-import {DeliveryRepository,type CapturedMessage,type DeliveryKey,type DeliveryJson} from "../../data/repositories/delivery-repository.js";
+import { DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../data/repositories/delivery-repository.js";
 import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import {ExecutionAttemptRepository} from "../../data/repositories/execution-attempt-repository.js";
@@ -33,7 +34,7 @@ export function acceptRuntimeInput(
     deliveries.captureMessage(capture,at);
     new ReplyObligationRepository(db).openForCapturedMessage(capture,at);
     deliveries.acceptCapturedDelivery({...key,snapshot:capture.snapshot},at);
-    const {input}=queue.enqueue({...key,payload:payload as unknown as DeliveryJson,trigger:payload.trigger,placement:options.placement},at);
+    const {input}=queue.enqueue({...key,payload:payload as unknown as JsonValue,trigger:payload.trigger,placement:options.placement},at);
     options.onAccepted?.();
     if(options.skip){
       queue.interrupt(input,{status:"pending"},options.skip.diagnosis,at);
@@ -59,7 +60,7 @@ export function acceptControlInput(scopeValue:string,memberId:string,payload:Pre
     const deliveries=new DeliveryRepository(db);deliveries.captureMessage(capture,at);
     new ReplyObligationRepository(db).openForCapturedMessage(capture,at);
     deliveries.acceptCapturedDelivery({...key,snapshot:capture.snapshot},at);
-    const result=new InputQueueRepository(db).enqueue({...key,payload:payload as unknown as DeliveryJson,trigger:payload.trigger,placement},at);
+    const result=new InputQueueRepository(db).enqueue({...key,payload:payload as unknown as JsonValue,trigger:payload.trigger,placement},at);
     onAccepted?.();return {input:result.input,accepted:result.enqueued};
   });
 }

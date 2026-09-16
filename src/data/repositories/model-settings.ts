@@ -1,6 +1,6 @@
-import type { Database } from "../database.js";
+import { sqliteBoolean, type Database } from "../database.js";
 import type { ModelCredentialProfile, ModelDefinitionConfig } from "../../kernel/types.js";
-import { bool, defined, optionalJson, parseObject } from "./settings-codec.js";
+import { defined, optionalJson, parseObject } from "../../kernel/json.js";
 
 export interface CredentialImport { profiles: ModelCredentialProfile[]; migrations: string[] }
 /** Internal secret repository. Revisions protect refreshes across asynchronous provider IO. */
@@ -47,7 +47,7 @@ export class ModelCredentialsRepository {
   }
   private writeModels(profileId: string, kind: string, models: ModelDefinitionConfig[]): void {
     models.forEach((m, i) => this.db.run("INSERT INTO model_definitions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", profileId,kind,m.id,i,
-      m.name ?? null,m.contextWindow ?? null,m.maxTokens ?? null,bool(m.reasoning),bool(m.input?.includes("text")),bool(m.input?.includes("image")),
+      m.name ?? null,m.contextWindow ?? null,m.maxTokens ?? null,sqliteBoolean(m.reasoning),sqliteBoolean(m.input?.includes("text")),sqliteBoolean(m.input?.includes("image")),
       optionalJson(m.thinkingLevelMap),optionalJson(m.compat),m.metadataSource ?? null));
   }
   /** Import/upsert one normalized profile; does not erase unrelated accounts. */
@@ -61,7 +61,7 @@ export class ModelCredentialsRepository {
         request_profile=excluded.request_profile,auth_header=excluded.auth_header,enabled=excluded.enabled,is_default=excluded.is_default,
         created_at=excluded.created_at,updated_at=excluded.updated_at,revision=excluded.revision`,
         p.id,ordinal,p.profileKind ?? null,p.name,p.providerSlug,p.protocol,p.baseUrl ?? null,p.authType,p.oauthProviderId ?? null,p.requestProfile,
-        bool(p.authHeader),Number(p.enabled),Number(p.isDefault),p.createdAt,p.updatedAt,this.nextRevision());
+        sqliteBoolean(p.authHeader),Number(p.enabled),Number(p.isDefault),p.createdAt,p.updatedAt,this.nextRevision());
       tx.run("INSERT OR REPLACE INTO model_secrets VALUES (?,?,?)",p.id,p.apiKey ?? null,optionalJson(p.oauthCredentials));
       tx.run("DELETE FROM model_headers WHERE profile_id=?",p.id);
       for (const [name,value] of Object.entries(p.headers ?? {})) tx.run("INSERT INTO model_headers VALUES (?,?,?)",p.id,name,value);
