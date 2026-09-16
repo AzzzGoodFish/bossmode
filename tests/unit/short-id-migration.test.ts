@@ -82,6 +82,14 @@ describe("renameSegment", () => {
     expect(renameSegment(`mm:${M1}-${M2}`, flipped)).toBe("mm:mem_aaaaaaaaaa-mem_zzzzzzzzzz");
   });
 
+  it("renames room-<id> segments and embedded forms, never bare uuids", () => {
+    expect(renameSegment(`room-${R1}`, mapping)).toBe("room-rm_cccccccccc");
+    expect(renameSegment(`scopes-room-${R1}.md`, mapping)).toBe("scopes-room-rm_cccccccccc.md");
+    expect(renameSegment(`mainline-room-${R1}.md`, mapping)).toBe("mainline-room-rm_cccccccccc.md");
+    expect(renameSegment("room-abc", mapping)).toBeNull(); // prefix without a mapped id
+    expect(renameSegment("room-99999999-1111-4111-8111-111111111111", mapping)).toBeNull(); // a different id stays
+  });
+
   it("never touches unmapped legacy records or unrelated names", () => {
     expect(renameSegment(LEGACY_RECORD, mapping)).toBeNull();
     expect(renameSegment("sessions", mapping)).toBeNull();
@@ -108,6 +116,12 @@ describe("mapCompositeString", () => {
   it("rewrites colon-delimited room scopes (dedupe keys)", () => {
     expect(mapCompositeString(`message:${R1}:msg-004a07d4`, mapping)).toBe("message:rm_cccccccccc:msg-004a07d4");
     expect(mapCompositeString(`scope-notification:${R1}:task-ui:msg-1`, mapping)).toBe("scope-notification:rm_cccccccccc:task-ui:msg-1");
+  });
+
+  it("keeps legacy room-tree member segments old while the room parts follow", () => {
+    expect(mapCompositeString(`rooms/${R1}/memory/members/${M1}/mainline.md`, mapping)).toBe(`rooms/rm_cccccccccc/memory/members/${M1}/mainline.md`);
+    expect(mapCompositeString(`rooms/${R1}/memory/members/${M1}/history/mainline/x.md`, mapping)).toBe(`rooms/rm_cccccccccc/memory/members/${M1}/history/mainline/x.md`);
+    expect(mapCompositeString(`members/${M1}/memory/scopes/room-${R1}/mainline.md`, mapping)).toBe(`members/mem_aaaaaaaaaa/memory/scopes/room-rm_cccccccccc/mainline.md`);
   });
 
   it("never touches unmapped legacy records", () => {

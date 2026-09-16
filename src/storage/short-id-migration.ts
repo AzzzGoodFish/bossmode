@@ -112,6 +112,18 @@ export function renameSegment(name: string, mapping: ShortIdMapping): string | n
     const inner = mapping.rooms.get(name.slice(5));
     if (inner) return `room_${inner}`;
   }
+  if (name.startsWith("room-")) {
+    const inner = mapping.rooms.get(name.slice(5));
+    if (inner) return `room-${inner}`;
+  }
+  // Substring forms inside longer names (`mainline-room-<id>.md`, fold products
+  // `scopes-room-<id>-…`) — mirrors the string-side rewrite.
+  let out = name;
+  for (const [old, next] of mapping.rooms) {
+    if (out.includes(`room-${old}`)) out = out.split(`room-${old}`).join(`room-${next}`);
+    if (out.includes(`room_${old}`)) out = out.split(`room_${old}`).join(`room_${next}`);
+  }
+  if (out !== name) return out;
   return null;
 }
 
@@ -439,10 +451,18 @@ function mapMmTokens(value: string, mapping: ShortIdMapping): string {
   return out;
 }
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, (character) => "\\" + character);
+
 /** Structured string replacement for composite values (paths, keys, comments). */
 export function mapCompositeString(value: string, mapping: ShortIdMapping): string {
   let out = mapMmTokens(value, mapping);
-  for (const [old, next] of mapping.members) if (out.includes(old)) out = out.split(old).join(next);
+  for (const [old, next] of mapping.members) {
+    if (!out.includes(old)) continue;
+    // A member id directly following `memory/members/` is a legacy room-tree
+    // segment: those keep the old form (archive semantics, design §3.3) — mirrors
+    // the filesystem walker, which never renames those segments.
+    out = out.replace(new RegExp(`(?<!memory/members/)${escapeRegExp(old)}`, "g"), next);
+  }
   for (const [old, next] of mapping.rooms) {
     if (out.includes(`rooms/${old}`)) out = out.split(`rooms/${old}`).join(`rooms/${next}`);
     if (out.includes(`room-${old}`)) out = out.split(`room-${old}`).join(`room-${next}`);
@@ -471,6 +491,19 @@ function containsOldId(value: string, mapping: ShortIdMapping): boolean {
     if (value.includes(`rooms/${old}`) || value.includes(`room-${old}`) || value.includes(`room_${old}`)) return true;
   }
   return false;
+}
+
+/** Composite residue under the same keep rule as the rewrite: member segments of
+ * legacy room memory trees (`memory/members/<id>`) stay old by design. */
+function compositeResidual(value: string, mapping: ShortIdMapping): boolean {
+  return containsOldId(value.replace(/(?<=memory\/members\/)[^/]+/g, ""), mapping);
+}
+
+function compositeResidualCount(tx: Database, table: string, column: string, mapping: ShortIdMapping): number {
+  const rows = tx.all<{ v: string }>(`SELECT "${column}" AS v FROM "${table}" WHERE "${column}" IS NOT NULL`);
+  let count = 0;
+  for (const row of rows) if (compositeResidual(row.v, mapping)) count++;
+  return count;
 }
 
 const isOldMemberId = (value: string): boolean => /mem_[0-9a-f]{8}-[0-9a-f]{4}-/.test(value);
@@ -744,12 +777,7 @@ function checkNoOldIds(tx: Database, mapping: ShortIdMapping): string[] {
     } else if (mode === "scope") {
       count = tx.get<{ n: number }>(`SELECT COUNT(*) AS n FROM "${table}" WHERE ${c} IS NOT NULL AND (${c} GLOB ${OLD_MEMBER_GLOB} OR ${c} LIKE ${UUID_LIKE})`)?.n;
     } else if (mode === "composite") {
-      count = tx.get<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM "${table}" WHERE ${c} IS NOT NULL AND (${c} GLOB ${OLD_MEMBER_GLOB}`
-        + ` OR ${c} LIKE '%rooms/________-____-____-____-____________%'`
-        + ` OR ${c} LIKE '%room-________-____-____-____-____________%'`
-        + ` OR ${c} GLOB '*room_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*')`,
-      )?.n;
+      count = compositeResidualCount(tx, table, column, mapping);
     } else {
       count = jsonResidualCount(tx, table, column, mapping);
     }

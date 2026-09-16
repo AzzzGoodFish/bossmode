@@ -86,16 +86,20 @@ export function archiveLegacySharedMemory(root: string, db: Database): void {
  * Fold any remaining files into the member's overview+parts root as
  * `scopes-<path-with-dashes>.md` (nothing lost, deterministic names), then drop
  * the empty tree. A member with an empty `scopes/` just gets the tree removed.
- * Idempotent via a `storage_meta` flag; non-blocking on failure.
+ * The fold only MOVES bytes, so the registry/history rows follow the move:
+ * `reconcileFoldedMemoryRows` runs on every startup (idempotent, conservative:
+ * only when the source is gone and the folded file exists; conflicts stay) and
+ * also heals databases whose fold flag was already set by an earlier build.
+ * The move phase stays flag-gated; non-blocking on failure (retry next start).
  */
 export function cleanupMemberMemoryScopes(root: string, db: Database): void {
   try {
-    if (db.get("SELECT 1 FROM storage_meta WHERE key=?", SCOPES_FLAG)) return;
+    const foldedFlagDone = !!db.get("SELECT 1 FROM storage_meta WHERE key=?", SCOPES_FLAG);
     const membersRoot = join(root, "members");
     let folded = 0;
     let cleaned = 0;
     let skipped = 0;
-    if (existsSync(membersRoot)) {
+    if (!foldedFlagDone && existsSync(membersRoot)) {
       for (const member of readdirSync(membersRoot, { withFileTypes: true })) {
         if (!member.isDirectory() || !MEMBER_ID.test(member.name)) continue;
         const memoryRoot = join(membersRoot, member.name, "memory");
@@ -120,13 +124,53 @@ export function cleanupMemberMemoryScopes(root: string, db: Database): void {
         if (listFiles(scopesRoot).length === 0) rmSync(scopesRoot, { recursive: true });
       }
     }
-    db.run("INSERT OR REPLACE INTO storage_meta(key,value) VALUES(?,?)", SCOPES_FLAG,
-      JSON.stringify({ foldedFiles: folded, cleanedEmpty: cleaned, skippedConflicts: skipped, completedAt: Date.now() }));
-    if (folded || cleaned || skipped) {
-      logger.info("storage-upgrade", "Member memory/scopes folded into the member memory root", { folded, cleaned, skipped });
+    const repointed = reconcileFoldedMemoryRows(root, db);
+    if (!foldedFlagDone) {
+      db.run("INSERT OR REPLACE INTO storage_meta(key,value) VALUES(?,?)", SCOPES_FLAG,
+        JSON.stringify({ foldedFiles: folded, cleanedEmpty: cleaned, skippedConflicts: skipped, repointedRows: repointed, completedAt: Date.now() }));
+    }
+    if (folded || cleaned || skipped || repointed) {
+      logger.info("storage-upgrade", "Member memory/scopes folded into the member memory root", { folded, cleaned, skipped, repointed });
     }
   } catch (error) {
     logger.warn("storage-upgrade",
       `Member memory scopes fold pending (will retry next startup): ${String(error)}`);
   }
+}
+
+const FOLD_REPOINT_TARGETS = [
+  ["memory_documents", "path"],
+  ["memory_document_history", "document_path"],
+  ["memory_document_history", "snapshot_path"],
+] as const;
+
+/** `members/<id>/memory/scopes/<rel>` → `members/<id>/memory/scopes-<rel flattened>`.
+ * Repoints only rows whose source is gone and whose folded file exists (covers runs
+ * interrupted between the move and this step); a conflict (both present) stays put.
+ * Idempotent — safe on every startup. */
+function reconcileFoldedMemoryRows(root: string, db: Database): number {
+  const membersRoot = join(root, "members");
+  if (!existsSync(membersRoot)) return 0;
+  let repointed = 0;
+  for (const member of readdirSync(membersRoot, { withFileTypes: true })) {
+    if (!member.isDirectory() || !MEMBER_ID.test(member.name)) continue;
+    const prefix = `members/${member.name}/memory/scopes/`;
+    const updates: Array<{ table: string; column: string; rowid: number; next: string }> = [];
+    for (const [table, column] of FOLD_REPOINT_TARGETS) {
+      const rows = db.all<{ r: number; v: string }>(`SELECT rowid AS r, "${column}" AS v FROM "${table}" WHERE "${column}" LIKE ?`, `${prefix}%`);
+      for (const row of rows) {
+        const next = `members/${member.name}/memory/scopes-${row.v.slice(prefix.length).replace(/\//g, "-")}`;
+        if (!existsSync(join(root, row.v)) && existsSync(join(root, next))) {
+          updates.push({ table, column, rowid: row.r, next });
+        }
+      }
+    }
+    if (updates.length === 0) continue;
+    db.transaction((tx) => {
+      tx.exec("PRAGMA defer_foreign_keys=ON"); // history.document_path references memory_documents(path)
+      for (const update of updates) tx.run(`UPDATE "${update.table}" SET "${update.column}"=? WHERE rowid=?`, update.next, update.rowid);
+    });
+    repointed += updates.length;
+  }
+  return repointed;
 }

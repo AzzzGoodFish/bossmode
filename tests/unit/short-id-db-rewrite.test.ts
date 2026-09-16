@@ -77,6 +77,13 @@ function seed(database: Database): void {
     `backups/fired-${M1}/memory/scopes/room-${R1}/x.jsonl`, `backups/core-upgrade/files/x.jsonl`, "h", 0, null);
   database.run("INSERT INTO member_archive_intents(member_id,source_path,archive_path,source_device,source_inode,state,created_at,completed_at) VALUES (?,?,?,?,?,'pending',?,NULL)",
     M1, `members/${M1}`, `backups/fired-${M1}-abc`, "1", "2", 1);
+  database.run("INSERT INTO memory_documents(path,layer,member_id,scope_id,revision,content_hash,content_length) VALUES(?,?,?,?,?,?,?)",
+    `rooms/${R1}/memory/members/${M1}/mainline.md`, "mainline", M1, R1, 1, "h", 1);
+  database.run("INSERT INTO memory_documents(path,layer,member_id,scope_id,revision,content_hash,content_length) VALUES(?,?,?,?,?,?,?)",
+    `members/${M1}/memory/scopes/room-${R1}/mainline.md`, "mainline", M1, R1, 1, "h", 1);
+  database.run("INSERT INTO memory_document_history(document_path,ordinal,revision,scope_id,ts,actor_type,actor_member_id,actor_name,operation,reason,content_hash,content_length,snapshot_path,snapshot_hash,snapshot_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    `rooms/${R1}/memory/members/${M1}/mainline.md`, 1, 1, R1, 1, "member", M1, "Aaa", "update", "test", "h", 1,
+    `rooms/${R1}/memory/members/${M1}/history/mainline/x.md`, "h", 1);
 }
 
 describe("migrateShortIds (DB rewrite + FS + flag)", () => {
@@ -89,6 +96,10 @@ describe("migrateShortIds (DB rewrite + FS + flag)", () => {
     writeFileSync(join(root, "members", M1, "persona.md"), "p");
     mkdirSync(join(root, "rooms", R1, "agent-events"), { recursive: true });
     writeFileSync(join(root, "rooms", R1, "agent-events", `${M1}.jsonl`), "{}");
+    mkdirSync(join(root, "members", M1, "memory", "scopes", `room-${R1}`), { recursive: true });
+    writeFileSync(join(root, "members", M1, "memory", "scopes", `room-${R1}`, "mainline.md"), "x");
+    mkdirSync(join(root, "members", M1, "archive"), { recursive: true });
+    writeFileSync(join(root, "members", M1, "archive", `mainline-room-${R1}.md`), "y");
     const triggersBefore = database.all<{ name: string; sql: string }>("SELECT name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name");
 
     const report = migrateShortIds(root, database);
@@ -161,6 +172,18 @@ describe("migrateShortIds (DB rewrite + FS + flag)", () => {
     expect(intent.member_id).toBe(n1);
     expect(intent.source_path).toBe(`members/${n1}`);
     expect(intent.archive_path).toBe(`backups/fired-${M1}-abc`); // archive path keeps the old form
+
+    // Legacy room-tree member segments keep the old form in DB (mirrors the filesystem);
+    // other room forms still follow.
+    expect(database.get<{ path: string }>("SELECT path FROM memory_documents WHERE path LIKE 'rooms/%'")!.path).toBe(`rooms/${nr}/memory/members/${M1}/mainline.md`);
+    expect(database.get<{ path: string }>("SELECT path FROM memory_documents WHERE path LIKE 'members/%memory/scopes%'")!.path).toBe(`members/${n1}/memory/scopes/room-${nr}/mainline.md`);
+    const historyRow = database.get<{ document_path: string; snapshot_path: string }>("SELECT document_path,snapshot_path FROM memory_document_history")!;
+    expect(historyRow.document_path).toBe(`rooms/${nr}/memory/members/${M1}/mainline.md`);
+    expect(historyRow.snapshot_path).toBe(`rooms/${nr}/memory/members/${M1}/history/mainline/x.md`);
+
+    // Filesystem: room-<id> dash forms (dirs + embedded names) are renamed.
+    expect(existsSync(join(root, "members", n1, "memory", "scopes", `room-${nr}`, "mainline.md"))).toBe(true);
+    expect(existsSync(join(root, "members", n1, "archive", `mainline-room-${nr}.md`))).toBe(true);
 
     // Trigger DDL round-trip is byte-identical; the guard still blocks rewrites.
     expect(database.all<{ name: string; sql: string }>("SELECT name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name")).toEqual(triggersBefore);
