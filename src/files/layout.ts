@@ -1,7 +1,7 @@
 /** Bossmode file-layout paths — the single authority for members/ and rooms/ paths.
  * Pure joins over the bossmode dir; no IO. */
 import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 
 export function membersRoot(): string {
   return join(getBossmodeDir(), "members");

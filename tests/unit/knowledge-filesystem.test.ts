@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 // Provide a mutable bossmode dir for the store to use each test
 let tmpDir: string = "";
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => tmpDir,
   ensureBossmodeDir: () => {},
   writePidFile: () => {},

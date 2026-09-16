@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import type { Database } from "../../src/data/database.js";

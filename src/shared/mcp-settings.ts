@@ -5,7 +5,7 @@ function repository(): McpSettingsRepository { return new McpSettingsRepository(
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getBossmodeDir } from "./config.js";
+import { getBossmodeDir } from "../config/config.js";
 import type { McpServerAvailability, McpServerSummary } from "../kernel/types.js";
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";

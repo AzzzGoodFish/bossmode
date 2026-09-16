@@ -37,7 +37,7 @@ import { switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-ma
 import * as roomStore from "../chat/room-store.js";
 import * as messageStore from "../chat/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
-import { readConfig } from "../shared/config.js";
+import { readConfig } from "../config/config.js";
 import type { RoomMessage } from "../kernel/types.js";
 import { readMemberProfile } from "../member/member-profile.js";
 
@@ -351,7 +351,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
 
     const { compileMemberPrompt } = await import("../engine/prompt-compiler.js");
     const { getRoom, resolveRoomMemberRef } = await import("../chat/room-store.js");
-    const { getBossmodeDir } = await import("../shared/config.js");
+    const { getBossmodeDir } = await import("../config/config.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../engine/system-prompt-final.js");
     const { memberRecordToConfig, resolveSkills } = await import("../engine/agent-manager.js");

@@ -1,5 +1,5 @@
 import { getDatabase } from "../data/database.js";
-import { readConfig, writeConfig } from "../shared/config.js";
+import { readConfig, writeConfig } from "../config/config.js";
 import { parseMcpConfigText, readMcpConfigText, restoreRedactedMcpConfig, writeMcpConfig, countMcpServers } from "../shared/mcp-settings.js";
 
 export class SettingsValidationError extends Error {}

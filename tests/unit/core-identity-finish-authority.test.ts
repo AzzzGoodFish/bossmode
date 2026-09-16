@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import * as registry from "../../src/member/member-registry.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { resolveRoomMember } from "../../src/workforce/room-member-resolver.js";

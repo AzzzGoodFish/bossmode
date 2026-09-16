@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ username: "" as string | undefined, throwOnRead: false }));
 
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
+vi.mock("../../src/config/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
   return {
     ...actual,
     readConfig: () => {
@@ -13,7 +13,7 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
   };
 });
 
-import { getUserDisplayName } from "../../src/shared/user-identity.js";
+import { getUserDisplayName } from "../../src/config/user-identity.js";
 import { wrapRoomContextMessage } from "../../src/engine/message-envelope.js";
 import type { RoomMessage } from "../../src/kernel/types.js";
 

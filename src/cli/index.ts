@@ -18,7 +18,7 @@ import {
   isProcessRunning,
   readPidFile,
   removePidFile,
-} from "../shared/config.js";
+} from "../config/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

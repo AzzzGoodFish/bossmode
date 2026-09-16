@@ -1,6 +1,6 @@
 import { coreFixture } from "../helpers/core-fixture.js";
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";

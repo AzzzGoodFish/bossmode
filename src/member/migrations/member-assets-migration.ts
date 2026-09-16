@@ -15,7 +15,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { basename, join } from "node:path";
-import { getBossmodeDir } from "../../shared/config.js";
+import { getBossmodeDir } from "../../config/config.js";
 import {
   getBossmodeMcpConfigPath,
   getAssignableMcpServerNames,

@@ -5,7 +5,7 @@ import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
 import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
-import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
+import { getDefaultConfig, writeConfig } from "../src/config/config.js";
 import { createMember, updateMemberIdentity } from "../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/room-store.js";
 import { addMessage } from "../src/chat/message-store.js";

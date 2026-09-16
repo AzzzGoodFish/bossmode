@@ -3,7 +3,7 @@ import { existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { conversationsFixture } from "./unit/core-conversations-fixture.js";
 const location = vi.hoisted(() => ({ root: "" }));
-vi.mock("../src/shared/config.js", async original => ({ ...await original<typeof import("../src/shared/config.js")>(), getBossmodeDir: () => location.root }));
+vi.mock("../src/config/config.js", async original => ({ ...await original<typeof import("../src/config/config.js")>(), getBossmodeDir: () => location.root }));
 import * as rooms from "../src/chat/room-store.js";
 import { roomDir } from "../src/files/layout.js";
 import * as messages from "../src/chat/message-store.js";

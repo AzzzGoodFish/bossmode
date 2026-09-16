@@ -1,5 +1,5 @@
 import { getDatabase } from "../data/database.js";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { MemberArchiveService } from "../member/member-archive-lifecycle.js";
 import { quiesceMember } from "../engine/agent-manager.js";
 function service() { return new MemberArchiveService(getDatabase(),getBossmodeDir(),{quiesce:quiesceMember}); }

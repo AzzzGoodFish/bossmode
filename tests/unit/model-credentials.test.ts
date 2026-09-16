@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 let dir: string;
 let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
 
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => dir,
   ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
 }));

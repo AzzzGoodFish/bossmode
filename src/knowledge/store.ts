@@ -13,7 +13,7 @@ import {
   type Dirent,
 } from "node:fs";
 import { join, dirname, sep, posix, extname, basename } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { logger } from "../kernel/logger.js";
 import type { KnowledgeEntry, KnowledgeTreeNode } from "../kernel/types.js";
 

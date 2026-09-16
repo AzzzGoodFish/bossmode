@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 let tmpDir: string = "";
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => tmpDir,
   ensureBossmodeDir: () => {},
   writePidFile: () => {},

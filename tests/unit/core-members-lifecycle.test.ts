@@ -31,7 +31,7 @@ let failSyncAfterRename = false;
 let moved = false;
 let forcedUUID: string | undefined;
 let forcedIdDraw: number | undefined;
-vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => root}));
+vi.mock("../../src/config/config.js", () => ({getBossmodeDir: () => root}));
 vi.mock("node:crypto", async original => {
   const actual = await original<typeof import("node:crypto")>();
   const drawInt = actual.randomInt as unknown as (...args: number[]) => number;

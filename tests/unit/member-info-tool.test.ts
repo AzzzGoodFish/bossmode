@@ -16,7 +16,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => state.tmpDir,
 }));
 

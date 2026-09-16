@@ -18,7 +18,7 @@ import * as cursors from "../../src/chat/user-read-cursors.js";
 
 let sandbox: string;
 let db: Database;
-vi.mock("../../src/shared/config.js", () => ({getBossmodeDir: () => sandbox}));
+vi.mock("../../src/config/config.js", () => ({getBossmodeDir: () => sandbox}));
 const owner = "mem_owner";
 const other = "mem_other";
 function sessionFile(member = owner, filename = "session.jsonl"): string {

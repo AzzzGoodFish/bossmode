@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 
 let boss = "";
 
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => boss,
   ensureBossmodeDir: () => {
     mkdirSync(boss, { recursive: true });

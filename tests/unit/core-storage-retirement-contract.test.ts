@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import { getDatabase, type Database } from "../../src/data/database.js";

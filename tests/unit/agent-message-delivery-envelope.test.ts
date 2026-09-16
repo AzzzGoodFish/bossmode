@@ -6,7 +6,7 @@ import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/a
 import { createMember } from "../../src/member/member-registry.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/chat/room-store.js";
 import { importMessage } from "../../src/data/repositories/message-repository.js";
-import { writeConfig } from "../../src/shared/config.js";
+import { writeConfig } from "../../src/config/config.js";
 
 vi.mock("../../src/communication/ws.js", () => ({
   broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn(),

@@ -10,7 +10,7 @@ const mock = vi.hoisted(() => ({
   root: "", hosted: true,
 }));
 vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock("../../src/shared/config.js", () => ({ readConfig: () => ({}), getBossmodeDir: () => mock.root }));
+vi.mock("../../src/config/config.js", () => ({ readConfig: () => ({}), getBossmodeDir: () => mock.root }));
 vi.mock("../../src/member/member-extensions.js", () => ({
   builtinMcpAdapterPath: () => mock.root,
   discoverMemberExtensionEntries: () => { mock.stage("extensions"); return []; },

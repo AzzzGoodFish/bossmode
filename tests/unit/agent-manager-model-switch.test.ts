@@ -175,7 +175,7 @@ const registry = {
 beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
-  (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
+  (await import("../../src/config/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
   const members = new MembersRepository(fixture.db);
   const conversations = new ConversationsRepository(fixture.db);
   for (const name of ["pm", "qa"]) {

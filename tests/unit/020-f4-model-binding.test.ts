@@ -63,7 +63,7 @@ describe("F4 model binding persists to the registry", () => {
   beforeEach(async () => {
     fixture = coreFixture();
     dir = fixture.root;
-    (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
+    (await import("../../src/config/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
@@ -201,7 +201,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   beforeEach(async () => {
     fixture = coreFixture();
     dir = fixture.root;
-    (await import("../../src/shared/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
+    (await import("../../src/config/config.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 } });
     mkdirSync(join(dir, "members"), { recursive: true });
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });

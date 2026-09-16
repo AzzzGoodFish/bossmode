@@ -5,7 +5,7 @@ import {
   setupTestWorkspace, getTestWorkspace, createTestServer, closeTestServer,
   loginAndGetToken, jsonRequest, type TestServer,
 } from "../helpers/test-server.js";
-import { readConfig, writeConfig } from "../../src/shared/config.js";
+import { readConfig, writeConfig } from "../../src/config/config.js";
 import { readMcpConfigText, writeMcpConfig } from "../../src/shared/mcp-settings.js";
 
 setupTestWorkspace();

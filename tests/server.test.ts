@@ -10,7 +10,7 @@ const testPasswordHash = (() => {
   return `${salt}:${hash}`;
 })();
 
-vi.mock("../src/shared/config.js", () => ({
+vi.mock("../src/config/config.js", () => ({
   readConfig: () => ({
     auth: { username: "testuser", passwordHash: testPasswordHash },
     apiKeys: {},

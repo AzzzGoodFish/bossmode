@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { latestMessage } from "../data/repositories/message-repository.js";
 import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../kernel/types.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../data/repositories/conversations.js";

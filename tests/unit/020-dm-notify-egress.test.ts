@@ -20,8 +20,8 @@ let dir: string;
 
 const broadcastToRoom = vi.fn();
 
-vi.mock("../../src/shared/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/shared/config.js")>();
+vi.mock("../../src/config/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config/config.js")>();
   return {
     ...actual,
     getBossmodeDir: () => dir,

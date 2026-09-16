@@ -9,7 +9,7 @@ import { memberDir } from "../files/layout.js";
 import { readWorkspaces } from "../member/workspace-registry.js";
 import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../chat/room-store.js";
 import { chatScopeRoomId } from "../shared/conversation-ref.js";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { logger } from "../kernel/logger.js";
 
 export interface AttachmentSuccess {

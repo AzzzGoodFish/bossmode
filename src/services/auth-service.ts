@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readConfig, verifyPassword } from "../shared/config.js";
+import { readConfig, verifyPassword } from "../config/config.js";
 import type { SessionToken } from "../kernel/types.js";
 
 import { getDatabase } from "../data/database.js";

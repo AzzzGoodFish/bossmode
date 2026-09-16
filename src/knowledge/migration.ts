@@ -22,7 +22,7 @@ import {
   renameSync, cpSync, statSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { logger } from "../kernel/logger.js";
 import { slugify } from "./store.js";
 

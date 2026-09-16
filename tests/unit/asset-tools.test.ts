@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 let dir = "";
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => dir,
   ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
 }));

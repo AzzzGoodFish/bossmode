@@ -15,7 +15,7 @@ import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAge
 import { loadEventsPaginated } from "../engine/event-handler.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
-import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
+import { readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
 import * as attachmentStore from "../files/attachment-store.js";

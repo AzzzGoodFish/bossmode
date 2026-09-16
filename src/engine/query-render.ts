@@ -3,7 +3,7 @@
  * One renderer for both output modes: inline SDK text and markdown file export.
  * Row shape = the tool's JSON projection (seq/sender/content/ts/replyTo/attachments).
  */
-import { getUserDisplayName } from "../shared/user-identity.js";
+import { getUserDisplayName } from "../config/user-identity.js";
 
 /** Same mapping as the activation envelope (message-envelope.ts): user → display name. */
 function senderDisplayName(sender: string): string {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 
 let tmpDir = "";
 
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => tmpDir,
 }));
 

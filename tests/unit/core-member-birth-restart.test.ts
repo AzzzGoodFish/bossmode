@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { bindDatabase, type Database } from "../../src/data/database.js";
 import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/data/repositories/document-repository.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/member/member-registry.js";
 import { readMemberProfile } from "../../src/member/member-profile.js";
 import { writeMemoryLayer } from "../../src/member/member-memory-store.js";

@@ -51,7 +51,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: loggerInfo, warn: loggerWarn, error: loggerError },
 }));
 
-vi.mock("../../src/shared/config.js", () => ({
+vi.mock("../../src/config/config.js", () => ({
   getBossmodeDir: () => join(dir, ".bossmode"),
   readConfig: () => bossmodeConfig,
 }));

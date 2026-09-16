@@ -8,7 +8,7 @@ import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/a
 import { postMessage } from "../../src/communication/message-bus.js";
 import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
 import { broadcastToAgentSubscribers } from "../../src/communication/ws.js";
-import { writeConfig } from "../../src/shared/config.js";
+import { writeConfig } from "../../src/config/config.js";
 import { formatToolArgsFull, getSanitizedArgs } from "../../web/src/components/agent-event-utils.js";
 
 vi.mock("../../src/communication/ws.js", () => ({

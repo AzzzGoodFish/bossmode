@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { parseFrontmatter, asStringArray, asString } from "../kernel/frontmatter.js";
 import { logger } from "../kernel/logger.js";
 import type { SkillDefinition } from "../kernel/types.js";

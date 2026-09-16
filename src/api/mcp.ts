@@ -2,7 +2,7 @@
 import { getDatabase } from "../data/database.js";
 import { updateMcpSettings, SettingsValidationError } from "../services/settings-service.js";
 import { addRoute, parseBody, sendJson } from "./index.js";
-import { readConfig } from "../shared/config.js";
+import { readConfig } from "../config/config.js";
 import {
   configFingerprint,
   getMcpServersObject,

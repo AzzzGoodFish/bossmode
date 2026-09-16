@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { getDefaultConfig, readConfig, writeConfig } from "../../src/shared/config.js";
+import { getDefaultConfig, readConfig, writeConfig } from "../../src/config/config.js";
 import * as catalog from "../../src/engine/model-catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;

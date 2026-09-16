@@ -1,7 +1,7 @@
 /**
  * Batch 7 closeout: the platform extension API is gone — 404, not 410
  * (retirement pattern: remove outright, no compat layer).
- * Lives in its own file: test-server's vi.mock pins shared/config file-wide.
+ * Lives in its own file: test-server's vi.mock pins config/config file-wide.
  */
 import { describe, expect, it } from "vitest";
 import { setupTestWorkspace, createTestServer, jsonRequest, loginAndGetToken, closeTestServer } from "../helpers/test-server.js";

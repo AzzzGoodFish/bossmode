@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { inspectStartupSettings } from "../../src/data/upgrade/startup-inspection.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import type { Database } from "../../src/data/database.js";
 import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";

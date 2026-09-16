@@ -8,7 +8,7 @@
 // Known limit: bash-driven writes are not detected (args are opaque).
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep, relative, isAbsolute, join } from "node:path";
-import { getBossmodeDir } from "../shared/config.js";
+import { getBossmodeDir } from "../config/config.js";
 import { postMessage } from "../communication/message-bus.js";
 import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/room-store.js";

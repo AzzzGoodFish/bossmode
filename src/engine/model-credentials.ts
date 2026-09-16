@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { getBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
+import { getBossmodeDir, readConfig, writeConfig } from "../config/config.js";
 import { logger } from "../kernel/logger.js";
 import {
   createDatabaseModelsStore,

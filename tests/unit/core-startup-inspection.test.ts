@@ -7,7 +7,7 @@ import { openDatabase, applyStorageMigrations, type Database } from "../../src/d
 import { baseStorageMigration } from "../../src/data/base-schema.js";
 import { settingsMigration } from "../../src/data/schema/settings.js";
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { getDefaultConfig } from "../../src/shared/config.js";
+import { getDefaultConfig } from "../../src/config/config.js";
 let root:string,db:Database|undefined;
 beforeEach(()=>{root=mkdtempSync(join(tmpdir(),"bm-startup-peek-"));});
 afterEach(()=>{db?.close();db=undefined;rmSync(root,{recursive:true,force:true});});

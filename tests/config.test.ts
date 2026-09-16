@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 
 describe("password hashing", () => {
   // Import the functions - they're pure crypto, no fs side effects
-  let hashPassword: typeof import("../src/shared/config.js").hashPassword;
-  let verifyPassword: typeof import("../src/shared/config.js").verifyPassword;
+  let hashPassword: typeof import("../src/config/config.js").hashPassword;
+  let verifyPassword: typeof import("../src/config/config.js").verifyPassword;
 
   beforeEach(async () => {
-    const mod = await import("../src/shared/config.js");
+    const mod = await import("../src/config/config.js");
     hashPassword = mod.hashPassword;
     verifyPassword = mod.verifyPassword;
   });
@@ -43,11 +43,11 @@ describe("password hashing", () => {
 });
 
 describe("resolveApiKey", () => {
-  let resolveApiKey: typeof import("../src/shared/config.js").resolveApiKey;
+  let resolveApiKey: typeof import("../src/config/config.js").resolveApiKey;
   const originalEnv = { ...process.env };
 
   beforeEach(async () => {
-    const mod = await import("../src/shared/config.js");
+    const mod = await import("../src/config/config.js");
     resolveApiKey = mod.resolveApiKey;
   });
 
@@ -88,12 +88,12 @@ describe("resolveApiKey", () => {
 
 describe("PID file management", () => {
   it("isProcessRunning returns true for current process", async () => {
-    const { isProcessRunning } = await import("../src/shared/config.js");
+    const { isProcessRunning } = await import("../src/config/config.js");
     expect(isProcessRunning(process.pid)).toBe(true);
   });
 
   it("isProcessRunning returns false for non-existent PID", async () => {
-    const { isProcessRunning } = await import("../src/shared/config.js");
+    const { isProcessRunning } = await import("../src/config/config.js");
     // PID 999999 is almost certainly not running
     expect(isProcessRunning(999999)).toBe(false);
   });
