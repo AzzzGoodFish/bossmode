@@ -49,6 +49,7 @@ const reMemberOld = new RegExp(`^mem_${UUID}$`);
 const reMemberNano = /^mem_[0-9a-z]{10}$/;
 const reMemberAny = /^mem_/;
 const reBareUuid = new RegExp(`^${UUID}$`);
+const reRoomDashOld = new RegExp(`room-${UUID}`);
 const reRmOld = new RegExp(`^rm_${UUID}$`);
 const reRmAny = /^rm_/;
 const reRoomPrefix = /^room_/;
@@ -69,6 +70,7 @@ const classify = (value) => {
     return "mm_scope_other";
   }
   if (value.startsWith("room:")) return "room_scope";
+  if (reRoomDashOld.test(value)) return "room_dash_old";
   if (reBareUuid.test(value)) return "uuid_bare";
   if (reRmOld.test(value)) return "rm_old_record";
   if (reRmAny.test(value)) return "rm_other";
@@ -239,6 +241,13 @@ function walk(dir, top, zone) {
 for (const top of readdirSync(bossmodeDir, { withFileTypes: true })) {
   if (!top.isDirectory()) continue;
   if (SKIP_NAMES.has(top.name)) continue;
+  // The exclusion check applies to top-level names too: `backups/` and
+  // `migration-backup-*` at the root are keep zones, not migration surface
+  // (counted once, not walked — same as nested exclusion dirs).
+  if (EXCLUDED_DIR_NAMES.has(top.name) || EXCLUDED_DIR_RE.test(top.name)) {
+    bump("excluded", top.name, "dir", join(bossmodeDir, top.name));
+    continue;
+  }
   const zone = top.name === "archive" ? "archive" : LIBRARY_TOPS.has(top.name) ? "library" : "surface";
   walk(join(bossmodeDir, top.name), top.name, zone);
 }
@@ -246,7 +255,7 @@ report.filesystem = { scannedEntries: scanned, ...zones };
 
 // Post-migration assertion: no old-shaped member/scope traces outside the exclusion
 // list, the archive tree, and the legacy room-memory keep zones.
-const ASSERT_VIOLATION_SHAPES = new Set(["member_old", "member_old_file", "member_other", "dm_scope_old", "dm_scope_other", "mm_scope_old", "mm_scope_other"]);
+const ASSERT_VIOLATION_SHAPES = new Set(["member_old", "member_old_file", "member_other", "dm_scope_old", "dm_scope_other", "mm_scope_old", "mm_scope_other", "room_dash_old"]);
 if (assertClean) {
   const violations = [];
   for (const [top, shapes] of Object.entries(zones.surface.byTop)) {
