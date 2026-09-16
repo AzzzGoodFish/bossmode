@@ -4,14 +4,14 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSy
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import ts from "typescript";
-import { publishAssetDurably } from "../../src/data/upgrade/upgrade-files.js";
+import { publishAssetDurably } from "../../src/files/io.js";
 
 it("SIGKILL during asset copying leaves only a temporary file and ordinary retry succeeds", async () => {
   const root = mkdtempSync(join(tmpdir(), "bm-upgrade-kill-"));
   const source = join(root, "source.md"), destination = join(root, "members/id/persona.md");
   const helper = join(root, "helper.mjs"), script = join(root, "child.mjs");
   writeFileSync(source, "complete original bytes\r\n");
-  const code = readFileSync(new URL("../../src/data/upgrade/upgrade-files.ts", import.meta.url), "utf8");
+  const code = readFileSync(new URL("../../src/files/io.ts", import.meta.url), "utf8");
   writeFileSync(helper, ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext } }).outputText);
   writeFileSync(script, `import fs from 'node:fs';
 import {syncBuiltinESMExports} from 'node:module';

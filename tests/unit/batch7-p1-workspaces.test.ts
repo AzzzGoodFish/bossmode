@@ -181,12 +181,11 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
   });
 });
 
-describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
-  it("startup backfill generates pairs for legacy members, idempotently", async () => {
+describe("SSH credentials for legacy members", () => {
+  it("the member credential capability creates a missing SQL key once", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const { memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/workspaces/ssh-keygen.js");
+    const { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/workspaces/ssh-keygen.js");
     const { SshCredentialsRepository } = await import("../../src/data/repositories/workspace-settings.js");
-    const { backfillMemberSshKeys } = await import("../../src/member/migrations/member-assets-migration.js");
     // Import a pre-key member rather than deleting current authoritative credentials.
     const legacy = reg.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",
       unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
@@ -194,8 +193,8 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
       createdAt: 1, updatedAt: 1 });
     const credentials = new SshCredentialsRepository(fixture.db);
     expect(credentials.read(legacy.id)).toBeNull();
-    const first = backfillMemberSshKeys();
-    expect(first.generated).toContain("legacybot");
+    const first = ensureMemberSshKeyPair(legacy.id);
+    expect(first).toMatch(/^ssh-ed25519 /);
     expect(existsSync(memberSshKeyPath(legacy.id))).toBe(false);
     const key = credentials.read(legacy.id)!;
     expect(key.privateKey).toContain("PRIVATE KEY");
@@ -203,14 +202,8 @@ describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
     expect(pub).toMatch(/^ssh-ed25519 /);
 
     // Credential material remains stable on a repeat.
-    backfillMemberSshKeys();
+    expect(ensureMemberSshKeyPair(legacy.id)).toBe(first);
     expect(credentials.read(legacy.id)).toEqual(key);
   });
 
-  // SQL credentials are authoritative even when legacy key files do not exist.
-  it("backfill reports existing SQL credentials as skipped on rerun", async () => {
-    const { backfillMemberSshKeys } = await import("../../src/member/migrations/member-assets-migration.js");
-    backfillMemberSshKeys();
-    expect(backfillMemberSshKeys()).toEqual({ generated: [], skipped: 1 });
-  });
 });

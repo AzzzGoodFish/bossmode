@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { inspectStartupSettings } from "../../src/data/upgrade/startup-inspection.js";
+import { inspectStartupSettings } from "../../src/app/upgrade/inventory.js";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");

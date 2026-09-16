@@ -4,7 +4,7 @@ import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
-import { loadShortIdMapping, migrateShortIds } from "../../src/data/migrations/short-id-migration.js";
+import { loadShortIdMapping, migrateShortIds } from "../../src/app/upgrade/ids.js";
 import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;

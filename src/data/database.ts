@@ -161,10 +161,8 @@ export function getDatabase(): Database {
 /** Open a connection only. Schema/import/readiness and context binding are explicit. */
 export function openDatabase(path: string, options: {onPostCommitError?: (error: unknown) => void} = {}): Database {
   if (!isAbsolute(path)) throw new Error("Database path must be absolute");
-  const require = createRequire(import.meta.url);
-  const { DatabaseSync: Connection } = require("node:sqlite") as typeof import("node:sqlite");
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const connection = new Connection(path);
+  const connection = connect(path);
   const db = new Database(connection, path, options.onPostCommitError);
   try {
     // Settings and credentials share this store; sidecars must be private too.
@@ -176,6 +174,56 @@ export function openDatabase(path: string, options: {onPostCommitError?: (error:
     db.close();
     throw error;
   }
+}
+
+function sqlite(): typeof import("node:sqlite") {
+  return createRequire(import.meta.url)("node:sqlite");
+}
+function connect(path: string, readOnly = false): DatabaseSync {
+  if (!isAbsolute(path)) throw new Error("Database path must be absolute");
+  return new (sqlite().DatabaseSync)(path, { readOnly });
+}
+
+/** Synchronous inspection only; no directory creation, schema changes or context binding. */
+export function inspectDatabase<T>(path: string, inspect: (db: Pick<Database, "get" | "all">) => T): T {
+  const db = new Database(connect(path, true), path);
+  try {
+    const result = inspect(db);
+    if (result && typeof (result as any).then === "function") {
+      void Promise.resolve(result).catch(() => {});
+      throw new Error("Database inspections must be synchronous");
+    }
+    return result;
+  } finally { db.close(); }
+}
+
+/** SQLite-consistent backup; filesystem publication and durability belong to the caller. */
+export async function backupDatabase(source: string, destination: string): Promise<void> {
+  const connection = connect(source, true);
+  try { await sqlite().backup(connection, destination); }
+  finally { connection.close(); }
+}
+
+/** A process-death-safe SQL lock. Never unlink the database carrying the lock. */
+export function lockDatabase(path: string, mode: "exclusive" | "immediate"): () => void {
+  const connection = connect(path);
+  try {
+    connection.exec(mode === "exclusive" ? "BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS lease (id INTEGER)" : "BEGIN IMMEDIATE");
+  } catch (error) { connection.close(); throw error; }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try { if (connection.isTransaction) connection.exec("ROLLBACK"); }
+    finally { connection.close(); }
+  };
+}
+
+/** Checkpoint a closed application's WAL before replacing its database file. */
+export function checkpointDatabase(path: string): { busy: number } | undefined {
+  const db = new Database(connect(path), path);
+  try { return db.get<{ busy: number }>("PRAGMA wal_checkpoint(TRUNCATE)"); }
+  finally { db.close(); }
 }
 
 /** Only the composition root/test fixture binds the process context. */

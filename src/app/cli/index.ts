@@ -2,7 +2,7 @@
 import { ensureDirectory } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
 import { getDefaultConfig } from "../../config/config.js";
-import { inspectStartupSettings } from "../../data/upgrade/startup-inspection.js";
+import { inspectStartupSettings } from "../upgrade/inventory.js";
 import { waitForStartup, StartupWaitError } from "./startup-wait.js";
 import type { BossmodeConfig } from "../../kernel/types.js";
 

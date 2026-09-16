@@ -2,18 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
-import { importLegacyMembers } from "../../src/data/upgrade/upgrade-members.js";
-import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
-import { importLegacyDocuments } from "../../src/data/upgrade/upgrade-documents.js";
-import { importLegacyExecution } from "../../src/data/upgrade/upgrade-execution.js";
+import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
+import { importLegacyMembers } from "../../src/app/upgrade/records.js";
+import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
+import { importLegacyDocuments } from "../../src/app/upgrade/assets.js";
+import { importLegacyExecution } from "../../src/app/upgrade/records.js";
 import { getDocument } from "../../src/data/repositories/document-repository.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { SessionRepository } from "../../src/data/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
-import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const member = {id: "mem_one", name: "pm", agentTemplate: "general", global: {}, createdAt: 11, updatedAt: 22,

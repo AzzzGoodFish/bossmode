@@ -8,9 +8,10 @@ import { bindDatabase, openDatabase } from "../../src/data/database.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { importMessage, readMessages } from "../../src/data/repositories/message-repository.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
-import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/upgrade/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
-import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/app/upgrade/inventory.js";
+import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
+import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
+import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/chat/message-store.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 

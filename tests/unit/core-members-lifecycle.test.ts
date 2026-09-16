@@ -17,7 +17,7 @@ const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1")
 const roomDescriptionMigration = getMigration("core-room-description-v1");
 import * as registry from "../../src/member/member-registry.js";
 import * as profile from "../../src/member/profile/member-profile.js";
-import * as wizard from "../../src/data/upgrade/member-archive.js";
+import * as wizard from "../../src/app/upgrade/assets.js";
 import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/archive/member-archive-lifecycle.js";
 import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";

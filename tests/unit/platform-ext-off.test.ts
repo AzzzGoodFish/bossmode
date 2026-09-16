@@ -1,12 +1,6 @@
-/**
- * Batch 7 closeout (fish 2026-09-04): platform extension loading is retired.
- * — ~/.bossmode/extensions.json archived at startup, idempotently
- * — no platform store anywhere (API 404s, member config has no extensions field)
- * — writeRecord peels global.extensions from legacy member records
- * — the guide's self-install symlink recipe is mechanically valid
- */
+/** Retired platform configuration stays inert; member extensions remain discoverable. */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
@@ -25,20 +19,7 @@ afterEach(() => {
 });
 
 describe("platform extensions.json retirement", () => {
-  it("startup archives the manifest once, silently on later runs", async () => {
-    writeFileSync(join(dir, "extensions.json"), JSON.stringify({ packages: ["npm:pi-web-access"] }), "utf-8");
-    const { runMemberAssetsMigrationOnStartup } = await import("../../src/member/migrations/member-assets-migration.js");
-    runMemberAssetsMigrationOnStartup();
-    expect(existsSync(join(dir, "extensions.json"))).toBe(false);
-    expect(existsSync(join(dir, "extensions.json.pre-batch7c"))).toBe(true);
-    // idempotent second run: archive stays, no crash
-    runMemberAssetsMigrationOnStartup();
-    expect(existsSync(join(dir, "extensions.json.pre-batch7c"))).toBe(true);
-    // fresh installs (no manifest ever) stay silent
-    rmSync(join(dir, "extensions.json.pre-batch7c"));
-    runMemberAssetsMigrationOnStartup();
-    expect(readdirSync(dir).some((e) => e.startsWith("extensions.json"))).toBe(false);
-  });
+
 
   it("member record write peels legacy global.extensions", async () => {
     // Hand-write a legacy record carrying the retired field (hermetic — no

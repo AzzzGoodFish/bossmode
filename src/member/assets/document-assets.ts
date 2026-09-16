@@ -1,4 +1,5 @@
 // File preparation for DB-owned document metadata. No legacy metadata/history IO.
+import { syncPath } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
 import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -20,10 +21,6 @@ export function readDocumentMeta(identity: DocumentIdentity): PrinciplesMeta | u
   return record?.meta;
 }
 
-function syncPath(path: string): void {
-  const fd = openSync(path, "r");
-  try { fsyncSync(fd); } finally { closeSync(fd); }
-}
 
 /** Reject symlinks at every asset segment, including the current body. */
 function assetPath(relativePath: string): string {

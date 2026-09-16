@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
-import { cleanupRetiredTopicSessionFiles } from "../../src/data/migrations/topic-session-cleanup.js";
+import { cleanupRetiredTopicSessionFiles } from "../../src/app/upgrade/retirements.js";
 import { SessionRepository } from "../../src/data/repositories/session-repository.js";
 import { importMessage, importMessageNextSequence } from "../../src/data/repositories/message-repository.js";
 import { importAgentEvent } from "../../src/data/repositories/event-repository.js";
@@ -151,7 +151,7 @@ describe("core-topic-retirement-v1", () => {
 
 describe("upgrade path end to end (prepareStorageUpgrade)", () => {
   it("migrates a pre-retirement DB, deletes topic data, cleans topic session files, and re-runs as a no-op", async () => {
-    const { prepareStorageUpgrade } = await import("../../src/data/upgrade/upgrade-runner.js");
+    const { prepareStorageUpgrade } = await import("../../src/app/upgrade/run.js");
     // "Previous version": full schema minus the topic retirement migration, with topic rows seeded.
     const prev = openDatabase(join(root, "previous.sqlite"));
     applyStorageMigrations(prev, withoutRetirement());

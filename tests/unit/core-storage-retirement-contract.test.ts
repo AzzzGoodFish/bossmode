@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
-import { prepareCoreStorage } from "../../src/data/core-startup.js";
+import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import { getDefaultConfig } from "../../src/config/config.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { migratedMemberId } from "../helpers/short-id.js";
@@ -39,17 +39,22 @@ function readLegacy<T>(query: string): T[] {
 
 // These are absence/package-boundary checks, not a rebuilt tarball assertion.
 describe("production legacy retirement", () => {
-  it("removes only the obsolete member-storage script from the shipped migration allowlist", () => {
+  it("ships no standalone migration writer or retired implementation", () => {
     const pkg = JSON.parse(readFileSync(join(repository, "package.json"), "utf8"));
     expect(pkg.files.filter((entry: string) => entry.startsWith("scripts/"))).toEqual([
-      "scripts/migrate-identity-memory-v1.mjs",
-      "scripts/migrate-member-assets-v6.mjs",
-      "scripts/migrate-member-sessions-v1.mjs",
       "scripts/check-package-inputs.mjs",
     ]);
     for (const entry of pkg.files.filter((entry: string) => entry.startsWith("scripts/"))) {
       expect(existsSync(join(repository, entry)), entry).toBe(true);
     }
+    expect(readdirSync(join(repository, "scripts")).filter(name => /^migrate-/.test(name))).toEqual([]);
+    for (const path of ["src/member/migrations/identity-migration.ts", "src/member/migrations/member-assets-migration.ts", "src/knowledge/migration.ts",
+      "dist/member/migrations/identity-migration.js", "dist/member/migrations/member-assets-migration.js", "dist/knowledge/migration.js"]) {
+      expect(existsSync(join(repository, path)), path).toBe(false);
+    }
+    const sessions = readFileSync(join(repository, "assets/skills/bossmode-guide/references/sessions.md"), "utf8");
+    expect(sessions).toContain("Supported storage upgrades run during normal startup");
+    expect(sessions).not.toMatch(/--(?:dry-run|apply|recover)|scripts\/migrate-/);
     expect(pkg.files).not.toContain("tests");
     expect(pkg.files.some((entry: string) => entry.includes("legacy-member-storage"))).toBe(false);
   });

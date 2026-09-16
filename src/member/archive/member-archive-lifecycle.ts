@@ -1,5 +1,6 @@
 /** Async archive orchestration. Bootstrap and runtime admission/cancellation are caller-owned. */
-import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync } from "node:fs";
+import { syncPath } from "../../files/io.js";
+import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../../data/database.js";
@@ -44,10 +45,6 @@ export function checkedAssetPath(root: string, relativePath: string): string {
     if (statIfPresent(current)?.isSymbolicLink()) throw new Error("archive_symlink_conflict");
   }
   return full;
-}
-function syncPath(path: string): void {
-  const fd = openSync(path, "r");
-  try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 function syncTree(path: string): void {
   const stat = lstatSync(path);

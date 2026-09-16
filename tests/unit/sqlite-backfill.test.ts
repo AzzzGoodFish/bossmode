@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
-import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
-import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
+import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
+import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
+import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 import { readUsageReport } from "../../src/data/repositories/usage-repository.js";
 import { readStats, rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 

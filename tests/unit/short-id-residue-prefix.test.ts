@@ -13,7 +13,7 @@ vi.mock("../../src/kernel/ids.js", async (original) => {
 
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
-import { migrateShortIds } from "../../src/data/migrations/short-id-migration.js";
+import { migrateShortIds } from "../../src/app/upgrade/ids.js";
 
 let root: string;
 let db: Database | undefined;

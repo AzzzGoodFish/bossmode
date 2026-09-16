@@ -2,20 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  applyRenameOps,
-  assignShortIds,
-  clearShortIdJournal,
-  foldRelPath,
-  isExcludedRelPath,
-  mapCompositeString,
-  planFilesystemRenames,
-  readShortIdJournal,
-  renameSegment,
-  replayShortIdJournal,
-  writeShortIdJournal,
-  type ShortIdMapping,
-} from "../../src/data/migrations/short-id-migration.js";
+import { applyRenameOps, assignShortIds, clearShortIdJournal, foldRelPath, isExcludedRelPath, mapCompositeString, planFilesystemRenames, readShortIdJournal, renameSegment, replayShortIdJournal, writeShortIdJournal, type ShortIdMapping } from "../../src/app/upgrade/ids.js";
 
 const M1 = "mem_11111111-1111-4111-8111-111111111111";
 const M2 = "mem_22222222-2222-4222-8222-222222222222";

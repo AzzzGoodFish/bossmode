@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 const templatesMigration = getMigration("core-templates-v1");
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import * as historical from "../../src/data/upgrade/template-files.js";
+import * as historical from "../../src/app/upgrade/records.js";
 import { seedBuiltinAssets } from "../../src/member/assets/team-updates.js";
 
 const originalCwd = process.cwd();
@@ -43,7 +43,12 @@ it("removes live modules, factory agent assets and live template-file exports, n
   for (const path of ["src/workforce/agent-store.ts", "src/workforce/template-lifecycle.ts", "templates/agents"]) {
     expect(existsSync(join(repo, path))).toBe(false);
   }
-  expect(Object.keys(historical).sort()).toEqual(["importAgentTemplates", "legacyAgentTemplateSources", "parseAgentDefinitionMarkdown", "readTemplateBody"].sort());
+  for (const name of ["importAgentTemplates", "legacyAgentTemplateSources", "parseAgentDefinitionMarkdown", "readTemplateBody"] as const) {
+    expect(historical[name]).toBeTypeOf("function");
+  }
+  for (const name of ["createAgentDefinition", "updateAgentDefinition", "deleteAgentDefinition", "getAgentDefinition", "listAgentDefinitions"]) {
+    expect(historical).not.toHaveProperty(name);
+  }
   expect(existsSync(join(repo, "templates/skills/impeccable/SKILL.md"))).toBe(true);
 });
 

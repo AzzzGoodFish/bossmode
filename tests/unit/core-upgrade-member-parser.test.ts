@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { parseLegacyMemberPersona, parseLegacyMemberRecord } from "../../src/data/upgrade/upgrade-member-parser.js";
+import { parseLegacyMemberPersona, parseLegacyMemberRecord } from "../../src/app/upgrade/records.js";
 const record={id:"mem_one",name:"Alice",agentTemplate:"general",global:{model:null,credentialId:"profile",skills:[],mcpServers:[],extensions:["retired"],custom:{keep:true}},createdAt:0,updatedAt:1};
 it("preserves every persona body byte after UTF-8/BOM/CRLF frontmatter",()=>{
  const body=Buffer.from("\r\n  literal 言实\r\n\r\n");

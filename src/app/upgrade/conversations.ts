@@ -1,25 +1,24 @@
+import { type Database } from "../../data/database.js";
+import { executionScopeId } from "../../data/repositories/execution-identity.js";
+import { type LegacySourceEntry, type UpgradeImportContext, readLegacyJson, readLegacyJsonl, readLegacyEventJsonl } from "./inventory.js";
+import { createHash } from "node:crypto";
 import { requireObject } from "../../kernel/json.js";
-import {createHash} from "node:crypto";
-import {isDeepStrictEqual} from "node:util";
-import type {Database} from "../database.js";
-import type {UpgradeImportContext} from "./upgrade-runner.js";
-import {readLegacyJson,readLegacyJsonl,readLegacyEventJsonl,type LegacySourceEntry} from "./legacy-inventory.js";
-import {readFileSync} from "node:fs";
-import {join} from "node:path";
-import {archiveRawRetiredSource} from "../migrations/task-retirement.js";
-import {ConversationsRepository} from "../repositories/conversations.js";
-import {MessageArchivesRepository,type ArchiveSummary} from "../repositories/message-archives.js";
-import {UserCursorRepository} from "../repositories/user-cursor-repository.js";
-import {executionScopeId} from "../repositories/execution-identity.js";
-import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "../repositories/message-repository.js";
-import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "../repositories/event-repository.js";
-import type {Room,RoomMessage} from "../../kernel/types.js";
-
+import { isDeepStrictEqual } from "node:util";
+import { importAgentEvent, readAgentEvent, type EventPayload, rebuildEventAggregates } from "../../data/repositories/event-repository.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { archiveRawRetiredSource } from "./retirements.js";
+import { ConversationsRepository } from "../../data/repositories/conversations.js";
+import { MessageArchivesRepository, type ArchiveSummary } from "../../data/repositories/message-archives.js";
+import { UserCursorRepository } from "../../data/repositories/user-cursor-repository.js";
+import { importMessage, importMessageNextSequence, importArchivedMessage, writeMemberCursor, writeDmMemberCursor } from "../../data/repositories/message-repository.js";
+import { type Room, type RoomMessage } from "../../kernel/types.js";
 
 /** Topic feature retired (fish #19358, 2026-09-11): topic scopes are never
  * imported. Legacy topic sources are consumed by the standard source-retire
  * flow instead of being imported; no topic archive copy is written. */
 export function retiredTopicScope(scope:string|undefined):boolean{return !!scope&&scope.startsWith("topic:");}
+
 /** Missing historical metadata does not justify inventing a current room or member. */
 export function ensureImportedScope(db:Database,input:string,_roomHint?:string):string{
  const id=executionScopeId(input);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;
@@ -27,6 +26,7 @@ export function ensureImportedScope(db:Database,input:string,_roomHint?:string):
  db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,?,?,?)",id,kind,kind==="room"?id:null,kind==="dm"?id.slice(3):null);
  return id;
 }
+
 /** Actor evidence is independent of execution-event evidence. Neither is inferred
  * from current names, filenames, timestamps, sequence values or equal payloads. */
 export interface LegacyConversationImportOptions {
@@ -40,17 +40,23 @@ export interface LegacyConversationImportOptions {
   */
  eventProvenance?:(entry:LegacySourceEntry,ordinal:number)=>string|undefined;
 }
+
 interface ImportEventRow { ordinal:number;value:unknown;proof?:string }
+
 interface ImportEventSource {
  entry:LegacySourceEntry;owner:string;memberId:string|null;rows:ImportEventRow[];
 }
+
 interface EventOccurrence {
  path:string;ordinal:number;eventId:string;proof:string|null;
  scopeId:string;ownerKey:string;memberId:string|null;
  sourceScopeId:string;sourceOwnerKey:string|null;sourceTimestamp:number;mtimeMs:number;
 }
+
 const occurrencePrefix="legacy-event-occurrence-v1:";
+
 function sourceHash(path:string):string{return createHash("sha256").update(path).digest("hex");}
+
 function eventSource(entry:LegacySourceEntry,options:LegacyConversationImportOptions):ImportEventSource{
  const identity=options.eventOwner?.(entry);
  if(options.eventOwner&&(!identity||typeof identity.ownerKey!=="string"||!identity.ownerKey
@@ -60,6 +66,7 @@ function eventSource(entry:LegacySourceEntry,options:LegacyConversationImportOpt
  if(!owner||typeof owner!=="string"||(memberId!==null&&(typeof memberId!=="string"||!memberId)))throw new Error(`Invalid legacy event owner: ${entry.path}`);
  return {entry,owner,memberId,rows:[]};
 }
+
 /** Import-only occurrence receipts use the existing versioned storage metadata
  * namespace. They retain every source location even when several locations prove
  * one fact. They are not live SDK replay receipts or a second event authority. */
@@ -102,6 +109,7 @@ function importEventRows(db:Database,source:ImportEventSource):void{
   }
  }
 }
+
 /** A fact may occupy different original ordinals in duplicate sources. Merge only
  * their explicit order constraints, not ordinal equality. Existing SQL order is
  * the tie breaker for otherwise unrelated events, not evidence of execution order.
@@ -151,6 +159,7 @@ function orderProvenEvents(db:Database,scope:string,owner:string):boolean{
  for(let i=0;i<ordered.length;i++)db.run("UPDATE agent_events SET seq=? WHERE id=?",i+1,ordered[i]);
  return true;
 }
+
 /** Full source order is retained, including non-activity events. Imports never emit outbox work. */
 export async function importLegacyConversations(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],options:LegacyConversationImportOptions={}):Promise<Set<string>>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();

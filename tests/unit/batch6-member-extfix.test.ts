@@ -1,8 +1,4 @@
-/**
- * qa rc.14 findings ①+②: member extensions/ must expand into loadable file
- * entries (pi's loader takes module files, not directories), and the startup
- * migration logs its skip when the platform archive exists.
- */
+/** Member extension discovery supplies module files, never bare directories. */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -59,26 +55,5 @@ describe("discoverMemberExtensionEntries (qa ①)", () => {
     const assets = memberDirLoaderAssetPaths("mem_none");
     expect(assets.extensions).toEqual([]);
     expect(assets.skills).toEqual([]);
-  });
-});
-
-describe("startup migration skip log (qa ②)", () => {
-  it("second startup logs the skip line once the platform config is archived", async () => {
-    const { runMemberAssetsMigration, runMemberAssetsMigrationOnStartup } = await import("../../src/member/migrations/member-assets-migration.js");
-    const { getBossmodeMcpConfigPath } = await import("../../src/member/mcp/mcp-settings.js");
-    const reg = await import("../../src/member/member-registry.js");
-    reg.createMember({ name: "solo", agentTemplate: "pm", mcpServers: ["srv-a"] } as any);
-    writeFileSync(getBossmodeMcpConfigPath(), JSON.stringify({ mcpServers: { "srv-a": { type: "stdio", command: "x" } } }), "utf-8");
-
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      runMemberAssetsMigration({ dryRun: false }); // first run applies
-      runMemberAssetsMigrationOnStartup();          // second run skips — but visibly
-      expect(logSpy).toHaveBeenCalledWith("[member-assets-migration] platform config already archived — nothing to do");
-    } finally {
-      errSpy.mockRestore();
-      logSpy.mockRestore();
-    }
   });
 });

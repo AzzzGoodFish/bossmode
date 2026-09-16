@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 const templatesMigration = getMigration("core-templates-v1");
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/data/upgrade/template-files.js";
+import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/app/upgrade/records.js";
 
 let root: string;
 let db: Database;

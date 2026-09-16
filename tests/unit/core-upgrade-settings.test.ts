@@ -4,12 +4,12 @@ import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/database.js";
 import {coreStorageMigrations} from "../../src/data/schema.js";
-import {discoverLegacyInventory} from "../../src/data/upgrade/legacy-inventory.js";
-import {decodeLegacyConfig,importLegacySettings} from "../../src/data/upgrade/upgrade-settings.js";
+import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
+import { decodeLegacyConfig, importLegacySettings } from "../../src/app/upgrade/records.js";
 import {McpOauthRepository,mcpOauthServerKey} from "../../src/data/repositories/mcp-oauth.js";
 import {SettingsRepository} from "../../src/data/repositories/settings.js";
 import {McpSettingsRepository} from "../../src/data/repositories/mcp-settings.js";
-import type {UpgradeImportContext} from "../../src/data/upgrade/upgrade-runner.js";
+import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
 function setup(files:Record<string,unknown>){

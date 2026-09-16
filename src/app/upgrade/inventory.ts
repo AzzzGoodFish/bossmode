@@ -1,6 +1,28 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, read, readFileSync, readdirSync } from "node:fs";
-import { isAbsolute, join, parse, resolve } from "node:path";
+import { type Database, inspectDatabase } from "../../data/database.js";
+import { join, isAbsolute, parse, resolve } from "node:path";
+import { lstatSync, readdirSync, closeSync, constants, fstatSync, openSync, readFileSync, read, existsSync } from "node:fs";
 import { promisify } from "node:util";
+import { requireRegularFile, managedPath } from "../../files/io.js";
+import { CORE_STORAGE_FORMAT } from "../../data/schema.js";
+
+export type UpgradePhase = "checking" | "backing-up" | "importing" | "validating" | "cutover" | "retiring" | "ready";
+
+export interface UpgradeProgress { phase: UpgradePhase; completed?: number; total?: number; }
+
+export interface UpgradeImportContext {
+  readonly db: Database;
+  readonly root: string;
+  readonly sourceRoot: string;
+  readonly previousDatabase: string | undefined;
+  /** Only these snapshotted sources may be read by legacy import adapters. */
+  readonly sourceFiles: readonly string[];
+  readonly legacy: boolean;
+  progress(completed: number, total?: number): void;
+  /** New allowed file bodies only; existing different content is never overwritten. */
+  stageAsset(relativePath: string, bytes: Uint8Array): void;
+}
+
+export interface UpgradeSource { path: string; retire: boolean; }
 
 /** Startup-only, read-only source discovery. This module has no application imports.
  * Run under exclusive startup ownership, then read the runner's immutable backup/files
@@ -16,7 +38,9 @@ export type LegacyKind =
   | "current-sessions" | "old-sessions" | "runtime-state" | "user-cursors" | "background-task"
   | "document-body" | "document-meta" | "document-history" | "document-snapshot"
   | "export-snapshot";
+
 export type LegacyFormat = "json" | "jsonl" | "text";
+
 export interface LegacySourceEntry {
   /** Canonical POSIX relative path; structurally compatible with UpgradeSource. */
   path: string;
@@ -42,17 +66,21 @@ export interface LegacySourceEntry {
   archivePath?: string;
   snapshotKind?: Exclude<LegacyKind, "export-snapshot"> | "archive-manifest";
 }
+
 export interface LegacyDiagnostic {
   code: "unknown-metadata";
   path: string;
 }
+
 export interface LegacyInventory {
   entries: LegacySourceEntry[];
   diagnostics: LegacyDiagnostic[];
 }
+
 export type LegacySourceErrorCode = "invalid-root" | "invalid-path" | "duplicate-path" | "symlink-source"
   | "not-directory" | "not-regular-file" | "unapproved-source" | "wrong-format" | "source-io"
   | "invalid-utf8" | "invalid-json" | "unterminated-jsonl-line";
+
 export class LegacySourceError extends Error {
   constructor(readonly code: LegacySourceErrorCode, readonly path: string, readonly lineNumber?: number) {
     // Do not include native IO/JSON errors or causes: they can contain secret bytes.
@@ -62,8 +90,11 @@ export class LegacySourceError extends Error {
 }
 
 type Description = Omit<LegacySourceEntry, "path" | "mtimeMs" | "size">;
+
 type Params = Record<string, string>;
+
 interface Rule { parts: string[]; describe: (p: Params, path: string) => Description }
+
 const tokens: Record<string, RegExp> = {
   member: /^.+$/, room: /^.+$/, topic: /^.+$/, owner: /^.+$/,
   event: /^(.+)\.jsonl$/, archive: /^(?:fired|legacy)-.+$/,
@@ -78,15 +109,21 @@ const tokens: Record<string, RegExp> = {
   hashBody: /^[a-f0-9]{64}\.md$/,
   oauthHash: /^sha256-[a-f0-9]{64}$/,
 };
+
 const rules: Rule[] = [];
+
 function rule(pattern: string, describe: Rule["describe"]): void { rules.push({ parts: pattern.split("/"), describe }); }
+
 function description(kind: LegacyKind, format: LegacyFormat = "json", retire = true): Description { return { kind, format, retire }; }
+
 // Topic paths/dirs remain identifiable here so importers can consume them via the
 // source-retire flow; topic sources are never imported (fish #19358).
 function scope(p: Params): string { return p.topic ? `topic:${p.topic}` : p.room; }
+
 function memberScope(p: Params): string {
   return p.scope === "dm" ? `dm:${p.member}` : p.scope.startsWith("room-") ? p.scope.slice(5) : `topic:${p.scope.slice(6)}`;
 }
+
 function layer(file: string): "principles" | "mainline" { return file.startsWith("principles") ? "principles" : "mainline"; }
 
 rule("mcp/runtime/oauth/:oauthHash/tokens.json", p => ({...description("mcp-oauth"),serverKey:p.oauthHash.slice(7)}));
@@ -97,6 +134,7 @@ for (const [path, kind] of Object.entries({
   "mcp/mcp.json": "mcp-config", "mcp/status.json": "mcp-status", "user-read-cursors.json": "user-cursors",
   "rooms/runtime-state.json": "runtime-state",
 }) as [string, LegacyKind][]) rule(path, () => description(kind));
+
 for (const [file, kind, format, retire] of [
   ["member.json", "member-metadata", "json", true], ["member.md", "member-profile-mixed", "text", true],
   ["mcp.json", "member-mcp", "json", true], ["workspaces.json", "workspaces", "json", true],
@@ -104,19 +142,27 @@ for (const [file, kind, format, retire] of [
   ["ssh/config", "ssh-config", "text", true], ["runtime-state.json", "runtime-state", "json", true],
   ["sessions/current.json", "current-sessions", "json", true],
 ] as const) rule(`members/:member/${file}`, p => ({ ...description(kind, format, retire), memberId: p.member }));
+
 for (const [file, kind, format] of [
   ["dm-messages.jsonl", "messages", "jsonl"], [".dm-seq", "message-sequence", "json"], ["dm-cursor.json", "dm-member-cursor", "json"],
 ] as const) rule(`members/:member/${file}`, p => ({ ...description(kind, format), memberId: p.member, scopeId: `dm:${p.member}` }));
+
 // Retired background-task layout (fish #19454): recognized and consumed, never imported.
 rule("members/:member/background-tasks/:day/:task/task.json", (p, path) => ({
   ...description("background-task"), memberId: p.member, taskId: p.task, sessionDir: path.slice(0, -"/task.json".length),
 }));
+
 rule("agents/:template", p => ({ ...description("agent-template-mixed", "text"), slug: p.template.slice(0, -3) }));
+
 rule("rooms/:room/room.json", p => ({ ...description("room-metadata"), scopeId: scope(p) }));
+
 rule("rooms/:room/tasks.json", p => ({ ...description("tasks"), scopeId: scope(p) }));
+
 rule("rooms/:room/runtime-state.json", p => ({ ...description("runtime-state"), scopeId: scope(p) }));
+
 // Retired topic layout (fish #19358): recognized and consumed, never imported.
 rule("rooms/:room/topics/:topic/topic.json", p => ({ ...description("topic-metadata"), scopeId: scope(p) }));
+
 for (const base of ["rooms/:room", "rooms/:room/topics/:topic"]) {
   for (const [file, kind, format] of [
     ["messages.jsonl", "messages", "jsonl"], ["cursors.json", "member-cursors", "json"],
@@ -127,21 +173,29 @@ for (const base of ["rooms/:room", "rooms/:room/topics/:topic"]) {
   rule(`${base}/archives/:archiveMessages`, p => ({ ...description("message-archive", "jsonl"), scopeId: scope(p), archiveTimestamp: p.archiveMessages.split(".")[0] }));
   rule(`${base}/archives/:archiveSummary`, p => ({ ...description("message-archive-summary"), scopeId: scope(p), archiveTimestamp: p.archiveSummary.split(".")[0] }));
 }
+
 // Room paths also cover rooms/dm:<id>/agent-events, without turning an event
 // basename (even one beginning mem_) into a proven member ID.
 rule("members/:member/persona.md", (p, path) => ({ ...description("document-body", "text", false), memberId: p.member, layer: "persona", documentPath: path, layout: "member" }));
+
 rule("members/:member/memory/persona.md", (p, path) => ({ ...description("document-body", "text", false), memberId: p.member, layer: "persona", documentPath: path, layout: "copy-forward" }));
+
 rule("members/:member/memory/persona-history.jsonl", p => ({ ...description("document-history", "jsonl"), memberId: p.member, layer: "persona", documentPath: `members/${p.member}/persona.md`, layout: "member" }));
+
 for (const [token, kind, format, retire] of [
   ["layerBody", "document-body", "text", false], ["layerHistory", "document-history", "jsonl", true],
 ] as const) rule(`members/:member/memory/scopes/:scope/:${token}`, (p, path) => ({
   ...description(kind, format, retire), memberId: p.member, scopeId: memberScope(p), layer: layer(p[token]),
   documentPath: path.replace(/-history\.jsonl$/, ".md"), layout: "member",
 }));
+
 rule("rooms/:room/memory/room-principles.md", (p, path) => ({ ...description("document-body", "text", false), scopeId: scope(p), layer: "principles", documentPath: path, layout: "room-memory" }));
+
 rule("rooms/:room/memory/members/:owner/:layerBody", (p, path) => ({ ...description("document-body", "text", false), scopeId: scope(p), ownerKey: p.owner, layer: layer(p.layerBody), documentPath: path, layout: "room-memory" }));
+
 for (const [token, kind, format] of [["layerMeta", "document-meta", "json"], ["layerHistory", "document-history", "jsonl"]] as const)
   rule(`rooms/:room/memory/:${token}`, p => ({ ...description(kind, format), scopeId: scope(p), layer: layer(p[token]), layout: "room-memory" }));
+
 for (const [dir, docLayer] of [["prompt-supplements", "principles"], ["mainlines", "mainline"]] as const) {
   for (const [file, kind, format, retire] of [
     ["meta.json", "document-meta", "json", true], ["history.jsonl", "document-history", "jsonl", true],
@@ -151,7 +205,9 @@ for (const [dir, docLayer] of [["prompt-supplements", "principles"], ["mainlines
     ...(p.oldOwnerBody ? { ownerKey: p.oldOwnerBody.slice(0, -3), documentPath: path } : {}),
   }));
 }
+
 rule("rooms/:room/prompt-supplements/room.md", (p, path) => ({ ...description("document-body", "text", false), scopeId: scope(p), layer: "principles", layout: "copy-forward", documentPath: path }));
+
 for (const base of ["members/:member", "members/:member/memory/scopes/:scope", "rooms/:room/memory", "rooms/:room/memory/members/:owner"])
   rule(`${base}/history/:snapshotLayer/:hashBody`, p => ({
     ...description("document-snapshot", "text", false),
@@ -163,14 +219,17 @@ for (const base of ["members/:member", "members/:member/memory/scopes/:scope", "
 // Only established fired-/legacy- export layouts. Never recurse through generic
 // backups, core-upgrade backups, incident snapshots, or their staged files.
 const businessRules = [...rules];
+
 function exported(d: Description, p: Params): Description {
   return { kind: "export-snapshot", format: d.format, retire: false, archivePath: `backups/${p.archive}`, snapshotKind: d.kind as Exclude<LegacyKind, "export-snapshot"> };
 }
+
 for (const r of businessRules.filter(r => ["members", "rooms"].includes(r.parts[0]))) {
   rule(`backups/:archive/${r.parts.join("/")}`, (p, path) => exported(r.describe(p, path), p));
   // Fired exports are a member directory copied directly to the export root.
   if (r.parts[0] === "members") rule(`backups/:archive/${r.parts.slice(2).join("/")}`, (p, path) => exported(r.describe(p, path), p));
 }
+
 rule("backups/:archive/manifest.json", p => ({ ...description("export-snapshot", "json", false), archivePath: `backups/${p.archive}`, snapshotKind: "archive-manifest" }));
 
 function match(parts: string[], r: Rule): Params | null {
@@ -185,11 +244,13 @@ function match(parts: string[], r: Rule): Params | null {
   }
   return p;
 }
+
 /** Reject aliases as well as traversal; inventory and runner use the same path key. */
 export function validateLegacyPath(path: string): void {
   if (!path || isAbsolute(path) || /^[a-zA-Z]:/.test(path) || path.includes("\\") || /[\x00-\x1f\x7f]/.test(path)
     || path.split("/").some(p => !p || p === "." || p === "..")) throw new LegacySourceError("invalid-path", path);
 }
+
 /** Also usable on a parent-composed source list before snapshot creation. */
 export function validateLegacySources(entries: readonly { path: string; retire: boolean }[]): void {
   const seen = new Set<string>();
@@ -199,6 +260,7 @@ export function validateLegacySources(entries: readonly { path: string; retire: 
     seen.add(e.path);
   }
 }
+
 function classify(path: string): Description | undefined {
   const parts = path.split("/");
   const matches = rules.flatMap(r => {
@@ -208,17 +270,20 @@ function classify(path: string): Description | undefined {
   if (matches.length > 1) throw new LegacySourceError("duplicate-path", path);
   return matches[0];
 }
+
 function io<T>(path: string, fn: () => T): T {
   try { return fn(); } catch (e) {
     if (e instanceof LegacySourceError) throw e;
     throw new LegacySourceError("source-io", path);
   }
 }
+
 function directory(path: string, label: string): void {
   const stat = io(label, () => lstatSync(path));
   if (stat.isSymbolicLink()) throw new LegacySourceError("symlink-source", label);
   if (!stat.isDirectory()) throw new LegacySourceError("not-directory", label);
 }
+
 function rootPath(root: string): string {
   if (!isAbsolute(root) || root.includes("\0")) throw new LegacySourceError("invalid-root", "<root>");
   const absolute = resolve(root);
@@ -231,10 +296,12 @@ function rootPath(root: string): string {
   }
   return absolute;
 }
+
 function ignoredMetadata(path: string): boolean {
   // SDK bodies can sit directly beside the only approved association/task JSON.
   return /(?:\/sessions\/[^/]+\.jsonl|\/background-tasks\/[^/]+\/[^/]+\/[^/]+\.jsonl)$/.test(path);
 }
+
 /** Deterministically sorted files, not a precedence decision. Does not read bodies,
  * referenced SSH keys, JSON metadata, SDK sessions, or arbitrary asset subtrees.
  * Unknown metadata siblings are diagnostic-only, and are never marked for retirement.
@@ -275,6 +342,7 @@ export function discoverLegacyInventory(sourceRoot: string): LegacyInventory {
   validateLegacySources(result.entries);
   return result;
 }
+
 function openSource(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">, format: LegacyFormat): number {
   validateLegacyPath(entry.path);
   const d = classify(entry.path);
@@ -297,10 +365,12 @@ function openSource(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">, 
     return fd;
   } catch (e) { closeSync(fd); return io(entry.path, () => { throw e; }); }
 }
+
 function decode(bytes: Uint8Array, path: string, lineNumber?: number): string {
   try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { throw new LegacySourceError("invalid-utf8", path, lineNumber); }
 }
+
 function json(text: string, path: string, lineNumber?: number): unknown {
   try { return JSON.parse(text) as unknown; }
   catch (e) {
@@ -313,12 +383,14 @@ function json(text: string, path: string, lineNumber?: number): unknown {
     throw new LegacySourceError("invalid-json", path, line);
   }
 }
+
 /** Strict JSON syntax/UTF-8 only; domain shape/identity validation belongs to parent. */
 export function readLegacyJson(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">): unknown {
   const fd = openSource(sourceRoot, entry, "json");
   try { return json(decode(io(entry.path, () => readFileSync(fd)), entry.path), entry.path); }
   finally { closeSync(fd); }
 }
+
 export interface LegacyJsonlRecord {
   path: string;
   /** 1-based original nonblank-line ordinal, including non-activity events. */
@@ -327,6 +399,7 @@ export interface LegacyJsonlRecord {
   lineNumber: number;
   value: unknown;
 }
+
 /** Streaming memory is bounded by the largest line plus a 64 KiB read buffer.
  * Nonblank unterminated tails are never yielded, even when valid JSON. Parent
  * must consume to successful EOF before accepting the import transaction.
@@ -335,15 +408,18 @@ export interface LegacyJsonlRecord {
 export interface InvalidLegacyEventLine {
   path: string; ordinal: number; lineNumber: number; raw: Buffer;
 }
+
 export async function* readLegacyJsonl(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">): AsyncGenerator<LegacyJsonlRecord> {
   yield* readJsonl(sourceRoot, entry);
 }
+
 /** The old runtime-event reader skipped corrupt JSON. Import retains those exact
  * terminated lines through the callback; all other sources and errors stay strict. */
 export async function* readLegacyEventJsonl(sourceRoot: string, entry: LegacySourceEntry, preserveInvalid: (line: InvalidLegacyEventLine) => void): AsyncGenerator<LegacyJsonlRecord> {
   if(entry.kind !== "agent-events") throw new LegacySourceError("wrong-format", entry.path);
   yield* readJsonl(sourceRoot, entry, preserveInvalid);
 }
+
 async function* readJsonl(sourceRoot: string, entry: Pick<LegacySourceEntry, "path">, preserveInvalid?: (line: InvalidLegacyEventLine) => void): AsyncGenerator<LegacyJsonlRecord> {
   const fd = openSource(sourceRoot, entry, "jsonl");
   const readChunk = promisify(read);
@@ -381,4 +457,67 @@ async function* readJsonl(sourceRoot: string, entry: Pick<LegacySourceEntry, "pa
     if (!/^[\t\r ]*$/.test(decode(Buffer.concat(pieces), entry.path, lineNumber))) throw new LegacySourceError("unterminated-jsonl-line", entry.path, lineNumber);
   } catch (e) { if (e instanceof LegacySourceError) throw e; throw new LegacySourceError("source-io", entry.path, lineNumber); }
   finally { closeSync(fd); }
+}
+
+export interface StartupSettingsSnapshot { configured: boolean; host?: string; port?: number; source: "empty" | "legacy" | "database"; }
+
+function address(value: {host?: unknown; port?: unknown}, source: StartupSettingsSnapshot["source"]): StartupSettingsSnapshot {
+  if (typeof value.host !== "string" || !value.host || !Number.isInteger(value.port) || Number(value.port) < 1 || Number(value.port) > 65535) throw new Error("Stored startup address is invalid; configuration was not replaced");
+  return {configured:true,host:value.host,port:Number(value.port),source};
+}
+
+/** Legacy settings are visible only before a completed core authority marker.
+ * An unreadable/incompatible authoritative DB never falls back to config.json.
+ * This selects setup/display behavior only; the daemon imports and owns settings.
+ */
+export function inspectStartupSettings(root: string): StartupSettingsSnapshot {
+  if (!isAbsolute(root)) throw new Error("Startup data root must be absolute");
+  assertNoMissingMemberDatabase(root);
+  const path=join(root,"bossmode.db");
+  if (existsSync(path)) {
+    requireRegularFile(path);
+    const configured=inspectDatabase(path,db=>{
+      const table=db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_meta'");
+      const marker=table ? db.get("SELECT value FROM storage_meta WHERE key='core-authority'") : undefined;
+      if (marker) {
+        let format: unknown;
+        try { format=JSON.parse(String(marker.value)).format; } catch { throw new Error("Invalid storage authority marker"); }
+        if (format !== CORE_STORAGE_FORMAT) throw new Error("Unsupported storage format; startup configuration was not changed");
+        const row=db.get("SELECT host,port FROM app_settings WHERE id=1");
+        const login=db.get("SELECT username,password_hash FROM login_credentials WHERE id=1");
+        if (!row || !login || typeof login.username !== "string" || typeof login.password_hash !== "string") throw new Error("Authoritative startup configuration is incomplete; refusing account replacement");
+        return address(row,"database");
+      }
+    });
+    if(configured)return configured;
+  }
+  const legacy=join(root,"config.json");
+  if (!existsSync(legacy)) return {configured:false,source:"empty"};
+  requireRegularFile(legacy);
+  let value: any;
+  try { value=JSON.parse(readFileSync(legacy,"utf8")); } catch { throw new Error("Legacy startup configuration cannot be parsed; it was not replaced"); }
+  if (!value || typeof value.auth?.username !== "string" || typeof value.auth?.passwordHash !== "string" || !value.defaults) throw new Error("Legacy startup configuration is incomplete; it was not replaced");
+  return address(value.defaults,"legacy");
+}
+
+/** Any historical conversion journal can indicate lost authority, regardless of status or syntax.
+ * Do not parse it into permission to create a new, empty database. Preserve the evidence. */
+export function assertNoMissingMemberDatabase(root: string): void {
+  if (existsSync(managedPath(root, "bossmode.db"))) return;
+  const journal = managedPath(root, "migrations/member-storage-v1.json");
+  if (existsSync(journal)) throw new Error("Historical member-storage journal exists but the authoritative database is missing; no source was replaced");
+}
+
+/** Only for file-authoritative input, after parsing identity records. Empty/unknown asset
+ * subtrees count too; discovery of recognized files alone cannot detect these orphans. */
+export function assertLegacyMemberDirectories(root: string, memberIds: ReadonlySet<string>): void {
+  const directory = managedPath(root, "members");
+  if (!existsSync(directory)) return;
+  if (!lstatSync(directory).isDirectory()) throw new Error("Member assets root is not a directory");
+  for (const id of readdirSync(directory)) {
+    const path = managedPath(root, `members/${id}`);
+    if (lstatSync(path).isDirectory() && !memberIds.has(id)) {
+      throw new Error(`Member assets have no identity metadata: members/${id}`);
+    }
+  }
 }

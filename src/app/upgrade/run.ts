@@ -1,27 +1,19 @@
-// Startup-only authority cutover. No CLI action flags and no live legacy fallback.
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
+import { type Database, type StorageMigration, inspectDatabase, lockDatabase, backupDatabase, applyStorageMigrations, validateStorageMigrationHistory, openDatabase, checkpointDatabase, bindDatabase } from "../../data/database.js";
+import { type UpgradeProgress, type UpgradeImportContext, type UpgradeSource, discoverLegacyInventory, type LegacySourceEntry, assertNoMissingMemberDatabase } from "./inventory.js";
 import { createHash, randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { isAbsolute, join, relative } from "node:path";
-import { applyStorageMigrations, validateStorageMigrationHistory, openDatabase, type Database, type StorageMigration } from "../database.js";
-import { copyDurably, publishAssetDurably, ensurePrivateDirectory, hashFile, managedPath, moveDurably, requireRegularFile, syncDirectory, syncDirectoryChain, syncFile, writeDurably } from "./upgrade-files.js";
+import { existsSync, readFileSync, chmodSync, realpathSync, renameSync } from "node:fs";
+import { requireRegularFile, ensurePrivateDirectory, managedPath, syncPath, moveDurably, hashFile, copyDurably, publishAssetDurably, syncDirectoryChain, writeDurably } from "../../files/io.js";
+import { join, isAbsolute, relative } from "node:path";
+import { replayShortIdJournalFromDisk, migrateShortIds } from "./ids.js";
+import { type BossmodeConfig } from "../../kernel/types.js";
+import { logger } from "../../kernel/logger.js";
+import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../data/schema.js";
+import { importLegacyArchives, importLegacyDocuments, verifyActiveMemberAssets } from "./assets.js";
+import { importLegacyMembers, importLegacySettings, importLegacyExecution, importAgentTemplates } from "./records.js";
+import { importLegacyConversations } from "./conversations.js";
+import { archiveRetiredTasks, cleanupRetiredTopicSessionFiles, cleanupRetiredBackgroundSessionFiles, archiveRetiredScopeSessions, archiveLegacySharedMemory, cleanupMemberMemoryScopes, copyRoomPrinciplesToDescriptions } from "./retirements.js";
+import { SettingsRepository } from "../../data/repositories/settings.js";
 
-type NativeSqlite = typeof import("node:sqlite");
-export type UpgradePhase = "checking" | "backing-up" | "importing" | "validating" | "cutover" | "retiring" | "ready";
-export interface UpgradeProgress { phase: UpgradePhase; completed?: number; total?: number; }
-export interface UpgradeImportContext {
-  readonly db: Database;
-  readonly root: string;
-  readonly sourceRoot: string;
-  readonly previousDatabase: string | undefined;
-  /** Only these snapshotted sources may be read by legacy import adapters. */
-  readonly sourceFiles: readonly string[];
-  readonly legacy: boolean;
-  progress(completed: number, total?: number): void;
-  /** New allowed file bodies only; existing different content is never overwritten. */
-  stageAsset(relativePath: string, bytes: Uint8Array): void;
-}
-export interface UpgradeSource { path: string; retire: boolean; }
 export interface UpgradeOptions {
   root: string;
   formatVersion: number;
@@ -41,30 +33,32 @@ export interface UpgradeOptions {
    *  schema) and the archive root. Throws to abort the upgrade if archiving fails. */
   archiveRetiredData?(stagingDb: Database, root: string): void | Promise<void>;
 }
+
 export interface UpgradeResult { db: Database; migrated: boolean; backupDirectory?: string; warnings: string[]; }
+
 interface Authority { format: number; schema: string; }
+
 interface SourceRecord { path: string; backup_path: string; hash: string; retire: number; }
+
 interface PreparedAsset { path: string; staged: string; hash: string; }
+
 const authorityKey = "core-authority";
 
-function native(): NativeSqlite {
-  return createRequire(import.meta.url)("node:sqlite") as NativeSqlite;
-}
 function schemaDigest(migrations: readonly StorageMigration[]): string {
   return createHash("sha256").update(JSON.stringify(migrations.map(m => [m.id, m.sql]))).digest("hex");
 }
+
 function inspectAuthority(path: string): Authority | undefined {
   if (!existsSync(path)) return undefined;
   requireRegularFile(path);
-  const db = new (native().DatabaseSync)(path, { readOnly: true });
-  try {
-    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_meta'").get()) return undefined;
-    const row = db.prepare("SELECT value FROM storage_meta WHERE key=?").get(authorityKey) as { value: string } | undefined;
-    if (!row) return undefined;
-    const marker = JSON.parse(row.value) as Authority;
-    if (!Number.isSafeInteger(marker.format) || marker.format < 1 || typeof marker.schema !== "string") throw new Error("Invalid core storage authority marker");
+  return inspectDatabase(path,db=>{
+    if(!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_meta'"))return undefined;
+    const row=db.get<{value:string}>("SELECT value FROM storage_meta WHERE key=?",authorityKey);
+    if(!row)return undefined;
+    const marker=JSON.parse(row.value) as Authority;
+    if(!Number.isSafeInteger(marker.format)||marker.format<1||typeof marker.schema!=="string")throw new Error("Invalid core storage authority marker");
     return marker;
-  } finally { db.close(); }
+  });
 }
 
 export function assertServiceStopped(root: string): void {
@@ -83,21 +77,18 @@ export function assertServiceStopped(root: string): void {
 /** Independent SQLite lease is released by the OS on process death, never unlink it. */
 function acquireLease(root: string): () => void {
   const directory = managedPath(root, "upgrades");
-  ensurePrivateDirectory(directory); syncDirectory(root);
+  ensurePrivateDirectory(directory); syncPath(root);
   const path = managedPath(root, "upgrades/lease.sqlite");
   if (existsSync(path)) requireRegularFile(path);
-  const lease = new (native().DatabaseSync)(path);
-  try { chmodSync(path, 0o600); lease.exec("BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS lease (id INTEGER)"); }
-  catch (error) { lease.close(); throw new Error("Cannot acquire startup upgrade lease", { cause: error }); }
-  return () => { try { lease.exec("ROLLBACK"); } finally { lease.close(); } };
+  let release:(()=>void)|undefined;
+  try { release=lockDatabase(path,"exclusive");chmodSync(path,0o600);return release; }
+  catch(error){release?.();throw new Error("Cannot acquire startup upgrade lease",{cause:error});}
 }
 
 async function snapshotDatabase(source: string, target: string): Promise<void> {
   requireRegularFile(source);
-  const db = new (native().DatabaseSync)(source, { readOnly: true });
-  try { await native().backup(db, target); }
-  finally { db.close(); }
-  chmodSync(target, 0o600); syncFile(target);
+  await backupDatabase(source,target);
+  chmodSync(target, 0o600); syncPath(target);
 }
 
 /** Quarantine an interrupted staging database. Authoritative source data is unchanged. */
@@ -150,7 +141,18 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     catch { warnings.push("Upgrade progress observer failed"); }
   };
   let db: Database | undefined;
-  let sourceGuard: import("node:sqlite").DatabaseSync | undefined;
+  let releaseSource: (()=>void) | undefined;
+  // Both current-generation reopen and cutover complete under the same lease.
+  const finish = async (main:string,migrated:boolean,backupDirectory?:string):Promise<UpgradeResult> => {
+    db=openDatabase(main);
+    validateStorageMigrationHistory(db,options.migrations);
+    options.verifyReady?.(db);
+    await retireSources(root,db,warnings,report);
+    await options.activate?.(db);
+    report({phase:"ready"});
+    const result=db;db=undefined;
+    return {db:result,migrated,...(backupDirectory?{backupDirectory}:{}),warnings};
+  };
   try {
     report({ phase: "checking" });
     assertServiceStopped(root);
@@ -158,26 +160,21 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     const expected: Authority = { format: options.formatVersion, schema: schemaDigest(options.migrations) };
     const previous = inspectAuthority(main);
     if (previous && previous.format > expected.format) throw new Error("Database was written by a newer storage format; refusing a downgrade");
+    // Hold the startup lease before replay, but reject newer formats before any source mutation.
+    const replay = replayShortIdJournalFromDisk(root);
+    if (replay.status === "failed") throw new Error(`Short-id rename journal replay failed: ${replay.failures.join("; ")}`);
     if (previous?.format === expected.format && previous.schema === expected.schema) {
-      db = openDatabase(main);
-      validateStorageMigrationHistory(db, options.migrations);
-      options.verifyReady?.(db);
-      await retireSources(root, db, warnings, report);
-      await options.activate?.(db);
-      report({ phase: "ready" });
-      const result = db; db = undefined;
-      return { db: result, migrated: false, warnings };
+      return await finish(main,false);
     }
 
     if (existsSync(main)) {
-      sourceGuard = new (native().DatabaseSync)(main);
-      sourceGuard.exec("BEGIN IMMEDIATE");
+      releaseSource = lockDatabase(main,"immediate");
     }
     const stage = managedPath(root, "upgrades/staging.sqlite");
     quarantineStage(root, stage);
     const backupName = `backups/core-upgrade-${randomUUID()}`;
     const backupDirectory = managedPath(root, backupName);
-    ensurePrivateDirectory(backupDirectory); syncDirectory(root);
+    ensurePrivateDirectory(backupDirectory); syncPath(root);
     const sourceRoot = join(backupDirectory, "files");
     ensurePrivateDirectory(sourceRoot);
     const inventory = previous ? [] : [...await options.collectLegacySources(root)].sort((a,b) => a.path.localeCompare(b.path));
@@ -203,7 +200,7 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
       await snapshotDatabase(main, previousDatabase);
       copyDurably(previousDatabase, stage);
     }
-    syncDirectory(backupDirectory);
+    syncPath(backupDirectory);
     options.checkpoint?.("backup");
 
     db = openDatabase(stage);
@@ -239,13 +236,13 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     for (const record of records) {
       const source = managedPath(root, record.path);
       if (await hashFile(source) !== record.hash) throw new Error(`Source changed before cutover: ${record.path}`);
-      if (!record.retire) { syncFile(source); syncDirectoryChain(join(source, ".."), root); }
+      if (!record.retire) { syncPath(source); syncDirectoryChain(join(source, ".."), root); }
     }
     for (const asset of prepared) {
       const destination = managedPath(root, asset.path);
       if (existsSync(destination)) {
         if (await hashFile(destination) !== asset.hash) throw new Error(`Existing asset differs: ${asset.path}`);
-        syncFile(destination); syncDirectoryChain(join(destination, ".."), root);
+        syncPath(destination); syncDirectoryChain(join(destination, ".."), root);
       } else publishAssetDurably(asset.staged, destination);
     }
     options.checkpoint?.("validated");
@@ -254,36 +251,107 @@ export async function prepareStorageUpgrade(options: UpgradeOptions): Promise<Up
     if (!checkpoint || checkpoint.busy) throw new Error("Staging database is still in use; cutover refused");
     db.close(); db = undefined;
     if (existsSync(stage + "-wal") || existsSync(stage + "-shm")) throw new Error("Staging database sidecars remain in use; cutover refused");
-    syncFile(stage);
+    syncPath(stage);
     report({ phase: "cutover" });
     // The old file's WAL must not be replayed onto the replacement DB.
-    if (sourceGuard) { sourceGuard.exec("ROLLBACK"); sourceGuard.close(); sourceGuard = undefined; }
+    releaseSource?.(); releaseSource=undefined;
     if (existsSync(main)) {
-      const old = new (native().DatabaseSync)(main);
-      try {
-        const checkpoint = old.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy: number };
-        if (checkpoint.busy) throw new Error("Authoritative database is still in use");
-      } finally { old.close(); }
+      if(checkpointDatabase(main)?.busy)throw new Error("Authoritative database is still in use");
       if (existsSync(main + "-wal") || existsSync(main + "-shm")) throw new Error("Old database sidecars remain in use; cutover refused");
     }
-    renameSync(stage, main); syncDirectory(root); syncDirectory(join(root, "upgrades"));
+    renameSync(stage, main); syncPath(root); syncPath(join(root, "upgrades"));
     options.checkpoint?.("activated");
-    db = openDatabase(main);
-    options.verifyReady?.(db);
-    await retireSources(root, db, warnings, report);
-    await options.activate?.(db);
-    report({ phase: "ready" });
-    const result = db; db = undefined;
-    return { db: result, migrated: true, backupDirectory, warnings };
+    return await finish(main,true,backupDirectory);
   } finally {
     try { db?.close(); }
     finally {
       try {
-        if (sourceGuard) {
-          try { if (sourceGuard.isTransaction) sourceGuard.exec("ROLLBACK"); }
-          finally { sourceGuard.close(); }
-        }
+        releaseSource?.();
       } finally { release(); }
     }
   }
+}
+
+function memberAuthority(ctx:UpgradeImportContext):"files"|"database"{
+ if(!ctx.previousDatabase)return "files";
+ return inspectDatabase(ctx.previousDatabase,previous=>{
+  const members=!!previous.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='members'");
+  const history=previous.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'");
+  const marked=!!history&&!!previous.get("SELECT 1 FROM schema_migrations WHERE id='member-storage-v1'");
+  if(members!==marked)throw new Error("Unrecognized previous member authority; no source was replaced");
+  return marked?"database":"files";
+ });
+}
+
+export interface CoreStartupOptions{
+ root:string;
+ initialConfig?:BossmodeConfig;
+ onProgress?:UpgradeOptions["onProgress"];
+ /** Tests/host can supply a static SDK catalog without creating a model session. */
+ bundledCatalog?:readonly any[];
+ activate?:UpgradeOptions["activate"];
+}
+
+/** Ordinary startup owns this coordinator. There is no dry-run/apply/recover mode.
+ * Unhandled source domains fail before cutover rather than silently disappearing. */
+export async function prepareCoreStorage(options:CoreStartupOptions){
+ let entries:LegacySourceEntry[]=[];let quarantinedEvents=0;
+ const result=await prepareStorageUpgrade({root:options.root,formatVersion:CORE_STORAGE_FORMAT,migrations:coreStorageMigrations,
+  onProgress:options.onProgress,
+  collectLegacySources:async root=>{assertNoMissingMemberDatabase(root);entries=discoverLegacyInventory(root).entries;return entries;},
+  verifyReady:db=>verifyActiveMemberAssets(options.root,db),
+  // Task feature retirement (fish #19259): export the four task tables to a verified
+  // archive before the core-task-retirement-v1 migration drops them.
+  archiveRetiredData:(stagingDb,root)=>{archiveRetiredTasks(stagingDb,root);},
+  importData:async ctx=>{
+   if(!ctx.legacy)return;
+   const consumed=new Set<string>();const add=(paths:Iterable<string>)=>{for(const path of paths)consumed.add(path);};
+   const members=importLegacyMembers(ctx,entries,memberAuthority(ctx));add(members.consumed);
+   add(importLegacyArchives(ctx,entries));
+   add(importLegacySettings(ctx,entries,options.bundledCatalog??[]));
+   if(options.initialConfig){
+    if(entries.some(e=>e.kind==="config"))throw new Error("Initial account cannot replace existing configuration");
+    new SettingsRepository(ctx.db).importConfig(options.initialConfig);
+   }
+   const templates=entries.filter(e=>e.kind==="agent-template-mixed");
+   importAgentTemplates(ctx,templates.map(e=>{
+    if(!ctx.sourceFiles.includes(e.path)||!e.slug)throw new Error("Unsnapshotted template source");
+    const file=managedPath(ctx.sourceRoot,e.path);requireRegularFile(file);
+    let markdown:string;try{markdown=new TextDecoder("utf-8",{fatal:true}).decode(readFileSync(file));}catch{throw new Error(`Invalid template UTF-8: ${e.path}`);}
+    return {path:e.path,slug:e.slug,markdown};
+   }));add(templates.map(e=>e.path));
+   add(await importLegacyConversations(ctx,entries));
+   quarantinedEvents=ctx.db.get<{count:number}>("SELECT COUNT(*) count FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'")!.count;
+   add(importLegacyExecution(ctx,entries));
+   add(await importLegacyDocuments(ctx,entries,members.personas));
+   const remaining=entries.filter(e=>!consumed.has(e.path));
+   if(remaining.length)throw new Error(`Startup source adapter missing: ${remaining.map(e=>e.kind+":"+e.path).join(", ")}`);
+   ctx.db.run("INSERT INTO storage_meta(key,value) VALUES('core-import-source-count',?)",String(consumed.size));
+  },
+  validate:async ctx=>{
+   if(!ctx.db.get("SELECT 1 FROM app_settings WHERE id=1")||!ctx.db.get("SELECT 1 FROM login_credentials WHERE id=1"))throw new Error("Startup settings are incomplete");
+   for(const row of ctx.db.all<{id:string}>("SELECT id FROM members WHERE archived_at IS NULL")){
+    if(!ctx.db.get("SELECT 1 FROM memory_documents WHERE path=? AND member_id=?",`members/${row.id}/persona.md`,row.id))throw new Error(`Member persona metadata missing: ${row.id}`);
+   }
+  },
+  activate:async db=>{
+   // Journal replay already ran under this lease, before any filesystem verifier.
+   // Required ID migration failures stop startup; optional cleanup failures retain
+   // their existing warning/retry behavior. No consumers see an intermediate state.
+   migrateShortIds(options.root,db);
+   cleanupRetiredTopicSessionFiles(options.root,db);
+   cleanupRetiredBackgroundSessionFiles(options.root,db);
+   archiveRetiredScopeSessions(options.root,db);
+   archiveLegacySharedMemory(options.root,db);
+   cleanupMemberMemoryScopes(options.root,db);
+   copyRoomPrinciplesToDescriptions(options.root,db);
+   verifyActiveMemberAssets(options.root,db);
+   if(options.activate){bindDatabase(db);await options.activate(db);}
+  },
+ });
+ if(quarantinedEvents){
+  const warning=`Preserved ${quarantinedEvents} unreadable legacy runtime-event lines in SQL quarantine; original files remain in the upgrade backup.`;
+  result.warnings.push(warning);logger.warn("storage-upgrade",warning);
+ }
+ return result;
 }

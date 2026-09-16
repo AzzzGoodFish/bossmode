@@ -1,6 +1,6 @@
 # Session archives
 
-Bossmode keeps SDK session JSONL under the owning member directory. You have **one session across all chats**: the live file lives in `sessions/<UTC day>/main/` and holds every chat's turns. A reset starts a new current session but preserves the old JSONL for later search. When the member-centric upgrade ran, session files from the retired per-chat layout were moved to `archive/sessions/<UTC day>/…`; they stay readable and searchable, they are just never resumed. These commands are read-only unless the migration section explicitly says otherwise.
+Bossmode keeps SDK session JSONL under the owning member directory. You have **one session across all chats**: the live file lives in `sessions/<UTC day>/main/` and holds every chat's turns. A reset starts a new current session but preserves the old JSONL for later search. When the member-centric upgrade ran, session files from the retired per-chat layout were moved to `archive/sessions/<UTC day>/…`; they stay readable and searchable, they are just never resumed. The search commands below are read-only.
 
 `list` and `search` report a `scope` label: `main` for the live member session, `room:<roomId>` or `dm:<memberId>` for archived per-chat files. Pass it to `--scope` to narrow to one of them.
 
@@ -32,33 +32,8 @@ When the last row is `{"kind":"truncated","nextCursor":"..."}`, rerun the same a
 
 The script scans files read-only and never opens them through the SDK. It omits `thinkingSignature` and `encrypted_content`. Its realpath checks keep accidental paths and symlinks outside the supplied member directory from being read, but this is not a security boundary against another process running as the same operating-system account.
 
-## One-time legacy migration
+## Automatic storage upgrades
 
-This is an offline operator procedure, not a normal member action. Production use requires separate authorization. Do not run it while Bossmode is active.
+Supported storage upgrades run during normal startup, with backups and validation before consumers activate. Retired per-chat SDK files remain archived and searchable; they are not spliced into or resumed as the current member session. There are no standalone migration, apply, or recovery scripts.
 
-```sh
-PACKAGE_ROOT=/absolute/path/to/installed/bossmode
-BOSSMODE_DIR=/absolute/path/to/.bossmode
-REPORT=/absolute/path/to/member-session-migration.ndjson
-
-bossmode off
-bossmode status  # must say it is not running
-
-node "$PACKAGE_ROOT/scripts/migrate-member-sessions-v1.mjs" \
-  --dry-run --bossmode-dir "$BOSSMODE_DIR" --output "$REPORT"
-
-# Review every plan. Resolve every conflict/error before apply.
-node "$PACKAGE_ROOT/scripts/migrate-member-sessions-v1.mjs" \
-  --apply --bossmode-dir "$BOSSMODE_DIR" --output "$REPORT.apply"
-```
-
-Exit codes are 0 for success, 2 for unresolved conflicts, and 1 for argument or I/O errors. Dry-run changes neither archives nor current references. Apply copies and verifies JSONL before publishing current references; it never deletes legacy sources.
-
-If apply was interrupted or its report says recovery is required, keep the service stopped and run:
-
-```sh
-node "$PACKAGE_ROOT/scripts/migrate-member-sessions-v1.mjs" \
-  --recover --bossmode-dir "$BOSSMODE_DIR" --output "$REPORT.recover"
-```
-
-An unfinished recovery blocks another apply. Recovery is repeatable and refuses to overwrite a current reference changed after migration. After recovery succeeds, a new `--apply` archives the recovered material under `migrations/member-sessions-v1-history/` before starting a traceable new attempt. A completed apply is idempotent and preserves its recovery material. Start Bossmode again only after the final summary has `exitCode:0` and the reports and recovery history have been retained.
+If startup fails, preserve the database, original files, backups, and diagnostic logs. Resolve the reported issue and retry normal startup. Automatic recovery does not repair corrupt data or replace missing authoritative data; never delete the database or rewrite session references to bypass a failure.

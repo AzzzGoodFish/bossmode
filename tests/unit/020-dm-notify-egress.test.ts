@@ -260,7 +260,7 @@ describe("DM historical messages through ordinary storage startup", () => {
   });
 
   async function startup() {
-    const { prepareCoreStorage } = await import("../../src/data/core-startup.js");
+    const { prepareCoreStorage } = await import("../../src/app/upgrade/run.js");
     const result = await prepareCoreStorage({ root: dir, bundledCatalog: [], initialConfig: {
       auth: { username: "test", passwordHash: "fixture" }, apiKeys: {},
       defaults: { host: "127.0.0.1", port: 8080 }, runtime: {},

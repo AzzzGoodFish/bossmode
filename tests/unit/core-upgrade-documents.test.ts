@@ -4,10 +4,10 @@ import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/database.js";
 import {coreStorageMigrations} from "../../src/data/schema.js";
-import {discoverLegacyInventory} from "../../src/data/upgrade/legacy-inventory.js";
-import {importLegacyDocuments} from "../../src/data/upgrade/upgrade-documents.js";
+import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
+import { importLegacyDocuments } from "../../src/app/upgrade/assets.js";
 import {getDocument,listDocumentHistory,documentContentMeta,documentSnapshotPath} from "../../src/data/repositories/document-repository.js";
-import type {UpgradeImportContext} from "../../src/data/upgrade/upgrade-runner.js";
+import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
 function setup(files:Record<string,string>){

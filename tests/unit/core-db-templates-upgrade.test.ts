@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
-import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
+import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/app/upgrade/run.js";
 const templatesMigration = getMigration("core-templates-v1");
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/data/upgrade/template-files.js";
+import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/app/upgrade/records.js";
 
 const ioFailure = vi.hoisted(() => ({
   partialBody: false,

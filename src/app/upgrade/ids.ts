@@ -1,28 +1,9 @@
-/**
- * Short-id migration (`core-short-ids-v1`) — member/room ids become
- * `mem_<nanoid10>` / `rm_<nanoid10>` (design: architecture/short-id-migration-detail-20260915.md).
- *
- * Building blocks implemented here:
- *  - mapping assignment (crypto-generated, collision-checked) + durable persistence;
- *  - filesystem rename planning (surface roots, exclusion-aware, legacy archive
- *    segments kept, idempotent) + journal write / replay / apply (replayed at
- *    startup before other upgrade steps, per the review口径);
- *  - the DB rewrite engine: one transaction (incl. every immutability/guard trigger
- *    on a rewritten table dropped and rebuilt verbatim), mapping table fill, scope-string
- *    recomputation, structured JSON replacement on the known keys, ledger path
- *    updates, self-check, done flag + archive mirror.
- *
- * `migrateShortIds` runs from the core-startup post-upgrade sequence after
- * `replayShortIdJournal`; a failure aborts startup rather than leaving a
- * half-migrated store (review hard requirement).
- */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { logger } from "../../kernel/logger.js";
+import { newMemberId, newRoomId, MEMBER_ID_PREFIX } from "../../kernel/ids.js";
+import { join, dirname } from "node:path";
 import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../../chat/conversation-ref.js";
-import { MEMBER_ID_PREFIX, newMemberId, newRoomId } from "../../kernel/ids.js";
-import type { Database } from "../database.js";
+import { readdirSync, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { logger } from "../../kernel/logger.js";
+import { inspectDatabase, type Database } from "../../data/database.js";
 
 export const SHORT_ID_MIGRATION_ID = "core-short-ids-v1";
 
@@ -73,8 +54,11 @@ function reserve(gen: () => string, taken: Set<string>, kind: string): string {
 // ── filesystem rename planning ──────────────────────────────────────────────
 
 const SURFACE_ROOTS = ["members", "rooms", "mcp", "pi-agent"] as const;
+
 const SKIP_DIR_NAMES = new Set([".migration-snapshots", "backups", "node_modules", ".git"]);
+
 const SKIP_DIR_RE = /^migration-backup-/;
+
 const SKIP_FILE_RE = /^members\.json$|\.pre-[^.]*$/;
 
 /**
@@ -300,20 +284,16 @@ type MappingProbe =
 function probeMappingFromDisk(root: string): MappingProbe {
   const dbPath = join(root, "bossmode.db");
   if (!existsSync(dbPath)) return { kind: "unavailable" };
-  let raw: import("node:sqlite").DatabaseSync | undefined;
   try {
-    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-    raw = new DatabaseSync(dbPath, { readOnly: true });
-    const rows = raw.prepare("SELECT kind, old_id, new_id FROM id_migration_map").all() as Array<{ kind: string; old_id: string; new_id: string }>;
-    if (rows.length === 0) return { kind: "empty" };
-    const members = new Map<string, string>();
-    const rooms = new Map<string, string>();
-    for (const row of rows) (row.kind === "member" ? members : rooms).set(row.old_id, row.new_id);
-    return { kind: "mapping", mapping: { members, rooms } };
+    return inspectDatabase<MappingProbe>(dbPath,raw=>{
+      const rows=raw.all<{kind:string;old_id:string;new_id:string}>("SELECT kind, old_id, new_id FROM id_migration_map");
+      if(rows.length===0)return {kind:"empty"};
+      const members=new Map<string,string>(),rooms=new Map<string,string>();
+      for(const row of rows)(row.kind==="member"?members:rooms).set(row.old_id,row.new_id);
+      return {kind:"mapping",mapping:{members,rooms}};
+    });
   } catch {
-    return { kind: "unavailable" }; // missing table or unreadable db: replay still runs in strict mode
-  } finally {
-    try { raw?.close(); } catch { /* already closed */ }
+    return {kind:"unavailable"}; // Missing table or unreadable DB: replay still runs in strict mode.
   }
 }
 
@@ -412,9 +392,13 @@ const SINGLE_MEMBER_KEYS = new Set([
   "senderMemberId", "targetMemberId", "memberId", "actorKey", "senderActorKey", "targetActorKey",
   "fromMemberId", "toMemberId", "ownerKey", "sourceOwnerKey", "assigneeMemberId",
 ]);
+
 const MEMBER_LIST_KEYS = new Set(["mentionMemberIds", "needResponseMemberIds", "targetMemberIds", "memberIds", "subscriberMemberIds"]);
+
 const SCOPE_KEYS = new Set(["scopeId", "scope_id", "sourceScopeId"]);
+
 const ROOM_KEYS = new Set(["roomId", "room_id"]);
+
 const COMPOSITE_KEYS = new Set(["path", "root"]);
 
 function mapScopeValue(value: string, mapping: ShortIdMapping): string | null {
@@ -516,6 +500,7 @@ function compositeResidualCount(tx: Database, table: string, column: string, map
 }
 
 const isOldMemberId = (value: string): boolean => /mem_[0-9a-f]{8}-[0-9a-f]{4}-/.test(value);
+
 const isOldRoomUuid = (value: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 
 /** Residual old ids under the known transform keys only (content fields are exempt). */
@@ -729,7 +714,9 @@ function rewriteLegacyEventLedgers(tx: Database, mapping: ShortIdMapping, stats:
 }
 
 const EXCLUDED_PATH_SEGMENTS = new Set(["backups", ".migration-snapshots"]);
+
 const EXCLUDED_FILE_RE = /^(members\.json|.*\.pre-[^.]*)$/;
+
 /** Exclusion zones from the migration design: their disk names keep the old ids. */
 export function isExcludedRelPath(rel: string): boolean {
   const segments = rel.split("/").filter(Boolean);
@@ -768,6 +755,7 @@ function snapshotTriggers(tx: Database): Array<{ name: string; sql: string }> {
 }
 
 const UUID_LIKE = "'________-____-____-____-____________'";
+
 /** Contains an old-format member id: `mem_` + exactly 8 hex chars + `-`. New nanoid
  *  ids are 10 chars before any separator, so they can never match. */
 const OLD_MEMBER_GLOB = "'*mem_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*'";

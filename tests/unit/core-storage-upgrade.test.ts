@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 const baseStorageMigration = getMigration("core-base-v1");
 import { getDatabase, type Database } from "../../src/data/database.js";
-import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
+import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/app/upgrade/run.js";
 
 let root: string;
 let opened: Database[];

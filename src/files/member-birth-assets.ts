@@ -1,5 +1,6 @@
 /** File preparation only; no SQL mutation and no optional/suppressed keygen failures. */
-import { closeSync, fsyncSync, lstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { syncPath } from "./io.js";
+import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -15,17 +16,13 @@ export function prepareMemberSshCredential(memberId: string): SshCredentialMater
 
 /** Persist prepared birth assets and directory entries before committing identity metadata. */
 export function syncMemberBirthAssets(path: string): void {
-  function sync(path: string): void {
-    const fd = openSync(path, "r");
-    try { fsyncSync(fd); } finally { closeSync(fd); }
-  }
   function tree(path: string): void {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) throw new Error("birth_asset_symlink");
     if (stat.isDirectory()) for (const child of readdirSync(path)) tree(join(path, child));
-    sync(path);
+    syncPath(path);
   }
   tree(path);
-  sync(dirname(path));
-  sync(dirname(dirname(path)));
+  syncPath(dirname(path));
+  syncPath(dirname(dirname(path)));
 }

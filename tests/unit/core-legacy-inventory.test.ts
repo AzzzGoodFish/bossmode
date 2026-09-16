@@ -2,10 +2,7 @@ import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  discoverLegacyInventory, LegacySourceError, readLegacyJson, readLegacyJsonl,
-  validateLegacyPath, validateLegacySources, type LegacyKind,
-} from "../../src/data/upgrade/legacy-inventory.js";
+import { discoverLegacyInventory, LegacySourceError, readLegacyJson, readLegacyJsonl, validateLegacyPath, validateLegacySources, type LegacyKind } from "../../src/app/upgrade/inventory.js";
 
 vi.mock("node:fs", async importOriginal => {
   const actual = await importOriginal<typeof import("node:fs")>();
