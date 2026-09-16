@@ -549,8 +549,8 @@ function refreshProfileSources(instance: AgentInstance): void {
   if (!instance.profilePromptDirty) return;
   const member = getMember(instance.memberId);
   if (!member) throw new Error(`Member no longer exists: ${instance.memberId}`);
-  const ref = parseScopeId(instance.scopeId)!;
-  const parentId = ref.kind === "room" ? ref.roomId : undefined;
+  const ref = parseScopeId(instance.scopeId);
+  const parentId = ref?.kind === "room" ? ref.roomId : undefined;
   const room = parentId ? roomStore.getRoom(parentId) : null;
   // ① batch 2: one prompt per member — the compiler takes no scope.
   const compiled = compileMemberPrompt({ memberId: member.id, memberName: member.name, description: member.title });

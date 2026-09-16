@@ -31,8 +31,8 @@ const MAX_RESULT_CHARS = 25_000;
  * member-global store keyed by ScopeId (contract §6).
  */
 function toolScopeId(roomId: string): ScopeId {
-  // dm:<id> is already a full ScopeId; bare room uuid → room:<uuid>
-  if (roomId.startsWith("dm:")) return roomId;
+  // dm:<id> / mm:<a>-<b> are already full ScopeIds; bare room uuid → room:<uuid>
+  if (roomId.startsWith("dm:") || isMmScopeId(roomId)) return roomId;
   return `room:${roomId}`;
 
 }
