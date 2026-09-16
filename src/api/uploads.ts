@@ -2,7 +2,7 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
 import { addRoute, sendJson } from "./index.js";
-import * as roomStore from "../workspace/room-store.js";
+import * as roomStore from "../chat/room-store.js";
 import * as attachmentStore from "../files/attachment-store.js";
 import { inferAttachmentPreviewType } from "../kernel/attachments.js";
 
@@ -57,7 +57,7 @@ addRoute("POST", "/api/rooms/:id/upload", async (req, res, params) => {
 
 // POST /api/dm/:memberId/upload — DM attachment upload (member-owned storage).
 addRoute("POST", "/api/dm/:memberId/upload", async (req, res, params) => {
-  const { resolveMemberRef } = await import("../workspace/member-registry.js");
+  const { resolveMemberRef } = await import("../member/member-registry.js");
   const member = resolveMemberRef(params.memberId);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
 
@@ -90,7 +90,7 @@ addRoute("POST", "/api/dm/:memberId/upload", async (req, res, params) => {
 
 // GET /api/dm/:memberId/attachments/:filename — DM attachment download.
 addRoute("GET", "/api/dm/:memberId/attachments/:filename", async (_req, res, params) => {
-  const { resolveMemberRef } = await import("../workspace/member-registry.js");
+  const { resolveMemberRef } = await import("../member/member-registry.js");
   const member = resolveMemberRef(params.memberId);
   if (!member) { sendJson(res, 404, { error: "Member not found" }); return; }
 

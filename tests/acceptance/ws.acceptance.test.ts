@@ -30,8 +30,8 @@ describe("Acceptance: WebSocket Infrastructure", () => {
   });
 
   async function createAgentScope(name: string) {
-    const registry = await import("../../src/workspace/member-registry.js");
-    const rooms = await import("../../src/workspace/room-store.js");
+    const registry = await import("../../src/member/member-registry.js");
+    const rooms = await import("../../src/chat/room-store.js");
     const member = registry.createMember({ name });
     const room = rooms.createRoom(name, undefined, [member.id], undefined, { promptLeaderMemberId: member.id });
     return { member, room };

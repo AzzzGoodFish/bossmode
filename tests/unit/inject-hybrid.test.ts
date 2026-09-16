@@ -65,9 +65,9 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("message-store cursor primitives: unread history and strict from_seq retain the trigger", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const reg = await import("../../src/workspace/member-registry.js");
-    const msgStore = await import("../../src/workspace/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const msgStore = await import("../../src/chat/message-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
@@ -87,9 +87,9 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("query read-to-clear: current-scope read advances cursor to furthest seq seen", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const reg = await import("../../src/workspace/member-registry.js");
-    const msgStore = await import("../../src/workspace/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const msgStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const room = roomStore.createRoom("r", dir, [], undefined);
@@ -109,9 +109,9 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("cross-scope query does not advance the room cursor", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const reg = await import("../../src/workspace/member-registry.js");
-    const msgStore = await import("../../src/workspace/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const msgStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const roomA = roomStore.createRoom("ra", dir, [], undefined);

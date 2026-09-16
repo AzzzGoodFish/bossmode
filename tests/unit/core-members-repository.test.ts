@@ -6,7 +6,7 @@ import { openDatabase, applyStorageMigrations, type Database } from "../../src/d
 import { baseStorageMigration } from "../../src/data/base-schema.js";
 import { membersMigration } from "../../src/data/schema/members.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
-import type { MemberRecord } from "../../src/workspace/member-registry.js";
+import type { MemberRecord } from "../../src/member/member-registry.js";
 let root: string, db: Database;
 const record = (id = "mem_original", name = "言实") : MemberRecord => ({id,name,title:" engineer ",agentTemplate:"general",unifiedModel:true,unifiedExtensions:true,global:{model:null,credentialId:"profile",skills:[],mcpServers:[]},scopeOverrides:{},createdAt:0,updatedAt:1});
 beforeEach(() => { root=mkdtempSync(join(tmpdir(),"bm-core-members-")); db=openDatabase(join(root,"bossmode.db")); });

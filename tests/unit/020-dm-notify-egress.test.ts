@@ -53,14 +53,14 @@ describe("scope-routed postMessage", () => {
   });
 
   it("dm:<id> address writes the DM store, broadcasts to dm:<id>, leaves no phantom", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     const dmScope = `dm:${member.id}`;
 
     const { postMessage } = await import("../../src/communication/message-bus.js");
     const msg = postMessage(dmScope, "system", `Member "architect" request failed. Error: boom`);
 
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const all = store.readAllDmMessages(member.id);
     expect(all).toHaveLength(1);
     expect(all[0].id).toBe(msg.id);
@@ -124,7 +124,7 @@ describe("DM instance unified event wiring (G1)", () => {
   });
 
   async function setup() {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({
       name: "architect",
       agentTemplate: "architect",
@@ -148,7 +148,7 @@ describe("DM instance unified event wiring (G1)", () => {
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(1);
 
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const all = store.readAllDmMessages(member.id);
     const notice = all.find((m) => m.sender === "system" && m.content.includes("request failed"));
     expect(notice).toBeDefined();
@@ -172,7 +172,7 @@ describe("DM instance unified event wiring (G1)", () => {
     };
 
     await manager.activateDmMember(member.id);
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const notice = store.readAllDmMessages(member.id).find((m) => m.content.includes("runtime ended unexpectedly"));
     expect(notice).toBeDefined();
     expect(notice!.content).toContain("exit 1");
@@ -184,14 +184,14 @@ describe("DM instance unified event wiring (G1)", () => {
   });
 
   it("unconfigured DM member posts a user-visible notice instead of silent return", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" }); // no model/credential
     const manager = await import("../../src/engine/agent-manager.js");
     manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
 
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(0);
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const notice = store.readAllDmMessages(member.id).find((m) => m.sender === "system");
     expect(notice?.content).toContain("hasn't selected a model yet");
   });
@@ -209,7 +209,7 @@ describe("DM instance unified event wiring (G1)", () => {
     (manager as any).initAgentManager({ get: () => failing, getAll: () => [] } as any);
 
     await manager.activateDmMember(member.id);
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const notice = store.readAllDmMessages(member.id).find((m) => m.sender === "system");
     expect(notice?.content).toContain("Failed to create member");
     expect(notice?.content).toContain("provider config missing");
@@ -246,7 +246,7 @@ describe("DM instance unified event wiring (G1)", () => {
     await manager.activateDmMember(member.id);
     await capturedCallbacks.onChat("hello from dm");
 
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     const msgs = store.readAllDmMessages(member.id);
     expect(msgs.some((m) => m.sender === "architect" && m.content === "hello from dm")).toBe(true);
     expect(broadcastToRoom.mock.calls.some(([room]: any[]) => room === `dm:${member.id}`)).toBe(true);
@@ -291,7 +291,7 @@ describe("DM historical messages through ordinary storage startup", () => {
 
     const result = await startup();
     expect(result.migrated).toBe(true);
-    const store = await import("../../src/workspace/dm-message-store.js");
+    const store = await import("../../src/chat/dm-message-store.js");
     // Current importer preserves historical IDs, timestamps and sequence values.
     expect(store.readAllDmMessages(memberId)).toEqual(phantom);
     expect(database!.get("SELECT kind, member_id FROM scopes WHERE id=?", `dm:${memberId}`))

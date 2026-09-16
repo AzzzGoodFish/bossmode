@@ -2,8 +2,8 @@ import { createReadStream, existsSync, readFileSync, realpathSync } from "node:f
 import { extname, join, resolve } from "node:path";
 import { addRoute, sendJson } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
-import * as roomStore from "../workspace/room-store.js";
-import { roomMemberAssetRoots } from "../workspace/room-store.js";
+import * as roomStore from "../chat/room-store.js";
+import { roomMemberAssetRoots } from "../chat/room-store.js";
 import { checkPath } from "../kernel/path-security.js";
 import type { Room } from "../kernel/types.js";
 

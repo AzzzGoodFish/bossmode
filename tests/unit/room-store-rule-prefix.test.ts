@@ -14,7 +14,7 @@ afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("room-store updateRuleDocPathsByPrefix", () => {
   it("updates matching ruleDocs prefix and deduplicates", async () => {
-    const { createRoom, getRoom, updateRuleDocPathsByPrefix } = await import("../../src/workspace/room-store.js");
+    const { createRoom, getRoom, updateRuleDocPathsByPrefix } = await import("../../src/chat/room-store.js");
 
     const room = createRoom("r1", "/tmp", [], [
       "bossmode/rules/a.md",
@@ -36,13 +36,13 @@ describe("room-store updateRuleDocPathsByPrefix", () => {
   });
 
   it("does not affect rooms without matching prefix", async () => {
-    const { createRoom, updateRuleDocPathsByPrefix } = await import("../../src/workspace/room-store.js");
+    const { createRoom, updateRuleDocPathsByPrefix } = await import("../../src/chat/room-store.js");
     createRoom("r1", "/tmp", [], ["foo/bar.md"]);
     expect(updateRuleDocPathsByPrefix("bossmode/rules", "bossmode2/rules")).toBe(0);
   });
 
   it("matches exact folders and slash boundaries, ignores empty prefixes and unrelated rooms", async () => {
-    const { createRoom, getRoom, updateRuleDocPathsByPrefix } = await import("../../src/workspace/room-store.js");
+    const { createRoom, getRoom, updateRuleDocPathsByPrefix } = await import("../../src/chat/room-store.js");
     const room = createRoom("bounds", undefined, [], ["rules", "rules/a.md", "rules-other/a.md"]);
     const empty = createRoom("empty", undefined, []);
     expect(updateRuleDocPathsByPrefix("", "new")).toBe(0);

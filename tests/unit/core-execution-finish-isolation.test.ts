@@ -5,10 +5,10 @@ import { ConversationsRepository } from "../../src/data/repositories/conversatio
 import { SessionRepository } from "../../src/data/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
-import * as runtime from "../../src/workspace/runtime-state.js";
-import * as sessions from "../../src/workspace/session-store.js";
-import * as cursors from "../../src/workspace/user-read-cursors.js";
-import { stampGlobalMemberIds, getCursors } from "../../src/workspace/room-store.js";
+import * as runtime from "../../src/member/runtime-state.js";
+import * as sessions from "../../src/member/session-store.js";
+import * as cursors from "../../src/chat/user-read-cursors.js";
+import { stampGlobalMemberIds, getCursors } from "../../src/chat/room-store.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const owners = ["mem_one", "mem_two"];

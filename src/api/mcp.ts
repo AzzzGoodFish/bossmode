@@ -14,7 +14,7 @@ import {
   writeMcpStatusCache,
 } from "../shared/mcp-settings.js";
 import { checkMcpServerAvailability } from "../engine/mcp-availability.js";
-import { getRoomMembers, listRooms } from "../workspace/room-store.js";
+import { getRoomMembers, listRooms } from "../chat/room-store.js";
 
 function assignedServerCounts(): Record<string, number> {
   const counts: Record<string, number> = {};

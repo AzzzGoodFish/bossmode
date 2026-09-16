@@ -16,8 +16,8 @@ afterEach(() => fixture.close());
 
 describe("room description (⑤ A)", () => {
   it("copy migration seeds description from legacy room-principles.md once", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { copyRoomPrinciplesToDescriptions } = await import("../../src/data/migrations/room-description-migration.js");
     const pm = reg.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project X", undefined, [pm.id], undefined, { promptLeaderMemberId: pm.id });
@@ -34,8 +34,8 @@ describe("room description (⑤ A)", () => {
   });
 
   it("an existing description is left untouched by the copy", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { copyRoomPrinciplesToDescriptions } = await import("../../src/data/migrations/room-description-migration.js");
     const pm = reg.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project Y", undefined, [pm.id], undefined, { description: "Fresh description" });
@@ -47,8 +47,8 @@ describe("room description (⑤ A)", () => {
   });
 
   it("updateRoomDescription sets, clears and enforces the 2000-char limit", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const pm = reg.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project Z", undefined, [pm.id]);
 
@@ -59,8 +59,8 @@ describe("room description (⑤ A)", () => {
   });
 
   it("chat_create / chat_edit / chat_info / chat_list carry the room description", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const pm = reg.createMember({ name: "pm" });
     const dev = reg.createMember({ name: "dev" });

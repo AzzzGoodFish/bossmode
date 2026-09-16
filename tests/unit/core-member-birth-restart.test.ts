@@ -5,9 +5,9 @@ import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { bindDatabase, type Database } from "../../src/data/database.js";
 import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/data/repositories/document-repository.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/workspace/member-registry.js";
-import { readMemberProfile } from "../../src/workspace/member-profile.js";
-import { writeMemoryLayer } from "../../src/workspace/member-memory-store.js";
+import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/member/member-registry.js";
+import { readMemberProfile } from "../../src/member/member-profile.js";
+import { writeMemoryLayer } from "../../src/member/member-memory-store.js";
 
 const root = process.env.BOSSMODE_DIR!;
 const literal = "\uFEFF---\r\nname: Not identity\r\n---\r\n内 文 😀 `literal`  \r\n\t\n";

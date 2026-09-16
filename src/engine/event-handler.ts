@@ -7,7 +7,7 @@ import { logger } from "../kernel/logger.js";
 import { broadcastToAgentSubscribers } from "../communication/ws.js";
 import { refreshContextUsage } from "./agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
-import { getRoom } from "../workspace/room-store.js";
+import { getRoom } from "../chat/room-store.js";
 import type { AgentStreamEvent } from "./runtime/types.js";
 import type { AgentStatus } from "../kernel/types.js";
 import { limitRuntimeErrorEvent } from "../kernel/runtime-error-limit.js";

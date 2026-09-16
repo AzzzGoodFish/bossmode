@@ -20,15 +20,15 @@ afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("mainline msg ref enrichment (room + DM scope)", () => {
   it("room scope: msg entries get msgId + summary; stale entries stay bare", async () => {
-    const { addMessage } = await import("../../src/workspace/message-store.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const { addMessage } = await import("../../src/chat/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("r", dir, [], undefined);
     // SQL appends allocate the next scope-local sequence.
     const m42 = addMessage(room.id, { sender: "architect", content: "We decided to ship the unified panel", mentions: [] });
     addMessage(room.id, { sender: "user", content: "go ahead", mentions: [] });
     const m44 = addMessage(room.id, { sender: "architect", content: "done", mentions: [] });
 
-    const ml = await import("../../src/workspace/mainline-store.js");
+    const ml = await import("../../src/chat/mainline-store.js");
     // Rewrite the mainline so msg:#42 points at the actual seq of m42
     const content = `## Focus\nShip.\n\n## Dynamic Index\n- task:task-abc123 — flagship task\n- msg:#${m42.seq} — the decision message\n- msg:${m44.id} — direct id ref\n- msg:#999 — long gone\n`;
     const messages = ml.loadScopeMessages(room.id);
@@ -49,12 +49,12 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
   });
 
   it("DM scope: msg refs resolve against the member-owned DM stream", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const dm = await import("../../src/workspace/dm-message-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const dm = await import("../../src/chat/dm-message-store.js");
     const arch = reg.createMember({ name: "architect", agentTemplate: "general" });
     const msg = dm.addDmMessage(arch.id, { sender: "user", content: "remember this DM decision", mentions: [] });
 
-    const ml = await import("../../src/workspace/mainline-store.js");
+    const ml = await import("../../src/chat/mainline-store.js");
     const scopeKey = `dm:${arch.id}`;
     const content = `## Focus\nX\n\n## Dynamic Index\n- msg:#${msg.seq} — dm decision\n`;
     const messages = ml.loadScopeMessages(scopeKey);
@@ -69,13 +69,13 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
   });
 
   it("loose msg forms resolve: No.n / #n / msg:n all map to seq; non-ref prose stays 'other'", async () => {
-    const { addMessage } = await import("../../src/workspace/message-store.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const { addMessage } = await import("../../src/chat/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("r2", dir, [], undefined);
     const m1 = addMessage(room.id, { sender: "architect", content: "loose ref message", mentions: [] });
     const m2 = addMessage(room.id, { sender: "user", content: "another one", mentions: [] });
 
-    const ml = await import("../../src/workspace/mainline-store.js");
+    const ml = await import("../../src/chat/mainline-store.js");
     const content = `## Focus\nShip.\n\n## Dynamic Index\n- No.${m1.seq} 附近 — natural language, capital No.\n- #${m2.seq} — bare hash\n- msg:${m1.seq} 这里 — numeric msg:\n- 11:44 那份 — time, must NOT become a ref\n- #abc — not digits, must NOT become a ref\n- No.abc — not digits, must NOT become a ref\n`;
     const messages = ml.loadScopeMessages(room.id);
     const resolved = ml.resolveMainlineRefs(room.id, content, messages);
@@ -103,16 +103,16 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
   });
 
   it("loose forms in Focus text are never parsed as references (index-context only)", async () => {
-    const ml = await import("../../src/workspace/mainline-store.js");
+    const ml = await import("../../src/chat/mainline-store.js");
     const content = `## Focus\nRemember No.14502 and #88 — prose, not refs.\n\n## Dynamic Index\n- task:task-x — t\n`;
     const parsed = ml.parseMainline(content);
     expect(parsed.index.some((e) => e.kind === "msg")).toBe(false);
   });
 
   it("isolates SQL message IDs and sequences across room and DM references", async () => {
-    const { addMessage } = await import("../../src/workspace/message-store.js");
-    const { createMember } = await import("../../src/workspace/member-registry.js");
-    const { loadScopeMessages, buildMsgLookup, parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const { addMessage } = await import("../../src/chat/message-store.js");
+    const { createMember } = await import("../../src/member/member-registry.js");
+    const { loadScopeMessages, buildMsgLookup, parseMainline, resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
     const member = createMember({ name: "scope-owner" });
     const roomMessage = addMessage("room-a", { sender: "user", content: "room only", mentions: [] });
     const scopes = ["room-a", `dm:${member.id}`];

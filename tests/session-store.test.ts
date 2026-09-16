@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MembersRepository } from "../src/data/repositories/members.js";
 import { SessionRepository } from "../src/data/repositories/session-repository.js";
-import * as sessionStore from "../src/workspace/session-store.js";
+import * as sessionStore from "../src/member/session-store.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let tempDir: string;

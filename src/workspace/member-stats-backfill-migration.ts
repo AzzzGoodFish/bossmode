@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
 import { getRoomsDir } from "../files/layout.js";
-import { computeStatsFromEvents, statsFileExists, writeBackfilledStats } from "./member-stats-store.js";
+import { computeStatsFromEvents, statsFileExists, writeBackfilledStats } from "../member/member-stats-store.js";
 
 const MIGRATION_ID = "member-stats-backfill-v1";
 

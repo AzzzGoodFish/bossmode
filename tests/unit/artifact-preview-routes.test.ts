@@ -1,4 +1,4 @@
-import { createMember, findMemberByName } from "../../src/workspace/member-registry.js";
+import { createMember, findMemberByName } from "../../src/member/member-registry.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ describe("artifact preview API", () => {
     servers.push(ts);
     const token = await login(ts.port);
 
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const knowledgeStore = await import("../../src/knowledge/store.js");
 
     // Batch 7 P3: rooms no longer bind a cwd — artifacts resolve against room
@@ -78,7 +78,7 @@ describe("artifact preview API", () => {
     const ts = await createTestServer();
     servers.push(ts);
     const token = await login(ts.port);
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-artifact-preview-"));
     const room = roomStore.createRoom("Preview", cwd, [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
 

@@ -7,8 +7,8 @@ setupTestWorkspace();
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
 it("renames a running member across room/DM without abort; next prompt refreshes self and peers", async () => {
-  const reg = await import("../../src/workspace/member-registry.js");
-  const roomStore = await import("../../src/workspace/room-store.js");
+  const reg = await import("../../src/member/member-registry.js");
+  const roomStore = await import("../../src/chat/room-store.js");
   const manager = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
   const suffix = randomUUID().slice(0, 6);
@@ -72,7 +72,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
 });
 
 it("reconciles a rename while handle construction is awaiting", async () => {
-  const reg = await import("../../src/workspace/member-registry.js");
+  const reg = await import("../../src/member/member-registry.js");
   const manager = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
   const member = reg.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
@@ -95,8 +95,8 @@ it("reconciles a rename while handle construction is awaiting", async () => {
 });
 
 it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
-  const reg = await import("../../src/workspace/member-registry.js");
-  const rooms = await import("../../src/workspace/room-store.js");
+  const reg = await import("../../src/member/member-registry.js");
+  const rooms = await import("../../src/chat/room-store.js");
   const manager = await import("../../src/engine/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/engine/runtime/registry.js");
   const { postMessage } = await import("../../src/communication/message-bus.js");

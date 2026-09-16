@@ -10,7 +10,7 @@ import {memberRuntimeAllowed} from "../runtime-admission.js";
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { getWorkspace, getActiveWorkspace, type WorkspaceEntry, type SshWorkspace } from "../../workspace/workspace-registry.js";
+import { getWorkspace, getActiveWorkspace, type WorkspaceEntry, type SshWorkspace } from "../../member/workspace-registry.js";
 import { logger } from "../../kernel/logger.js";
 
 export interface WorkspacePathResolution {

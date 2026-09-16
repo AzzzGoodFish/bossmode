@@ -3,7 +3,7 @@ import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRu
 import {InputQueueRepository,type QueuedInput} from "../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../data/repositories/delivery-repository.js";
-import {readMemberProfile,isBlankPersona} from "../workspace/member-profile.js";
+import {readMemberProfile,isBlankPersona} from "../member/member-profile.js";
 import type {MentionActivationCtx} from "../communication/router.js";
 import { getDatabase } from "../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
@@ -15,12 +15,12 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 import { join } from "node:path";
 import { logger } from "../kernel/logger.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
-import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
+import { activeWorkspaceRoot } from "../member/workspace-registry.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
-import * as roomStore from "../workspace/room-store.js";
-import * as sessionStore from "../workspace/session-store.js";
+import * as roomStore from "../chat/room-store.js";
+import * as sessionStore from "../member/session-store.js";
 import { mainSessionDirectory } from "../files/member-session-paths.js";
 import * as attachmentStore from "../files/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../communication/message-bus.js";
@@ -28,13 +28,13 @@ import { initRouter } from "../communication/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../communication/ws.js";
 import { compileMemberPrompt } from "./prompt-compiler.js";
 import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { listRoomsForMember } from "../workspace/scope-access.js";
-import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../workspace/member-registry.js";
-import { readAllDmMessages } from "../workspace/dm-message-store.js";
+import { listRoomsForMember } from "../member/scope-access.js";
+import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../member/member-registry.js";
+import { readAllDmMessages } from "../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
 import { loadScopeMessages } from "./tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../workspace/runtime-state.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../member/runtime-state.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -1628,7 +1628,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
 
     // Commit the global config exactly once, after every instance accepted.
     try {
-      const { updateMember } = await import("../workspace/member-registry.js");
+      const { updateMember } = await import("../member/member-registry.js");
       updateMember(memberId, { global: { model: normalizedModel, credentialId: binding.credentialId } });
     } catch (saveErr) {
       const reason = String((saveErr as Error)?.message || saveErr);

@@ -12,9 +12,9 @@ import { RuntimeRepository } from "../../src/data/repositories/runtime-repositor
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
 import { importExecutionAmbiguity } from "../../src/data/repositories/execution-identity.js";
-import * as sessions from "../../src/workspace/session-store.js";
-import * as runtime from "../../src/workspace/runtime-state.js";
-import * as cursors from "../../src/workspace/user-read-cursors.js";
+import * as sessions from "../../src/member/session-store.js";
+import * as runtime from "../../src/member/runtime-state.js";
+import * as cursors from "../../src/chat/user-read-cursors.js";
 
 let sandbox: string;
 let db: Database;

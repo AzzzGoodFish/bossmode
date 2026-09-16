@@ -1,4 +1,4 @@
-import type { UserReadCursor } from "../../workspace/user-read-cursors.js";
+import type { UserReadCursor } from "../../chat/user-read-cursors.js";
 import type { Database } from "../database.js";
 import { executionScopeId } from "./execution-identity.js";
 

@@ -55,7 +55,7 @@ describe("room attachments migration", () => {
 
 describe("rooms without cwd", () => {
   it("createRoom accepts no cwd; persisted SQL room has none; attachments land in the room data dir", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("free-room", undefined, []);
     expect(room.cwd).toBeUndefined();
     fixture.reopen();
@@ -72,18 +72,18 @@ describe("rooms without cwd", () => {
   });
 
   it("path policy covers member homes and their workspace roots", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const reg = await import("../../src/workspace/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "policybot", agentTemplate: "pm" } as any);
     const room = roomStore.createRoom("policy-room", undefined, []);
     roomStore.stampGlobalMemberIds(room.id, [m.id]);
 
-    const { roomMemberAssetRoots } = await import("../../src/workspace/room-store.js");
+    const { roomMemberAssetRoots } = await import("../../src/chat/room-store.js");
     const roots = roomMemberAssetRoots(room.id);
     expect(roots).toContain(join(dir, "members", m.id));
 
     // adding a workspace extends the roots
-    const wsr = await import("../../src/workspace/workspace-registry.js");
+    const wsr = await import("../../src/member/workspace-registry.js");
     wsr.createWorkspace(m.id, { id: "web1", kind: "ssh", host: "h", user: "u", root: "/srv/app" });
     expect(roomMemberAssetRoots(room.id)).toContain("/srv/app");
   });

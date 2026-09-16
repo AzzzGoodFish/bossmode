@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
 import { getRoomsDir } from "../files/layout.js";
-import { computeContentMeta } from "./principles-store.js";
+import { computeContentMeta } from "../member/principles-store.js";
 
 const MIGRATION_ID = "mainline-english-headings-v1";
 

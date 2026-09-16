@@ -9,7 +9,7 @@ beforeEach(() => { fixture = coreFixture(); dir = fixture.root; });
 afterEach(() => fixture.close());
 describe("member runtime comes from the supported runtime, not retired JSON", () => {
   it.each([false, true])("uses pi-cli for a DB member with retired storage present=%s", async (withOldStore) => {
-    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const { createMember } = await import("../../src/member/member-registry.js");
     const member = createMember({ name: "dev", runtime: "claude-cli" } as any);
     if (withOldStore) writeFileSync(join(dir, "members.json"), JSON.stringify([{ id: member.id, name: member.name, runtime: "claude-cli", model: "stale" }]));
     const room = join(dir, "rooms", "room-a"); mkdirSync(room, { recursive: true });

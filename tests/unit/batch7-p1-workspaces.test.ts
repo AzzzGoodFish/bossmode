@@ -13,7 +13,7 @@ beforeEach(async () => {
   mkdirSync(join(dir, "members"), { recursive: true });
   vi.resetModules();
   fixture = (await import("../helpers/core-fixture.js")).coreFixture();
-  const { importMemberRecord } = await import("../../src/workspace/member-registry.js");
+  const { importMemberRecord } = await import("../../src/member/member-registry.js");
   importMemberRecord({ id: MEMBER, name: "wsbot", agentTemplate: "general",
     unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
     global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
@@ -32,7 +32,7 @@ function seedMemberDir() {
 describe("workspace registry", () => {
   it("original is synthesized, immune, and default-active without a file", async () => {
     seedMemberDir();
-    const reg = await import("../../src/workspace/workspace-registry.js");
+    const reg = await import("../../src/member/workspace-registry.js");
     const list = reg.listWorkspaces(MEMBER);
     expect(list.active).toBe("original");
     expect(list.workspaces).toHaveLength(1);
@@ -44,7 +44,7 @@ describe("workspace registry", () => {
 
   it("ssh lifecycle: create → active switch → remove falls back to original", async () => {
     seedMemberDir();
-    const reg = await import("../../src/workspace/workspace-registry.js");
+    const reg = await import("../../src/member/workspace-registry.js");
     const created = reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "srv.example", user: "deploy", root: "/srv/app" });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -63,7 +63,7 @@ describe("workspace registry", () => {
 
   it("invalid ids and duplicates are rejected", async () => {
     seedMemberDir();
-    const reg = await import("../../src/workspace/workspace-registry.js");
+    const reg = await import("../../src/member/workspace-registry.js");
     expect(reg.createWorkspace(MEMBER, { id: "bad id!", kind: "ssh", host: "h", user: "u" }).ok).toBe(false);
     expect(reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u" }).ok).toBe(true);
     expect(reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u" }).ok).toBe(false);
@@ -131,7 +131,7 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
       },
     }));
     try {
-      const reg = await import("../../src/workspace/workspace-registry.js");
+      const reg = await import("../../src/member/workspace-registry.js");
       const created = reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u", root: "/srv/app" });
       expect(created.ok).toBe(true);
       reg.useWorkspace(MEMBER, "web1");
@@ -171,7 +171,7 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const src = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../../src/workspace/ssh-keygen.ts"),
+      join(dirname(fileURLToPath(import.meta.url)), "../../src/member/ssh-keygen.ts"),
       "utf-8",
     );
     // The rc.15 bug: require() in ESM throws, the catch swallowed it, and the
@@ -183,8 +183,8 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
 
 describe("ssh key backfill (batch 7 §6, pm ruling)", () => {
   it("startup backfill generates pairs for legacy members, idempotently", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const { memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/workspace/ssh-keygen.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const { memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/ssh-keygen.js");
     const { SshCredentialsRepository } = await import("../../src/data/repositories/workspace-settings.js");
     const { backfillMemberSshKeys } = await import("../../src/workspace/member-assets-migration.js");
     // Import a pre-key member rather than deleting current authoritative credentials.

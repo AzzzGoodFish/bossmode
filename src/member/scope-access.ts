@@ -5,7 +5,7 @@
 // panel APIs (②) both consume it. Failures throw explicit errors, never
 // silently fall back.
 import { getMember } from "./member-registry.js";
-import { listRooms } from "./room-store.js";
+import { listRooms } from "../chat/room-store.js";
 import type { Room } from "../kernel/types.js";
 import { isMmScopeId, parseMmScopeId, type ScopeId } from "../shared/conversation-ref.js";
 

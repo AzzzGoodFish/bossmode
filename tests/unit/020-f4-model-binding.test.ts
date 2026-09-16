@@ -54,7 +54,7 @@ async function seedCredential() {
 }
 
 async function makeStampedRoom(memberId: string) {
-  const roomStore = await import("../../src/workspace/room-store.js");
+  const roomStore = await import("../../src/chat/room-store.js");
   const room = roomStore.createRoom("R", dir, [memberId], undefined, { promptLeaderMemberId: memberId });
   return room;
 }
@@ -77,7 +77,7 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("unifiedModel=true: switch writes the global binding; memberOverrides untouched; read side agrees", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
@@ -88,7 +88,7 @@ describe("F4 model binding persists to the registry", () => {
     // New authority updated.
     expect(reg.getMember(member.id)!.global.model).toBe("testprov/claude-b");
     // Old authority NOT written.
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     expect(roomStore.getRoom(room.id)!.memberOverrides).toBeUndefined();
     // Read side (display / heal) resolves the new model.
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
@@ -96,7 +96,7 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("batch-5b: switch always writes global even when the disk flag says scoped", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({
       name: "pm",
@@ -118,9 +118,9 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("MCP asset patches remain global and do not write room overrides", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
 
     // Fully unified member: everything goes global.
     const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
@@ -152,7 +152,7 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("clearing a model binding is retired: the module exports no clear path", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
@@ -218,7 +218,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   });
 
   it("room: switch with live instance → persisted → re-activation does NOT roll the session back", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
@@ -245,7 +245,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   });
 
   it("§10: a direct config write does NOT touch a live DM instance — only switchMemberModel does", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 

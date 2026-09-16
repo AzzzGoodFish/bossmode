@@ -1,5 +1,5 @@
-import * as roomStore from "../workspace/room-store.js";
-import { getEffectiveConfig, getMember, MemberNotFoundError } from "../workspace/member-registry.js";
+import * as roomStore from "../chat/room-store.js";
+import { getEffectiveConfig, getMember, MemberNotFoundError } from "../member/member-registry.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../kernel/types.js";
 
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {

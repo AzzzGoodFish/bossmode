@@ -7,8 +7,8 @@ import { readMcpConfigText, readMemberMcpConfig } from "../../src/shared/mcp-set
 import { getCatalog } from "../../src/engine/model-catalog.js";
 import { loadModelCredentialProfiles } from "../../src/engine/model-credentials.js";
 import { validateToken } from "../../src/services/auth-service.js";
-import { readWorkspaces } from "../../src/workspace/workspace-registry.js";
-import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/workspace/ssh-keygen.js";
+import { readWorkspaces } from "../../src/member/workspace-registry.js";
+import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/ssh-keygen.js";
 
 it("imports every settings consumer without initializing storage; only path/PID helpers work before boot",()=>{
   expect(()=>getDatabase()).toThrow("bootstrap");

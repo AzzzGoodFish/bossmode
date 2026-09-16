@@ -7,7 +7,7 @@ import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberC
 import { ConversationsRepository, getConversationMember as getMember } from "../data/repositories/conversations.js";
 export { ensureDmScope, ensureMmScope } from "../data/repositories/conversations.js";
 import { memberDir, roomDir } from "../files/layout.js";
-import { readWorkspaces } from "./workspace-registry.js";
+import { readWorkspaces } from "../member/workspace-registry.js";
 import { newRoomId } from "../kernel/short-id.js";
 
 /** Batch 7 P3: cwd is peeled on write — it exists on disk only until the

@@ -165,8 +165,8 @@ export const MOCK_MEMBER_MODEL = "mock-provider/mock-model";
 export const MOCK_MEMBER_CREDENTIAL_ID = "test-credential";
 
 export async function configureMockMemberModel(roomId: string, memberRef: string): Promise<void> {
-  const roomStore = await import("../../src/workspace/room-store.js");
-  const registry = await import("../../src/workspace/member-registry.js");
+  const roomStore = await import("../../src/chat/room-store.js");
+  const registry = await import("../../src/member/member-registry.js");
   const member = registry.getMember(memberRef) || registry.getMember(roomStore.findRoomMemberByName(roomId, memberRef)?.id || "");
   if (!member) throw new Error("Mock execution requires a current global member; create the room with memberIds");
   if (member.global.model !== MOCK_MEMBER_MODEL || member.global.credentialId !== MOCK_MEMBER_CREDENTIAL_ID) {

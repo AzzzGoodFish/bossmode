@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn } from "../helpers/mock-runtime.js";
 import { getMemberInstances } from "../../src/engine/agent-manager.js";
-import * as sessions from "../../src/workspace/session-store.js";
+import * as sessions from "../../src/member/session-store.js";
 setupTestWorkspace();
 
 const barrier = () => { let release!: () => void; const promise = new Promise<void>((r) => (release = r)); return { promise, release }; };

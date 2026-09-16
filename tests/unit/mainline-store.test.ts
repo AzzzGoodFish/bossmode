@@ -18,7 +18,7 @@ afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 const ACTOR = { type: "member" as const, memberId: "rm_1", name: "pm" };
 
 async function seedRefs() {
-  const { addMessage } = await import("../../src/workspace/message-store.js");
+  const { addMessage } = await import("../../src/chat/message-store.js");
   mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
   writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "prd.md"), "# PRD", "utf-8");
   const message = addMessage("room-a", { sender: "user", content: "裁定", mentions: [] });
@@ -27,14 +27,14 @@ async function seedRefs() {
 
 describe("mainline-store", () => {
   it("returns empty revision 0 for missing mainline", async () => {
-    const { readMainline } = await import("../../src/workspace/mainline-store.js");
+    const { readMainline } = await import("../../src/chat/mainline-store.js");
     const result = readMainline("room-a", "rm_1");
     expect(result.content).toBe("");
     expect(result.revision).toBe(0);
   });
 
   it("writes and reads back focus + index, with revision and history snapshot", async () => {
-    const { writeMainline, readMainline, MAINLINE_TEMPLATE } = await import("../../src/workspace/mainline-store.js");
+    const { writeMainline, readMainline, MAINLINE_TEMPLATE } = await import("../../src/chat/mainline-store.js");
     expect(MAINLINE_TEMPLATE).toContain("## Focus");
     expect(MAINLINE_TEMPLATE).toContain("## Dynamic Index");
     const content = "## Focus\n\n产品理念 X。\n\n## Dynamic Index\n\n- docs/bossmode/prd.md — PRD\n";
@@ -54,7 +54,7 @@ describe("mainline-store", () => {
   });
 
   it("requires reason and enforces the 4K budget with current content attached", async () => {
-    const { writeMainline, MAINLINE_MAX_CHARS, AssetBudgetError } = await import("../../src/workspace/mainline-store.js");
+    const { writeMainline, MAINLINE_MAX_CHARS, AssetBudgetError } = await import("../../src/chat/mainline-store.js");
     expect(MAINLINE_MAX_CHARS).toBe(4_000);
     expect(() => writeMainline({ roomId: "room-a", memberId: "rm_1", content: "x", actor: ACTOR, reason: "" })).toThrow(/reason is required/);
     writeMainline({ roomId: "room-a", memberId: "rm_1", content: "focus v1", actor: ACTOR, reason: "seed" });
@@ -68,7 +68,7 @@ describe("mainline-store", () => {
   });
 
   it("edits index entries via targeted text replacement", async () => {
-    const { writeMainline, editMainline, readMainline } = await import("../../src/workspace/mainline-store.js");
+    const { writeMainline, editMainline, readMainline } = await import("../../src/chat/mainline-store.js");
     const content = `## Focus\n\nF\n\n## Dynamic Index\n\n- docs/bossmode/prd.md — PRD\n`;
     writeMainline({ roomId: "room-a", memberId: "rm_1", content, actor: ACTOR, reason: "pin" });
     const edited = editMainline({ roomId: "room-a", memberId: "rm_1", oldText: `- docs/bossmode/prd.md — PRD`, newText: "", actor: ACTOR, reason: "doc dropped" });
@@ -77,7 +77,7 @@ describe("mainline-store", () => {
   });
 
   it("resolves docs/msg refs and marks unresolvable lines [stale] without deleting them", async () => {
-    const { writeMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const { writeMainline, resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
     const { message } = await seedRefs();
     const content = [
       "## Focus",
@@ -107,8 +107,8 @@ describe("mainline-store", () => {
   });
 
   it("msg:#<seq> resolves the SQL-allocated sequence without a JSONL rewrite", async () => {
-    const { resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
-    const { addMessage } = await import("../../src/workspace/message-store.js");
+    const { resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
+    const { addMessage } = await import("../../src/chat/message-store.js");
     const message = addMessage("room-a", { sender: "user", content: "裁定", mentions: [] });
     expect(message.id).toBeTruthy();
     expect(message.seq).toBe(1);
@@ -123,7 +123,7 @@ describe("mainline-store", () => {
   });
 
   it("re-resolution is idempotent and self-healing (stale mark dropped when target returns)", async () => {
-    const { resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const { resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
     const staleOnce = resolveMainlineRefs("room-a", "## Dynamic Index\n\n- docs/bossmode/later.md — 稍后创建\n");
     expect(staleOnce).toContain("[stale]");
     // A second read must not double-mark
@@ -138,7 +138,7 @@ describe("mainline-store", () => {
   });
 
   it("parseMainline returns structured focus + index with kind/ref/note/stale", async () => {
-    const { parseMainline, resolveMainlineRefs } = await import("../../src/workspace/mainline-store.js");
+    const { parseMainline, resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
     mkdirSync(join(tmpDir, "memory", "projects", "bossmode"), { recursive: true });
     writeFileSync(join(tmpDir, "memory", "projects", "bossmode", "prd.md"), "# PRD", "utf-8");
     const content = [

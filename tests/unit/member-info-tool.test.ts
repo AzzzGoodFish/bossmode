@@ -26,7 +26,7 @@ const members = [
   { id: "mem_des", name: "designer", title: "" },
 ];
 
-vi.mock("../../src/workspace/member-registry.js", () => ({
+vi.mock("../../src/member/member-registry.js", () => ({
   resolveMemberRef: (ref: string) =>
     members.find((m) => m.id === ref || m.name === ref) ?? null,
 }));
@@ -41,7 +41,7 @@ vi.mock("../../src/engine/agent-manager.js", () => ({
   getMemberLiveStatus: (...args: unknown[]) => getMemberLiveStatus(...(args as [string])),
 }));
 
-vi.mock("../../src/workspace/room-store.js", () => ({}));
+vi.mock("../../src/chat/room-store.js", () => ({}));
 
 import { handleToolCallback } from "../../src/engine/tools.js";
 

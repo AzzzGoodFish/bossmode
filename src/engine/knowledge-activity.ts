@@ -11,7 +11,7 @@ import { resolve, sep, relative, isAbsolute, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { postMessage } from "../communication/message-bus.js";
 import { logger } from "../kernel/logger.js";
-import * as roomStore from "../workspace/room-store.js";
+import * as roomStore from "../chat/room-store.js";
 import type { KnowledgeEventMeta } from "../kernel/types.js";
 
 function docsRoot(): string {

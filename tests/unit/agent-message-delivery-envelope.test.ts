@@ -3,8 +3,8 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, mockPromptFn, resetMocks } from "../helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../../src/engine/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/engine/agent-manager.js";
-import { createMember } from "../../src/workspace/member-registry.js";
-import { createRoom, stampGlobalMemberIds } from "../../src/workspace/room-store.js";
+import { createMember } from "../../src/member/member-registry.js";
+import { createRoom, stampGlobalMemberIds } from "../../src/chat/room-store.js";
 import { importMessage } from "../../src/data/repositories/message-repository.js";
 import { writeConfig } from "../../src/shared/config.js";
 

@@ -17,7 +17,7 @@ const BYTES = "DM-IMG-BYTES-0123456789";
 beforeAll(async () => {
   ts = await createTestServer();
   token = await loginAndGetToken(ts.port);
-  const reg = await import("../../src/workspace/member-registry.js");
+  const reg = await import("../../src/member/member-registry.js");
   const member = reg.createMember({ name: "att-dm", agentTemplate: "general" });
 
   const up = await fetch(`http://127.0.0.1:${ts.port}/api/dm/${member.id}/upload?filename=${encodeURIComponent("pic.png")}`, {

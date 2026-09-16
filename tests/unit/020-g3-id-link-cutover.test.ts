@@ -18,8 +18,8 @@ describe("G3 ID-link SQL cutover", () => {
   afterEach(() => fixture.close());
 
   it("stampGlobalMemberIds synthesizes members from globalMemberIds without discarding historical roomMembers", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "m/a", credentialId: "c1" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer", model: "m/b", credentialId: "c2" });
 
@@ -38,8 +38,8 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("resolveGlobalMemberId prefers sourceMemberId; rename does not break ID link", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const room = historicalRoom(["pm"]);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
@@ -55,8 +55,8 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("inviteGlobalMember adds mem_* membership without activating historical roomMembers", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const room = historicalRoom(["pm"]);
@@ -79,8 +79,8 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("does not resolve a same-named global member outside globalMemberIds", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     // Two globals cannot share name — so create room-local "shadow" without stamp
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const room = historicalRoom(["pm"]);

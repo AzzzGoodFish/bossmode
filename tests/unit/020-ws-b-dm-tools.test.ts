@@ -34,7 +34,7 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("member_list returns global registry with id/name/description", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", title: "Product lead" });
     reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
@@ -48,7 +48,7 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("chat_create makes creator leader and invites by id", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/engine/tools.js");
@@ -64,7 +64,7 @@ describe("batch 3 gateway tools", () => {
     expect(result.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);
 
     const roomId = String(result.chat.id).replace(/^room:/, "");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.getRoom(roomId)!;
     expect(room.name).toBe("Project X");
     expect(room.globalMemberIds || []).toEqual(expect.arrayContaining([pm.id, dev.id]));
@@ -84,7 +84,7 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("chat_edit: any room member can rename and adjust members (leader gate retired)", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
     const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
     const extra = reg.createMember({ name: "extra", agentTemplate: "general" });

@@ -94,7 +94,7 @@ describe("summary-removal-v1 migration", () => {
     expect(rerun).toEqual({ rooms: 0, removed: 0, skipped: true });
     expect(readFileSync(join(dir, "rooms", "room-a", "messages.jsonl"), "utf-8")).toBe(before);
     await importHistoricalMessages();
-    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { getMessages } = await import("../../src/chat/message-store.js");
     expect(getMessages("room-a").map(m => m.content)).toEqual(["ORIGINAL-1", "ORIGINAL-2", "ORIGINAL-3"]);
     expect(getMessages("room-a")[2].type).toBe("task_event");
     expect(getMessages("room-b").map(m => m.content)).toEqual(["NO-SUMMARY-HERE"]);
@@ -107,7 +107,7 @@ describe("summary-removal-v1 migration", () => {
       line("pm", "PLAIN-2"),
     ]);
     await importHistoricalMessages();
-    const store = await import("../../src/workspace/message-store.js");
+    const store = await import("../../src/chat/message-store.js");
     const messages = store.getMessages("room-c", { limit: 50 });
     expect(messages.map((m) => m.content)).toEqual(["PLAIN-1", "PLAIN-2"]);
   });

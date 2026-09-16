@@ -12,9 +12,9 @@ vi.mock("../src/shared/config.js", () => ({
 }));
 
 describe("archive", () => {
-  let roomStore: typeof import("../src/workspace/room-store.js");
-  let messageStore: typeof import("../src/workspace/message-store.js");
-  let archiveStore: typeof import("../src/workspace/archive-store.js");
+  let roomStore: typeof import("../src/chat/room-store.js");
+  let messageStore: typeof import("../src/chat/message-store.js");
+  let archiveStore: typeof import("../src/chat/archive-store.js");
 
   beforeEach(async () => {
     vi.resetModules();
@@ -22,9 +22,9 @@ describe("archive", () => {
     fixture = coreFixture();
     tempDir = fixture.root;
     database = fixture.db;
-    roomStore = await import("../src/workspace/room-store.js");
-    messageStore = await import("../src/workspace/message-store.js");
-    archiveStore = await import("../src/workspace/archive-store.js");
+    roomStore = await import("../src/chat/room-store.js");
+    messageStore = await import("../src/chat/message-store.js");
+    archiveStore = await import("../src/chat/archive-store.js");
   });
 
   afterEach(() => {

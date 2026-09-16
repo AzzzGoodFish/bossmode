@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../kernel/types.js";
 import { validateToken } from "../services/auth-service.js";
-import { findMemberByName } from "../workspace/member-registry.js";
+import { findMemberByName } from "../member/member-registry.js";
 
 interface ClientState {
   ws: WebSocket;

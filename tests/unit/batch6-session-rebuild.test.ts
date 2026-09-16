@@ -28,7 +28,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let reloading: Promise<unknown> | undefined;
     try {
       const manager = await import("../../src/engine/agent-manager.js");
-      const { saveCurrentSession, getCurrentSession } = await import("../../src/workspace/session-store.js");
+      const { saveCurrentSession, getCurrentSession } = await import("../../src/member/session-store.js");
       saveCurrentSession(memberId, { runtime: "pi-cli", sessionId: "retained-session" });
       // An empty room builds an idle instance, not an invented human instruction.
       await manager.activateAgent(roomId, memberId);
@@ -90,8 +90,8 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let compacting: Promise<unknown> | undefined;
     try {
       const manager = await import("../../src/engine/agent-manager.js");
-      const { addDmMessage } = await import("../../src/workspace/dm-message-store.js");
-      const { addMessage } = await import("../../src/workspace/message-store.js");
+      const { addDmMessage } = await import("../../src/chat/dm-message-store.js");
+      const { addMessage } = await import("../../src/chat/message-store.js");
       const scopeId = kind === "dm" ? `dm:${memberId}` : `room:${roomId}`;
       const instance = await manager.buildMemberAgentSession(memberId, scopeId);
       expect(instance).toBeTruthy();

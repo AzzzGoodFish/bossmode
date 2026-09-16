@@ -44,12 +44,12 @@ const PROFILE = {
 
 /** Member "dev" belongs to roomA + roomB; "outsider" belongs to roomC only. */
 async function seedWorld() {
-  const reg = await import("../../src/workspace/member-registry.js");
+  const reg = await import("../../src/member/member-registry.js");
   const creds = await import("../../src/engine/model-credentials.js");
   const cred = creds.saveModelCredentialProfile(PROFILE);
   const dev = reg.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
   const outsider = reg.createMember({ name: "outsider", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
-  const roomStore = await import("../../src/workspace/room-store.js");
+  const roomStore = await import("../../src/chat/room-store.js");
   const roomA = roomStore.createRoom("alpha", undefined, []);
   roomStore.stampGlobalMemberIds(roomA.id, [dev.id], dev.id);
   const roomB = roomStore.createRoom("beta", undefined, []);
@@ -75,7 +75,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("chat_read: chat param reads another member-room; violations are explicit errors", async () => {
     const { dev, roomA, roomB, roomC } = await seedWorld();
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     messageStore.addMessage(roomA.id, { sender: "dev", mentions: [], content: "alpha-only discussion" });
     messageStore.addMessage(roomB.id, { sender: "pm", mentions: [], content: "beta decision: ship it" });
     messageStore.addMessage(roomB.id, { sender: "system", mentions: [], content: "[Member failure notice] hidden" });
@@ -107,7 +107,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("chat_read: own DM scope is readable from room and from DM (member-owned store)", async () => {
     const { dev, roomA } = await seedWorld();
-    const dmStore = await import("../../src/workspace/dm-message-store.js");
+    const dmStore = await import("../../src/chat/dm-message-store.js");
     dmStore.addDmMessage(dev.id, { sender: "user", mentions: [], content: "private beta question" });
     dmStore.addDmMessage(dev.id, { sender: "dev", mentions: [], content: "private answer" });
 
@@ -164,7 +164,7 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("members config PATCH write path: batch-5b writes global on any scope", async () => {
     const { dev, roomA } = await seedWorld();
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
 
     // Unified member patched at DM scope → global write, no scope override.
     reg.applyMemberConfigPatch(dev.id, `dm:${dev.id}`, { thinkingLevel: "high" });
@@ -186,7 +186,7 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(rec.scopeOverrides[`dm:${scoped.id}`]).toBeUndefined();
 
     // Room scope same story: global write, no memberOverrides residue.
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room2 = roomStore.createRoom("delta", undefined, []);
     roomStore.stampGlobalMemberIds(room2.id, [scoped.id], scoped.id);
     reg.applyMemberConfigPatch(scoped.id, `room:${room2.id}`, { thinkingLevel: "max" });

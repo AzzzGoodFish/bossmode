@@ -15,7 +15,7 @@ vi.mock("ssh2",async()=>{
     sftp(callback:any){callback(undefined,{createReadStream:()=>Readable.from([Buffer.from("remote fixture")])});}
   }};
 });
-import { createWorkspace } from "../../src/workspace/workspace-registry.js";
+import { createWorkspace } from "../../src/member/workspace-registry.js";
 import { workspaceReadTool,dropSftpConnectionsForMember } from "../../src/engine/tools/file-tools.js";
 import { createShell,closeAllShellsForMember } from "../../src/engine/shell-manager.js";
 import { openRuntimeAdmission,closeRuntimeAdmission } from "../../src/engine/runtime-admission.js";

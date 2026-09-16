@@ -81,10 +81,10 @@ describe("chat_read member-visible filter", () => {
   });
 
   it("hides ALL system notices (failures + non-error prompts) but keeps conversation and typed events", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
-    const { createMember } = await import("../../src/workspace/member-registry.js");
+    const { createMember } = await import("../../src/member/member-registry.js");
     const member = createMember({ name: "pm" });
     const room = roomStore.createRoom("r", undefined, []);
 

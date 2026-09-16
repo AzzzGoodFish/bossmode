@@ -6,10 +6,10 @@ import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/engine/runtime/registry.js";
 import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/engine/agent-manager.js";
 import { getDefaultConfig, writeConfig } from "../src/shared/config.js";
-import { createMember, updateMemberIdentity } from "../src/workspace/member-registry.js";
-import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/workspace/room-store.js";
-import { addMessage } from "../src/workspace/message-store.js";
-import * as sessionStore from "../src/workspace/session-store.js";
+import { createMember, updateMemberIdentity } from "../src/member/member-registry.js";
+import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/room-store.js";
+import { addMessage } from "../src/chat/message-store.js";
+import * as sessionStore from "../src/member/session-store.js";
 import { loadEventsFromDisk } from "../src/engine/event-handler.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/communication/ws.js";
 

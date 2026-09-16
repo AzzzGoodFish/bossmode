@@ -55,7 +55,7 @@ describe("020 conversations / scope surface", () => {
   });
 
   it("effective-config binds into memberRecordToConfig path via getEffectiveConfig", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({
       name: "pm",
       agentTemplate: "pm",
@@ -70,7 +70,7 @@ describe("020 conversations / scope surface", () => {
   });
 
   it("member-level compile via compileMemberPrompt (② batch 2)", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "architect", agentTemplate: "architect" });
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
     const compiled = compileMemberPrompt({ memberId: m.id, memberName: "architect" });

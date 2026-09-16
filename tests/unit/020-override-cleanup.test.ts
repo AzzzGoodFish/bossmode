@@ -62,7 +62,7 @@ describe("cleanup-member-overrides-v1", () => {
   afterEach(() => fixture.close());
 
   it("clears dead residue (mem_* duplicates, codex-era name keys, ghosts); registry config untouched; snapshot + idempotent", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-b", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
@@ -100,7 +100,7 @@ describe("cleanup-member-overrides-v1", () => {
   });
 
   it("keeps + warns an entry that looks like a live intent not in the new authority", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({ name: "qa", agentTemplate: "qa", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id, "qa");
@@ -125,7 +125,7 @@ describe("cleanup-member-overrides-v1", () => {
   });
 
   it("restored live intent (qa playwright case): old entry matching the new authority is cleared", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const member = reg.createMember({
       name: "qa",
@@ -147,7 +147,7 @@ describe("cleanup-member-overrides-v1", () => {
   });
 
   it("mem_* keys are definitional residue (no content check); thinking levels judged against the effective model", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const qa = reg.createMember({ name: "qa", agentTemplate: "qa", model: "testprov/claude-a", credentialId: cred.id });
@@ -174,7 +174,7 @@ describe("cleanup-member-overrides-v1", () => {
   });
 
   it("legacy unstamped room: memberOverrides still authoritative → skipped entirely", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const cred = await seedCredential();
     reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = historicalRoom("Legacy");

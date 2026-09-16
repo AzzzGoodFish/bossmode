@@ -13,7 +13,7 @@ function seedMessages(roomId: string, count: number) {
 
 describe("getMessages around", () => {
   it("returns a window centered on the target message", async () => {
-    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { getMessages } = await import("../../src/chat/message-store.js");
     seedMessages("around-1", 50);
     const result = getMessages("around-1", { around: "msg-25", limit: 10 });
     expect(result.length).toBe(10);
@@ -24,14 +24,14 @@ describe("getMessages around", () => {
   });
 
   it("returns empty array when target not found", async () => {
-    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { getMessages } = await import("../../src/chat/message-store.js");
     seedMessages("around-2", 10);
     const result = getMessages("around-2", { around: "nonexistent", limit: 10 });
     expect(result).toEqual([]);
   });
 
   it("handles target near the beginning", async () => {
-    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { getMessages } = await import("../../src/chat/message-store.js");
     seedMessages("around-3", 20);
     const result = getMessages("around-3", { around: "msg-2", limit: 10 });
     expect(result.some((m) => m.id === "msg-2")).toBe(true);
@@ -40,7 +40,7 @@ describe("getMessages around", () => {
   });
 
   it("handles target near the end", async () => {
-    const { getMessages } = await import("../../src/workspace/message-store.js");
+    const { getMessages } = await import("../../src/chat/message-store.js");
     seedMessages("around-4", 20);
     const result = getMessages("around-4", { around: "msg-18", limit: 10 });
     expect(result.some((m) => m.id === "msg-18")).toBe(true);

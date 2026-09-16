@@ -13,7 +13,7 @@ vi.mock("../../src/communication/ws.js", () => ({
 }));
 
 describe("runtime error Room boundary", () => {
-  let roomStore: typeof import("../../src/workspace/room-store.js");
+  let roomStore: typeof import("../../src/chat/room-store.js");
   let messageBus: typeof import("../../src/communication/message-bus.js");
 
   beforeEach(async () => {
@@ -22,7 +22,7 @@ describe("runtime error Room boundary", () => {
     fixture = coreFixture();
     tempDir = fixture.root;
     wsMocks.broadcastToRoom.mockReset();
-    roomStore = await import("../../src/workspace/room-store.js");
+    roomStore = await import("../../src/chat/room-store.js");
     messageBus = await import("../../src/communication/message-bus.js");
   });
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { createMember, updateMember } from "../../src/workspace/member-registry.js";
+import { createMember, updateMember } from "../../src/member/member-registry.js";
 import { roomDir } from "../../src/files/layout.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
@@ -18,7 +18,7 @@ function writeAgent(name: string, extraFrontmatter = ""): void {
 describe("room-member-resolver — no implicit model default", () => {
   it("leaves a freshly created current contact Unconfigured (no model, no credentialId)", async () => {
     const member = createMember({ name: "architect" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -32,7 +32,7 @@ describe("room-member-resolver — no implicit model default", () => {
   it("ignores a legacy model field in Agent definition frontmatter", async () => {
     writeAgent("pm", "model: claude-sonnet-4-6\n");
     const member = createMember({ name: "pm", agentTemplate: "pm" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -43,7 +43,7 @@ describe("room-member-resolver — no implicit model default", () => {
   });
 
   it("retains imported legacy model history without making an unlinked snapshot executable", async () => {
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
     // Retained historical converter runs on files; resolution sees only the explicitly imported SQL DTO.
     const { runRoomMemberMigration } = await import("../../src/workspace/room-member-migration.js");
@@ -66,7 +66,7 @@ describe("room-member-resolver — no implicit model default", () => {
 
   it("resolves an explicitly configured member's model and credentialId together", async () => {
     const member = createMember({ name: "qa" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -79,7 +79,7 @@ describe("room-member-resolver — no implicit model default", () => {
 });
 
 async function currentMemberFixture() {
-  const registry = await import("../../src/workspace/member-registry.js");
+  const registry = await import("../../src/member/member-registry.js");
   const db = fixture.db;
   const member = registry.importMemberRecord({
     id: "mem_current", name: "current-name", title: "Engineer", agentTemplate: "developer",
@@ -87,7 +87,7 @@ async function currentMemberFixture() {
     global: { model: "db-model", credentialId: "db-credential", thinkingLevel: "high", skills: ["db-skill"], mcpServers: ["db-mcp"] },
     createdAt: 1, updatedAt: 2,
   });
-  const roomStore = await import("../../src/workspace/room-store.js");
+  const roomStore = await import("../../src/chat/room-store.js");
   const room = roomStore.createRoom("Current", dir, []);
   // A pre-cutover linked shadow must not supply identity or cleared settings.
   const shadow = {

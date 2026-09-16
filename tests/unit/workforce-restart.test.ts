@@ -35,7 +35,7 @@ vi.mock("../../src/engine/agent-manager.js", () => ({
   restartMember: (...args: any[]) => restartMemberMock(...args),
 }));
 
-vi.mock("../../src/workspace/member-registry.js", () => ({
+vi.mock("../../src/member/member-registry.js", () => ({
   getMember: (...args: any[]) => getMemberMock(...args),
 }));
 

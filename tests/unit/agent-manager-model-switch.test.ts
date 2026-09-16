@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/communication/message-bus.js";
 import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
-import { getMember, updateMember } from "../../src/workspace/member-registry.js";
+import { getMember, updateMember } from "../../src/member/member-registry.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
 function dispatch(message: string, options?: PromptOptions) {
@@ -510,7 +510,7 @@ describe("agent-manager model hot switch", () => {
 
   it("does not commit the global config when setModel fails — instance is restored", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const registry = await import("../../src/workspace/member-registry.js");
+    const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -531,7 +531,7 @@ describe("agent-manager model hot switch", () => {
 
   it("commits the global config exactly once, only after a successful live apply", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const registry = await import("../../src/workspace/member-registry.js");
+    const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
 
@@ -545,7 +545,7 @@ describe("agent-manager model hot switch", () => {
 
   it("applies the switch to the member's single live instance, whatever chat it serves", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const registry = await import("../../src/workspace/member-registry.js");
+    const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -564,7 +564,7 @@ describe("agent-manager model hot switch", () => {
 
   it("one instance per member: a failed switch rolls back the single runtime and commits nothing", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const registry = await import("../../src/workspace/member-registry.js");
+    const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -586,7 +586,7 @@ describe("agent-manager model hot switch", () => {
 
   it("rollback that fails again stops the member's instance and names it in the error", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const registry = await import("../../src/workspace/member-registry.js");
+    const registry = await import("../../src/member/member-registry.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -746,7 +746,7 @@ describe("agent-manager model hot switch", () => {
       { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: now, seq: 6 },
       { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: now, seq: 7 },
     ];
-    (await import("../../src/workspace/room-store.js")).setCursor("room", "mem_pm", bus.getLatestMessageId("room"));
+    (await import("../../src/chat/room-store.js")).setCursor("room", "mem_pm", bus.getLatestMessageId("room"));
     for (const message of messages) bus.postMessage("room", message.sender, message.content, message.mentions, message.type === "chat" ? undefined : { type: message.type as any });
 
     await manager.activateAgent("room", "pm");

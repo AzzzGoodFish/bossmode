@@ -79,9 +79,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("inline query result rendered by the SDK carries seq/replyTo/attachment (through tool rows)", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("R", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -89,7 +89,7 @@ describe("query renderer (member view)", () => {
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "rep1.md"), "# r", "utf-8");
 
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     const base = messageStore.addMessage(room.id, {
       mentions: [],
       sender: "pm",
@@ -120,9 +120,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("file output matches inline shape (same renderer): seq + replyTo + attachment lines", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("R2", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -130,7 +130,7 @@ describe("query renderer (member view)", () => {
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "rep2.md"), "# r2", "utf-8");
 
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     const base = messageStore.addMessage(room.id, { mentions: [], sender: "pm", content: "origin note" });
     messageStore.addMessage(room.id, {
       mentions: [],
@@ -152,13 +152,13 @@ describe("query renderer (member view)", () => {
   });
 
   it("cross-window reply target resolves from the full scope; lost target degrades", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("R3", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     // Old message (outside the 1-message page window)
     const old = messageStore.addMessage(room.id, { mentions: [], sender: "qa", content: "ancient origin" });
     // Reply (page window of 1 sees only this)
@@ -193,9 +193,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("dm output preserves attachment ownership and does not resolve foreign reply targets", async () => {
-    const { createMember } = await import("../../src/workspace/member-registry.js");
-    const { createRoom, inviteGlobalMember } = await import("../../src/workspace/room-store.js");
-    const { addMessage } = await import("../../src/workspace/message-store.js");
+    const { createMember } = await import("../../src/member/member-registry.js");
+    const { createRoom, inviteGlobalMember } = await import("../../src/chat/room-store.js");
+    const { addMessage } = await import("../../src/chat/message-store.js");
     const { getDmAttachmentPath } = await import("../../src/files/attachment-store.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const { renderQueryRowsForMember } = await import("../../src/engine/query-render.js");

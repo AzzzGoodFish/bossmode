@@ -57,7 +57,7 @@ it.each(["room","dm"])("reset rejects a delayed %s creator's old session publica
   try{
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,`References ${kind}`,[`reference-${kind}`]);const id=room.globalMemberIds![0];
     const scope=kind==="dm"?`dm:${id}`:`room:${room.id}`;
-    const sessions=await import("../../src/workspace/session-store.js");
+    const sessions=await import("../../src/member/session-store.js");
     const directory=sessions.mainSessionDirectory(id);mkdirSync(directory,{recursive:true});const file=join(directory,"old.jsonl");writeFileSync(file,"retained SDK history\n");
     sessions.saveCurrentSession(id,{runtime:"pi-cli",sessionId:"old",sessionFile:file});
     const runtime=getRegistry()!.get("pi-cli")!;const original=runtime.createAgent.bind(runtime);
@@ -91,7 +91,7 @@ it("shutdown preserves final session metadata from an already owned run",async()
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Final session metadata",["final-session"]);const id=room.globalMemberIds![0];
     const runtime=getRegistry()!.get("pi-cli")!;const create=vi.spyOn(runtime,"createAgent");
     await buildMemberAgentSession(id,`room:${room.id}`);
-    const sessions=await import("../../src/workspace/session-store.js");const directory=sessions.mainSessionDirectory(id);
+    const sessions=await import("../../src/member/session-store.js");const directory=sessions.mainSessionDirectory(id);
     mkdirSync(directory,{recursive:true});const file=join(directory,"final.jsonl");writeFileSync(file,"retained SDK history\n");
     const stopping=shutdownAll();
     create.mock.calls[0][0].onSessionChanged?.({sessionId:"final",sessionFile:file});
@@ -106,7 +106,7 @@ it("shutdown waits for the application prompt continuation beyond a runtime's id
     const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"Application drain",["application-drain"]);const id=room.globalMemberIds![0];
     let entered=false;const gate=new Promise<void>(resolve=>release=resolve);
     mock.setMockPromptFn(vi.fn(async()=>{entered=true;await gate;}));
-    const {addMessage}=await import("../../src/workspace/message-store.js");
+    const {addMessage}=await import("../../src/chat/message-store.js");
     addMessage(room.id,{sender:"user",content:"finish this work",mentions:[],mentionMemberIds:[id]});
     const {activateAgent}=await import("../../src/engine/agent-manager.js");const activation=activateAgent(room.id,id);
     await vi.waitFor(()=>expect(entered).toBe(true));let finished=false;

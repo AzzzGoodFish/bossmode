@@ -11,7 +11,7 @@ import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.
 import { AuthSessionsRepository } from "../../src/data/repositories/settings.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { createCredentialStore, saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } from "../../src/engine/model-credentials.js";
-import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/workspace/workspace-registry.js";
+import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/member/workspace-registry.js";
 import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/shared/mcp-settings.js";
 
 let root: string, db: Database, other: Database, repo: ModelCredentialsRepository;

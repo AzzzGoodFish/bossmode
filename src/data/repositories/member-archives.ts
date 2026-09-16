@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import type { Database } from "../database.js";
-import type { MemberGlobalConfig } from "../../workspace/member-registry.js";
+import type { MemberGlobalConfig } from "../../member/member-registry.js";
 export interface ArchiveCatalogSource {
   archivePath: string;
   name: string;

@@ -35,7 +35,7 @@ describe("DM attachments", () => {
   });
 
   it("streamToDmAttachment stores member-owned with hash naming + traversal protection", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({ name: "archie", agentTemplate: "archie" });
     const store = await import("../../src/files/attachment-store.js");
 
@@ -51,9 +51,9 @@ describe("DM attachments", () => {
   });
 
   it("DM message store persists structured attachments on the RoomMessage shape", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({ name: "archie", agentTemplate: "archie" });
-    const dm = await import("../../src/workspace/dm-message-store.js");
+    const dm = await import("../../src/chat/dm-message-store.js");
 
     const attachments = [{ storedFilename: "abc123.txt", originalFilename: "notes.txt", size: 15 }];
     const msg = dm.addDmMessage(member.id, { sender: "user", content: "see attached", mentions: [], attachments } as any);

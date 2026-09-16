@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFi
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
-import { getMember, getEffectiveConfig } from "./member-registry.js";
+import { getMember, getEffectiveConfig } from "../member/member-registry.js";
 import { isModelAvailable, listAvailableModels } from "../engine/model-credentials.js";
 import type { RoomMemberOverride } from "../kernel/types.js";
 

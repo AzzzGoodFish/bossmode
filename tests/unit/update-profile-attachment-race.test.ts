@@ -5,8 +5,8 @@ const processAttachments = vi.hoisted(() => vi.fn());
 vi.mock("../../src/engine/agent-attachments.js", () => ({ processAgentAttachments: processAttachments }));
 
 it("captures mention target IDs before attachment IO while refreshing the sender label after IO", async () => {
-  const reg = await import("../../src/workspace/member-registry.js");
-  const rooms = await import("../../src/workspace/room-store.js");
+  const reg = await import("../../src/member/member-registry.js");
+  const rooms = await import("../../src/chat/room-store.js");
   const own = reg.createMember({ name: "Sender" });
   const target = reg.createMember({ name: "Target" });
   const reuse = reg.createMember({ name: "Other" });

@@ -39,7 +39,7 @@ describe("member↔member private chat (⑤ B)", () => {
   });
 
   it("send opens the pair scope, captures the peer target, and read/list/info work for both", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const ref = await import("../../src/shared/conversation-ref.js");
     const alice = reg.createMember({ name: "alice" });
@@ -96,7 +96,7 @@ describe("member↔member private chat (⑤ B)", () => {
   });
 
   it("first send posts a read-only jump notice into the receiver's user DM; later sends do not duplicate it", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const { handleToolCallback } = await import("../../src/engine/tools.js");
     const chatApi = await import("../../src/api/member-chats.js");
     const ref = await import("../../src/shared/conversation-ref.js");
@@ -132,7 +132,7 @@ describe("member↔member private chat (⑤ B)", () => {
     expect(older.messages.map((m) => m.content)).toEqual(["first"]);
 
     chatApi.markMemberChatRead(scope);
-    const { getUserReadCursor } = await import("../../src/workspace/user-read-cursors.js");
+    const { getUserReadCursor } = await import("../../src/chat/user-read-cursors.js");
     expect(getUserReadCursor(scope)?.messageId).toBe(page.messages[0].id);
     expect(() => chatApi.readMemberChatMessages("mm:broken", {})).toThrow(/unknown_member_chat/);
   });

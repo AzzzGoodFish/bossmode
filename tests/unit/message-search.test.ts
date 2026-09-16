@@ -16,7 +16,7 @@ function writeMessages(roomId: string, messages: object[]) {
 
 describe("message-store searchMessages", () => {
   it("keyword search is case-insensitive", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "The Quick Brown Fox", ts: 1000, mentions: [] },
@@ -28,7 +28,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("sender filter is exact match", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "hello", ts: 1000, mentions: [] },
@@ -40,7 +40,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("time range after/before filters", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "old", ts: 1000, mentions: [] },
@@ -53,7 +53,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("combined query + from filter", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "plan for next week", ts: 1000, mentions: [] },
@@ -66,7 +66,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("total is not affected by limit", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     const msgs = Array.from({ length: 20 }, (_, i) => ({
       id: `m${i}`, sender: "fish", content: `message ${i}`, ts: i * 100, mentions: [],
@@ -78,7 +78,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("offset and limit provide pagination", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     const msgs = Array.from({ length: 10 }, (_, i) => ({
       id: `m${i}`, sender: "fish", content: "x", ts: i * 100, mentions: [],
@@ -92,7 +92,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("empty results when no match", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "hello", ts: 1000, mentions: [] },
@@ -103,7 +103,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("limit is capped at 500", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     const msgs = Array.from({ length: 600 }, (_, i) => ({
       id: `m${i}`, sender: "fish", content: "x", ts: i, mentions: [],
@@ -114,7 +114,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("offset beyond total returns empty messages", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "x", ts: 1000, mentions: [] },
@@ -125,7 +125,7 @@ describe("message-store searchMessages", () => {
   });
 
   it("results are sorted newest first", async () => {
-    const { searchMessages } = await import("../../src/workspace/message-store.js");
+    const { searchMessages } = await import("../../src/chat/message-store.js");
     const rid = makeRoomId();
     writeMessages(rid, [
       { id: "m1", sender: "fish", content: "x", ts: 1000, mentions: [] },

@@ -1,7 +1,7 @@
 // Pi SDK Runtime — in-process pi Agent SDK integration behind the legacy pi-cli storage key
 import { existsSync, mkdirSync } from "node:fs";
-import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../../workspace/member-extensions.js";
-export { discoverMemberExtensionEntries } from "../../workspace/member-extensions.js";
+import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../../member/member-extensions.js";
+export { discoverMemberExtensionEntries } from "../../member/member-extensions.js";
 import { join } from "node:path";
 import {
   createAgentSession,

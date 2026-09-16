@@ -57,7 +57,7 @@ describe("platform extensions.json retirement", () => {
       createdAt: 1,
       updatedAt: 1,
     };
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     reg.importMemberRecord(legacy);
     reg.updateMember(mId, { global: { thinkingLevel: "high" } });
     const after = reg.getMember(mId)!;

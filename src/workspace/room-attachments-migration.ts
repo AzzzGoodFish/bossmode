@@ -7,7 +7,7 @@
  */
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import * as roomStore from "./room-store.js";
+import * as roomStore from "../chat/room-store.js";
 import { roomDir } from "../files/layout.js";
 
 export interface RoomAttachmentsMigrationReport {

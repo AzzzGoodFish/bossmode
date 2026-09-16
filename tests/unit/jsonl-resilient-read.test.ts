@@ -11,7 +11,7 @@ import { coreStorageMigrations } from "../../src/data/migrations.js";
 import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/upgrade/legacy-inventory.js";
 import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
 import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
-import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/workspace/message-store.js";
+import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/chat/message-store.js";
 import { loadEventsFromDisk } from "../../src/engine/event-handler.js";
 import { parseJsonlLines } from "../../src/kernel/jsonl.js";
 
@@ -142,7 +142,7 @@ describe("historical JSONL import and SQL queries", () => {
   });
 
   it("valid event history retains order under an unresolved owner, never the current same-name member", async () => {
-    const { importMemberRecord } = await import("../../src/workspace/member-registry.js");
+    const { importMemberRecord } = await import("../../src/member/member-registry.js");
     importMemberRecord({ id: "mem_pm", name: "pm", agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
       global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
       scopeOverrides: {}, createdAt: 1, updatedAt: 1 });

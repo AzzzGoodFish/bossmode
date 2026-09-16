@@ -12,7 +12,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import {
   formatMemberPromptSegment,
   readMemberProfile,
-} from "../workspace/member-profile.js";
+} from "../member/member-profile.js";
 import {
   memberArchiveDir,
   memberDir,

@@ -6,7 +6,7 @@ import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {assertLegacyMemberDirectories} from "./startup-member-verification.js";
 import type {LegacySourceEntry} from "./legacy-inventory.js";
 import type {UpgradeImportContext} from "./upgrade-runner.js";
-import type {MemberRecord} from "../../workspace/member-registry.js";
+import type {MemberRecord} from "../../member/member-registry.js";
 
 export interface MemberSourceImport {
  consumed:Set<string>;

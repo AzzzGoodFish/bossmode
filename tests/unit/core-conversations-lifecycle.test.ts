@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { conversationsFixture } from "./core-conversations-fixture.js";
 import { ConversationsRepository, ensureDmScope } from "../../src/data/repositories/conversations.js";
-import {getRoom, listRooms} from "../../src/workspace/room-store.js";
+import {getRoom, listRooms} from "../../src/chat/room-store.js";
 import {roomDir} from "../../src/files/layout.js";
 
 let f: ReturnType<typeof conversationsFixture> | undefined;

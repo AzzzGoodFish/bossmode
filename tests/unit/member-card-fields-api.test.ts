@@ -47,7 +47,7 @@ describe("member card field title (description retired)", () => {
       "utf-8",
     );
     expect(onDisk).toBe("");
-    const { getMember } = await import("../../src/workspace/member-registry.js");
+    const { getMember } = await import("../../src/member/member-registry.js");
     expect(getMember(memberId)?.title).toBe("Architect");
     expect(onDisk).not.toMatch(/description:/);
 

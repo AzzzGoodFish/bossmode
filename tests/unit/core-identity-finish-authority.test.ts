@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
-import * as registry from "../../src/workspace/member-registry.js";
+import * as registry from "../../src/member/member-registry.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { resolveRoomMember } from "../../src/workforce/room-member-resolver.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { readTemplateBody } from "../../src/workforce/template-files.js";
-import { readMemberProfile } from "../../src/workspace/member-profile.js";
+import { readMemberProfile } from "../../src/member/member-profile.js";
 import type { Database } from "../../src/data/database.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 
@@ -50,7 +50,7 @@ describe("stable identity and body-free metadata", () => {
     expect(() => readMemberProfile(member.id)).toThrow();
   });
   it("inviting a current contact preserves the no-legacy-config contract", async () => {
-    const { createRoom, inviteGlobalMember } = await import("../../src/workspace/room-store.js");
+    const { createRoom, inviteGlobalMember } = await import("../../src/chat/room-store.js");
     const room=createRoom("Direct",undefined,[]);
     writeFileSync(join(fixture.root,"members.json"),JSON.stringify([{id:"legacy",name:"direct",model:"stale"}]));
     const member = registry.createMember({ name: "direct" });

@@ -5,7 +5,7 @@ import { conversationsFixture } from "./core-conversations-fixture.js";
 import type { Room, Task } from "../../src/kernel/types.js";
 import { getRoom, listRooms, getRoomMembersFromRoom, stampGlobalMemberIds, resolveGlobalMemberId, removeRoomMemberByRef,
   getCursors, setCursor, deleteCursor, inviteGlobalMember, updateRoomName, updateRoomPromptLeader, updateRoomDocsPath, updateRoomRuleDocs,
-  updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom } from "../../src/workspace/room-store.js";
+  updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom } from "../../src/chat/room-store.js";
 import { roomDir } from "../../src/files/layout.js";
 import { chatScopeRoomId } from "../../src/shared/conversation-ref.js";
 import { ensureDmScope } from "../../src/data/repositories/conversations.js";

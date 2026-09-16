@@ -3,7 +3,7 @@ import type {UpgradeImportContext} from "./upgrade-runner.js";
 import type {LegacySourceEntry} from "./legacy-inventory.js";
 import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {parseLegacyMemberPersona,parseLegacyMemberRecord} from "./upgrade-member-parser.js";
-import {catalogFromFiredExport,catalogFromLegacyManifest} from "../../workspace/member-archive.js";
+import {catalogFromFiredExport,catalogFromLegacyManifest} from "../../member/member-archive.js";
 import {MemberArchivesRepository} from "../repositories/member-archives.js";
 import {MembersRepository} from "../repositories/members.js";
 

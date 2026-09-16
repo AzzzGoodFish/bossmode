@@ -5,9 +5,9 @@ import { createHash } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
-import * as roomStore from "../workspace/room-store.js";
-import * as memberRegistry from "../workspace/member-registry.js";
-import * as messageStore from "../workspace/message-store.js";
+import * as roomStore from "../chat/room-store.js";
+import * as memberRegistry from "../member/member-registry.js";
+import * as messageStore from "../chat/message-store.js";
 import { postMessage } from "../communication/message-bus.js";
 import { broadcastToRoom } from "../communication/ws.js";
 import { parseMentionMemberIds, parseMentions } from "../communication/router.js";
@@ -19,9 +19,9 @@ import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
 import * as attachmentStore from "../files/attachment-store.js";
-import * as principlesStore from "../workspace/principles-store.js";
-import * as mainlineStore from "../workspace/mainline-store.js";
-import { readMemoryLayerInfo } from "../workspace/member-memory-store.js";
+import * as principlesStore from "../member/principles-store.js";
+import * as mainlineStore from "../chat/mainline-store.js";
+import { readMemoryLayerInfo } from "../member/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
@@ -541,7 +541,7 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     sendJson(res, 400, { error: "Template member drafts are not supported; select an existing memberId" }); return;
   }
   try {
-    const { getMember } = await import("../workspace/member-registry.js");
+    const { getMember } = await import("../member/member-registry.js");
     const global = getMember(body.memberId);
     if (!global) { sendJson(res, 404, { error: "Member not found" }); return; }
     const added = roomStore.inviteGlobalMember(params.id, {id: global.id, name: global.name,
@@ -561,7 +561,7 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params)
   }
   let globalMemberId: string | undefined;
   try {
-    const { resolveMemberRef, findMemberByName } = await import("../workspace/member-registry.js");
+    const { resolveMemberRef, findMemberByName } = await import("../member/member-registry.js");
     if (params.memberRef.startsWith("mem_")) {
       globalMemberId = params.memberRef;
     } else {

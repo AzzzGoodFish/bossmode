@@ -7,8 +7,8 @@ import { setupTestWorkspace, getTestBossmodeDir, getTestWorkspace } from "../hel
 setupTestWorkspace();
 
 async function fixture() {
-  const registry = await import("../../src/workspace/member-registry.js");
-  const rooms = await import("../../src/workspace/room-store.js");
+  const registry = await import("../../src/member/member-registry.js");
+  const rooms = await import("../../src/chat/room-store.js");
   const suffix = randomUUID().slice(0, 8);
   const own = registry.createMember({ name: `Self-${suffix}`, title: "Before" });
   const peer = registry.createMember({ name: `Peer-${suffix}` });

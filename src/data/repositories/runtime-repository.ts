@@ -1,4 +1,4 @@
-import type { RuntimeStateEntry, RuntimeStateMap } from "../../workspace/runtime-state.js";
+import type { RuntimeStateEntry, RuntimeStateMap } from "../../member/runtime-state.js";
 import type { Database } from "../database.js";
 import { assertExecutionMember } from "./execution-identity.js";
 

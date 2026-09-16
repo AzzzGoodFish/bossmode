@@ -16,10 +16,10 @@ import {
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
-import * as roomStore from "./room-store.js";
+import * as roomStore from "../chat/room-store.js";
 import { roomDir } from "../files/layout.js";
-import { createMember, findMemberByName } from "./member-registry.js";
-import { ensureMemorySkeleton, writeMemoryLayer } from "./member-memory-store.js";
+import { createMember, findMemberByName } from "../member/member-registry.js";
+import { ensureMemorySkeleton, writeMemoryLayer } from "../member/member-memory-store.js";
 import { scopeIdOf } from "../shared/conversation-ref.js";
 
 const MIGRATION_ID = "member-global-v1";

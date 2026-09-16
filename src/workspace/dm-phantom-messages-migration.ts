@@ -13,7 +13,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import { logger } from "../kernel/logger.js";
 import { parseJsonlLines } from "../kernel/jsonl.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { addDmMessage } from "./dm-message-store.js";
+import { addDmMessage } from "../chat/dm-message-store.js";
 
 function roomsRoot(): string {
   return join(getBossmodeDir(), "rooms");

@@ -55,11 +55,11 @@ afterEach(() => {
 
 describe("chat_read attachments", () => {
   it("room scope: JSON carries {originalFilename, path}; markdown appends Attachment lines", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const creds = await import("../../src/engine/model-credentials.js");
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("R", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -68,7 +68,7 @@ describe("chat_read attachments", () => {
     mkdirSync(attachDir, { recursive: true });
     writeFileSync(join(attachDir, "abc123.md"), "# report", "utf-8");
 
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     messageStore.addMessage(room.id, {
       sender: "user",
       content: "report attached",
@@ -92,15 +92,15 @@ describe("chat_read attachments", () => {
   });
 
   it("missing file → path 'unavailable' in both modes", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const creds = await import("../../src/engine/model-credentials.js");
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const room = roomStore.createRoom("R2", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
-    const messageStore = await import("../../src/workspace/message-store.js");
+    const messageStore = await import("../../src/chat/message-store.js");
     messageStore.addMessage(room.id, {
       sender: "user",
       content: "gone file",
@@ -123,7 +123,7 @@ describe("chat_read attachments", () => {
   });
 
   it("DM scope resolves the DM attachment dir", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const creds = await import("../../src/engine/model-credentials.js");
     creds.saveModelCredentialProfile(PROFILE);
     const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
@@ -132,7 +132,7 @@ describe("chat_read attachments", () => {
     mkdirSync(dmAttachDir, { recursive: true });
     writeFileSync(join(dmAttachDir, "dmf1.png"), "png", "utf-8");
 
-    const dmStore = await import("../../src/workspace/dm-message-store.js");
+    const dmStore = await import("../../src/chat/dm-message-store.js");
     dmStore.addDmMessage(m.id, {
       sender: "user",
       content: "dm attach",

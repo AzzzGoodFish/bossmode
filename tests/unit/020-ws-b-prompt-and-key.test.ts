@@ -39,7 +39,7 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("compileMemberPrompt (② batch 2) is Persona → Environment → Communication → Memory → Workspace → Assets", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
 
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
@@ -66,7 +66,7 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("compileMemberPrompt (dm-side member) shares one scope-free prompt", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const { compileMemberPrompt } = await import("../../src/engine/prompt-compiler.js");
 
     const member = reg.createMember({ name: "pm", agentTemplate: "pm" });
@@ -97,7 +97,7 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("getEffectiveConfig is global-only (unified flags retired, batch-5b)", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const member = reg.createMember({
       name: "dev",
       agentTemplate: "developer",

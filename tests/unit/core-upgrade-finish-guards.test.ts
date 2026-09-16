@@ -7,7 +7,7 @@ import { inspectStartupSettings } from "../../src/data/upgrade/startup-inspectio
 import { getDefaultConfig } from "../../src/shared/config.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import type { Database } from "../../src/data/database.js";
-import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 
 let root: string;

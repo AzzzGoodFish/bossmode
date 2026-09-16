@@ -5,7 +5,7 @@ import { executionScopeId } from "../data/repositories/execution-identity.js";
 import { DeliveryRepository, type CapturedMessage, type DeliveryActor, type CapturedDeliverySnapshot } from "../data/repositories/delivery-repository.js";
 import { ReplyObligationRepository } from "../data/repositories/reply-obligation-repository.js";
 import { MembersRepository } from "../data/repositories/members.js";
-import { getRoomMembers } from "../workspace/room-store.js";
+import { getRoomMembers } from "../chat/room-store.js";
 import type { RoomMessage } from "../kernel/types.js";
 
 /** No routing callback, filesystem work or SDK activity occurs in this transaction.

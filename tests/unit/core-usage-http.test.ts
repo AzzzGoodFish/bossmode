@@ -5,7 +5,7 @@ import { closeTestServer, createTestServer, createMockRoom, getTestBossmodeDir, 
 import { appendAgentEvent } from "../../src/data/repositories/event-repository.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { getDatabase } from "../../src/data/database.js";
-import { stampGlobalMemberIds } from "../../src/workspace/room-store.js";
+import { stampGlobalMemberIds } from "../../src/chat/room-store.js";
 setupTestWorkspace();
 
 it("reports SQL room/DM usage, retains stable identity after rename/removal, and fails rather than returning false zeros", async () => {

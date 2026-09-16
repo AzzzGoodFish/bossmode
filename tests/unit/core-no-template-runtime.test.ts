@@ -12,10 +12,10 @@ import {
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
   reloadMemberResources, reloadMemberSession, resolveSkills,
 } from "../../src/engine/agent-manager.js";
-import { getMember, updateMember } from "../../src/workspace/member-registry.js";
+import { getMember, updateMember } from "../../src/member/member-registry.js";
 import { memberProfilePath } from "../../src/files/layout.js";
-import { getRuntimeStateEntry } from "../../src/workspace/runtime-state.js";
-import { getCurrentSession } from "../../src/workspace/session-store.js";
+import { getRuntimeStateEntry } from "../../src/member/runtime-state.js";
+import { getCurrentSession } from "../../src/member/session-store.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";

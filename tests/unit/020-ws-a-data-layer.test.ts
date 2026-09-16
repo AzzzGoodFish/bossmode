@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { MemberArchiveService } from "../../src/workspace/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";
 import {
   scopeIdOf,
   parseScopeId,
@@ -51,7 +51,7 @@ describe("ConversationRef / ScopeId", () => {
 
 describe("member-registry", () => {
   it("creates unique members, rejects name clash, renames, fires", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const a = reg.createMember({ name: "pm", agentTemplate: "pm", model: "anthropic/claude" });
     expect(a.id).toMatch(/^mem_/);
     expect(a.unifiedModel).toBe(true);
@@ -74,7 +74,7 @@ describe("member-registry", () => {
   });
 
   it("scope overrides retired (batch-5b): patches write global, never scope", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
+    const reg = await import("../../src/member/member-registry.js");
     const m = reg.createMember({ name: "patchscope" });
     reg.updateMember(m.id, { unifiedModel: false });
     reg.applyMemberConfigPatch(m.id, "room:r1", { model: "scope-model" });
@@ -89,8 +89,8 @@ describe("member-registry", () => {
 
 describe("member-memory-store + dm-message-store", () => {
   it("writes persona and per-scope layers under member dir", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const mem = await import("../../src/workspace/member-memory-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const mem = await import("../../src/member/member-memory-store.js");
     const m = reg.createMember({ name: "qa", agentTemplate: "qa" });
     mem.ensureMemorySkeleton(m.id, "dm:" + m.id);
     mem.writeMemoryLayer(m.id, "persona", "## Persona\nI am qa.\n", { type: "user" }, { reason: "init" });
@@ -108,8 +108,8 @@ describe("member-memory-store + dm-message-store", () => {
   });
 
   it("dm messages append with seq and cursor", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const dm = await import("../../src/workspace/dm-message-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const dm = await import("../../src/chat/dm-message-store.js");
     const m = reg.createMember({ name: "arch", agentTemplate: "architect" });
     const m1 = dm.addDmMessage(m.id, { sender: "user", content: "hello", mentions: [] });
     const m2 = dm.addDmMessage(m.id, {
@@ -132,8 +132,8 @@ describe("member-memory-store + dm-message-store", () => {
 
 describe("SQL chats aggregation and ID membership", () => {
   it("inviteGlobalMember stamps globalMemberIds; remove clears membership", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const g = reg.createMember({ name: "ops", agentTemplate: "general" });
     const roomId = "room-inv-1";
     new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "ops-room", members: [], globalMemberIds: [], createdAt: 1});
@@ -157,8 +157,8 @@ describe("SQL chats aggregation and ID membership", () => {
   });
 
   it("stampGlobalMemberIds after invite matches memberIds create path", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const roomStore = await import("../../src/workspace/room-store.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/room-store.js");
     const a = reg.createMember({ name: "alice", agentTemplate: "general" });
     const b = reg.createMember({ name: "bob", agentTemplate: "general" });
     const roomId = "room-mid-1";
@@ -176,9 +176,9 @@ describe("SQL chats aggregation and ID membership", () => {
   });
 
   it("user read cursor drives unread after mark-read", async () => {
-    const reg = await import("../../src/workspace/member-registry.js");
-    const dm = await import("../../src/workspace/dm-message-store.js");
-    const cursors = await import("../../src/workspace/user-read-cursors.js");
+    const reg = await import("../../src/member/member-registry.js");
+    const dm = await import("../../src/chat/dm-message-store.js");
+    const cursors = await import("../../src/chat/user-read-cursors.js");
     const { scopeIdOf } = await import("../../src/shared/conversation-ref.js");
     const m = reg.createMember({ name: "chatty", agentTemplate: "general" });
     const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });

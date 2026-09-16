@@ -20,7 +20,7 @@ function writeDoc(relPath: string, content: string): string {
 }
 
 async function getRoomMessages(roomId: string) {
-  const messageStore = await import("../../src/workspace/message-store.js");
+  const messageStore = await import("../../src/chat/message-store.js");
   return messageStore.getMessages(roomId);
 }
 

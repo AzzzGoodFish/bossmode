@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { createMember } from "../../src/workspace/member-registry.js";
-import { createRoom, stampGlobalMemberIds } from "../../src/workspace/room-store.js";
-import { addMessage } from "../../src/workspace/message-store.js";
+import { createMember } from "../../src/member/member-registry.js";
+import { createRoom, stampGlobalMemberIds } from "../../src/chat/room-store.js";
+import { addMessage } from "../../src/chat/message-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 

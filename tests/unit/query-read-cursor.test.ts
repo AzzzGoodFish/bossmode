@@ -8,8 +8,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 let fixture: ReturnType<typeof coreFixture>;
 let tools: typeof import("../../src/engine/tools.js");
-let roomStore: typeof import("../../src/workspace/room-store.js");
-let registryMod: typeof import("../../src/workspace/member-registry.js");
+let roomStore: typeof import("../../src/chat/room-store.js");
+let registryMod: typeof import("../../src/member/member-registry.js");
 let bus: typeof import("../../src/communication/message-bus.js");
 let memberId = "";
 let roomId = "";
@@ -17,8 +17,8 @@ let roomId = "";
 beforeEach(async () => {
   fixture = coreFixture();
   tools = await import("../../src/engine/tools.js");
-  roomStore = await import("../../src/workspace/room-store.js");
-  registryMod = await import("../../src/workspace/member-registry.js");
+  roomStore = await import("../../src/chat/room-store.js");
+  registryMod = await import("../../src/member/member-registry.js");
   bus = await import("../../src/communication/message-bus.js");
 
   const member = registryMod.createMember({ name: "cursorbot", agentTemplate: "general", model: "anthropic/model-x", credentialId: "cred-a" });

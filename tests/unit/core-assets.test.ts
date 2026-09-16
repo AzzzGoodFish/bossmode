@@ -19,9 +19,9 @@ const { SettingsRepository } = await import("../../src/data/repositories/setting
 const { getDefaultConfig } = await import("../../src/shared/config.js");
 const { assetsMigration } = await import("../../src/data/schema/assets.js");
 const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/data/repositories/document-repository.js");
-const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/workspace/principles-store.js");
-const { readMainline, writeMainline, editMainline } = await import("../../src/workspace/mainline-store.js");
-const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/workspace/member-memory-store.js");
+const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/principles-store.js");
+const { readMainline, writeMainline, editMainline } = await import("../../src/chat/mainline-store.js");
+const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/member/member-memory-store.js");
 const { saveDocument } = await import("../../src/workspace/document-assets.js");
 import type { Database } from "../../src/data/database.js";
 import type { DocumentIdentity, DocumentImport } from "../../src/data/repositories/document-repository.js";

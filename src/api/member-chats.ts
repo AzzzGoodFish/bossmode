@@ -9,9 +9,9 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { ConversationsRepository } from "../data/repositories/conversations.js";
 import { pageMessages } from "../data/repositories/message-repository.js";
 import { parseMmScopeId } from "../shared/conversation-ref.js";
-import { getMember } from "../workspace/member-registry.js";
-import { readAllMmMessages } from "../workspace/mm-message-store.js";
-import { setUserReadCursor } from "../workspace/user-read-cursors.js";
+import { getMember } from "../member/member-registry.js";
+import { readAllMmMessages } from "../chat/mm-message-store.js";
+import { setUserReadCursor } from "../chat/user-read-cursors.js";
 import type { RoomMessage } from "../kernel/types.js";
 
 export interface MemberChatSummary {

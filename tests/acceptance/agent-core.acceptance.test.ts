@@ -364,8 +364,8 @@ describe("Acceptance: Agent Core (F6, F7, F8, F12, F13, F19, F20)", () => {
     });
 
     it("task endpoints are retired (404)", async () => {
-      const registry = await import("../../src/workspace/member-registry.js");
-      const rooms = await import("../../src/workspace/room-store.js");
+      const registry = await import("../../src/member/member-registry.js");
+      const rooms = await import("../../src/chat/room-store.js");
       const creator = registry.createMember({ name: "task-id-creator" });
       const member = registry.createMember({ name: "task-id-developer" });
       const room = rooms.createRoom("t26-task-member-id", undefined, [creator.id, member.id], undefined, { promptLeaderMemberId: creator.id });

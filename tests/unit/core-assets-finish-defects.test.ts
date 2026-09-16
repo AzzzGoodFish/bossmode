@@ -3,9 +3,9 @@ import { readFileSync, rmSync } from "node:fs";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDefaultConfig } from "../../src/shared/config.js";
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
-import { createMember } from "../../src/workspace/member-registry.js";
-import { createRoom, inviteGlobalMember } from "../../src/workspace/room-store.js";
-import { addMessage } from "../../src/workspace/message-store.js";
+import { createMember } from "../../src/member/member-registry.js";
+import { createRoom, inviteGlobalMember } from "../../src/chat/room-store.js";
+import { addMessage } from "../../src/chat/message-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { renderQueryRowsForMember, type QueryRow } from "../../src/engine/query-render.js";
 

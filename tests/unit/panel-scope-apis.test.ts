@@ -27,7 +27,7 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
 });
 
 async function seedMember(name: string, flags?: { unifiedModel?: boolean; unifiedExtensions?: boolean }) {
-  const reg = await import("../../src/workspace/member-registry.js");
+  const reg = await import("../../src/member/member-registry.js");
   const member = reg.createMember({ name, agentTemplate: name });
   if (flags) reg.updateMember(member.id, flags);
   return { reg, member: reg.getMember(member.id)! };

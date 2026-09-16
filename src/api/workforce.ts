@@ -7,10 +7,10 @@ import {
 } from "../workforce/skill-store.js";
 import { getMemberInstances, abortMember, compactMemberById, resetMemberSession, restartMember } from "../engine/agent-manager.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
-import * as roomStore from "../workspace/room-store.js";
-import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../workspace/token-usage-store.js";
-import { readMemberStats } from "../workspace/member-stats-store.js";
-import { getMember, resolveMemberRef } from "../workspace/member-registry.js";
+import * as roomStore from "../chat/room-store.js";
+import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../member/token-usage-store.js";
+import { readMemberStats } from "../member/member-stats-store.js";
+import { getMember, resolveMemberRef } from "../member/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";

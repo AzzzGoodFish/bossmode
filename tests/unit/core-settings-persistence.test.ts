@@ -12,8 +12,8 @@ import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/r
 import { configExists, readConfig, writeConfig, getDefaultConfig, getConfigPath, getBossmodeDir, hashPassword } from "../../src/shared/config.js";
 import { login, validateToken, getSessionExpiresAtForTests, setSessionRemainingForTests, SESSION_TTL_MS } from "../../src/services/auth-service.js";
 import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/shared/mcp-settings.js";
-import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/workspace/workspace-registry.js";
-import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/workspace/ssh-keygen.js";
+import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/member/workspace-registry.js";
+import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/member/ssh-keygen.js";
 
 let root: string;
 let db: Database;

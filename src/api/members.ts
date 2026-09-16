@@ -19,27 +19,27 @@ import {
   MemberNameTakenError,
   MemberNotFoundError,
   type MemberRecord,
-} from "../workspace/member-registry.js";
-import { readMemoryLayer, readMemoryLayerInfo } from "../workspace/member-memory-store.js";
-import * as mainlineStore from "../workspace/mainline-store.js";
-import * as principlesStore from "../workspace/principles-store.js";
+} from "../member/member-registry.js";
+import { readMemoryLayer, readMemoryLayerInfo } from "../member/member-memory-store.js";
+import * as mainlineStore from "../chat/mainline-store.js";
+import * as principlesStore from "../member/principles-store.js";
 import {
   readAllDmMessages,
   getLatestDmSeq,
-} from "../workspace/dm-message-store.js";
+} from "../chat/dm-message-store.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
-import { listMemberExtensions } from "../workspace/member-extensions.js";
+import { listMemberExtensions } from "../member/member-extensions.js";
 import { listMemberSkills } from "../engine/skill-catalog.js";
-import { activeWorkspaceRoot, listWorkspaces } from "../workspace/workspace-registry.js";
-import { readMemberSshPublicKey } from "../workspace/ssh-keygen.js";
+import { activeWorkspaceRoot, listWorkspaces } from "../member/workspace-registry.js";
+import { readMemberSshPublicKey } from "../member/ssh-keygen.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../engine/agent-manager.js";
-import * as roomStore from "../workspace/room-store.js";
-import * as messageStore from "../workspace/message-store.js";
-import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
+import * as roomStore from "../chat/room-store.js";
+import * as messageStore from "../chat/message-store.js";
+import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
 import { readConfig } from "../shared/config.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { readMemberProfile } from "../workspace/member-profile.js";
+import { readMemberProfile } from "../member/member-profile.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -350,7 +350,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     }
 
     const { compileMemberPrompt } = await import("../engine/prompt-compiler.js");
-    const { getRoom, resolveRoomMemberRef } = await import("../workspace/room-store.js");
+    const { getRoom, resolveRoomMemberRef } = await import("../chat/room-store.js");
     const { getBossmodeDir } = await import("../shared/config.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../engine/system-prompt-final.js");
@@ -577,7 +577,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { readMemberProfile } = await import("../workspace/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+    const { readMemberProfile } = await import("../member/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -668,7 +668,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     if (layer === "profile") {
-      const { readMemberProfile } = await import("../workspace/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+      const { readMemberProfile } = await import("../member/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
       const profile = readMemberProfile(m.id);
       sendJson(res, 200, {
         layer: "profile",

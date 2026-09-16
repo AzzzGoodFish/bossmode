@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { importMessage, importMessageNextSequence } from "../../src/data/repositories/message-repository.js";
-import { addMessage, readAllMessages, searchMessages } from "../../src/workspace/message-store.js";
+import { addMessage, readAllMessages, searchMessages } from "../../src/chat/message-store.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {

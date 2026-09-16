@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { conversationsFixture } from "./unit/core-conversations-fixture.js";
 const location = vi.hoisted(() => ({ root: "" }));
 vi.mock("../src/shared/config.js", async original => ({ ...await original<typeof import("../src/shared/config.js")>(), getBossmodeDir: () => location.root }));
-import * as rooms from "../src/workspace/room-store.js";
+import * as rooms from "../src/chat/room-store.js";
 import { roomDir } from "../src/files/layout.js";
-import * as messages from "../src/workspace/message-store.js";
+import * as messages from "../src/chat/message-store.js";
 
 let f: ReturnType<typeof conversationsFixture>;
 beforeEach(() => { f = conversationsFixture(); location.root = f.root; });
