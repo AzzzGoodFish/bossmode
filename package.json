@@ -48,6 +48,7 @@
     "test:watch": "node scripts/run-tests.mjs --watch",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "check:architecture": "node scripts/check-architecture.mjs",
+    "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "prepack": "node scripts/check-package-inputs.mjs ."
   },
   "dependencies": {
