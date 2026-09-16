@@ -18,7 +18,7 @@ import { parseMentions, parseMentionMemberIds } from "../communication/router.js
 import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
 import { logger } from "../kernel/logger.js";
 import { processAgentAttachments } from "./agent-attachments.js";
-import * as attachmentStore from "../workspace/attachment-store.js";
+import * as attachmentStore from "../files/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 

@@ -64,7 +64,7 @@ describe("rooms without cwd", () => {
     expect(existsSync(join(dir, "rooms", room.id, "room.json"))).toBe(false);
 
     // attachment store writes into rooms/<id>/attachments without touching any project dir
-    const attachmentStore = await import("../../src/workspace/attachment-store.js");
+    const attachmentStore = await import("../../src/files/attachment-store.js");
     const { Readable } = await import("node:stream");
     const stored = await attachmentStore.streamToAttachment(Readable.from([Buffer.from("pngdata")]), room.id, "shot.png");
     expect(stored.storedFilename).toBeTruthy();

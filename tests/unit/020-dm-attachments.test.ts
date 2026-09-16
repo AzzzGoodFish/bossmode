@@ -37,7 +37,7 @@ describe("DM attachments", () => {
   it("streamToDmAttachment stores member-owned with hash naming + traversal protection", async () => {
     const reg = await import("../../src/workspace/member-registry.js");
     const member = reg.createMember({ name: "archie", agentTemplate: "archie" });
-    const store = await import("../../src/workspace/attachment-store.js");
+    const store = await import("../../src/files/attachment-store.js");
 
     const stored = await store.streamToDmAttachment(Readable.from(["DM-FILE-CONTENT"]), member.id, "notes.txt");
     expect(stored.storedFilename.endsWith(".txt")).toBe(true);

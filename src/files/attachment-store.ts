@@ -8,9 +8,9 @@ import {
 } from "node:fs";
 import { extname, basename, join } from "node:path";
 import type { Readable } from "node:stream";
-import * as roomStore from "./room-store.js";
-import { roomDir } from "./room-store.js";
-import { memberDir } from "./member-registry.js";
+import * as roomStore from "../workspace/room-store.js";
+import { roomDir } from "../workspace/room-store.js";
+import { memberDir } from "../workspace/member-registry.js";
 import { logger } from "../kernel/logger.js";
 
 export const ATTACHMENT_DIR_NAME = ".bossmode-attachments";

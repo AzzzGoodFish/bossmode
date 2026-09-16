@@ -49,7 +49,7 @@ function archiveRelativePath(memberId: string, file: string): string {
   return rel;
 }
 
-export { mainSessionDirectory } from "./member-session-paths.js";
+export { mainSessionDirectory } from "../files/member-session-paths.js";
 
 /** The member's one session across every chat (① A1: key is the member alone). */
 export function getCurrentSession(memberId: string): AgentSession | undefined {

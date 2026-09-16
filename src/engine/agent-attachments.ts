@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { checkPath, type PathPolicy } from "../kernel/path-security.js";
-import { copyToAttachment, MAX_UPLOAD_SIZE } from "../workspace/attachment-store.js";
+import { copyToAttachment, MAX_UPLOAD_SIZE } from "../files/attachment-store.js";
 import * as roomStore from "../workspace/room-store.js";
 import { memberDir } from "../workspace/member-profile.js";
 import { readWorkspaces } from "../workspace/workspace-registry.js";

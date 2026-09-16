@@ -9,7 +9,7 @@ import { getDatabase, type Database } from "../data/database.js";
 import { MembersRepository } from "../data/repositories/members.js";
 import { documentContentMeta, insertInitialDocument } from "../data/repositories/document-repository.js";
 import { ConversationsRepository } from "../data/repositories/conversations.js";
-import { prepareMemberSshCredential, syncMemberBirthAssets } from "./member-birth-assets.js";
+import { prepareMemberSshCredential, syncMemberBirthAssets } from "../files/member-birth-assets.js";
 import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 import { newMemberId } from "../kernel/short-id.js";
 import { getBossmodeDir } from "../shared/config.js";

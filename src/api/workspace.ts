@@ -18,7 +18,7 @@ import { pageActivity as queryActivityPage } from "../data/repositories/event-re
 import { readConfig, writeConfig, getBossmodeDir } from "../shared/config.js";
 import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../engine/model-credentials.js";
-import * as attachmentStore from "../workspace/attachment-store.js";
+import * as attachmentStore from "../files/attachment-store.js";
 import * as principlesStore from "../workspace/principles-store.js";
 import * as mainlineStore from "../workspace/mainline-store.js";
 import { readMemoryLayerInfo } from "../workspace/member-memory-store.js";
