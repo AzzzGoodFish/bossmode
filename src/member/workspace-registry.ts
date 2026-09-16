@@ -4,33 +4,9 @@ import { WorkspacesRepository } from "../data/repositories/workspace-settings.js
 function repository(): WorkspacesRepository { return new WorkspacesRepository(getDatabase()); }
 import { join } from "node:path";
 import { memberDir } from "../files/layout.js";
+import type { OriginalWorkspace, SshWorkspace, WorkspaceEntry, WorkspaceRegistry } from "../data/types.js";
 
-export interface OriginalWorkspace {
-  id: string;
-  kind: "original";
-  description: string;
-  root: string;
-  builtin: true;
-}
-
-export interface SshWorkspace {
-  id: string;
-  kind: "ssh";
-  description: string;
-  host: string;
-  port: number;
-  user: string;
-  keyPath: string;
-  root: string;
-  builtin?: false;
-}
-
-export type WorkspaceEntry = OriginalWorkspace | SshWorkspace;
-
-export interface WorkspaceRegistry {
-  active: string;
-  workspaces: WorkspaceEntry[];
-}
+export type { OriginalWorkspace, SshWorkspace, WorkspaceEntry, WorkspaceRegistry };
 
 const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 

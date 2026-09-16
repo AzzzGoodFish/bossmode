@@ -16,7 +16,7 @@ import { memberRuntimeStateMigration } from "../../src/data/schema/member-runtim
 import { roomDescriptionMigration } from "../../src/data/schema/room-description.js";
 import * as registry from "../../src/member/member-registry.js";
 import * as profile from "../../src/member/member-profile.js";
-import * as wizard from "../../src/member/member-archive.js";
+import * as wizard from "../../src/data/upgrade/member-archive.js";
 import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/member-archive-lifecycle.js";
 import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";

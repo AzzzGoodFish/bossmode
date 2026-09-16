@@ -1,5 +1,5 @@
 import type { Database } from "../database.js";
-import type { WorkspaceRegistry, WorkspaceEntry } from "../../member/workspace-registry.js";
+import type { WorkspaceRegistry, WorkspaceEntry } from "../types.js";
 export interface SshCredentialMaterial { privateKey: string; publicKey: string; config?: string }
 export class WorkspacesRepository {
   constructor(private readonly db: Database) {}

@@ -17,33 +17,9 @@ import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
 import { writeMemberProfileSkeleton } from "./member-profile.js";
 import { ensureDefaultRegistry } from "./workspace-registry.js";
+import type { MemberGlobalConfig, MemberScopeOverride, MemberRecord } from "../data/types.js";
 
-export interface MemberGlobalConfig {
-  model?: string | null;
-  credentialId?: string | null;
-  thinkingLevel?: string | null;
-  skills?: string[];
-  mcpServers?: string[];
-}
-
-/** Diff-only overrides for a scope when unified* is false. Empty object / missing key = inherit global. */
-export type MemberScopeOverride = Partial<MemberGlobalConfig>;
-
-export interface MemberRecord {
-  id: string;
-  name: string;
-  title?: string;
-  agentTemplate: string;
-  /** Default true — scope inherits global model/credential/thinking. */
-  unifiedModel: boolean;
-  /** Default true — scope inherits global extensions/skills/mcp. */
-  unifiedExtensions: boolean;
-  global: MemberGlobalConfig;
-  /** Keys are ScopeId ("dm:<id>" | "room:<roomId>"). Values are diff-only. */
-  scopeOverrides: Record<string, MemberScopeOverride>;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { MemberGlobalConfig, MemberScopeOverride, MemberRecord };
 
 export interface CreateMemberInput {
   /** Empty/omitted → "New Member" (+ numeric suffix if taken). */

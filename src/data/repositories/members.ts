@@ -1,6 +1,6 @@
 import type { Database } from "../database.js";
 import { validateArchivePath } from "./member-archives.js";
-import type { MemberGlobalConfig, MemberRecord } from "../../member/member-registry.js";
+import type { MemberGlobalConfig, MemberRecord } from "../types.js";
 
 interface MemberRow {
   id: string; name: string; title: string | null; agent_template: string;

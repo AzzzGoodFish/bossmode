@@ -1,13 +1,7 @@
 import { readStats, hasStats, rebuildEventAggregates } from "../data/repositories/event-repository.js";
-export interface MemberStats {
-  turns: number;
-  toolCalls: number;
-  /** Cumulative active work time in ms: sum of (agent_end.ts - agent_start.ts) per turn. */
-  activeMs: number;
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  cost: number;
-  updatedAt?: number;
-}
+import type { MemberStats } from "../data/types.js";
+
+export type { MemberStats };
 
 function emptyStats(): MemberStats {
   return { turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };

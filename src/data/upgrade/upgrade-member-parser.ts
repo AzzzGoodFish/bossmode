@@ -1,6 +1,6 @@
 // Pure source conversion for the normal-startup upgrade. No file or DB access.
 import { parseDocument } from "yaml";
-import type { MemberRecord } from "../../member/member-registry.js";
+import type { MemberRecord } from "../types.js";
 
 function text(bytes: Uint8Array, path: string): string {
   try { return new TextDecoder("utf-8", {fatal:true}).decode(bytes); }

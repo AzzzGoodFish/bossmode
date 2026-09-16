@@ -3,26 +3,9 @@
 // independent of the chat being served.
 import { getDatabase } from "../data/database.js";
 import { RuntimeRepository } from "../data/repositories/runtime-repository.js";
+import type { MountStale, RuntimeStateEntry, RuntimeStateMap } from "../data/types.js";
 
-export interface MountStale {
-  since: number;
-  /** Which mount field(s) changed (currently only "mcpServers"). */
-  fields: string[];
-}
-
-export interface RuntimeStateEntry {
-  /** sha1 of bossmode-core + environment-communication + tool schema — code-owned contract parts only. */
-  contractFingerprint?: string;
-  /** Member-facing contract version stored at last compile (drives the startup drift dialog). */
-  contractVersion?: number;
-  /** Last version the user was notified about (one-shot drift guard). */
-  driftNotified?: number;
-  /** Mount config changed since last reload/reset; instance still runs the old mounts. */
-  staleMounts?: MountStale;
-}
-
-/** Member-id keyed map (all members with a checkpoint). */
-export type RuntimeStateMap = Record<string, RuntimeStateEntry>;
+export type { MountStale, RuntimeStateEntry, RuntimeStateMap };
 
 function repository(): RuntimeRepository { return new RuntimeRepository(getDatabase()); }
 
