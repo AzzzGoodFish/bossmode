@@ -9,7 +9,7 @@ import {
   scopeDirName,
   parseScopeDirName,
   instanceKey,
-} from "../../src/shared/conversation-ref.js";
+} from "../../src/chat/conversation-ref.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });
@@ -179,7 +179,7 @@ describe("SQL chats aggregation and ID membership", () => {
     const reg = await import("../../src/member/member-registry.js");
     const dm = await import("../../src/chat/dm-message-store.js");
     const cursors = await import("../../src/chat/user-read-cursors.js");
-    const { scopeIdOf } = await import("../../src/shared/conversation-ref.js");
+    const { scopeIdOf } = await import("../../src/chat/conversation-ref.js");
     const m = reg.createMember({ name: "chatty", agentTemplate: "general" });
     const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
     const a = dm.addDmMessage(m.id, { sender: "user", content: "hi", mentions: [] });

@@ -69,7 +69,7 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
       emitMockEvent({ type: "message_end", text: "qa bare reply under expectation", stopReason: "stop" });
     });
 
-    const { postMessage } = await import("../../src/communication/message-bus.js");
+    const { postMessage } = await import("../../src/chat/message-bus.js");
     postMessage(room.id, "pm", "@qa verify the fallback", ["qa"], { senderMemberId: room.globalMemberIds![0], mentionMemberIds: [room.globalMemberIds![1]], needResponse: ["qa"], needResponseMemberIds: [room.globalMemberIds![1]] });
 
     await waitFor(async () => (await roomMessages(room.id)).some((m: any) => m.sender === "system" && String(m.content).includes("finished without replying")));

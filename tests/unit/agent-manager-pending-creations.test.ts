@@ -5,15 +5,15 @@ import { ConversationsRepository } from "../../src/data/repositories/conversatio
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import * as bus from "../../src/communication/message-bus.js";
+import * as bus from "../../src/chat/message-bus.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
 function dispatch(message: string, options?: PromptOptions) {
   getDatabase().transaction(() => options?.beforeDispatch?.({ attemptId: `mock-${randomUUID()}`, dispatchIndex: 0, message }));
 }
 let fixture: ReturnType<typeof coreFixture>;
-vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+vi.mock("../../src/chat/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/chat/message-bus.js")>();
   return { ...actual, postMessage: vi.fn(actual.postMessage) };
 });
 
@@ -33,7 +33,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/server/ws.js", () => ({
   broadcastToRoom: mocks.broadcastToRoom,
   broadcastToAgentSubscribers: vi.fn(),
 }));

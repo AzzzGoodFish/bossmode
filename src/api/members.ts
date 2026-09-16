@@ -1,4 +1,4 @@
-import { postMessage } from "../communication/message-bus.js";
+import { postMessage } from "../chat/message-bus.js";
 import { archiveMember } from "../member/archive/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../member/profile/member-profile-update.js";
 /**
@@ -32,7 +32,7 @@ import { listMemberExtensions } from "../member/assets/member-extensions.js";
 import { listMemberSkills } from "../member/skills/skill-catalog.js";
 import { activeWorkspaceRoot, listWorkspaces } from "../member/workspaces/workspace-registry.js";
 import { readMemberSshPublicKey } from "../member/workspaces/ssh-keygen.js";
-import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
+import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversation-ref.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/orchestrator/agent-manager.js";
 import * as roomStore from "../chat/room-store.js";
 import * as messageStore from "../chat/message-store.js";

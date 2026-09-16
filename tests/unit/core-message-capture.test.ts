@@ -3,12 +3,12 @@ import {coreFixture} from "../helpers/core-fixture.js";
 import {MembersRepository} from "../../src/data/repositories/members.js";
 import {ConversationsRepository} from "../../src/data/repositories/conversations.js";
 import {DeliveryRepository} from "../../src/data/repositories/delivery-repository.js";
-import {postMessage} from "../../src/communication/message-bus.js";
-import {initRouter} from "../../src/communication/router.js";
+import {postMessage} from "../../src/chat/message-bus.js";
+import {initRouter} from "../../src/chat/router.js";
 import {patchMessage,archiveMessagesInTransaction,readMessages} from "../../src/data/repositories/message-repository.js";
 let fixture:ReturnType<typeof coreFixture>;let members:MembersRepository;let rooms:ConversationsRepository;let captures:DeliveryRepository;
 const transport=vi.hoisted(()=>({broadcast:vi.fn()}));
-vi.mock("../../src/communication/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
+vi.mock("../../src/server/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
 const stops:Array<()=>void>=[];
 const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
 beforeEach(()=>{

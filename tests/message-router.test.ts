@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseMentionMemberIds, parseMentions } from "../src/communication/router.js";
+import { parseMentionMemberIds, parseMentions } from "../src/chat/router.js";
 
 describe("parseMentions", () => {
   const members = ["pm", "dev", "qa", "dev-opus", "arch-sonnet"];

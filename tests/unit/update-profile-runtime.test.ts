@@ -39,7 +39,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
     const scopes = [`room:${room.id}`, `dm:${own.id}`];
     for (const scope of scopes) expect(await manager.buildMemberAgentSession(own.id, scope)).toBeTruthy();
     expect(await manager.buildMemberAgentSession(peer.id, scopes[0])).toBeTruthy();
-    const { postMessage } = await import("../../src/communication/message-bus.js");
+    const { postMessage } = await import("../../src/chat/message-bus.js");
     postMessage(room.id, "user", "Start the running turn");
     const pending = manager.activateAgent(room.id, own.id, { senderName: "peer", needResponseMemberIds: [] });
     await started.promise;
@@ -99,7 +99,7 @@ it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name i
   const rooms = await import("../../src/chat/room-store.js");
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
-  const { postMessage } = await import("../../src/communication/message-bus.js");
+  const { postMessage } = await import("../../src/chat/message-bus.js");
   const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
   const suffix = randomUUID().slice(0, 6);
   const own = reg.createMember({ name: `Queued-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });

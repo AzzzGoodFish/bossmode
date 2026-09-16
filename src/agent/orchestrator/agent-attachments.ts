@@ -8,7 +8,7 @@ import * as roomStore from "../../chat/room-store.js";
 import { memberDir } from "../../files/layout.js";
 import { readWorkspaces } from "../../member/workspaces/workspace-registry.js";
 import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/room-store.js";
-import { chatScopeRoomId } from "../../shared/conversation-ref.js";
+import { chatScopeRoomId } from "../../chat/conversation-ref.js";
 import { getBossmodeDir } from "../../config/config.js";
 import { logger } from "../../kernel/logger.js";
 

@@ -1,5 +1,5 @@
 import type { Database } from "../database.js";
-import { parseMmScopeId } from "../../shared/conversation-ref.js";
+import { parseMmScopeId } from "../../chat/conversation-ref.js";
 
 /** Shared DB keys use bare room IDs. API session/runtime keys also accept room:<id>.
  * Topic scopes were retired (fish #19358) and are no longer accepted here. */

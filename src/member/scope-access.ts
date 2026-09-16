@@ -7,7 +7,7 @@
 import { getMember } from "./member-registry.js";
 import { listRooms } from "../chat/room-store.js";
 import type { Room } from "../kernel/types.js";
-import { isMmScopeId, parseMmScopeId, type ScopeId } from "../shared/conversation-ref.js";
+import { isMmScopeId, parseMmScopeId, type ScopeId } from "../chat/conversation-ref.js";
 
 /** Rooms a registry member belongs to — stamped rooms by globalMemberIds,
  * legacy unstamped rooms by name membership. */

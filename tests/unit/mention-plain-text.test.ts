@@ -4,7 +4,7 @@
  * stay literal (inline + fenced).
  */
 import {describe,it,expect} from "vitest";
-import {parseMentions} from "../../src/communication/router.js";
+import {parseMentions} from "../../src/chat/router.js";
 
 const MEMBERS = ["pm", "qa", "dev-ben"];
 

@@ -5,7 +5,7 @@ import { ConversationsRepository } from "../../src/data/repositories/conversatio
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import * as bus from "../../src/communication/message-bus.js";
+import * as bus from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
 import { getMember, updateMember } from "../../src/member/member-registry.js";
 
@@ -15,8 +15,8 @@ function dispatch(message: string, options?: PromptOptions) {
 }
 let fixture: ReturnType<typeof coreFixture>;
 let compactionRefreshPending = false;
-vi.mock("../../src/communication/message-bus.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/message-bus.js")>();
+vi.mock("../../src/chat/message-bus.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/chat/message-bus.js")>();
   return { ...actual, postMessage: vi.fn(actual.postMessage) };
 });
 
@@ -122,7 +122,7 @@ vi.mock("../../src/kernel/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/server/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));
@@ -287,7 +287,7 @@ describe("agent-manager model hot switch", () => {
 
   it("reports busy status during a threshold auto-compaction between turns and returns to idle after", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/server/ws.js");
     await manager.activateAgent("room", "pm");
     expect(manager.getAgentStatus("room", "pm")).toBe("idle");
 
@@ -462,7 +462,7 @@ describe("agent-manager model hot switch", () => {
 
   it("drops an idle active agent when its deleted credential can no longer export", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     exportReturnsNull = true;
@@ -477,7 +477,7 @@ describe("agent-manager model hot switch", () => {
 
   it("drops an idle active agent when refresh/rebind fails with a non-transient error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const ws = await import("../../src/communication/ws.js");
+    const ws = await import("../../src/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failSetModel = true;
@@ -492,7 +492,7 @@ describe("agent-manager model hot switch", () => {
 
   it("does not drop the instance when credential refresh hits a transient network error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const bus = await import("../../src/communication/message-bus.js");
+    const bus = await import("../../src/chat/message-bus.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.failRefresh = true;
@@ -799,7 +799,7 @@ describe("agent-manager model hot switch", () => {
 
   it("blocks activation for an Unconfigured member without creating a runtime or guessing a credential", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const messageBus = await import("../../src/communication/message-bus.js");
+    const messageBus = await import("../../src/chat/message-bus.js");
     updateMember("mem_pm", { global: { model: null, credentialId: null } });
 
     await manager.activateAgent("room", "pm");
@@ -820,7 +820,7 @@ describe("agent-manager model hot switch", () => {
 
   it("blocks activation when a member has a model but no bound credential", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const messageBus = await import("../../src/communication/message-bus.js");
+    const messageBus = await import("../../src/chat/message-bus.js");
     updateMember("mem_pm", { global: { credentialId: null } });
 
     await manager.activateAgent("room", "pm");
@@ -831,8 +831,8 @@ describe("agent-manager model hot switch", () => {
 
   it("keeps the active instance after provider message_end errors while posting a visible error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const messageBus = await import("../../src/communication/message-bus.js");
-    const ws = await import("../../src/communication/ws.js");
+    const messageBus = await import("../../src/chat/message-bus.js");
+    const ws = await import("../../src/server/ws.js");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 

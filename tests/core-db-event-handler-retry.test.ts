@@ -9,7 +9,7 @@ import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../
 import type { AgentStreamEvent } from "../src/agent/runtime/types.js";
 
 const transport = vi.hoisted(() => ({ agent: vi.fn(), refresh: vi.fn(), knowledge: vi.fn() }));
-vi.mock("../src/communication/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));
+vi.mock("../src/server/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));
 vi.mock("../src/agent/orchestrator/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
 vi.mock("../src/agent/events/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
 vi.mock("../src/chat/room-store.js", () => ({ getRoom: vi.fn() }));

@@ -8,13 +8,13 @@ vi.mock("../../src/config/config.js", () => ({
 }));
 
 const wsMocks = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
-vi.mock("../../src/communication/ws.js", () => ({
+vi.mock("../../src/server/ws.js", () => ({
   broadcastToRoom: wsMocks.broadcastToRoom,
 }));
 
 describe("runtime error Room boundary", () => {
   let roomStore: typeof import("../../src/chat/room-store.js");
-  let messageBus: typeof import("../../src/communication/message-bus.js");
+  let messageBus: typeof import("../../src/chat/message-bus.js");
 
   beforeEach(async () => {
     vi.resetModules();
@@ -23,7 +23,7 @@ describe("runtime error Room boundary", () => {
     tempDir = fixture.root;
     wsMocks.broadcastToRoom.mockReset();
     roomStore = await import("../../src/chat/room-store.js");
-    messageBus = await import("../../src/communication/message-bus.js");
+    messageBus = await import("../../src/chat/message-bus.js");
   });
 
   afterEach(() => fixture.close());

@@ -11,10 +11,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExtensionRunner } from "@earendil-works/pi-coding-agent";
 
-vi.mock("../../src/workspace/extension-store.js", () => ({
-  resolveMemberExtensionPaths: () => [],
-  resolveMemberExtensionSkillPaths: () => [],
-}));
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

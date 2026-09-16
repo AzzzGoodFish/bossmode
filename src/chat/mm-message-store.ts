@@ -8,9 +8,9 @@
 import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
 import type { RoomMessage } from "../kernel/types.js";
 import { appendMessage, readMessages, latestMessage, readMemberCursor, writeMemberCursor } from "../data/repositories/message-repository.js";
-import { mmScopeIdOf, parseMmScopeId } from "../shared/conversation-ref.js";
+import { mmScopeIdOf, parseMmScopeId } from "./conversation-ref.js";
 
-export { mmScopeIdOf } from "../shared/conversation-ref.js";
+export { mmScopeIdOf } from "./conversation-ref.js";
 
 export function readAllMmMessages(scopeId: string): RoomMessage[] {
   return readMessages(scopeId).map(limitRuntimeFailureRoomMessage);

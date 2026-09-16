@@ -11,9 +11,9 @@ import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/
 import { addMessage } from "../src/chat/message-store.js";
 import * as sessionStore from "../src/member/session-store.js";
 import { loadEventsFromDisk } from "../src/agent/events/event-handler.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/communication/ws.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/server/ws.js";
 
-vi.mock("../src/communication/ws.js", () => ({
+vi.mock("../src/server/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));

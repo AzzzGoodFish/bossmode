@@ -13,7 +13,7 @@ import { prepareMemberSshCredential, syncMemberBirthAssets } from "../files/memb
 import { SshCredentialsRepository } from "../data/repositories/workspace-settings.js";
 import { newMemberId } from "../kernel/short-id.js";
 import { membersRoot, memberDir } from "../files/layout.js";
-import type { ScopeId } from "../shared/conversation-ref.js";
+import type { ScopeId } from "../chat/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";
 import { writeMemberProfileSkeleton } from "./profile/member-profile.js";
 import { ensureDefaultRegistry } from "./workspaces/workspace-registry.js";

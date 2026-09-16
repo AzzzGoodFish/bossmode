@@ -29,8 +29,8 @@ vi.mock("../../src/config/config.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/communication/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
+vi.mock("../../src/server/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/ws.js")>();
   return {
     ...actual,
     broadcastToRoom: (...args: unknown[]) => broadcastToRoom(...args),
@@ -57,7 +57,7 @@ describe("scope-routed postMessage", () => {
     const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
     const dmScope = `dm:${member.id}`;
 
-    const { postMessage } = await import("../../src/communication/message-bus.js");
+    const { postMessage } = await import("../../src/chat/message-bus.js");
     const msg = postMessage(dmScope, "system", `Member "architect" request failed. Error: boom`);
 
     const store = await import("../../src/chat/dm-message-store.js");

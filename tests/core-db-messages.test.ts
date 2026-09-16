@@ -9,12 +9,12 @@ import { archiveMessagesInTransaction, readArchivedMessages, importArchivedMessa
 import { appendAgentEvent, importAgentEvent, readAgentEvents, pageActivity, readStats, memberTokenTotal, rebuildEventAggregates, pageAgentEvents } from "../src/data/repositories/event-repository.js";
 import { recordDailyUsage } from "../src/data/repositories/token-rollup.js";
 import { getDmCursor, setDmCursor, addDmMessage } from "../src/chat/dm-message-store.js";
-import { postMessage, onMessage, scheduleMessageDispatch } from "../src/communication/message-bus.js";
+import { postMessage, onMessage, scheduleMessageDispatch } from "../src/chat/message-bus.js";
 import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentEventDispatch } from "../src/agent/events/event-handler.js";
 import type { RoomMessage } from "../src/kernel/types.js";
 
 const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
-vi.mock("../src/communication/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
+vi.mock("../src/server/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
 vi.mock("../src/agent/orchestrator/agent-manager.js",() => ({refreshContextUsage:vi.fn()}));
 vi.mock("../src/agent/events/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity:vi.fn()}));
 vi.mock("../src/chat/room-store.js",() => ({getRoom:vi.fn()}));

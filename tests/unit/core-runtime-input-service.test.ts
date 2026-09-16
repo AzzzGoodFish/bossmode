@@ -6,7 +6,7 @@ import {DeliveryRepository} from "../../src/data/repositories/delivery-repositor
 import {InputQueueRepository} from "../../src/data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
 import {ExecutionAttemptRepository} from "../../src/data/repositories/execution-attempt-repository.js";
-import {postMessage} from "../../src/communication/message-bus.js";
+import {postMessage} from "../../src/chat/message-bus.js";
 import {readMessages,writeMemberCursor,readMemberCursors,importMessage} from "../../src/data/repositories/message-repository.js";
 import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeInputs,pendingRuntimeInputs,recoverRuntimeInputState,runtimeInputPayload} from "../../src/agent/orchestrator/runtime-input-service.js";
 let f:ReturnType<typeof coreFixture>;

@@ -107,14 +107,14 @@ describe("self-only profile_update", () => {
   });
   it("matches current Unicode/spaced names and keeps reply targets and waits on IDs after name reuse", async () => {
     const f = await fixture();
-    const router = await import("../../src/communication/router.js");
+    const router = await import("../../src/chat/router.js");
     const next = `言实 同事 ${randomUUID().slice(0, 6)}`;
     let captured: any;
     const stop = router.initRouter({mention:(_scope,id,ctx)=>{captured={id,ctx};}});
     try {
       await f.call("chat_send", { message: `@${f.peer.name} please reply` });
       expect(captured).toMatchObject({ id: f.peer.id });
-      const { postMessage } = await import("../../src/communication/message-bus.js");
+      const { postMessage } = await import("../../src/chat/message-bus.js");
       postMessage(f.room.id, f.own.name, "captured internal reply obligation", [f.peer.name], { senderMemberId: f.own.id, mentionMemberIds: [f.peer.id], needResponseMemberIds: [f.peer.id] });
       await Promise.resolve();
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });

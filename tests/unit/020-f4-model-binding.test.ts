@@ -23,8 +23,8 @@ function dispatch(message: string, options?: PromptOptions) {
 
 const { broadcastToRoom } = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
 
-vi.mock("../../src/communication/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
+vi.mock("../../src/server/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/ws.js")>();
   return {
     ...actual,
     broadcastToRoom: (...args: unknown[]) => broadcastToRoom(...args),
@@ -226,7 +226,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
 
-    (await import("../../src/communication/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
+    (await import("../../src/chat/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
     expect(createAgentCalls).toBe(1);
 
@@ -238,7 +238,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     // Pre-fix the registry still said claude-a → heal "rolled the drift back".
     // Post-fix they agree — no setModel, no destroy/recreate.
     setModelCalls = [];
-    (await import("../../src/communication/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
+    (await import("../../src/chat/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
     expect(setModelCalls).toEqual([]);
     expect(createAgentCalls).toBe(1);

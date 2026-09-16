@@ -19,8 +19,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
-vi.mock("../../src/communication/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/communication/ws.js")>();
+vi.mock("../../src/server/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/ws.js")>();
   return { ...actual, broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn() };
 });
 

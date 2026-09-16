@@ -10,7 +10,7 @@ let fixture: ReturnType<typeof coreFixture>;
 let tools: typeof import("../../src/agent/tools/tools.js");
 let roomStore: typeof import("../../src/chat/room-store.js");
 let registryMod: typeof import("../../src/member/member-registry.js");
-let bus: typeof import("../../src/communication/message-bus.js");
+let bus: typeof import("../../src/chat/message-bus.js");
 let memberId = "";
 let roomId = "";
 
@@ -19,7 +19,7 @@ beforeEach(async () => {
   tools = await import("../../src/agent/tools/tools.js");
   roomStore = await import("../../src/chat/room-store.js");
   registryMod = await import("../../src/member/member-registry.js");
-  bus = await import("../../src/communication/message-bus.js");
+  bus = await import("../../src/chat/message-bus.js");
 
   const member = registryMod.createMember({ name: "cursorbot", agentTemplate: "general", model: "anthropic/model-x", credentialId: "cred-a" });
   memberId = member.id;

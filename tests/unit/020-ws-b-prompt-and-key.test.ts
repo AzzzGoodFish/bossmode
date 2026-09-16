@@ -32,7 +32,7 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("instanceKey is member-only (one runtime per member, ① B1)", async () => {
-    const { scopeIdOf, instanceKey } = await import("../../src/shared/conversation-ref.js");
+    const { scopeIdOf, instanceKey } = await import("../../src/chat/conversation-ref.js");
     const scope = scopeIdOf({ kind: "room", roomId: "abc" });
     expect(scope).toBe("room:abc");
     expect(instanceKey("mem_x")).toBe("mem_x");

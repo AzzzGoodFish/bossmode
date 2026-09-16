@@ -3,11 +3,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 
-vi.mock("../../src/workspace/extension-store.js", () => ({
-  resolveMemberExtensionPaths: () => [],
-  resolveMemberExtensionSkillPaths: () => [],
-}));
-
 import { coreFixture } from "../helpers/core-fixture.js";
 const mcpFactory = { name: "pi-mcp-adapter", factory: vi.fn() };
 const loadDatabaseMcpFactory = vi.fn(async (_path: string) => mcpFactory);

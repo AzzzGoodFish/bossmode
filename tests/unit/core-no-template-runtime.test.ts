@@ -6,7 +6,7 @@ import {
   getTestWorkspace, jsonRequest, loginAndGetToken, setupTestWorkspace,
 } from "../helpers/test-server.js";
 import { mockPromptFn, resetMocks } from "../helpers/mock-runtime.js";
-import { postMessage } from "../../src/communication/message-bus.js";
+import { postMessage } from "../../src/chat/message-bus.js";
 import {
   activateDmMember, activateAgent, buildMemberAgentSession,
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,

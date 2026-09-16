@@ -4,7 +4,7 @@ import {InputQueueRepository,type QueuedInput} from "../../data/repositories/inp
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
 import {readMemberProfile,isBlankPersona} from "../../member/profile/member-profile.js";
-import type {MentionActivationCtx} from "../../communication/router.js";
+import type {MentionActivationCtx} from "../../chat/router.js";
 import { getDatabase } from "../../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
@@ -23,11 +23,11 @@ import * as roomStore from "../../chat/room-store.js";
 import * as sessionStore from "../../member/session-store.js";
 import { mainSessionDirectory } from "../../files/member-session-paths.js";
 import * as attachmentStore from "../../files/attachment-store.js";
-import { postMessage, getMessagesSince, getLatestMessageId } from "../../communication/message-bus.js";
-import { initRouter } from "../../communication/router.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../../communication/ws.js";
+import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/message-bus.js";
+import { initRouter } from "../../chat/router.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../../server/ws.js";
 import { compileMemberPrompt } from "../prompt/prompt-compiler.js";
-import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../shared/conversation-ref.js";
+import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversation-ref.js";
 import { listRoomsForMember } from "../../member/scope-access.js";
 import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../../member/member-registry.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";

@@ -1,4 +1,4 @@
-import {postMessage} from "../../src/communication/message-bus.js";
+import {postMessage} from "../../src/chat/message-bus.js";
 import {patchMessage,readMessages} from "../../src/data/repositories/message-repository.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
 import {it,expect,vi} from "vitest";

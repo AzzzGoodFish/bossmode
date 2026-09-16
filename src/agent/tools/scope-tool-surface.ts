@@ -4,7 +4,7 @@
  * wait tool; family labels here feed the Active-tools panel and are refreshed by
  * the member-centric UI batch.
  */
-import { parseScopeId, type ScopeId } from "../../shared/conversation-ref.js";
+import { parseScopeId, type ScopeId } from "../../chat/conversation-ref.js";
 
 export type ScopeToolFamily =
   | "chat"

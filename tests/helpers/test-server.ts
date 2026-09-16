@@ -95,7 +95,7 @@ export async function createTestServer(): Promise<TestServer> {
   const { getDatabase } = await import("../../src/data/database.js");
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/index.js");
-  const { createWebSocketServer } = await import("../../src/communication/ws.js");
+  const { createWebSocketServer } = await import("../../src/server/ws.js");
   const { initAgentManager, wireMentionRouter } = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { MockRuntime } = await import("./mock-runtime.js");
@@ -134,7 +134,7 @@ export async function createTestServer(): Promise<TestServer> {
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
   ts.stopRouter();
-  const { shutdownWebSocket } = await import("../../src/communication/ws.js");
+  const { shutdownWebSocket } = await import("../../src/server/ws.js");
   await shutdownWebSocket();
   const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js");
   await shutdownAll();

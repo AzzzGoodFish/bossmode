@@ -6,8 +6,8 @@ import {RuntimeRegistry} from "../../src/agent/runtime/registry.js";
 import {getDatabase} from "../../src/data/database.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
 import {readMessages} from "../../src/data/repositories/message-repository.js";
-import {postMessage} from "../../src/communication/message-bus.js";
-import * as bus from "../../src/communication/message-bus.js";
+import {postMessage} from "../../src/chat/message-bus.js";
+import * as bus from "../../src/chat/message-bus.js";
 setupTestWorkspace();
 const barrier=()=>{let release!:()=>void;const promise=new Promise<void>(r=>release=r);return {promise,release};};
 async function fixture(){const server=await createTestServer();resetMocks();const token=await loginAndGetToken(server.port),room=await createMockRoom(server.port,token,"Runtime races",["race-owner"]),id=room.globalMemberIds![0];return {server,room,id,post:(text:string)=>jsonRequest(server.port,"POST",`/api/rooms/${room.id}/messages`,{token,body:{content:`@race-owner ${text}`}})};}

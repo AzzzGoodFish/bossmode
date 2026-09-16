@@ -1,8 +1,8 @@
 // User sequence values are TEXT in the shared cursor table; message IDs remain separate.
 import { getDatabase } from "../data/database.js";
 import { UserCursorRepository } from "../data/repositories/user-cursor-repository.js";
-import type { ScopeId } from "../shared/conversation-ref.js";
-import { parseMmScopeId, parseScopeId } from "../shared/conversation-ref.js";
+import type { ScopeId } from "./conversation-ref.js";
+import { parseMmScopeId, parseScopeId } from "./conversation-ref.js";
 
 export interface UserReadCursor {
   messageId: string | null;
