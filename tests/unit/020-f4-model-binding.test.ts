@@ -49,7 +49,7 @@ const PROFILE = {
 };
 
 async function seedCredential() {
-  const creds = await import("../../src/engine/model-credentials.js");
+  const creds = await import("../../src/config/model-credentials.js");
   return creds.saveModelCredentialProfile(PROFILE);
 }
 

@@ -6,11 +6,11 @@ import { openDatabase, bindDatabase, applyStorageMigrations, type Database } fro
 import { baseStorageMigration } from "../../src/data/base-schema.js";
 import { settingsMigration } from "../../src/data/schema/settings.js";
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
-import { CatalogRepository } from "../../src/data/repositories/catalog-settings.js";
+import { CatalogRepository } from "../../src/config/pi-adapt/models-store.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
-import { createCredentialStore, saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/engine/model-credentials.js";
+import { createCredentialStore, saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/config/model-credentials.js";
 import { ModelCredentialBinding } from "../../src/engine/runtime/model-credential-binding.js";
-import { getCatalog, commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, createDatabaseModelsStore, clearRemoteCatalogMemoryForTests, setPiCatalogModelsForTests } from "../../src/engine/model-catalog.js";
+import { getCatalog, commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, createDatabaseModelsStore, clearRemoteCatalogMemoryForTests, setPiCatalogModelsForTests } from "../../src/config/model-catalog.js";
 
 let root:string,db:Database,repo:ModelCredentialsRepository;
 function open(){db=openDatabase(join(root,"core.sqlite"));applyStorageMigrations(db,[baseStorageMigration,settingsMigration]);bindDatabase(db);repo=new ModelCredentialsRepository(db);}

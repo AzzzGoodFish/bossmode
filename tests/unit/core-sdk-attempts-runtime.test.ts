@@ -22,7 +22,7 @@ vi.mock("../../src/shared/mcp-settings.js", () => ({
 }));
 vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
 vi.mock("../../src/engine/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
-vi.mock("../../src/engine/model-credentials.js", () => ({
+vi.mock("../../src/config/model-credentials.js", () => ({
   normalizeModelRef: (ref: string) => ref,
   resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => { mock.stage("credentials"); return { agentDir: mock.root, profile: { id: "p", providerSlug: "mock", authType: "api-key" } }; },

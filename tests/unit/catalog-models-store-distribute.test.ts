@@ -13,11 +13,11 @@ vi.mock("../../src/engine/agent-manager.js", () => ({
 import {
   buildProviderOverlaysFromFetch, createCredentialStore, distributeModelsStoreOverlays,
   getBossmodePiRuntimeRoot, connectBuiltinProviderApiKey, ensurePiCatalogWarm,
-} from "../../src/engine/model-credentials.js";
+} from "../../src/config/model-credentials.js";
 import {
   commitRemoteCatalog, commitProviderOverlays, getProviderOverlays,
   clearRemoteCatalogMemoryForTests, createDatabaseModelsStore,
-} from "../../src/engine/model-catalog.js";
+} from "../../src/config/model-catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 describe("catalog native SQL models-store distribution", () => {

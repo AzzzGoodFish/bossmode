@@ -127,7 +127,7 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-vi.mock("../../src/engine/model-credentials.js", () => ({
+vi.mock("../../src/config/model-credentials.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => availableModels),
   assertModelAvailable: vi.fn((model: string) => {
@@ -721,7 +721,7 @@ describe("agent-manager model hot switch", () => {
 
   it("validates the credential before touching any instance", async () => {
     const manager = await import("../../src/engine/agent-manager.js");
-    const creds = await import("../../src/engine/model-credentials.js");
+    const creds = await import("../../src/config/model-credentials.js");
     await manager.activateAgent("room", "pm");
 
     // Unknown profile → fail upfront, no setModel, no commit.

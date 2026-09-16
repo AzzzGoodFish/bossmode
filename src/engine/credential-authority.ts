@@ -1,4 +1,4 @@
 export {
   resolveRuntimeCredential,
   type RuntimeCredentialResolution,
-} from "./model-credentials.js";
+} from "../config/model-credentials.js";

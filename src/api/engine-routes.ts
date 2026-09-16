@@ -24,7 +24,7 @@ import {
   startNativeOAuthConnection,
   startOAuthLoginJob,
   submitOAuthLoginJobInput,
-} from "../engine/model-credentials.js";
+} from "../config/model-credentials.js";
 
 // GET /api/capabilities — runtime capabilities
 addRoute("GET", "/api/capabilities", async (_req, res) => {

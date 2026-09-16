@@ -1,7 +1,7 @@
-import type { Database } from "../database.js";
-import type { DiskCatalogCache, ProviderModelsStoreEntry } from "../../engine/model-catalog.js";
+import type { Database } from "../../data/database.js";
+import type { DiskCatalogCache, ProviderModelsStoreEntry } from "../model-catalog.js";
 import type { ModelsStore, ModelsStoreEntry } from "@earendil-works/pi-ai";
-import { bool, defined, objectJson, parseObject } from "./settings-codec.js";
+import { bool, defined, objectJson, parseObject } from "../../data/repositories/settings-codec.js";
 
 /** SDK metadata is heterogeneous; queryable model identity/capabilities remain columns. */
 export class CatalogRepository {

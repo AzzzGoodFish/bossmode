@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import * as mod from "../../src/engine/model-catalog.js";
-import { CatalogRepository } from "../../src/data/repositories/catalog-settings.js";
+import * as mod from "../../src/config/model-catalog.js";
+import { CatalogRepository } from "../../src/config/pi-adapt/models-store.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -96,7 +96,7 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("dropdown === validation: listAvailableModels sees new models after refresh", async () => {
-    const cred = await import("../../src/engine/model-credentials.js");
+    const cred = await import("../../src/config/model-credentials.js");
 
     mod.commitRemoteCatalog([
       { provider: "kimi-coding", id: "k2", name: "K2", api: "anthropic-messages", baseUrl: "https://api.kimi.com", contextWindow: 128000, input: ["text"] },
@@ -128,8 +128,8 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("failed network refresh keeps prior remote overlay", async () => {
-    const cat = await import("../../src/engine/model-catalog.js");
-    const cred = await import("../../src/engine/model-credentials.js");
+    const cat = await import("../../src/config/model-catalog.js");
+    const cred = await import("../../src/config/model-credentials.js");
 
     cat.clearRemoteCatalogMemoryForTests();
     cat.setBundledCatalogLoader(() => [
@@ -162,7 +162,7 @@ describe("CatalogStore SQL authority", () => {
   });
 
   it("builtin discover serves catalog without hitting provider /models", async () => {
-    const cred = await import("../../src/engine/model-credentials.js");
+    const cred = await import("../../src/config/model-credentials.js");
     mod.commitRemoteCatalog([
       { provider: "anthropic", id: "claude-fable-5", name: "Fable", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, input: ["text"] },
     ]);

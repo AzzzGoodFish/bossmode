@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { getBossmodeDir, readConfig, writeConfig } from "../config/config.js";
+import { getBossmodeDir, readConfig, writeConfig } from "./config.js";
 import { logger } from "../kernel/logger.js";
 import {
   createDatabaseModelsStore,
@@ -2049,7 +2049,7 @@ export function distributeModelsStoreOverlays(
 
 async function refreshLiveInstanceModelRegistries(): Promise<void> {
   try {
-    const { refreshAllInstanceModelRegistries } = await import("./agent-manager.js");
+    const { refreshAllInstanceModelRegistries } = await import("../engine/agent-manager.js");
     if (typeof refreshAllInstanceModelRegistries === "function") {
       await refreshAllInstanceModelRegistries();
     }

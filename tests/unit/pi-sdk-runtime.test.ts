@@ -56,7 +56,7 @@ vi.mock("../../src/config/config.js", () => ({
   readConfig: () => bossmodeConfig,
 }));
 
-vi.mock("../../src/engine/model-credentials.js", () => ({
+vi.mock("../../src/config/model-credentials.js", () => ({
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   createDatabaseModelRuntime: async (credentials: unknown, profileId: string) => { modelRegistryCreate(credentials, profileId); return modelRuntime; },
   refreshDatabaseModelRuntime: databaseRuntimeRefresh,

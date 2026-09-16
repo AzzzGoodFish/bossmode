@@ -11,7 +11,7 @@ function gate() {
 }
 
 async function setup() {
-  const credentials = await import("../../src/engine/model-credentials.js");
+  const credentials = await import("../../src/config/model-credentials.js");
   const { ModelCredentialBinding } = await import("../../src/engine/runtime/model-credential-binding.js");
   const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
   const profiles = ["A", "B"].map((id) => ({
@@ -90,7 +90,7 @@ describe("model snapshot credentials through real SDK getAuth", () => {
   });
 
   it.each(["disabled", "another-provider"])("stops reading a bound profile after it becomes %s", async (change) => {
-    const credentials = await import("../../src/engine/model-credentials.js");
+    const credentials = await import("../../src/config/model-credentials.js");
     const input = {
       profileKind: "custom_endpoint" as const, name: "Account", providerSlug: "fixture-provider",
       protocol: "openai-responses" as const, baseUrl: "http://127.0.0.1:1", authType: "api_key" as const,

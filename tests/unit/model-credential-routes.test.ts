@@ -26,7 +26,7 @@ async function pollJobUntilSettled(port: number, token: string, jobId: string, t
 describe("model credential profile API routes", () => {
 
   it.each(["complete", "cancel"])("acknowledges input while token exchange is pending, then %s via job state", async (action) => {
-    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([{ provider: "anthropic", id: "claude-fable-5", name: "Fixture model", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, maxTokens: 8192, reasoning: false, input: ["text"] }]);
     let release!: () => void;
     let returned!: () => void;
@@ -76,7 +76,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("runs native Anthropic OAuth connection and normalizes legacy request profile to standard", async () => {
-    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"], compat: { forceAdaptiveThinking: true }, thinkingLevelMap: { xhigh: "xhigh" } },
     ]);
@@ -122,7 +122,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("runs native OAuth provider connection without custom endpoint fields", async () => {
-    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", api: "openai-codex-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 128000, input: ["text"] },
     ]);
@@ -172,7 +172,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("surfaces device-code OAuth jobs for polling", async () => {
-    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "github-copilot", id: "claude-sonnet-4", name: "Claude Sonnet", api: "openai-responses", baseUrl: "https://api.githubcopilot.com", contextWindow: 128000, input: ["text"] },
     ]);
@@ -209,7 +209,7 @@ describe("model credential profile API routes", () => {
   // cleared once the flow moves on — otherwise stale buttons linger over the
   // next stage.
   it("exposes select prompts and clears them when the flow advances", async () => {
-    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", api: "openai-responses", baseUrl: "https://api.openai.com", contextWindow: 128000, input: ["text"] },
     ]);
@@ -266,7 +266,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("connects a built-in provider API key through native Connect Provider endpoints", async () => {
-    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([
       { provider: "openai", id: "gpt-4.1", name: "GPT 4.1", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, maxTokens: 32768, reasoning: true, input: ["text", "image"] },
       { provider: "openai", id: "gpt-4.1-mini", name: "GPT 4.1 Mini", api: "openai-responses", baseUrl: "https://api.openai.com/v1", contextWindow: 1000000, input: ["text"] },
@@ -380,7 +380,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("discovers OpenAI-compatible models without leaking secrets", async () => {
-    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests(null);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -425,7 +425,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("uses endpoint metadata before pi catalog fallback during discovery", async () => {
-    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([{ provider: "openai-test", id: "gpt-known", contextWindow: 999000, maxTokens: 999, reasoning: false }]);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-known", context_window: 64000, max_output_tokens: 8192, supports_reasoning: true }] }) } as any);
     const ts = await createTestServer();
@@ -439,7 +439,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("falls back to unique pi catalog metadata and keeps unknown when unmatched", async () => {
-    const { setPiCatalogModelsForTests } = await import("../../src/engine/model-credentials.js");
+    const { setPiCatalogModelsForTests } = await import("../../src/config/model-credentials.js");
     setPiCatalogModelsForTests([{ provider: "openai-test", id: "gpt-known", contextWindow: 200000, maxTokens: 32000, reasoning: true }]);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-known" }, { id: "unknown-model" }] }) } as any);
     const ts = await createTestServer();
@@ -456,7 +456,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("runs OAuth login jobs through an adapter exchange and redacts stored tokens", async () => {
-    const { setOAuthLoginAdapterForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests } = await import("../../src/config/model-credentials.js");
     setOAuthLoginAdapterForTests({
       async login(providerId, callbacks) {
         callbacks.onAuth({ url: `https://provider.example/${providerId}/authorize`, instructions: "Authorize with provider." });
@@ -516,7 +516,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("rejects invalid OAuth exchange input without saving a profile", async () => {
-    const { setOAuthLoginAdapterForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests } = await import("../../src/config/model-credentials.js");
     setOAuthLoginAdapterForTests({
       async login(_providerId, callbacks) {
         callbacks.onAuth({ url: "https://provider.example/authorize", instructions: "Authorize with provider." });
@@ -545,7 +545,7 @@ describe("model credential profile API routes", () => {
   });
 
   it("cancels OAuth login jobs without saving partial credentials", async () => {
-    const { setOAuthLoginAdapterForTests } = await import("../../src/engine/model-credentials.js");
+    const { setOAuthLoginAdapterForTests } = await import("../../src/config/model-credentials.js");
     setOAuthLoginAdapterForTests({
       async login(_providerId, callbacks) {
         callbacks.onAuth({ url: "https://provider.example/authorize", instructions: "Authorize with provider." });

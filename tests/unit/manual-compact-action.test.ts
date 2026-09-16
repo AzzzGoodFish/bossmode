@@ -110,7 +110,7 @@ vi.mock("../../src/communication/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-vi.mock("../../src/engine/model-credentials.js", () => ({
+vi.mock("../../src/config/model-credentials.js", () => ({
   normalizeModelRef: (model: string) => model,
   listAvailableModels: vi.fn(() => [{ ref: "anthropic/claude-a" }]),
   assertModelAvailable: vi.fn(),

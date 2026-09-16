@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDefaultConfig, readConfig, writeConfig } from "../../src/config/config.js";
-import * as catalog from "../../src/engine/model-catalog.js";
+import * as catalog from "../../src/config/model-catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -19,7 +19,7 @@ describe("catalog auto-refresh SQL settings", () => {
   });
 
   it("defaults to 7 days and persists interval changes", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js");
     expect(mod.getCatalogAutoRefreshIntervalDays()).toBe(7);
     expect(mod.DEFAULT_CATALOG_AUTO_REFRESH_DAYS).toBe(7);
 
@@ -35,8 +35,8 @@ describe("catalog auto-refresh SQL settings", () => {
   });
 
   it("is due when never fetched remotely; not due right after a fresh remote commit", async () => {
-    const catalog = await import("../../src/engine/model-catalog.js");
-    const mod = await import("../../src/engine/model-credentials.js");
+    const catalog = await import("../../src/config/model-catalog.js");
+    const mod = await import("../../src/config/model-credentials.js");
     catalog.clearRemoteCatalogMemoryForTests();
     catalog.setBundledCatalogLoader(() => [{ provider: "x", id: "bundled" }]);
     mod.setCatalogAutoRefreshIntervalDays(7);
@@ -52,8 +52,8 @@ describe("catalog auto-refresh SQL settings", () => {
   });
 
   it("getCatalogSettingsPublic exposes interval + due flag + status", async () => {
-    const catalog = await import("../../src/engine/model-catalog.js");
-    const mod = await import("../../src/engine/model-credentials.js");
+    const catalog = await import("../../src/config/model-catalog.js");
+    const mod = await import("../../src/config/model-credentials.js");
     catalog.clearRemoteCatalogMemoryForTests();
     catalog.setBundledCatalogLoader(() => [{ provider: "x", id: "y" }]);
     mod.setCatalogAutoRefreshIntervalDays(7);

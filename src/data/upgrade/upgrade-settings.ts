@@ -1,11 +1,11 @@
 import {readFileSync} from "node:fs";
 import {getDefaultConfig} from "../../config/config.js";
 import type {BossmodeConfig} from "../../kernel/types.js";
-import {normalizeLegacyCredentialImport} from "../../engine/model-credentials.js";
+import {normalizeLegacyCredentialImport} from "../../config/model-credentials.js";
 import {McpOauthRepository,decodeLegacyMcpOauthEntry} from "../repositories/mcp-oauth.js";
 import {SettingsRepository} from "../repositories/settings.js";
 import {ModelCredentialsRepository} from "../repositories/model-settings.js";
-import {CatalogRepository} from "../repositories/catalog-settings.js";
+import {CatalogRepository} from "../../config/pi-adapt/models-store.js";
 import {McpSettingsRepository} from "../repositories/mcp-settings.js";
 import {WorkspacesRepository,SshCredentialsRepository} from "../repositories/workspace-settings.js";
 import {readLegacyJson,type LegacySourceEntry} from "./legacy-inventory.js";

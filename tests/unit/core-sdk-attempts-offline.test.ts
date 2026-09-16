@@ -26,7 +26,7 @@ vi.mock("../../src/engine/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFacto
       execute: async () => ({ content: [{ type: "text", text: "offline" }], details: {} }) });
   },
 }) }));
-vi.mock("../../src/engine/model-credentials.js", () => ({
+vi.mock("../../src/config/model-credentials.js", () => ({
   normalizeModelRef: (ref: string) => ref, resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => ({ agentDir: mock.root, profile: { id: "offline", providerSlug: "offline", authType: "api-key" } }),
   createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {}, getModelCredentialProfile: () => ({}),

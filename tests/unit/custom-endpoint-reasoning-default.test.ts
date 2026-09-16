@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
-import * as catalog from "../../src/engine/model-catalog.js";
+import * as catalog from "../../src/config/model-catalog.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 
@@ -26,7 +26,7 @@ describe("custom endpoint reasoning default", () => {
   });
 
   it("save defaults missing reasoning to true", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
       ...customProfile,
       models: [{ id: "glm5.3", thinkingLevelMap: { max: "high" } }],
@@ -35,7 +35,7 @@ describe("custom endpoint reasoning default", () => {
   });
 
   it("save keeps explicit reasoning false", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js");
     const saved = mod.saveModelCredentialProfile({
       ...customProfile,
       models: [{ id: "glm5.3", reasoning: false }],
@@ -44,7 +44,7 @@ describe("custom endpoint reasoning default", () => {
   });
 
   it("normalizes null/missing custom reasoning once during explicit import, preserving builtin flags", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js");
     const source = { profiles: [
       { ...customProfile, id: "cust1", profileKind: "custom_endpoint" as const,
         models: [
@@ -75,7 +75,7 @@ describe("custom endpoint reasoning default", () => {
   });
 
   it("does not flip builtin catalog reasoning on refresh", async () => {
-    const mod = await import("../../src/engine/model-credentials.js");
+    const mod = await import("../../src/config/model-credentials.js");
     await mod.ensurePiCatalogWarm();
     catalog.commitRemoteCatalog([
       { provider: "anthropic", id: "claude-x", name: "Claude X", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", contextWindow: 200000, reasoning: false, input: ["text"] },

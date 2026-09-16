@@ -18,7 +18,7 @@ import {
   loadProjectContextFiles,
   loadSkills,
 } from "@earendil-works/pi-coding-agent";
-import { exportPiConfigForMember, resolvePiAgentDir } from "./model-credentials.js";
+import { exportPiConfigForMember, resolvePiAgentDir } from "../config/model-credentials.js";
 import { resolvePiSystemPromptSources } from "./runtime/pi-sdk.js";
 import type { AgentMemberConfig } from "../kernel/types.js";
 

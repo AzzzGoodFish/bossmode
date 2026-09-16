@@ -6,7 +6,7 @@
  * "State mismatch".
  */
 import { describe, expect, it } from "vitest";
-import { validateOAuthSubmitInput } from "../../src/engine/model-credentials.js";
+import { validateOAuthSubmitInput } from "../../src/config/model-credentials.js";
 
 const JOB = { authUrl: "https://auth.openai.com/authorize?client_id=abc&state=expected-state-123&code_challenge=x" };
 

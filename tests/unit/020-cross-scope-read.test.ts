@@ -45,7 +45,7 @@ const PROFILE = {
 /** Member "dev" belongs to roomA + roomB; "outsider" belongs to roomC only. */
 async function seedWorld() {
   const reg = await import("../../src/member/member-registry.js");
-  const creds = await import("../../src/engine/model-credentials.js");
+  const creds = await import("../../src/config/model-credentials.js");
   const cred = creds.saveModelCredentialProfile(PROFILE);
   const dev = reg.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
   const outsider = reg.createMember({ name: "outsider", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
