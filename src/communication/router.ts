@@ -4,9 +4,9 @@ import {DeliveryRepository,type CapturedMessage,type DeliveryKind} from "../stor
 // Does NOT directly call activateAgent — uses injected callbacks for decoupling.
 
 import { onMessage } from "./message-bus.js";
-import { logger } from "../foundation/logger.js";
-import type { RoomMemberRecord } from "../shared/types.js";
-import { stripCodeSegments } from "../shared/mention-text.js";
+import { logger } from "../kernel/logger.js";
+import type { RoomMemberRecord } from "../kernel/types.js";
+import { stripCodeSegments } from "../kernel/mention-text.js";
 
 /** Match literal current roster names, longest first (Unicode and spaces included). */
 function rosterMentions(content: string, names: string[]): string[] {

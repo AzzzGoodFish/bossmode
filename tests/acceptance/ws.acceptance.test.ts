@@ -12,7 +12,7 @@ import WebSocket from "ws";
 import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
-import type { WsServerEvent } from "../../src/shared/types.js";
+import type { WsServerEvent } from "../../src/kernel/types.js";
 
 setupTestWorkspace();
 

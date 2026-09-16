@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, createMockRoom } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
-import type { Room, RoomMessage } from "../../src/shared/types.js";
+import type { Room, RoomMessage } from "../../src/kernel/types.js";
 
 // Mock pi-mono (not needed for summarize tests, but required by imports)
 vi.mock("@mariozechner/pi-agent-core", () => ({

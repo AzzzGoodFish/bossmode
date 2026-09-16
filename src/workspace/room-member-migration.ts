@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import * as roomStore from "./room-store.js";
 import { getBossmodeDir } from "../shared/config.js";
-import type { AgentMemberConfig, AgentSession, CursorMap, LegacyMemberConfig, Room, RoomMemberConfig, RoomMemberRecord } from "../shared/types.js";
+import type { AgentMemberConfig, AgentSession, CursorMap, LegacyMemberConfig, Room, RoomMemberConfig, RoomMemberRecord } from "../kernel/types.js";
 
 function roomJsonPath(roomId: string): string {
   return join((roomStore as any).roomDir(roomId), "room.json");

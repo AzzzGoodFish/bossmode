@@ -1,5 +1,5 @@
 import type { Database } from "../database.js";
-import type { McpServerAvailability } from "../../shared/types.js";
+import type { McpServerAvailability } from "../../kernel/types.js";
 import { defined, objectJson, parseObject } from "./settings-codec.js";
 export type McpStatusCache = Record<string, McpServerAvailability & { configHash?: string }>;
 

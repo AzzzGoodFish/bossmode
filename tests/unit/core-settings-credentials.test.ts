@@ -7,7 +7,7 @@ import { baseStorageMigration } from "../../src/storage/base-schema.js";
 import { settingsMigration } from "../../src/storage/schema/settings.js";
 import { ModelCredentialsRepository } from "../../src/storage/repositories/model-settings.js";
 import { CatalogRepository } from "../../src/storage/repositories/catalog-settings.js";
-import type { ModelCredentialProfile } from "../../src/shared/types.js";
+import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { createCredentialStore, saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/engine/model-credentials.js";
 import { ModelCredentialBinding } from "../../src/engine/runtime/model-credential-binding.js";
 import { getCatalog, commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, createDatabaseModelsStore, clearRemoteCatalogMemoryForTests, setPiCatalogModelsForTests } from "../../src/engine/model-catalog.js";

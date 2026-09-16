@@ -6,8 +6,8 @@ import * as messageStore from "../workspace/message-store.js";
 import { appendCapturedMessage } from "../services/message-service.js";
 import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../storage/message-dispatch-repository.js";
 import { broadcastToRoom } from "./ws.js";
-import { logger } from "../foundation/logger.js";
-import type { RoomMessage } from "../shared/types.js";
+import { logger } from "../kernel/logger.js";
+import type { RoomMessage } from "../kernel/types.js";
 
 type MessageListener = (roomId: string, message: RoomMessage) => void;
 

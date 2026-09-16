@@ -1,6 +1,6 @@
 import {readFileSync} from "node:fs";
 import {getDefaultConfig} from "../shared/config.js";
-import type {BossmodeConfig} from "../shared/types.js";
+import type {BossmodeConfig} from "../kernel/types.js";
 import {normalizeLegacyCredentialImport} from "../engine/model-credentials.js";
 import {McpOauthRepository,decodeLegacyMcpOauthEntry} from "./repositories/mcp-oauth.js";
 import {SettingsRepository} from "./repositories/settings.js";

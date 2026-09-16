@@ -4,8 +4,8 @@ import { addRoute, sendJson } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import * as roomStore from "../workspace/room-store.js";
 import { roomMemberAssetRoots } from "../workspace/room-store.js";
-import { checkPath } from "../shared/path-security.js";
-import type { Room } from "../shared/types.js";
+import { checkPath } from "../kernel/path-security.js";
+import type { Room } from "../kernel/types.js";
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;

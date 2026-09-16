@@ -11,7 +11,7 @@ import { documentContentMeta, insertInitialDocument } from "../storage/document-
 import { ConversationsRepository } from "../storage/repositories/conversations.js";
 import { prepareMemberSshCredential, syncMemberBirthAssets } from "./member-birth-assets.js";
 import { SshCredentialsRepository } from "../storage/repositories/workspace-settings.js";
-import { newMemberId } from "../shared/short-id.js";
+import { newMemberId } from "../kernel/short-id.js";
 import { getBossmodeDir } from "../shared/config.js";
 import type { ScopeId } from "../shared/conversation-ref.js";
 import { markStaleMounts } from "./runtime-state.js";

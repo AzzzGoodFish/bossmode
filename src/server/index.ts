@@ -2,7 +2,7 @@ import { recoverMemberArchives } from "../services/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
 import { prepareCoreStorage } from "../storage/core-startup.js";
 import type { UpgradeProgress } from "../storage/upgrade-runner.js";
-import type { BossmodeConfig } from "../shared/types.js";
+import type { BossmodeConfig } from "../kernel/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -14,7 +14,7 @@ import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount
 
 import { RuntimeRegistry } from "../engine/runtime/registry.js";
 import { PiSdkRuntime } from "../engine/runtime/pi-sdk.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../workforce/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {

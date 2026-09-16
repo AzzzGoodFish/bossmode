@@ -4,7 +4,7 @@ import { extname } from "node:path";
 import { addRoute, sendJson } from "./index.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
-import { inferAttachmentPreviewType } from "../shared/attachments.js";
+import { inferAttachmentPreviewType } from "../kernel/attachments.js";
 
 const MAX_ATTACHMENT_PREVIEW_BYTES = 2 * 1024 * 1024;
 

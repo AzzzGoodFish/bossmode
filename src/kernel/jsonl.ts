@@ -5,7 +5,7 @@
  * down an entire room or event stream. Callers get good lines only; bad lines
  * are skipped with a warn log. Read paths never write/repair the file.
  */
-import { logger } from "../foundation/logger.js";
+import { logger } from "./logger.js";
 
 export interface ParseJsonlOptions {
   /** Log category, e.g. "message-store". */

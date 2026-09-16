@@ -4,7 +4,7 @@ import {
   limitRuntimeErrorEvent,
   limitRuntimeErrorMessage,
   limitRuntimeFailureRoomMessage,
-} from "../../src/shared/runtime-error-limit.js";
+} from "../../src/kernel/runtime-error-limit.js";
 
 describe("user-visible runtime error limit", () => {
   it("keeps a 300-character error unchanged", () => {

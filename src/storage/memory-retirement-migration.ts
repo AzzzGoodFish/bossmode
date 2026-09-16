@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import type { Database } from "./database.js";
 
 const SHARED_FLAG = "core-global-archive-v1";

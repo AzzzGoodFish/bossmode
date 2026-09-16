@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { importMessage } from "../../src/storage/message-repository.js";
-import type { RoomMessage } from "../../src/shared/types.js";
+import type { RoomMessage } from "../../src/kernel/types.js";
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });
 afterEach(() => { fixture.close(); });

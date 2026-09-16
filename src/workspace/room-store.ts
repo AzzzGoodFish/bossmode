@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getBossmodeDir } from "../shared/config.js";
 import { latestMessage } from "../storage/message-repository.js";
-import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../shared/types.js";
+import type { Room, CursorMap, RoomMemberOverride, RoomMemberRecord, RoomMemberConfig } from "../kernel/types.js";
 import { ConversationsRepository, getConversationMember as getMember } from "../storage/repositories/conversations.js";
 export { ensureDmScope, ensureMmScope } from "../storage/repositories/conversations.js";
 import { memberDir } from "./member-profile.js";
 import { readWorkspaces } from "./workspace-registry.js";
-import { newRoomId } from "../shared/short-id.js";
+import { newRoomId } from "../kernel/short-id.js";
 
 function roomsDir(): string {
   return join(getBossmodeDir(), "rooms");

@@ -17,7 +17,7 @@ import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { addRoute, sendJson } from "./index.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 const HOME = homedir();
 

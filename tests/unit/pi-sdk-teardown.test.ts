@@ -15,7 +15,7 @@ vi.mock("../../src/workspace/extension-store.js", () => ({
   resolveMemberExtensionPaths: () => [],
   resolveMemberExtensionSkillPaths: () => [],
 }));
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -126,7 +126,7 @@ describe("PiSdkAgentHandle teardown (real ExtensionRunner)", () => {
   });
 
   it("T5: void destroy() logs teardown failures instead of leaking unhandled rejections (main-session path)", async () => {
-    const { logger } = await import("../../src/foundation/logger.js");
+    const { logger } = await import("../../src/kernel/logger.js");
     const runner = realRunner(async () => { throw new Error("main-session shutdown handler failed"); });
     const handle = handleWith(runner);
     handle.destroy(); // void entry — must not produce an unhandled rejection

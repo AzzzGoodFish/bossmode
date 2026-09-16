@@ -9,7 +9,7 @@ import { ModelCredentialsRepository } from "../../src/storage/repositories/model
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/storage/repositories/workspace-settings.js";
 import { McpSettingsRepository } from "../../src/storage/repositories/mcp-settings.js";
 import { AuthSessionsRepository } from "../../src/storage/repositories/settings.js";
-import type { ModelCredentialProfile } from "../../src/shared/types.js";
+import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { createCredentialStore, saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } from "../../src/engine/model-credentials.js";
 import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/workspace/workspace-registry.js";
 import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/shared/mcp-settings.js";

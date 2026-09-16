@@ -3,7 +3,7 @@
  * sends commands, and collects events for assertion.
  */
 import WebSocket from "ws";
-import type { WsServerEvent, WsClientCommand } from "../../src/shared/types.js";
+import type { WsServerEvent, WsClientCommand } from "../../src/kernel/types.js";
 
 export interface WsTestClient {
   ws: WebSocket;

@@ -1,6 +1,6 @@
 // Runtime Registry — loads enabled runtimes from config
 import type { AgentRuntime, RuntimesConfig } from "./types.js";
-import { logger } from "../../foundation/logger.js";
+import { logger } from "../../kernel/logger.js";
 
 export class RuntimeRegistry {
   private runtimes = new Map<string, AgentRuntime>();

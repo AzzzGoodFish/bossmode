@@ -6,8 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // Force a generated id that *contains* the legacy id as a substring: `mem_a` is a
 // prefix of `mem_agx4g1idiv`. The residue self-check must not mistake the product
 // of the rewrite for a leftover.
-vi.mock("../../src/shared/short-id.js", async (original) => {
-  const actual = await original<typeof import("../../src/shared/short-id.js")>();
+vi.mock("../../src/kernel/short-id.js", async (original) => {
+  const actual = await original<typeof import("../../src/kernel/short-id.js")>();
   return { ...actual, newMemberId: () => "mem_agx4g1idiv", newRoomId: () => "rm_zzzzzzzzzz" };
 });
 

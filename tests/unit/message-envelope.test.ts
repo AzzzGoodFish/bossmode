@@ -15,7 +15,7 @@ import {
   wrapRoomMessagesTranscript,
   type ChatLabel,
 } from "../../src/engine/message-envelope.js";
-import type { RoomMessage } from "../../src/shared/types.js";
+import type { RoomMessage } from "../../src/kernel/types.js";
 
 function makeMsg(sender: string, content: string, seq?: number, ts?: number, senderMemberId?: string): RoomMessage {
   return {

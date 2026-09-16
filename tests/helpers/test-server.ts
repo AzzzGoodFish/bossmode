@@ -2,7 +2,7 @@
 import { beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import { coreFixture } from "./core-fixture.js";
-import type { Room } from "../../src/shared/types.js";
+import type { Room } from "../../src/kernel/types.js";
 
 const TEST_PASSWORD = "testpass";
 const TEST_USERNAME = "testuser";

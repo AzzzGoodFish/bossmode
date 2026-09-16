@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { getRoomsDir } from "./room-store.js";
 import { computeStatsFromEvents, statsFileExists, writeBackfilledStats } from "./member-stats-store.js";
 

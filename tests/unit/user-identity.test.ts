@@ -15,7 +15,7 @@ vi.mock("../../src/shared/config.js", async (importOriginal) => {
 
 import { getUserDisplayName } from "../../src/shared/user-identity.js";
 import { wrapRoomContextMessage } from "../../src/engine/message-envelope.js";
-import type { RoomMessage } from "../../src/shared/types.js";
+import type { RoomMessage } from "../../src/kernel/types.js";
 
 const FIXED_TS = new Date("2026-07-17T14:32:00").getTime();
 

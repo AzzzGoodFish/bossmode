@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import type { Database } from "./database.js";
 
 const COPY_FLAG = "core-room-description-copy-v1";

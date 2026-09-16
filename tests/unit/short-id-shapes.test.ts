@@ -8,7 +8,7 @@ import {
   isShortRoomId,
   newMemberId,
   newRoomId,
-} from "../../src/shared/short-id.js";
+} from "../../src/kernel/short-id.js";
 
 const OLD_MEMBER_ID = /^mem_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const OLD_ROOM_MEMBER_RECORD = /^rm_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

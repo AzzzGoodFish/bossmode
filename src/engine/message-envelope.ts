@@ -1,4 +1,4 @@
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 import { getUserDisplayName } from "../shared/user-identity.js";
 
 export type SenderRole = "user" | "member";

@@ -11,7 +11,7 @@ import type { Readable } from "node:stream";
 import * as roomStore from "./room-store.js";
 import { roomDir } from "./room-store.js";
 import { memberDir } from "./member-registry.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 export const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
 export const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB

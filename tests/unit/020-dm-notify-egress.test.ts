@@ -321,7 +321,7 @@ describe("DM historical messages through ordinary storage startup", () => {
 
 describe("system notices hidden from members (fish 2026-08-04)", () => {
   it("predicate hides all sender=system except typed task/knowledge events", async () => {
-    const { isSystemNoticeHiddenFromMembers } = await import("../../src/shared/runtime-error-limit.js");
+    const { isSystemNoticeHiddenFromMembers } = await import("../../src/kernel/runtime-error-limit.js");
     expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" request failed.` })).toBe(true);
     expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" finished without replying.` })).toBe(true);
     expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" hasn't selected a model yet.` })).toBe(true);

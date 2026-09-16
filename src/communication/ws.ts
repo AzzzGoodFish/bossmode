@@ -1,7 +1,7 @@
-import {logger} from "../foundation/logger.js";
+import {logger} from "../kernel/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { WsClientCommand, WsServerEvent } from "../shared/types.js";
+import type { WsClientCommand, WsServerEvent } from "../kernel/types.js";
 import { validateToken } from "../services/auth-service.js";
 import { findMemberByName } from "../workspace/member-registry.js";
 

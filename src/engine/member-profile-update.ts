@@ -1,4 +1,4 @@
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { getMember, updateMemberIdentity, MemberNotFoundError } from "../workspace/member-registry.js";
 import { notifyMemberProfileChanged } from "./agent-manager.js";
 import { broadcastMemberProfileChanged } from "../communication/ws.js";

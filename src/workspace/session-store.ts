@@ -4,7 +4,7 @@ import { memberDir } from "./member-profile.js";
 import { getBossmodeDir } from "../shared/config.js";
 import { getDatabase } from "../storage/database.js";
 import { SessionRepository } from "../storage/repositories/session-repository.js";
-import type { AgentSession } from "../shared/types.js";
+import type { AgentSession } from "../kernel/types.js";
 
 function repository(): SessionRepository { return new SessionRepository(getDatabase()); }
 const SAFE_ID = /^[^/:\\]+$/;

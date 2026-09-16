@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import * as roomStore from "./room-store.js";
 import { createMember, findMemberByName } from "./member-registry.js";
 import { ensureMemorySkeleton, writeMemoryLayer } from "./member-memory-store.js";

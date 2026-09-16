@@ -13,14 +13,14 @@ import { assertMemberScopeAccess, listRoomsForMember } from "../workspace/scope-
 import { unknownMemberToolMessage } from "../shared/member-tool-names.js";
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 import { parseMentions, parseMentionMemberIds } from "../communication/router.js";
-import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
-import { logger } from "../foundation/logger.js";
+import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
+import { logger } from "../kernel/logger.js";
 import { processAgentAttachments } from "./agent-attachments.js";
 import * as attachmentStore from "../workspace/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
-import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../shared/attachments.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;

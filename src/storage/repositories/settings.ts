@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Database } from "../database.js";
-import type { BossmodeConfig } from "../../shared/types.js";
+import type { BossmodeConfig } from "../../kernel/types.js";
 import { bool } from "./settings-codec.js";
 
 /** Secret-bearing internal settings API; public transports must select/redact fields. */

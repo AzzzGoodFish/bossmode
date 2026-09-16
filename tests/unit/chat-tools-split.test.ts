@@ -6,7 +6,7 @@ import { addMessage } from "../../src/workspace/message-store.js";
 import { handleToolCallback } from "../../src/engine/tools.js";
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

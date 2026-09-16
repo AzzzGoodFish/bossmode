@@ -7,7 +7,7 @@ import { updateProfileForMember, InvalidProfileError } from "../engine/member-pr
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { addRoute, sendJson, parseBody } from "./index.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import {
   listMembers,
   listMemberIdentities,
@@ -38,7 +38,7 @@ import * as roomStore from "../workspace/room-store.js";
 import * as messageStore from "../workspace/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../workspace/user-read-cursors.js";
 import { readConfig } from "../shared/config.js";
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 import { readMemberProfile } from "../workspace/member-profile.js";
 
 function publicMember(m: MemberRecord) {

@@ -2,7 +2,7 @@
 // Agent Runtime Abstraction Layer V2
 // ============================================================================
 
-import type { AgentMemberConfig } from "../../shared/types.js";
+import type { AgentMemberConfig } from "../../kernel/types.js";
 
 // Re-export AgentMemberConfig as the member config type for runtimes
 export type { AgentMemberConfig };

@@ -17,7 +17,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { getRoomsDir } from "./room-store.js";
 import { computeContentMeta } from "./principles-store.js";
 

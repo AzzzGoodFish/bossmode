@@ -118,7 +118,7 @@ class TestHandle implements AgentHandle {
   }
 }
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { error: loggerError, warn: loggerWarn, info: loggerInfo },
 }));
 

@@ -39,14 +39,14 @@ vi.mock("../../src/workspace/member-registry.js", () => ({
   getMember: (...args: any[]) => getMemberMock(...args),
 }));
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: {
     info: loggerInfoMock,
     error: loggerErrorMock,
   },
 }));
 
-vi.mock("../../src/shared/frontmatter.js", () => ({
+vi.mock("../../src/kernel/frontmatter.js", () => ({
   parseFrontmatter: vi.fn(() => ({ meta: {}, body: "" })),
 }));
 

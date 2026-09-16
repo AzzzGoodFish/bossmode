@@ -19,7 +19,7 @@ import { getCurrentSession } from "../../src/workspace/session-store.js";
 import { ConversationsRepository } from "../../src/storage/repositories/conversations.js";
 import { TemplateRepository } from "../../src/storage/repositories/templates.js";
 import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";
-import type { AgentMemberConfig } from "../../src/shared/types.js";
+import type { AgentMemberConfig } from "../../src/kernel/types.js";
 
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 setupTestWorkspace();

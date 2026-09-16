@@ -1,6 +1,6 @@
 import * as roomStore from "../workspace/room-store.js";
 import { getEffectiveConfig, getMember, MemberNotFoundError } from "../workspace/member-registry.js";
-import type { AgentMemberConfig, RoomMemberRecord } from "../shared/types.js";
+import type { AgentMemberConfig, RoomMemberRecord } from "../kernel/types.js";
 
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
   const globalId = roomMember.id.startsWith("mem_") ? roomMember.id

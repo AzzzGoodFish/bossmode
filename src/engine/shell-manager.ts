@@ -17,7 +17,7 @@ import { memberRuntimeAllowed } from "./runtime-admission.js";
  * not emit markers — the outer exec stays "running" until it returns.
  */
 import { getWorkspace, type SshWorkspace } from "../workspace/workspace-registry.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 export const SHELL_COLS = 160;
 export const SHELL_ROWS = 1000;

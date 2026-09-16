@@ -23,7 +23,7 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { slugify } from "./store.js";
 
 function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }

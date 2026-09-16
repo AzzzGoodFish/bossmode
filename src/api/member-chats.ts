@@ -12,7 +12,7 @@ import { parseMmScopeId } from "../shared/conversation-ref.js";
 import { getMember } from "../workspace/member-registry.js";
 import { readAllMmMessages } from "../workspace/mm-message-store.js";
 import { setUserReadCursor } from "../workspace/user-read-cursors.js";
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 
 export interface MemberChatSummary {
   scopeId: string;

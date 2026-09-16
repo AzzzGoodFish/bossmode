@@ -5,8 +5,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
-import type { RoomMessage } from "../shared/types.js";
+import { logger } from "../kernel/logger.js";
+import type { RoomMessage } from "../kernel/types.js";
 
 const MIGRATION_ID = "message-seq-v1";
 

@@ -7,7 +7,7 @@ import { existsSync, statSync } from "node:fs";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import * as knowledgeStore from "../knowledge/store.js";
 import * as roomStore from "../workspace/room-store.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 function detectPathType(path: string): "file" | "folder" | null {
   try {

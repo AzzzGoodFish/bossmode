@@ -1,6 +1,6 @@
 import { getDatabase, type Database } from "../database.js";
 import { mmScopeIdOf } from "../../shared/conversation-ref.js";
-import type { Room, RoomMemberRecord, CursorMap } from "../../shared/types.js";
+import type { Room, RoomMemberRecord, CursorMap } from "../../kernel/types.js";
 
 interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null }
 interface RoomRow {

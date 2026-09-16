@@ -11,14 +11,14 @@ import { recordDailyUsage } from "../src/workspace/db/token-rollup.js";
 import { getDmCursor, setDmCursor, addDmMessage } from "../src/workspace/dm-message-store.js";
 import { postMessage, onMessage, scheduleMessageDispatch } from "../src/communication/message-bus.js";
 import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentEventDispatch } from "../src/engine/event-handler.js";
-import type { RoomMessage } from "../src/shared/types.js";
+import type { RoomMessage } from "../src/kernel/types.js";
 
 const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
 vi.mock("../src/communication/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
 vi.mock("../src/engine/agent-manager.js",() => ({refreshContextUsage:vi.fn()}));
 vi.mock("../src/engine/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity:vi.fn()}));
 vi.mock("../src/workspace/room-store.js",() => ({getRoom:vi.fn()}));
-vi.mock("../src/foundation/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
+vi.mock("../src/kernel/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
 
 let db: Database; let root: string; let fixture: ReturnType<typeof coreFixture>;
 const member = {ownerKey:"mem_old",memberId:"mem_old"};

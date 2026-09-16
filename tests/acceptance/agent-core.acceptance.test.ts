@@ -21,7 +21,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, createMockRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
-import type { Room, RoomMessage, WsServerEvent } from "../../src/shared/types.js";
+import type { Room, RoomMessage, WsServerEvent } from "../../src/kernel/types.js";
 
 // ── Mock runtime (no real LLM calls) ──
 

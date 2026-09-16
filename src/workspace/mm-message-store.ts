@@ -5,8 +5,8 @@
  * `messages` table keyed by that scope (no per-scope files). Both members keep
  * their own message-ID cursor in the shared `read_cursors` table.
  */
-import { limitRuntimeFailureRoomMessage } from "../shared/runtime-error-limit.js";
-import type { RoomMessage } from "../shared/types.js";
+import { limitRuntimeFailureRoomMessage } from "../kernel/runtime-error-limit.js";
+import type { RoomMessage } from "../kernel/types.js";
 import { appendMessage, readMessages, latestMessage, readMemberCursor, writeMemberCursor } from "../storage/message-repository.js";
 import { mmScopeIdOf, parseMmScopeId } from "../shared/conversation-ref.js";
 

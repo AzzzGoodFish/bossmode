@@ -8,7 +8,7 @@ import { InMemoryCredentialStore, createAssistantMessageEventStream, Type, type 
 import { BossmodeResourceLoader, PiSdkAgentHandle } from "../../src/engine/runtime/pi-sdk.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
-vi.mock("../../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 // All SDK/ModelRuntime/extension/provider/agent-loop objects are real. Only the
 // registered provider and tool perform fake, synchronous, counted offline work.

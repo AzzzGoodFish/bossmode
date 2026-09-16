@@ -10,8 +10,8 @@ import { documentIdentity, readDocumentMeta, saveDocument } from "./document-ass
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
-import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../shared/types.js";
-import { logger } from "../foundation/logger.js";
+import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../kernel/types.js";
+import { logger } from "../kernel/logger.js";
 import { readAllMessages } from "./message-store.js";
 import { readAllDmMessages } from "./dm-message-store.js";
 import { entryExists } from "../knowledge/store.js";

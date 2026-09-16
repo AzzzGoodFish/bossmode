@@ -11,7 +11,7 @@ import { handleToolCallback, loadScopeMessages } from "../../src/engine/tools.js
 import { createBossmodeSdkTools } from "../../src/engine/runtime/bossmode-sdk-tools.js";
 import * as attachments from "../../src/engine/agent-attachments.js";
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

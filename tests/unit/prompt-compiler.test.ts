@@ -4,7 +4,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Room } from "../../src/shared/types.js";
+import type { Room } from "../../src/kernel/types.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 

@@ -47,7 +47,7 @@ let openedLeafEntry: any = null;
 const sessionBranch = vi.fn();
 const sessionResetLeaf = vi.fn();
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: loggerInfo, warn: loggerWarn, error: loggerError },
 }));
 

@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
-import type { Room, RoomMessage } from "../../src/shared/types.js";
+import type { Room, RoomMessage } from "../../src/kernel/types.js";
 import {
   setupTestWorkspace,
   createTestServer,

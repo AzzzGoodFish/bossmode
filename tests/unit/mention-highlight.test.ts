@@ -64,7 +64,7 @@ describe("splitMentionTokens — code is literal", () => {
   });
 
   it("backend and web stripCodeSegments are byte-identical", async () => {
-    const backend = await import("../../src/shared/mention-text.js");
+    const backend = await import("../../src/kernel/mention-text.js");
     const web = await import("../../web/src/utils/mention-tokens");
     const cases = ["plain", "`inline` x", "```\nblock\n``` y", "unclosed ``` tail", "a `b` c `d` e", "`!pm`"];
     for (const c of cases) {

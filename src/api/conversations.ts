@@ -21,7 +21,7 @@ import {
   getMemberBusyState,
 } from "../engine/agent-manager.js";
 import { loadEventsPaginated } from "../engine/event-handler.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 function decodeScope(raw: string): ScopeId | null {
   try {

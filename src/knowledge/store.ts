@@ -14,8 +14,8 @@ import {
 } from "node:fs";
 import { join, dirname, sep, posix, extname, basename } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
-import type { KnowledgeEntry, KnowledgeTreeNode } from "../shared/types.js";
+import { logger } from "../kernel/logger.js";
+import type { KnowledgeEntry, KnowledgeTreeNode } from "../kernel/types.js";
 
 /** Resolved at call time so tests can override BOSSMODE_DIR. */
 function knowledgeDir(): string { return join(getBossmodeDir(), "knowledge"); }

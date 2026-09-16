@@ -13,12 +13,12 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 // Tool callbacks → engine/tools.ts
 
 import { join } from "node:path";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { resolveGlobalSkillPaths } from "../workforce/skill-store.js";
 import { activeWorkspaceRoot } from "../workspace/workspace-registry.js";
 import { resolveRoomMember } from "../workforce/room-member-resolver.js";
 import { getBossmodeDir } from "../shared/config.js";
-import { isSystemNoticeHiddenFromMembers } from "../shared/runtime-error-limit.js";
+import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
 import * as roomStore from "../workspace/room-store.js";
 import * as sessionStore from "../workspace/session-store.js";
 import { mainSessionDirectory } from "../workspace/member-session-paths.js";
@@ -33,7 +33,7 @@ import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecor
 import { readAllDmMessages } from "../workspace/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "./event-handler.js";
 import { loadScopeMessages } from "./tools.js";
-import { MEMBER_CONTRACT_VERSION } from "../shared/contract-version.js";
+import { MEMBER_CONTRACT_VERSION } from "../kernel/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../workspace/runtime-state.js";
 import {
   wrapRoomContextMessage,
@@ -51,7 +51,7 @@ import type { RuntimeRegistry } from "./runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "./runtime/types.js";
 import { exportPiConfigForMember, normalizeModelRef, assertModelAvailable, getModelCredentialProfile } from "./model-credentials.js";
 import { settleMemberShellWaits } from "./shell-manager.js";
-import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../shared/types.js";
+import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../kernel/types.js";
 
 // -- Registry injection --
 

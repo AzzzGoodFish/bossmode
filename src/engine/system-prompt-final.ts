@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { exportPiConfigForMember, resolvePiAgentDir } from "./model-credentials.js";
 import { resolvePiSystemPromptSources } from "./runtime/pi-sdk.js";
-import type { AgentMemberConfig } from "../shared/types.js";
+import type { AgentMemberConfig } from "../kernel/types.js";
 
 export interface FinalMemberSystemPromptArgs {
   /** Scope-shaped id exactly as the runtime passes it (room:<id> / dm:<memberId>). */

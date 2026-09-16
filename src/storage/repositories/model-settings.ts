@@ -1,5 +1,5 @@
 import type { Database } from "../database.js";
-import type { ModelCredentialProfile, ModelDefinitionConfig } from "../../shared/types.js";
+import type { ModelCredentialProfile, ModelDefinitionConfig } from "../../kernel/types.js";
 import { bool, defined, optionalJson, parseObject } from "./settings-codec.js";
 
 export interface CredentialImport { profiles: ModelCredentialProfile[]; migrations: string[] }

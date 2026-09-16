@@ -6,7 +6,7 @@
 // silently fall back.
 import { getMember } from "./member-registry.js";
 import { listRooms } from "./room-store.js";
-import type { Room } from "../shared/types.js";
+import type { Room } from "../kernel/types.js";
 import { isMmScopeId, parseMmScopeId, type ScopeId } from "../shared/conversation-ref.js";
 
 /** Rooms a registry member belongs to — stamped rooms by globalMemberIds,

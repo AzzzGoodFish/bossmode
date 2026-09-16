@@ -1,6 +1,6 @@
 // Skills and member operational API routes. Member CRUD lives in members.ts.
 import { addRoute, sendJson, parseBody } from "./index.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,

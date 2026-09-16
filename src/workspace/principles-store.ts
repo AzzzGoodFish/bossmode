@@ -4,7 +4,7 @@ import { documentIdentity, readDocumentMeta, saveDocument } from "./document-ass
 import { join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
-import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../shared/types.js";
+import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../kernel/types.js";
 
 export type PrinciplesScope = "room" | "member";
 

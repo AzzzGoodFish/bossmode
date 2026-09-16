@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { logger, formatSpawnArgs } from "../../src/foundation/logger.js";
+import { logger, formatSpawnArgs } from "../../src/kernel/logger.js";
 
 describe("logger", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;

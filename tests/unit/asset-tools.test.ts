@@ -11,7 +11,7 @@ vi.mock("../../src/shared/config.js", () => ({
   getBossmodeDir: () => dir,
   ensureBossmodeDir: () => { mkdirSync(dir, { recursive: true }); },
 }));
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

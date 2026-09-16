@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { BossmodeConfig } from "./types.js";
+import type { BossmodeConfig } from "../kernel/types.js";
 
 const BOSSMODE_DIR = process.env.BOSSMODE_DIR || join(homedir(), ".bossmode");
 const CONFIG_PATH = join(BOSSMODE_DIR, "config.json");

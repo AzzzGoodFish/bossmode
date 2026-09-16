@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { getBossmodeDir, readConfig, writeConfig } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import {
   createDatabaseModelsStore,
   setBundledCatalogLoader,
@@ -47,7 +47,7 @@ import type {
   OAuthLoginJobStatus,
   OAuthDeviceCodeInfo,
   OAuthSelectPrompt,
-} from "../shared/types.js";
+} from "../kernel/types.js";
 
 // SDK/provider adapters currently require an apiKey-shaped value even for keyless endpoints.
 // This sentinel is not a credential; it marks authType=none until upstream supports true no-auth providers.

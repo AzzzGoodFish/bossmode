@@ -1,5 +1,5 @@
 import {createRequire} from "node:module";
-import {logger} from "../foundation/logger.js";
+import {logger} from "../kernel/logger.js";
 import {readFileSync} from "node:fs";
 import {assertServiceStopped,prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade-runner.js";
 import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./migrations.js";
@@ -22,7 +22,7 @@ import {managedPath,requireRegularFile} from "./upgrade-files.js";
 import {bindDatabase} from "./database.js";
 import {SettingsRepository} from "./repositories/settings.js";
 import {assertNoMissingMemberDatabase,verifyActiveMemberAssets} from "./startup-member-verification.js";
-import type {BossmodeConfig} from "../shared/types.js";
+import type {BossmodeConfig} from "../kernel/types.js";
 
 function memberAuthority(ctx:UpgradeImportContext):"files"|"database"{
  if(!ctx.previousDatabase)return "files";

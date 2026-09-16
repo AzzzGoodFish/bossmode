@@ -11,7 +11,7 @@ import { join } from "node:path";
 let fixture: ReturnType<typeof coreFixture>;
 let dir = "";
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

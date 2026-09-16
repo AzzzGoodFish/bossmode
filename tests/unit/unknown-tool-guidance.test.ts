@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MEMBER_DIRECT_TOOL_NAMES, MEMBER_GATEWAY_TOOL_NAMES } from "../../src/shared/member-tool-names.js";
 import { setupTestWorkspace } from "../helpers/test-server.js";
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

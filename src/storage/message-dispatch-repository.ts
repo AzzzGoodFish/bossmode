@@ -1,5 +1,5 @@
 import { getDatabase } from "./database.js";
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 import { readAgentEvent } from "./event-repository.js";
 
 /** C's local outbox queries. Only dispatchers on a fresh post-transaction stack call these. */

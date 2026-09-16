@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, symlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkPath, type PathPolicy } from "../../src/shared/path-security.js";
+import { checkPath, type PathPolicy } from "../../src/kernel/path-security.js";
 
 const testDir = mkdtempSync(join(tmpdir(), "bossmode-pathsec-"));
 afterAll(() => rmSync(testDir, { recursive: true, force: true }));

@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { setupTestWorkspace, createTestServer, closeTestServer, jsonRequest, loginAndGetToken, getTestBossmodeDir, createMockRoom, MOCK_MEMBER_MODEL, MOCK_MEMBER_CREDENTIAL_ID } from "../helpers/test-server.js";
 import { createWsClient } from "../helpers/ws-client.js";
 import type { TestServer } from "../helpers/test-server.js";
-import type { Room, RoomMessage } from "../../src/shared/types.js";
+import type { Room, RoomMessage } from "../../src/kernel/types.js";
 
 // ── Mock runtime ──
 

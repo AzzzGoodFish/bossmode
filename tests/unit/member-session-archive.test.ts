@@ -10,7 +10,7 @@ import { archiveRetiredScopeSessions } from "../../src/storage/member-session-ar
 // retired. Its files are parked under `members/<id>/archive/sessions/` so nothing is
 // lost; `sessions/<day>/main/` is the live layout and must never be touched.
 
-vi.mock("../../src/foundation/logger.js", () => ({
+vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

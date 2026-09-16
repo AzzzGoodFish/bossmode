@@ -13,7 +13,7 @@ vi.mock("../src/communication/ws.js", () => ({ broadcastToAgentSubscribers: tran
 vi.mock("../src/engine/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
 vi.mock("../src/engine/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
 vi.mock("../src/workspace/room-store.js", () => ({ getRoom: vi.fn() }));
-vi.mock("../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
+vi.mock("../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 
 let db: Database;
 let root: string;

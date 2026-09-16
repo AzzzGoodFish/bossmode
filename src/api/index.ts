@@ -1,7 +1,7 @@
 // API Router — route matching + CORS + auth guard + delegation to domain handlers
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { requireAuth } from "./auth.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 
 // -- Route types --
 

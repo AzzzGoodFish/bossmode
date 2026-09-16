@@ -12,7 +12,7 @@ import {UserCursorRepository} from "./repositories/user-cursor-repository.js";
 import {executionScopeId} from "./repositories/execution-identity.js";
 import {importMessage,importMessageNextSequence,importArchivedMessage,writeMemberCursor,writeDmMemberCursor} from "./message-repository.js";
 import {importAgentEvent,readAgentEvent,rebuildEventAggregates,type EventPayload} from "./event-repository.js";
-import type {Room,RoomMessage} from "../shared/types.js";
+import type {Room,RoomMessage} from "../kernel/types.js";
 
 function object(value:unknown,path:string):Record<string,any>{
  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid legacy conversation object: ${path}`);

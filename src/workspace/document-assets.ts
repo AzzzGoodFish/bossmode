@@ -6,7 +6,7 @@ import { getBossmodeDir } from "../shared/config.js";
 import { getDatabase } from "../storage/database.js";
 import { assertDocumentIdentity, commitDocumentRevision, documentContentMeta, documentSnapshotPath, getDocument, validateDocumentPath,
   type DocumentIdentity } from "../storage/document-repository.js";
-import type { PrinciplesMeta } from "../shared/types.js";
+import type { PrinciplesMeta } from "../kernel/types.js";
 
 export function documentIdentity(path: string, layer: DocumentIdentity["layer"], memberId?: string, scopeId?: string): DocumentIdentity {
   return { path: validateDocumentPath(relative(getBossmodeDir(), path).split(sep).join("/")), layer, memberId,

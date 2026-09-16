@@ -6,9 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getBossmodeDir } from "../shared/config.js";
-import { logger } from "../foundation/logger.js";
+import { logger } from "../kernel/logger.js";
 import { getRoomsDir, roomDir } from "./room-store.js";
-import type { Room, RoomMemberRecord } from "../shared/types.js";
+import type { Room, RoomMemberRecord } from "../kernel/types.js";
 
 const MIGRATION_ID = "member-credential-binding-v1";
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildAgentPrompt } from "../src/engine/prompt-assembler.js";
-import type { AgentDefinition, KnowledgeEntry } from "../src/shared/types.js";
+import type { AgentDefinition, KnowledgeEntry } from "../src/kernel/types.js";
 
 describe("General Agent: prompt-assembler split (G3)", () => {
   const makeAgent = (systemPrompt: string, name = "test"): AgentDefinition => ({

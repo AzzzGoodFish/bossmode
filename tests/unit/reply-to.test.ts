@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { excerptForReply } from "../../src/engine/tools.js";
 import { formatReplyQuoteBlock, wrapRoomContextMessage } from "../../src/engine/message-envelope.js";
-import type { RoomMessage } from "../../src/shared/types.js";
+import type { RoomMessage } from "../../src/kernel/types.js";
 
 function msg(partial: Partial<RoomMessage> & { id: string; seq: number; content: string }): RoomMessage {
   return {

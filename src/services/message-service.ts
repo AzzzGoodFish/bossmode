@@ -6,7 +6,7 @@ import { DeliveryRepository, type CapturedMessage, type DeliveryActor, type Capt
 import { ReplyObligationRepository } from "../storage/repositories/reply-obligation-repository.js";
 import { MembersRepository } from "../storage/repositories/members.js";
 import { getRoomMembers } from "../workspace/room-store.js";
-import type { RoomMessage } from "../shared/types.js";
+import type { RoomMessage } from "../kernel/types.js";
 
 /** No routing callback, filesystem work or SDK activity occurs in this transaction.
  * Supplied ID arrays, including [], are already-captured authority, never hints.

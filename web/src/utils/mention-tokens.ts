@@ -29,7 +29,7 @@ const LEGAL_NAME_CHAR = "[\\w.-]";
 /**
  * Strip markdown code segments (inline `…` + fenced blocks) as same-length
  * whitespace — offsets stay stable so match ranges map back to the original
- * text. Mirror of src/shared/mention-text.ts (web cannot import src/shared);
+ * text. Mirror of src/kernel/mention-text.ts (web cannot import src);
  * parity is locked by tests. Code is literal text: a backticked @ never tints.
  */
 export function stripCodeSegments(text: string): string {

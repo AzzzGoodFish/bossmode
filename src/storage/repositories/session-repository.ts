@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import type { AgentSession } from "../../shared/types.js";
+import type { AgentSession } from "../../kernel/types.js";
 import type { Database } from "../database.js";
 import { assertExecutionMember } from "./execution-identity.js";
 

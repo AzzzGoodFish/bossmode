@@ -1,5 +1,5 @@
 import {getDatabase,type Database} from "./database.js";
-import type {WsServerEvent} from "../shared/types.js";
+import type {WsServerEvent} from "../kernel/types.js";
 
 /** Durable local UI notification, never an instruction to execute agent work. */
 export function enqueueScopeNotification(scopeId:string,key:string,event:WsServerEvent,db:Database=getDatabase()):void {

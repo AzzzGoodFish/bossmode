@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { conversationsFixture } from "./core-conversations-fixture.js";
-import type { Room, Task } from "../../src/shared/types.js";
+import type { Room, Task } from "../../src/kernel/types.js";
 import { getRoom, listRooms, getRoomMembersFromRoom, stampGlobalMemberIds, resolveGlobalMemberId, removeRoomMemberByRef,
   getCursors, setCursor, deleteCursor, inviteGlobalMember, updateRoomName, updateRoomPromptLeader, updateRoomDocsPath, updateRoomRuleDocs,
   updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom, roomDir } from "../../src/workspace/room-store.js";

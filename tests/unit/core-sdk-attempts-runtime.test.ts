@@ -9,7 +9,7 @@ const mock = vi.hoisted(() => ({
   stage: vi.fn(), create: vi.fn(), reload: vi.fn(), configDispose: vi.fn(),
   root: "", hosted: true,
 }));
-vi.mock("../../src/foundation/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../../src/shared/config.js", () => ({ readConfig: () => ({}), getBossmodeDir: () => mock.root }));
 vi.mock("../../src/workspace/member-extensions.js", () => ({
   builtinMcpAdapterPath: () => mock.root,
