@@ -225,6 +225,13 @@ async function login() {
   token = r.data.token;
 }
 
+/** Static UI must be the built app shell, not the "Frontend not built yet" fallback. */
+async function assertWebUiServed() {
+  const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/`);
+  const body = await res.text();
+  assert(body.includes('id="root"'), "web UI not served: / did not return the built app shell");
+}
+
 async function seedProfile() {
   const r = await api("POST", "/api/model-credential-profiles", {
     profileKind: "custom_endpoint",
@@ -463,6 +470,8 @@ async function main() {
 
   await login();
   step("login");
+  await assertWebUiServed();
+  step("web UI served");
   await seedProfile();
   step("credential profile", PROFILE_ID);
   await createMember();

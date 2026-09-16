@@ -64,7 +64,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();
 
-  const webDistDir = join(import.meta.dirname, "../../web/dist");
+  const webDistDir = join(import.meta.dirname, "../../../web/dist");
 
   let accepting = true;
   const requests = new Set<Promise<void>>();
