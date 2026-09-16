@@ -1,156 +1,145 @@
 #!/usr/bin/env node
-// check-architecture.mjs — 架构依赖守护（重构片 0：燃烧线基线）
-//
-// 规则 v0：
-//   1. 基线冻结：重构开始时把 src/ 的「跨模块引用」冻结进 scripts/architecture-baseline.json。
-//   2. 只减不增：冻结的「模块对」计数不得增加；旧模块之间不得出现新的模块对。
-//   3. 新模块自由期：不属于基线模块列表的新模块，其引用边照常记录（不拦截），
-//      待该模块所属重构片评审时按目标规则（kernel/config/data/files/agent/member/chat/api/app）校验。
-//   4. 每个重构片应让燃烧线（冻结引用总条数）下降；持平需在片日志说明。
-//
-// 用法：
-//   node scripts/check-architecture.mjs            # 检查（门禁）；有违规 exit 1
-//   node scripts/check-architecture.mjs --report   # 同检查，附带更详细的报告
-//   node scripts/check-architecture.mjs --update   # 人工刷新基线（模块整体替换/重命名时，走审查后使用）
-import { readdirSync, readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
-import { join, dirname, normalize, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+// Enforce the target architecture for every source file, including new paths.
+// Existing violations may only disappear; final acceptance also checks size/tree.
+import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname, resolve, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(SCRIPT_DIR, "..");
-const SRC = join(ROOT, "src");
-const BASELINE_PATH = join(SCRIPT_DIR, "architecture-baseline.json");
+const dependencies = {
+  kernel: ['kernel'], data: ['data', 'kernel'], files: ['files', 'kernel'],
+  config: ['config', 'data', 'files', 'kernel'],
+  member: ['member', 'data', 'files', 'kernel'],
+  chat: ['chat', 'data', 'files', 'kernel'],
+  agent: ['agent', 'config', 'data', 'files', 'kernel'],
+  knowledge: ['knowledge', 'member', 'data', 'files', 'kernel'],
+  api: ['api', 'member', 'chat', 'config', 'files', 'kernel'],
+  app: ['app', 'api', 'knowledge', 'agent', 'member', 'chat', 'config', 'data', 'files', 'kernel'],
+};
+const apiAgentFiles = new Set(['types', 'controls', 'events', 'tools', 'terminal'].map(n => `src/agent/${n}.ts`));
+const adapter = p => p.startsWith('src/agent/runtime/') || p.startsWith('src/config/pi-adapt/');
+const lines = text => (text.match(/\n/g) || []).length + (text && !text.endsWith('\n') ? 1 : 0);
+const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+const count = (map, key) => { map[key] = (map[key] || 0) + 1; };
 
-const mode = process.argv.includes("--update") ? "update" : process.argv.includes("--report") ? "report" : "check";
-
-function walk(dir, out = []) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
-    else if (e.name.endsWith(".ts") && !e.name.endsWith(".test.ts") && !e.name.endsWith(".d.ts")) out.push(p);
+function sourceFiles(root, dir = 'src') {
+  return readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap(e => {
+    const path = `${dir}/${e.name}`;
+    if (e.isSymbolicLink()) throw new Error(`Source symlinks are not allowed: ${path}`);
+    if (e.isDirectory()) return sourceFiles(root, path);
+    return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) ? [] : [path];
+  }).sort();
+}
+function importSpecifiers(node, result = []) {
+  if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) result.push(node.moduleSpecifier);
+  else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) result.push(node.argument.literal);
+  else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+    (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
+    if (node.arguments[0]) result.push(node.arguments[0]);
   }
-  return out;
+  ts.forEachChild(node, child => { importSpecifiers(child, result); });
+  return result;
 }
-
-function topMod(abs) {
-  const rel = relative(SRC, abs).split(sep);
-  return rel[0];
-}
-
-const importRe = /(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g;
-
-function resolveSpec(fromFile, spec) {
-  let base = normalize(join(dirname(fromFile), spec));
-  const cands = [];
-  if (base.endsWith(".js")) cands.push(base.slice(0, -3) + ".ts");
-  cands.push(base, base + ".ts", join(base, "index.ts"));
-  for (const c of cands) {
-    try { if (existsSync(c) && statSync(c).isFile()) return c; } catch {}
+function permitted(from, to) {
+  const a = from.split('/')[1], b = to.split('/')[1];
+  if (a === 'api') {
+    if (from === 'src/api/auth.ts' && b === 'data') return true;
+    if (apiAgentFiles.has(to) || to === 'src/app/member-actions.ts' || to === 'src/knowledge/documents.ts') return true;
+    if (adapter(to)) return false;
   }
-  return null;
+  // Application use cases must never depend on the transport/composition root.
+  if (from === 'src/app/member-actions.ts' && (b === 'api' || to.startsWith('src/app/'))) return false;
+  return dependencies[a]?.includes(b) ?? false;
 }
-
-function computeEdges() {
-  const files = walk(SRC);
-  const pairs = new Map();      // "a->b" -> count
-  const unresolved = new Map(); // spec -> count
-  for (const f of files) {
-    const from = topMod(f);
-    const text = readFileSync(f, "utf8");
-    let g;
-    importRe.lastIndex = 0;
-    while ((g = importRe.exec(text))) {
-      const spec = g[1];
-      if (!spec.startsWith(".")) continue;
-      const target = resolveSpec(f, spec);
-      if (!target) { unresolved.set(spec, (unresolved.get(spec) || 0) + 1); continue; }
-      const to = topMod(target);
-      if (to === from) continue;
-      const key = `${from}->${to}`;
-      pairs.set(key, (pairs.get(key) || 0) + 1);
+function scan(root) {
+  const files = sourceFiles(root), known = new Set(files), violations = {}, graph = new Map();
+  const totals = { files: files.length, lines: 0, normalizedLines: 0, bytes: 0 };
+  for (const path of files) {
+    const text = readFileSync(resolve(root, path), 'utf8');
+    totals.lines += lines(text); totals.bytes += Buffer.byteLength(text);
+    if (!/\.[cm]?[jt]sx?$/.test(path)) {
+      totals.normalizedLines += text.split('\n').filter(l => l.trim()).length;
+      continue;
+    }
+    const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+    if (source.parseDiagnostics.length) throw new Error(`Invalid source syntax: ${path}`);
+    totals.normalizedLines += printer.printFile(source).split('\n').filter(l => l.trim()).length;
+    const edges = new Set(); graph.set(path, edges);
+    for (const node of importSpecifiers(source)) {
+      if (!ts.isStringLiteralLike(node)) {
+        // The sole extension loader necessarily resolves member-owned entry paths.
+        if (path !== 'src/agent/runtime/resources.ts') count(violations, `dynamic-import|${path}|${node.getText(source)}`);
+        continue;
+      }
+      const spec = node.text;
+      if (spec.startsWith('@earendil-works/') && !adapter(path)) count(violations, `sdk|${path}|${spec}`);
+      if (!spec.startsWith('.')) continue;
+      const base = relative(root, resolve(root, dirname(path), spec)).replaceAll('\\', '/');
+      const stem = base.replace(/\.[cm]?js$/, '');
+      const target = [base, `${stem}.ts`, `${stem}.tsx`, `${base}/index.ts`].find(p => known.has(p));
+      if (!target) { count(violations, `unresolved|${path}|${spec}`); continue; }
+      edges.add(target);
+      if (!permitted(path, target)) count(violations, `dependency|${path}|${target}`);
     }
   }
-  return { pairs, unresolved, fileCount: files.length };
-}
-
-function loadBaseline() {
-  if (!existsSync(BASELINE_PATH)) {
-    console.error(`ABORT: baseline missing (${BASELINE_PATH}). Run with --update to freeze the current state.`);
-    process.exit(2);
+  // Cycles are checked on file edges, not directory-name pairs. Type imports count.
+  let index = 0; const stack = [], indexes = new Map(), low = new Map(), active = new Set();
+  function visit(path) {
+    indexes.set(path, index); low.set(path, index++); stack.push(path); active.add(path);
+    for (const to of graph.get(path) || []) {
+      if (!indexes.has(to)) { visit(to); low.set(path, Math.min(low.get(path), low.get(to))); }
+      else if (active.has(to)) low.set(path, Math.min(low.get(path), indexes.get(to)));
+    }
+    if (low.get(path) !== indexes.get(path)) return;
+    const component = []; let current;
+    do { current = stack.pop(); active.delete(current); component.push(current); } while (current !== path);
+    if (component.length > 1) {
+      const inside = new Set(component);
+      for (const from of component) for (const to of graph.get(from) || []) if (inside.has(to)) count(violations, `cycle|${from}|${to}`);
+    }
   }
-  return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+  for (const path of graph.keys()) if (!indexes.has(path)) visit(path);
+  return { files, totals, violations };
 }
 
-function refOfHead() {
-  try { return execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(); }
-  catch { return "unknown"; }
-}
-
-const current = computeEdges();
-
-if (mode === "update") {
-  const modules = [...new Set([...current.pairs.keys()].flatMap(k => k.split("->")))].sort();
-  const baseline = {
-    frozenAt: new Date().toISOString().slice(0, 10),
-    frozenRef: refOfHead(),
-    note: "Architecture refactor burn-line baseline (see refactor-execution-plan). Only shrink; refreeze = review.",
-    modules,
-    pairs: Object.fromEntries([...current.pairs.entries()].sort()),
-    totalRefs: [...current.pairs.values()].reduce((a, b) => a + b, 0),
-  };
-  writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + "\n");
-  console.log(`baseline written: ${modules.length} modules, ${Object.keys(baseline.pairs).length} pairs, ${baseline.totalRefs} refs`);
+const args = process.argv.slice(2);
+const rootIndex = args.indexOf('--root');
+const root = resolve(rootIndex < 0 ? resolve(dirname(fileURLToPath(import.meta.url)), '..') : args[rootIndex + 1]);
+const policy = JSON.parse(readFileSync(resolve(root, 'scripts/architecture-target.json'), 'utf8'));
+const baselinePath = resolve(root, 'scripts/architecture-baseline.json');
+const target = new Set(policy.files);
+if (target.size !== policy.files.length || target.size > policy.limits.files) throw new Error('Invalid target file manifest');
+const current = scan(root);
+if (args.includes('--init')) {
+  if (existsSync(baselinePath)) throw new Error('Refusing to replace an existing baseline');
+  writeFileSync(baselinePath, JSON.stringify({ version: 2, ref: policy.baselineRef, totals: current.totals,
+    legacyFiles: current.files.filter(p => !target.has(p)), violations: current.violations }, null, 2) + '\n');
+  console.log('Initialized file-level baseline; this is not final architecture acceptance.');
   process.exit(0);
 }
-
-const baseline = loadBaseline();
-const legacy = new Set(baseline.modules);
-const violations = [];
-let burned = 0;
-const removedPairs = [];
-const shrunkPairs = [];
-const newEdges = [];
-
-for (const [pair, baseCount] of Object.entries(baseline.pairs)) {
-  const cur = current.pairs.get(pair) || 0;
-  if (cur > baseCount) violations.push(`${pair}: ${baseCount} -> ${cur} (increase)`);
-  else if (cur < baseCount) { burned += baseCount - cur; (cur === 0 ? removedPairs : shrunkPairs).push(`${pair}: ${baseCount} -> ${cur}`); }
+const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+if (baseline.version !== 2 || baseline.ref !== policy.baselineRef) throw new Error('Architecture baseline/target mismatch');
+const errors = [];
+const old = new Set(baseline.legacyFiles);
+for (const path of current.files) if (!target.has(path) && !old.has(path)) errors.push(`Unplanned source file: ${path}`);
+for (const [key, n] of Object.entries(current.violations)) {
+  if (n > (baseline.violations[key] || 0)) errors.push(`${key}: ${baseline.violations[key] || 0} -> ${n}`);
 }
-
-for (const [pair, cur] of current.pairs.entries()) {
-  const [from, to] = pair.split("->");
-  const inBaseline = Object.prototype.hasOwnProperty.call(baseline.pairs, pair);
-  if (inBaseline) continue;
-  if (legacy.has(from) && legacy.has(to)) violations.push(`${pair}: new pair (${cur} refs)`);
-  else newEdges.push(`${pair}: ${cur}`);
+const remaining = current.files.filter(p => !target.has(p));
+if (args.includes('--final')) {
+  for (const path of remaining) errors.push(`Legacy implementation remains: ${path}`);
+  for (const path of target) if (!current.files.includes(path)) errors.push(`Target capability missing: ${path}`);
+  for (const key of Object.keys(current.violations)) errors.push(`Architecture violation remains: ${key}`);
+  for (const key of ['files', 'lines', 'normalizedLines']) if (current.totals[key] > policy.limits[key]) errors.push(`${key}: ${current.totals[key]} > ${policy.limits[key]}`);
 }
-
-const curLegacyTotal = [...current.pairs.entries()]
-  .filter(([pair]) => pair.split("->").every(m => legacy.has(m)))
-  .reduce((a, [, c]) => a + c, 0);
-
-// Quarantine rule (P5): @earendil-works/* is importable only from the marked adapter zones.
-const QUARANTINE_ALLOW = ["src/agent/runtime/", "src/config/pi-adapt/"];
-const quarantine = [];
-for (const abs of walk(SRC)) {
-  const rel = relative(ROOT, abs).split(sep).join("/");
-  if (QUARANTINE_ALLOW.some((a) => rel.startsWith(a))) continue;
-  if (/@earendil-works\//.test(readFileSync(abs, "utf8"))) quarantine.push(rel);
-}
-if (quarantine.length) violations.push(...quarantine.map((f) => `quarantine: ${f} imports @earendil-works/* (allowed: agent/runtime/**, config/pi-adapt/**)`));
-
-console.log(`modules: ${baseline.modules.length} frozen; src files scanned: ${current.fileCount}`);
-console.log(`burn line: ${baseline.totalRefs} frozen refs -> ${curLegacyTotal} current (burned ${burned})`);
-if (mode === "report") console.log(`  quarantine: ${quarantine.length === 0 ? "clean" : quarantine.join(", ")} (allowed: ${QUARANTINE_ALLOW.join(", ")})`);
-if (removedPairs.length) console.log(`  removed: ${removedPairs.join(", ")}`);
-if (shrunkPairs.length && mode === "report") console.log(`  shrunk: ${shrunkPairs.join(", ")}`);
-if (newEdges.length) console.log(`  new-module edges (recorded): ${newEdges.length}${mode === "report" ? " -> " + newEdges.join(", ") : ""}`);
-if (current.unresolved.size) console.log(`  unresolved imports: ${current.unresolved.size} distinct specs`);
-
-if (violations.length) {
-  console.error(`\nArchitecture guard FAILED (${violations.length}):`);
-  for (const v of violations) console.error(`  - ${v}`);
-  process.exit(1);
-}
-console.log("\nArchitecture guard passed.");
+console.log(`Backend: ${current.totals.files} files, ${current.totals.lines} lines, ${current.totals.normalizedLines} normalized lines`);
+console.log(`Target: ${target.size} files; limits ${JSON.stringify(policy.limits)}`);
+console.log(`Remaining legacy files: ${remaining.length}; violating file edges: ${Object.keys(current.violations).length}`);
+if (args.includes('--report')) for (const [key, n] of Object.entries(current.violations)) console.log(`  ${n} ${key}`);
+if (errors.length) {
+  for (const error of errors) console.error(error);
+  process.exitCode = 1;
+} else if (args.includes('--ratchet')) {
+  writeFileSync(baselinePath, JSON.stringify({ ...baseline, legacyFiles: remaining, violations: current.violations }, null, 2) + '\n');
+  console.log('Removed resolved exceptions; no new exception was admitted.');
+} else console.log(args.includes('--final') ? 'Final architecture accepted.' : 'No architecture regression. Final acceptance remains a separate required gate.');
