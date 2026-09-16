@@ -3,7 +3,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from "node:fs";
 import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {prepareStorageUpgrade,type UpgradeOptions} from "../../src/data/upgrade/upgrade-runner.js";
-import {coreStorageMigrations} from "../../src/data/migrations.js";
+import {coreStorageMigrations} from "../../src/data/schema.js";
 import {discoverLegacyInventory} from "../../src/data/upgrade/legacy-inventory.js";
 import {importLegacyMembers} from "../../src/data/upgrade/upgrade-members.js";
 import {importLegacyDocuments} from "../../src/data/upgrade/upgrade-documents.js";

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { archiveRetiredScopeSessions } from "../../src/data/migrations/member-session-archive.js";
 
 // Member-centric sessions (① A2/A3, fish #20025): the per-scope session layout is

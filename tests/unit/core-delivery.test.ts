@@ -1,12 +1,13 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { messagesMigration } from "../../src/data/schema/messages.js";
-import { runtimeInputsMigration } from "../../src/data/schema/runtime-inputs.js";
-import { deliveryMigration } from "../../src/data/schema/delivery.js";
-import { executionMigration } from "../../src/data/schema/execution.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const messagesMigration = getMigration("core-messages-v1");
+const runtimeInputsMigration = getMigration("core-runtime-inputs-v1");
+const deliveryMigration = getMigration("core-delivery-v1");
+const executionMigration = getMigration("core-execution-v1");
 import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
 import { appendMessageInTransaction } from "../../src/data/repositories/message-repository.js";
 import { acceptCapturedDelivery, DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../src/data/repositories/delivery-repository.js";

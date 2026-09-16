@@ -1,10 +1,11 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { settingsMigration } from "../../src/data/schema/settings.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const settingsMigration = getMigration("core-settings-v1");
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import { CatalogRepository } from "../../src/config/pi-adapt/models-store.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";

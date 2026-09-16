@@ -6,7 +6,7 @@ import { requireRegularFile } from "./upgrade-files.js";
 import { assertNoMissingMemberDatabase } from "./startup-member-verification.js";
 
 export interface StartupSettingsSnapshot { configured: boolean; host?: string; port?: number; source: "empty" | "legacy" | "database"; }
-export const CORE_STORAGE_FORMAT = 1;
+import { CORE_STORAGE_FORMAT } from "../schema.js";
 function address(value: {host?: unknown; port?: unknown}, source: StartupSettingsSnapshot["source"]): StartupSettingsSnapshot {
   if (typeof value.host !== "string" || !value.host || !Number.isInteger(value.port) || Number(value.port) < 1 || Number(value.port) > 65535) throw new Error("Stored startup address is invalid; configuration was not replaced");
   return {configured:true,host:value.host,port:Number(value.port),source};

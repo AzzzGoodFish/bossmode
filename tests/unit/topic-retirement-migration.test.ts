@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, copyFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { cleanupRetiredTopicSessionFiles } from "../../src/data/migrations/topic-session-cleanup.js";
 import { SessionRepository } from "../../src/data/repositories/session-repository.js";
 import { importMessage, importMessageNextSequence } from "../../src/data/repositories/message-repository.js";

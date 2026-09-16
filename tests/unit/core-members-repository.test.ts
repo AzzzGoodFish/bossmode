@@ -1,10 +1,11 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { membersMigration } from "../../src/data/schema/members.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const membersMigration = getMigration("core-members-v1");
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import type { MemberRecord } from "../../src/member/member-registry.js";
 let root: string, db: Database;

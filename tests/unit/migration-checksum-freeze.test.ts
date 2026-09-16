@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 
 /**
  * Frozen sha256 of every registered migration's SQL text.

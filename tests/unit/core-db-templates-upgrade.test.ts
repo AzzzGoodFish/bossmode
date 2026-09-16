@@ -1,12 +1,13 @@
+import { getMigration } from "../helpers/schema.js";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
+const baseStorageMigration = getMigration("core-base-v1");
 import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
-import { templatesMigration } from "../../src/data/schema/templates.js";
+const templatesMigration = getMigration("core-templates-v1");
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/data/upgrade/template-files.js";
 

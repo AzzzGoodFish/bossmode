@@ -1,9 +1,10 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
+const baseStorageMigration = getMigration("core-base-v1");
 import { getDatabase, type Database } from "../../src/data/database.js";
 import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
 

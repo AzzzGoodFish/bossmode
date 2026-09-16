@@ -3,7 +3,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync,existsSync} from
 import {join,dirname} from "node:path";
 import {tmpdir} from "node:os";
 import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/database.js";
-import {coreStorageMigrations} from "../../src/data/migrations.js";
+import {coreStorageMigrations} from "../../src/data/schema.js";
 import {discoverLegacyInventory} from "../../src/data/upgrade/legacy-inventory.js";
 import {importLegacyExecution} from "../../src/data/upgrade/upgrade-execution.js";
 import {MembersRepository} from "../../src/data/repositories/members.js";

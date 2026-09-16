@@ -1,11 +1,12 @@
+import { getMigration } from "../helpers/schema.js";
 import {requireAuth} from "../../src/api/auth.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { settingsMigration } from "../../src/data/schema/settings.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const settingsMigration = getMigration("core-settings-v1");
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";

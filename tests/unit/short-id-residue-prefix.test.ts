@@ -12,7 +12,7 @@ vi.mock("../../src/kernel/short-id.js", async (original) => {
 });
 
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { migrateShortIds } from "../../src/data/migrations/short-id-migration.js";
 
 let root: string;

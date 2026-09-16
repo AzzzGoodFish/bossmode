@@ -1,12 +1,13 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { executionMigration } from "../../src/data/schema/execution.js";
-import { memberSessionsMigration } from "../../src/data/schema/member-sessions.js";
-import { memberRuntimeStateMigration } from "../../src/data/schema/member-runtime-state.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const executionMigration = getMigration("core-execution-v1");
+const memberSessionsMigration = getMigration("core-member-session-v1");
+const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1");
 import { SessionRepository } from "../../src/data/repositories/session-repository.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";

@@ -3,7 +3,7 @@ import {mkdtempSync,rmSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/database.js";
-import {coreStorageMigrations} from "../../src/data/migrations.js";
+import {coreStorageMigrations} from "../../src/data/schema.js";
 const roots:string[]=[];const handles:Database[]=[];
 function database(){const root=mkdtempSync(join(tmpdir(),"core-plan-"));roots.push(root);const db=openDatabase(join(root,"bossmode.db"));handles.push(db);return db;}
 afterEach(()=>{for(const db of handles.splice(0))db.close();for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { loadShortIdMapping, migrateShortIds, replayShortIdJournalFromDisk, writeShortIdJournal } from "../../src/data/migrations/short-id-migration.js";
 import { mmScopeIdOf } from "../../src/chat/conversation-ref.js";
 

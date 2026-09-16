@@ -1,9 +1,11 @@
+import { getMigration } from "./helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../src/data/database.js";
-import { baseStorageMigration } from "../src/data/base-schema.js";
-import { messagesMigration, eventSourceMigration } from "../src/data/schema/messages.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const messagesMigration = getMigration("core-messages-v1");
+const eventSourceMigration = getMigration("core-event-source-v1");
 import { appendAgentEvent, readAgentEvents, readStats } from "../src/data/repositories/event-repository.js";
 import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/agent/events/event-handler.js";
 import type { AgentStreamEvent } from "../src/agent/runtime/types.js";

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { cleanupRetiredBackgroundSessionFiles } from "../../src/data/migrations/background-session-cleanup.js";
 
 let root: string;

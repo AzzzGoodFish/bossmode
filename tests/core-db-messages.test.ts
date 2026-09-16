@@ -1,10 +1,12 @@
+import { getMigration } from "./helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { join } from "node:path";
 import { openDatabase, applyStorageMigrations, getDatabase, type Database } from "../src/data/database.js";
-import { baseStorageMigration } from "../src/data/base-schema.js";
-import { messagesMigration, eventSourceMigration } from "../src/data/schema/messages.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const messagesMigration = getMigration("core-messages-v1");
+const eventSourceMigration = getMigration("core-event-source-v1");
 import { archiveMessagesInTransaction, readArchivedMessages, importArchivedMessage, appendMessage, appendMessageInTransaction, importMessage, importMessageNextSequence, readMessages, pageMessages, messagesSince, patchMessage, searchMessageFacts, replaceMessages, writeMemberCursor, readMemberCursor } from "../src/data/repositories/message-repository.js";
 import { appendAgentEvent, importAgentEvent, readAgentEvents, pageActivity, readStats, memberTokenTotal, rebuildEventAggregates, pageAgentEvents } from "../src/data/repositories/event-repository.js";
 import { recordDailyUsage } from "../src/data/repositories/token-rollup.js";

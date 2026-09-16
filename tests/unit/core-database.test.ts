@@ -1,9 +1,10 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyStorageMigrations, bindDatabase, getDatabase, openDatabase, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
+const baseStorageMigration = getMigration("core-base-v1");
 
 let root: string;
 let databases: Database[];

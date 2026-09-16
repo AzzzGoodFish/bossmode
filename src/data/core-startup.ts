@@ -2,7 +2,7 @@ import {createRequire} from "node:module";
 import {logger} from "../kernel/logger.js";
 import {readFileSync} from "node:fs";
 import {assertServiceStopped,prepareStorageUpgrade,type UpgradeOptions,type UpgradeImportContext} from "./upgrade/upgrade-runner.js";
-import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./migrations.js";
+import {coreStorageMigrations,CORE_STORAGE_FORMAT} from "./schema.js";
 import {discoverLegacyInventory,type LegacySourceEntry} from "./upgrade/legacy-inventory.js";
 import {importLegacyArchives} from "./upgrade/upgrade-archives.js";
 import {importLegacyMembers} from "./upgrade/upgrade-members.js";

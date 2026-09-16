@@ -1,10 +1,11 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, bindDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { settingsMigration } from "../../src/data/schema/settings.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const settingsMigration = getMigration("core-settings-v1");
 import { ModelCredentialsRepository } from "../../src/data/repositories/model-settings.js";
 import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
 import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";

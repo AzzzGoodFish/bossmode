@@ -1,9 +1,10 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
-import { mcpOauthMigration } from "../../src/data/schema/mcp-oauth.js";
+const mcpOauthMigration = getMigration("core-mcp-oauth-v1");
 import { createMcpOauthStorage, decodeLegacyMcpOauthEntry, McpOauthRepository, mcpOauthServerKey, type McpOauthEntry } from "../../src/data/repositories/mcp-oauth.js";
 import { createMcpAuth, type McpAuthStorage } from "../../vendor/pi-mcp-adapter/mcp-auth.ts";
 import { McpOAuthProvider } from "../../vendor/pi-mcp-adapter/mcp-oauth-provider.ts";

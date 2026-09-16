@@ -5,7 +5,7 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/data/upgrade/legacy-inventory.js";
 import { importLegacyConversations } from "../../src/data/upgrade/upgrade-conversations.js";
 import { prepareStorageUpgrade, type UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 import { openDatabase } from "../../src/data/database.js";
 import { importAgentEvent } from "../../src/data/repositories/event-repository.js";
 

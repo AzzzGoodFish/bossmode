@@ -6,7 +6,7 @@ import { prepareCoreStorage } from "../../src/data/core-startup.js";
 import { prepareStorageUpgrade } from "../../src/data/upgrade/upgrade-runner.js";
 import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
 import { importLegacyMembers } from "../../src/data/upgrade/upgrade-members.js";
-import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../src/data/migrations.js";
+import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../src/data/schema.js";
 import { getDefaultConfig } from "../../src/config/config.js";
 import type { Database } from "../../src/data/database.js";
 import { migratedMemberId } from "../helpers/short-id.js";

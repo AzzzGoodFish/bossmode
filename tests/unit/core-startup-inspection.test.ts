@@ -1,11 +1,12 @@
+import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { inspectStartupSettings } from "../../src/data/upgrade/startup-inspection.js";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
-import { baseStorageMigration } from "../../src/data/base-schema.js";
-import { settingsMigration } from "../../src/data/schema/settings.js";
+const baseStorageMigration = getMigration("core-base-v1");
+const settingsMigration = getMigration("core-settings-v1");
 import { SettingsRepository } from "../../src/data/repositories/settings.js";
 import { getDefaultConfig } from "../../src/config/config.js";
 let root:string,db:Database|undefined;

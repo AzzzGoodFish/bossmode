@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { openDatabase, applyStorageMigrations, bindDatabase, type Database } from "../../src/data/database.js";
-import { coreStorageMigrations } from "../../src/data/migrations.js";
+import { coreStorageMigrations } from "../../src/data/schema.js";
 
 /** Explicit current-schema SQL fixture. Migration/bootstrap tests deliberately do not use it.
  * No application import hook initializes storage and no legacy projection opener is involved.
