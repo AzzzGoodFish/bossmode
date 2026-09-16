@@ -155,8 +155,8 @@ vi.mock("../../src/config/pi-adapt/runtime-bridge.js", () => ({
 // Member registry (single-path commit target): switchMemberModel commits the
 // global binding here, once, after every live instance accepted.
 
-vi.mock("../../src/workforce/skill-store.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../src/workforce/skill-store.js")>(),
+vi.mock("../../src/member/skills/skill-store.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/member/skills/skill-store.js")>(),
   resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
 }));
 

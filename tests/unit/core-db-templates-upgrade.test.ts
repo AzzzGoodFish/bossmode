@@ -8,7 +8,7 @@ import { baseStorageMigration } from "../../src/data/base-schema.js";
 import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/data/upgrade/upgrade-runner.js";
 import { templatesMigration } from "../../src/data/schema/templates.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/workforce/template-files.js";
+import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/data/upgrade/template-files.js";
 
 const ioFailure = vi.hoisted(() => ({
   partialBody: false,

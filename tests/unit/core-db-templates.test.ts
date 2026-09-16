@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 import { templatesMigration } from "../../src/data/schema/templates.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/workforce/template-files.js";
+import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/data/upgrade/template-files.js";
 
 let root: string;
 let db: Database;

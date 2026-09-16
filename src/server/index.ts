@@ -1,4 +1,4 @@
-import { recoverMemberArchives } from "../services/member-archive-service.js";
+import { recoverMemberArchives } from "../member/archive/member-archive-service.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
 import { prepareCoreStorage } from "../data/core-startup.js";
 import type { UpgradeProgress } from "../data/upgrade/upgrade-runner.js";
@@ -15,7 +15,7 @@ import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount
 import { RuntimeRegistry } from "../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../agent/runtime/pi-sdk.js";
 import { logger } from "../kernel/logger.js";
-import { seedBuiltinAssets } from "../workforce/team-updates.js";
+import { seedBuiltinAssets } from "../member/assets/team-updates.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",

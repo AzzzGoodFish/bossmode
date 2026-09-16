@@ -44,7 +44,7 @@ async function seedMcpOwner(id: string) {
 
 describe("SQL member MCP configuration as sole live source", () => {
   it("no member config → scoped config is empty (adapter stays bound)", async () => {
-    const { writeMemberScopedMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberScopedMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     await seedMcpOwner("mem_x");
     const scoped = writeMemberScopedMcpConfig({ roomId: "r1", memberId: "mem_x" });
     const text = readFileSync(scoped.configPath, "utf-8");
@@ -54,7 +54,7 @@ describe("SQL member MCP configuration as sole live source", () => {
   });
 
   it("SQL member servers pass through; conflicting legacy file is ignored", async () => {
-    const { writeMemberScopedMcpConfig, writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberScopedMcpConfig, writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     await seedMcpOwner("mem_y");
     writeMemberMcpConfig("mem_y", PLATFORM_MCP);
     writeFileSync(join(dir, "members", "mem_y", "mcp.json"), '{"mcpServers":{}}');

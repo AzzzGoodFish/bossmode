@@ -85,7 +85,7 @@ describe("General Agent: prompt-assembler split (G3)", () => {
 
 describe("historical general template provenance", () => {
   it("retains builtin tags and literal historical body without a bundled live template", async () => {
-    const { parseAgentDefinitionMarkdown } = await import("../src/workforce/template-files.js");
+    const { parseAgentDefinitionMarkdown } = await import("../src/data/upgrade/template-files.js");
     const { existsSync } = await import("node:fs");
     const { join } = await import("node:path");
     const body = "Historical general persona.\n  Keep literal bytes.\n";

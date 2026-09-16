@@ -22,7 +22,7 @@ import {
   getMcpServersObject,
   getMemberMcpConfigPath,
   disableDeferredMcpCapabilities,
-} from "../../shared/mcp-settings.js";
+} from "../mcp/mcp-settings.js";
 import { listMembers } from "../member-registry.js";
 import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../ssh-keygen.js";
 import { memberDir } from "../../files/layout.js";

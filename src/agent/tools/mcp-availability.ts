@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServerAvailability } from "../../kernel/types.js";
-import { sanitizeMcpError } from "../../shared/mcp-settings.js";
+import { sanitizeMcpError } from "../../member/mcp/mcp-settings.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 

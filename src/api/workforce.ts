@@ -4,7 +4,7 @@ import { logger } from "../kernel/logger.js";
 import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
-} from "../workforce/skill-store.js";
+} from "../member/skills/skill-store.js";
 import { getMemberInstances, abortMember, compactMemberById, resetMemberSession, restartMember } from "../agent/orchestrator/agent-manager.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../chat/room-store.js";

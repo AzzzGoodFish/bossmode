@@ -16,7 +16,7 @@ vi.mock("../../src/member/member-extensions.js", () => ({
   discoverMemberExtensionEntries: () => { mock.stage("extensions"); return []; },
 }));
 vi.mock("../../src/files/layout.js", () => ({ memberSkillsDir: () => join(mock.root, "skills"), memberExtensionsDir: () => join(mock.root, "extensions") }));
-vi.mock("../../src/shared/mcp-settings.js", () => ({
+vi.mock("../../src/member/mcp/mcp-settings.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "mcp.json"), serverNames: [], dispose: mock.configDispose }),
 }));

@@ -13,7 +13,7 @@ import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile, startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests, setPiCatalogModelsForTests } from "../../src/config/model-credentials.js";
 import { createCredentialStore } from "../../src/config/pi-adapt/runtime-bridge.js";
 import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/member/workspace-registry.js";
-import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/shared/mcp-settings.js";
+import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/member/mcp/mcp-settings.js";
 
 let root: string, db: Database, other: Database, repo: ModelCredentialsRepository;
 function profile(id = "a", patch: Partial<ModelCredentialProfile> = {}): ModelCredentialProfile {

@@ -91,7 +91,7 @@ describe("F4 model binding persists to the registry", () => {
     const roomStore = await import("../../src/chat/room-store.js");
     expect(roomStore.getRoom(room.id)!.memberOverrides).toBeUndefined();
     // Read side (display / heal) resolves the new model.
-    const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
     expect(resolveRoomMember(room.id, member.id)?.model).toBe("testprov/claude-b");
   });
 
@@ -132,7 +132,7 @@ describe("F4 model binding persists to the registry", () => {
     expect(rec.scopeOverrides[`room:${room1.id}`]).toBeUndefined();
     expect(roomStore.getRoom(room1.id)!.memberOverrides).toBeUndefined();
     // Read side agrees (this was the invisible-write bug).
-    const { resolveRoomMember } = await import("../../src/workforce/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
     expect(resolveRoomMember(room1.id, unified.id)?.mcpServers).toEqual(["playwright"]);
 
     // Batch-5b: scoped/mixed members also write global (flags ignored).

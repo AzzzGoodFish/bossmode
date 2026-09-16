@@ -10,7 +10,7 @@ import * as mainlineStore from "../../chat/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/member-memory-store.js";
 import { getMember, resolveMemberRef } from "../../member/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../../member/scope-access.js";
-import { unknownMemberToolMessage } from "../../shared/member-tool-names.js";
+import { unknownMemberToolMessage } from "./member-tool-names.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../shared/conversation-ref.js";
 import type { RoomMessage } from "../../kernel/types.js";

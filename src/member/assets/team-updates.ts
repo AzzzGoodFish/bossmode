@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { logger } from "../kernel/logger.js";
+import { logger } from "../../kernel/logger.js";
 
 type AssetCategory = "skill" | "rule";
 

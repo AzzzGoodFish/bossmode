@@ -390,7 +390,7 @@ describe("PiSdkRuntime", () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
     // Member-owned SQL configuration; the registry enable list is retired.
-    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } });
     const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
 
@@ -482,7 +482,7 @@ describe("PiSdkRuntime", () => {
     const handle = await runtime.createAgent(baseOpts());
     const sessionId = (handle as any).session.sessionId;
 
-    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
     // Simulate registry after reload including extension + mcp tools
     activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
@@ -506,7 +506,7 @@ describe("PiSdkRuntime", () => {
   it("replaces the derived config before reload start and releases each config after shutdown", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const oldPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
     writeMemberMcpConfig("pm", { mcpServers: { added: { url: "http://127.0.0.1:1/mcp" } } });
@@ -575,7 +575,7 @@ describe("PiSdkRuntime", () => {
 
   it("removes derived config when the hosted factory cannot load", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const settings = await import("../../src/shared/mcp-settings.js");
+    const settings = await import("../../src/member/mcp/mcp-settings.js");
     const materialize = settings.writeMemberScopedMcpConfig;
     let path = "";
     vi.spyOn(settings, "writeMemberScopedMcpConfig").mockImplementation(args => {
@@ -591,7 +591,7 @@ describe("PiSdkRuntime", () => {
   it("retains uncertain config generations after reload failure until session teardown", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const settings = await import("../../src/shared/mcp-settings.js");
+    const settings = await import("../../src/member/mcp/mcp-settings.js");
     const materialize = settings.writeMemberScopedMcpConfig;
     const paths: string[] = [];
     vi.spyOn(settings, "writeMemberScopedMcpConfig").mockImplementation(args => {
@@ -627,7 +627,7 @@ describe("PiSdkRuntime", () => {
   });
 
   it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
-    const { writeMemberMcpConfig } = await import("../../src/shared/mcp-settings.js");
+    const { writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
     writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };

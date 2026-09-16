@@ -18,7 +18,7 @@ vi.mock("../../src/api/index.js", () => ({
   parseBody: vi.fn(),
 }));
 
-vi.mock("../../src/workforce/skill-store.js", () => ({
+vi.mock("../../src/member/skills/skill-store.js", () => ({
   loadSkillDefinitions: vi.fn(() => []),
   loadSkillDefinition: vi.fn(() => null),
   saveSkillDefinition: vi.fn(),

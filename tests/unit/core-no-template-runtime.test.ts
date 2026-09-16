@@ -18,7 +18,7 @@ import { getRuntimeStateEntry } from "../../src/member/runtime-state.js";
 import { getCurrentSession } from "../../src/member/session-store.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
-import { resolveRoomMember, resolveRoomMembers } from "../../src/workforce/room-member-resolver.js";
+import { resolveRoomMember, resolveRoomMembers } from "../../src/member/room-member-resolver.js";
 import type { AgentMemberConfig } from "../../src/kernel/types.js";
 
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";

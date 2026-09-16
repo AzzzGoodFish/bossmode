@@ -1,12 +1,12 @@
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { getDatabase } from "../data/database.js";
-import { McpSettingsRepository } from "../data/repositories/mcp-settings.js";
+import { getDatabase } from "../../data/database.js";
+import { McpSettingsRepository } from "../../data/repositories/mcp-settings.js";
 function repository(): McpSettingsRepository { return new McpSettingsRepository(getDatabase()); }
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getBossmodeDir } from "../config/config.js";
-import type { McpServerAvailability, McpServerSummary } from "../kernel/types.js";
+import { getBossmodeDir } from "../../config/config.js";
+import type { McpServerAvailability, McpServerSummary } from "../../kernel/types.js";
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";
 

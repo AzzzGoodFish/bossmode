@@ -14,9 +14,9 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 
 import { join } from "node:path";
 import { logger } from "../../kernel/logger.js";
-import { resolveGlobalSkillPaths } from "../../workforce/skill-store.js";
+import { resolveGlobalSkillPaths } from "../../member/skills/skill-store.js";
 import { activeWorkspaceRoot } from "../../member/workspace-registry.js";
-import { resolveRoomMember } from "../../workforce/room-member-resolver.js";
+import { resolveRoomMember } from "../../member/room-member-resolver.js";
 import { getBossmodeDir } from "../../config/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
 import * as roomStore from "../../chat/room-store.js";

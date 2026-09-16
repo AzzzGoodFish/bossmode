@@ -65,7 +65,7 @@ describe("discoverMemberExtensionEntries (qa ①)", () => {
 describe("startup migration skip log (qa ②)", () => {
   it("second startup logs the skip line once the platform config is archived", async () => {
     const { runMemberAssetsMigration, runMemberAssetsMigrationOnStartup } = await import("../../src/member/migrations/member-assets-migration.js");
-    const { getBossmodeMcpConfigPath } = await import("../../src/shared/mcp-settings.js");
+    const { getBossmodeMcpConfigPath } = await import("../../src/member/mcp/mcp-settings.js");
     const reg = await import("../../src/member/member-registry.js");
     reg.createMember({ name: "solo", agentTemplate: "pm", mcpServers: ["srv-a"] } as any);
     writeFileSync(getBossmodeMcpConfigPath(), JSON.stringify({ mcpServers: { "srv-a": { type: "stdio", command: "x" } } }), "utf-8");

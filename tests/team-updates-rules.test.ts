@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toRulePath } from "../src/workforce/team-updates.js";
+import { toRulePath } from "../src/member/assets/team-updates.js";
 
 describe("toRulePath — canonical rule naming", () => {
   it("maps dev-team/team-prompt.md → rules/team-dev-protocol.md", () => {

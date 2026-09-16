@@ -13,7 +13,7 @@ vi.mock("../../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), warn: vi
 vi.mock("../../src/config/config.js", () => ({ readConfig: () => ({}), getBossmodeDir: () => mock.root }));
 vi.mock("../../src/member/member-extensions.js", () => ({ builtinMcpAdapterPath: () => mock.root, discoverMemberExtensionEntries: () => [] }));
 vi.mock("../../src/files/layout.js", () => ({ memberSkillsDir: () => join(mock.root, "skills"), memberExtensionsDir: () => join(mock.root, "extensions") }));
-vi.mock("../../src/shared/mcp-settings.js", () => ({
+vi.mock("../../src/member/mcp/mcp-settings.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "unused-mcp.json"), serverNames: [], dispose() {} }),
 }));

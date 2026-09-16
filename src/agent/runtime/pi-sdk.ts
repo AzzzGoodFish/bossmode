@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SdkExecutionService, type SdkExecutionAttempt } from "./sdk-execution-service.js";
 import { logger } from "../../kernel/logger.js";
-import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../shared/mcp-settings.js";
+import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../member/mcp/mcp-settings.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../files/layout.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.js";
 import { getModelCredentialProfile } from "../../config/model-credentials.js";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkMcpServerAvailability } from "../../src/agent/tools/mcp-availability.js";
-import { sanitizeMcpError } from "../../src/shared/mcp-settings.js";
+import { sanitizeMcpError } from "../../src/member/mcp/mcp-settings.js";
 
 describe("MCP availability", () => {
   it("marks configs without url or command as invalid", async () => {

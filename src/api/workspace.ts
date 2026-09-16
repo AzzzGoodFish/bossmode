@@ -16,7 +16,7 @@ import { loadEventsPaginated } from "../agent/events/event-handler.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
 import { readConfig, writeConfig, getBossmodeDir } from "../config/config.js";
-import { resolveRoomMembers, resolveRoomMember } from "../workforce/room-member-resolver.js";
+import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-resolver.js";
 import { getModelCredentialProfile } from "../config/model-credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
 import * as attachmentStore from "../files/attachment-store.js";
@@ -25,7 +25,7 @@ import * as mainlineStore from "../chat/mainline-store.js";
 import { readMemoryLayerInfo } from "../member/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
-import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../shared/mcp-settings.js";
+import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp/mcp-settings.js";
 
 type AttachmentInput = { storedFilename?: string; filename?: string; originalFilename?: string; size?: number };
 

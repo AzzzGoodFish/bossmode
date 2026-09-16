@@ -1,5 +1,5 @@
 import { postMessage } from "../communication/message-bus.js";
-import { archiveMember } from "../services/member-archive-service.js";
+import { archiveMember } from "../member/archive/member-archive-service.js";
 import { updateProfileForMember, InvalidProfileError } from "../member/member-profile-update.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
@@ -27,7 +27,7 @@ import {
   readAllDmMessages,
   getLatestDmSeq,
 } from "../chat/dm-message-store.js";
-import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../shared/mcp-settings.js";
+import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp/mcp-settings.js";
 import { listMemberExtensions } from "../member/member-extensions.js";
 import { listMemberSkills } from "../member/skill-catalog.js";
 import { activeWorkspaceRoot, listWorkspaces } from "../member/workspace-registry.js";
@@ -355,8 +355,8 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../agent/prompt/system-prompt-final.js");
     const { memberRecordToConfig, resolveSkills } = await import("../agent/orchestrator/agent-manager.js");
-    const { resolveRoomMember } = await import("../workforce/room-member-resolver.js");
-    const { resolveGlobalSkillPaths } = await import("../workforce/skill-store.js");
+    const { resolveRoomMember } = await import("../member/room-member-resolver.js");
+    const { resolveGlobalSkillPaths } = await import("../member/skills/skill-store.js");
 
     const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
       cwd: string;

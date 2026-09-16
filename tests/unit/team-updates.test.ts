@@ -48,7 +48,7 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
   });
 
   async function mod() {
-    return import("../../src/workforce/team-updates.js");
+    return import("../../src/member/assets/team-updates.js");
   }
 
   it("contentHash returns stable 16-char hex", async () => {

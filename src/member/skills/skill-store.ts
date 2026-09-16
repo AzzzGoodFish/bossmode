@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
-import { parseFrontmatter, asStringArray, asString } from "../kernel/frontmatter.js";
-import { logger } from "../kernel/logger.js";
-import type { SkillDefinition } from "../kernel/types.js";
+import { getBossmodeDir } from "../../config/config.js";
+import { parseFrontmatter, asStringArray, asString } from "../../kernel/frontmatter.js";
+import { logger } from "../../kernel/logger.js";
+import type { SkillDefinition } from "../../kernel/types.js";
 
 const PRIMARY_SKILLS_DIR = join(getBossmodeDir(), "skills");
 
@@ -137,6 +137,6 @@ export function deleteSkillDefinition(name: string): boolean {
 }
 
 export function loadSkillTemplates(): SkillDefinition[] {
-  const templatesDir = join(import.meta.dirname, "../../templates/skills");
+  const templatesDir = join(import.meta.dirname, "../../../templates/skills");
   return scanDir(templatesDir);
 }

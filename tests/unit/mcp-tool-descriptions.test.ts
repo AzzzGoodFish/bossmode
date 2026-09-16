@@ -12,8 +12,8 @@ import {
   PROFILE_READ_DESCRIPTION,
   PROFILE_UPDATE_DESCRIPTION,
   PARAM_DESCRIPTIONS,
-} from "../../src/shared/mcp-tool-descriptions.js";
-import { buildChatSendToolDescription } from "../../src/shared/chat-tool-description.js";
+} from "../../src/agent/tools/mcp-tool-descriptions.js";
+import { buildChatSendToolDescription } from "../../src/agent/tools/chat-tool-description.js";
 
 describe("mcp-tool-descriptions", () => {
   it("all batch-3 tool descriptions are non-empty strings", () => {
@@ -37,7 +37,7 @@ describe("mcp-tool-descriptions", () => {
   });
 
   it("retired tool descriptions are gone (batch 3 renames)", async () => {
-    const mod = await import("../../src/shared/mcp-tool-descriptions.js");
+    const mod = await import("../../src/agent/tools/mcp-tool-descriptions.js");
     for (const key of ["QUERY_ROOM_MESSAGES_DESCRIPTION", "LIST_SCOPES_DESCRIPTION", "WAIT_DESCRIPTION"]) {
       expect((mod as any)[key]).toBeUndefined();
     }
@@ -47,7 +47,7 @@ describe("mcp-tool-descriptions", () => {
   });
 
   it("has no leftover write_summary / summarizer residue", async () => {
-    const mod = await import("../../src/shared/mcp-tool-descriptions.js");
+    const mod = await import("../../src/agent/tools/mcp-tool-descriptions.js");
     expect((mod as any).WRITE_SUMMARY_DESCRIPTION).toBeUndefined();
     expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summaryTitle");
     expect(PARAM_DESCRIPTIONS).not.toHaveProperty("summaryFromId");
@@ -56,7 +56,7 @@ describe("mcp-tool-descriptions", () => {
   });
 
   it("has no leftover task tool descriptions or parameters (task feature retired)", async () => {
-    const mod = await import("../../src/shared/mcp-tool-descriptions.js");
+    const mod = await import("../../src/agent/tools/mcp-tool-descriptions.js");
     for (const key of ["CREATE_TASK_DESCRIPTION", "UPDATE_TASK_DESCRIPTION", "LIST_TASKS_DESCRIPTION", "GET_TASK_DESCRIPTION", "COMMENT_TASK_DESCRIPTION"]) {
       expect((mod as any)[key]).toBeUndefined();
     }

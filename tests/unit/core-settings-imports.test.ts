@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase } from "../../src/data/database.js";
 import { getBossmodeDir, getConfigPath, readPidFile, readConfig, configExists } from "../../src/config/config.js";
-import { readMcpConfigText, readMemberMcpConfig } from "../../src/shared/mcp-settings.js";
+import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp/mcp-settings.js";
 import { getCatalog } from "../../src/config/model-catalog.js";
 import { loadModelCredentialProfiles } from "../../src/config/model-credentials.js";
 import { validateToken } from "../../src/services/auth-service.js";

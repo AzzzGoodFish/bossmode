@@ -1,10 +1,10 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "./skill-store.js";
-import { seedBuiltinAssets } from "./team-updates.js";
-import { buildSkillCatalog, listMemberSkills } from "../member/skill-catalog.js";
-import { memberSkillsDir } from "../files/layout.js";
+import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "../../src/member/skills/skill-store.js";
+import { seedBuiltinAssets } from "../../src/member/assets/team-updates.js";
+import { buildSkillCatalog, listMemberSkills } from "../../src/member/skill-catalog.js";
+import { memberSkillsDir } from "../../src/files/layout.js";
 
 const memberId = "impeccable-skill-fixture";
 afterEach(() => { rmSync(memberSkillsDir(memberId), { recursive: true, force: true }); });

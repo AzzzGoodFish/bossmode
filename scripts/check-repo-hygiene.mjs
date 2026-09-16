@@ -10,7 +10,10 @@ const forbiddenPaths = [
   /(^|\/)\.playwright-mcp\//,
   /^docs\//,
   /^design-prototype\//,
-  /(^|\/)(node_modules|dist|coverage|archive|memory)\//,
+  /(^|\/)(node_modules|dist|coverage)\//,
+  // Local artifact dirs named archive/ or memory/ are forbidden outside src/;
+  // inside src/ they are module subzones (member/archive, member/memory).
+  /^(?!src\/)(?:.*\/)?(?:archive|memory)\//,
   /(^|\/)(team-mock|library-mock|room-member-management-mock)\.[cm]?[jt]sx?$/,
 ];
 const forbiddenNames = [

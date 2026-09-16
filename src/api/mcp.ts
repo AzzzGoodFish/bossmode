@@ -12,7 +12,7 @@ import {
   readMcpStatusCache,
   readRedactedMcpConfigText,
   writeMcpStatusCache,
-} from "../shared/mcp-settings.js";
+} from "../member/mcp/mcp-settings.js";
 import { checkMcpServerAvailability } from "../agent/tools/mcp-availability.js";
 import { getRoomMembers, listRooms } from "../chat/room-store.js";
 

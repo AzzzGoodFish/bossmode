@@ -10,7 +10,7 @@ import {importLegacySettings} from "./upgrade/upgrade-settings.js";
 import {importLegacyConversations} from "./upgrade/upgrade-conversations.js";
 import {importLegacyExecution} from "./upgrade/upgrade-execution.js";
 import {importLegacyDocuments} from "./upgrade/upgrade-documents.js";
-import {importAgentTemplates} from "../workforce/template-files.js";
+import {importAgentTemplates} from "./upgrade/template-files.js";
 import {archiveRetiredTasks} from "./migrations/task-retirement.js";
 import {cleanupRetiredTopicSessionFiles} from "./migrations/topic-session-cleanup.js";
 import {cleanupRetiredBackgroundSessionFiles} from "./migrations/background-session-cleanup.js";

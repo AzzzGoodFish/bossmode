@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getCatalog, hydrateCatalogFromDisk, setBundledCatalogLoader } from "../../src/config/model-catalog.js";
 import { readConfig } from "../../src/config/config.js";
-import { readMcpConfigText } from "../../src/shared/mcp-settings.js";
+import { readMcpConfigText } from "../../src/member/mcp/mcp-settings.js";
 import { discoverLegacyInventory } from "../../src/data/upgrade/legacy-inventory.js";
 import { importLegacySettings } from "../../src/data/upgrade/upgrade-settings.js";
 import type { UpgradeImportContext } from "../../src/data/upgrade/upgrade-runner.js";
