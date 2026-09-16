@@ -157,11 +157,16 @@ export function planFilesystemRenames(root: string, mapping: ShortIdMapping): Re
 
 // ── rename execution + journal ──────────────────────────────────────────────
 
-/** Fold every segment of a relative path through the mapping (ancestor renames included). */
+/** Fold every segment of a relative path through the mapping (ancestor renames included).
+ * Positionally aligned with the planner: the member segment directly under
+ * `rooms/<room>/memory/members/` keeps its old form (archive semantics, design §3.3);
+ * deeper segments fold as usual (`mem_<id>.jsonl` file names included). */
 export function foldRelPath(rel: string, mapping: ShortIdMapping): string {
-  return rel
-    .split("/")
-    .map((segment) => renameSegment(segment, mapping) ?? segment)
+  const segments = rel.split("/");
+  const roomSegments = new Set([...mapping.rooms.keys(), ...mapping.rooms.values()]);
+  const keepMemberSegment = segments.length >= 5 && segments[0] === "rooms" && roomSegments.has(segments[1]!) && segments[2] === "memory" && segments[3] === "members";
+  return segments
+    .map((segment, index) => (keepMemberSegment && index === 4 ? segment : renameSegment(segment, mapping) ?? segment))
     .join("/");
 }
 

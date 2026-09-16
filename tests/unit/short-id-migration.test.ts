@@ -6,6 +6,7 @@ import {
   applyRenameOps,
   assignShortIds,
   clearShortIdJournal,
+  foldRelPath,
   isExcludedRelPath,
   mapCompositeString,
   planFilesystemRenames,
@@ -126,6 +127,24 @@ describe("mapCompositeString", () => {
 
   it("never touches unmapped legacy records", () => {
     expect(mapCompositeString(`dm:${LEGACY_RECORD}`, mapping)).toBe(`dm:${LEGACY_RECORD}`);
+  });
+});
+
+describe("foldRelPath", () => {
+  it("keeps the member segment directly under rooms/<room>/memory/members/ (planner alignment)", () => {
+    expect(foldRelPath(`rooms/${R1}/memory/members/${M1}/x.md`, fixtureMapping()))
+      .toBe(`rooms/rm_cccccccccc/memory/members/${M1}/x.md`);
+    expect(foldRelPath(`rooms/${R1}/memory/members/${M1}`, fixtureMapping()))
+      .toBe(`rooms/rm_cccccccccc/memory/members/${M1}`);
+  });
+
+  it("folds deeper segments and file-name forms below a kept member segment", () => {
+    expect(foldRelPath(`rooms/${R1}/memory/members/${M1}/sub/${M1}.jsonl`, fixtureMapping()))
+      .toBe(`rooms/rm_cccccccccc/memory/members/${M1}/sub/mem_aaaaaaaaaa.jsonl`);
+  });
+
+  it("folds member paths outside the keep position as usual", () => {
+    expect(foldRelPath(`members/${M1}/archive/x.md`, fixtureMapping())).toBe(`members/mem_aaaaaaaaaa/archive/x.md`);
   });
 });
 
