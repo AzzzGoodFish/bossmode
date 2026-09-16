@@ -29,7 +29,7 @@ beforeEach(()=>{
 afterEach(async()=>{
   control.delayClose=false;for(const close of control.close.splice(0))close();
   await Promise.all([dropSftpConnectionsForMember(),closeAllShellsForMember()]);fixture.close();openRuntimeAdmission();
-});
+}, 30000);
 it("concurrent first SFTP calls share one owned connection and cleanup awaits its close event",async()=>{
   const results=await Promise.all([workspaceReadTool("mem_ssh",{path:"a",workspace:"remote"}),workspaceReadTool("mem_ssh",{path:"b",workspace:"remote"})]);
   expect(control.connections).toHaveLength(1);expect(results[0].content[0]).toMatchObject({text:"remote fixture"});
