@@ -928,25 +928,7 @@ export async function resetAgentSession(
   });
 }
 
-// ── Contract drift + mount-stale (auto-reload prompt, fish 2026-08-07) ──
-
-export interface ContractDriftEntry {
-  memberName: string;
-  memberId: string;
-  scopeId: string;
-  scopeLabel: string;
-  currentVersion: number;
-  alreadyNotified: boolean;
-}
-
-export async function getContractDrift(roomId: string): Promise<ContractDriftEntry[]> {
-  const res = await apiFetch(`/api/rooms/${roomId}/contract-drift`);
-  return (res as { drift: ContractDriftEntry[] }).drift;
-}
-
-export async function dismissContractDrift(roomId: string): Promise<void> {
-  await apiFetch(`/api/rooms/${roomId}/contract-drift/dismiss`, { method: "POST" });
-}
+// ── Mount-stale info ──
 
 export interface StaleInfo {
   mounts?: { since: number; fields: string[] };
@@ -1066,15 +1048,6 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   return res.json();
 }
 
-export type PiTransportSetting = "auto" | "websocket" | "websocket-cached" | "sse";
-
-export interface RuntimeSettings {
-  sessionResume: boolean;
-  codexTransport?: PiTransportSetting;
-  websocketConnectTimeoutMs?: number;
-  httpIdleTimeoutMs?: number | null;
-}
-
 export type McpAvailabilityStatus = "unchecked" | "checking" | "available" | "unavailable" | "auth-required" | "invalid-config";
 
 export interface McpServerAvailability {
@@ -1101,10 +1074,6 @@ export interface McpSettings {
   servers?: McpServerSummary[];
   availability?: Record<string, McpServerAvailability>;
   sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
-}
-
-export async function getRuntimeSettings(): Promise<RuntimeSettings> {
-  return apiFetch("/api/settings/runtime");
 }
 
 // -- Usage (token stats) --
@@ -1201,52 +1170,6 @@ export async function getRoomUsage(
   if (params?.model) q.set("model", params.model);
   const qs = q.toString();
   return apiFetch(`/api/rooms/${roomId}/usage${qs ? `?${qs}` : ""}`);
-}
-
-export async function updateRuntimeSettings(settings: boolean | Partial<RuntimeSettings>): Promise<RuntimeSettings> {
-  return apiFetch("/api/settings/runtime", {
-    method: "PUT",
-    body: JSON.stringify(typeof settings === "boolean" ? { sessionResume: settings } : settings),
-  });
-}
-
-export interface EnvironmentCommunicationAsset {
-  content: string;
-  source: "default" | "user";
-  updatedAt?: number;
-}
-
-export async function getEnvironmentCommunication(): Promise<EnvironmentCommunicationAsset> {
-  return apiFetch("/api/settings/environment-communication");
-}
-
-export async function saveEnvironmentCommunication(content: string): Promise<EnvironmentCommunicationAsset> {
-  return apiFetch("/api/settings/environment-communication", {
-    method: "PUT",
-    body: JSON.stringify({ content }),
-  });
-}
-
-export async function resetEnvironmentCommunication(): Promise<EnvironmentCommunicationAsset> {
-  return apiFetch("/api/settings/environment-communication", { method: "DELETE" });
-}
-
-export interface MemoryBudgets {
-  persona: number;
-  memberPrinciples: number;
-  mainline: number;
-  roomPrinciples: number;
-}
-
-export async function getMemoryBudgets(): Promise<MemoryBudgets> {
-  return apiFetch("/api/settings/memory-budgets");
-}
-
-export async function updateMemoryBudgets(budgets: Partial<MemoryBudgets>): Promise<MemoryBudgets> {
-  return apiFetch("/api/settings/memory-budgets", {
-    method: "PUT",
-    body: JSON.stringify(budgets),
-  });
 }
 
 export async function getMcpSettings(): Promise<McpSettings> {

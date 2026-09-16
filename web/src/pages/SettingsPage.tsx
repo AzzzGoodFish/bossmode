@@ -1,16 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Plus, KeyRound, Pencil, Trash2, PlugZap, RefreshCw } from "lucide-react";
-import { ToggleSwitch } from "../components/ToggleSwitch";
 import { MobileTopBar } from "../components/MobileTopBar";
-import type { RuntimeSettings, PiTransportSetting, PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, PublicModelProvider, ModelCatalogStatus, MemoryBudgets } from "../api/client";
+import type { PublicModelCredentialProfile, ModelCredentialProfileInput, ModelDefinitionConfig, ModelProtocol, ModelAuthType, OAuthLoginJob, PublicModelProvider, ModelCatalogStatus } from "../api/client";
 import {
-  getRuntimeSettings,
-  updateRuntimeSettings,
-  getEnvironmentCommunication,
-  saveEnvironmentCommunication,
-  resetEnvironmentCommunication,
-  getMemoryBudgets,
-  updateMemoryBudgets,
   getModelCredentialProfiles,
   createModelCredentialProfile,
   updateModelCredentialProfile,
@@ -43,23 +35,8 @@ interface SettingsPageProps {
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   models: { title: "Models", desc: "Connect providers and choose available models." },
-  runtime: { title: "Runtime", desc: "Session continuity and connection recovery." },
-  prompt: { title: "Prompt", desc: "Environment & Communication asset compiled into every member." },
   usage: { title: "Usage", desc: "Token consumption by identity, room and time" },
 };
-
-function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
-  return {
-    sessionResume: settings.sessionResume !== false,
-    codexTransport: settings.codexTransport || "auto",
-    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs ?? 15000,
-    httpIdleTimeoutMs: settings.httpIdleTimeoutMs === null ? null : settings.httpIdleTimeoutMs,
-  };
-}
-
-function secondsFromMs(ms: number | undefined, fallbackSeconds: number): number {
-  return Math.round((ms ?? fallbackSeconds * 1000) / 1000);
-}
 
 export function oauthStatusLabel(job: OAuthLoginJob): string {
   if (job.status === "awaiting_input" && job.selectPrompt) return "Waiting for your choice";
@@ -76,21 +53,6 @@ export function oauthStatusLabel(job: OAuthLoginJob): string {
 
 export function SettingsPage({ section = "models", onOpenMobileSidebar }: SettingsPageProps = {}) {
   const { toast, confirm } = useDialog();
-  const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>({
-    sessionResume: true,
-    codexTransport: "auto",
-    websocketConnectTimeoutMs: 15000,
-  });
-  const [runtimeSaving, setRuntimeSaving] = useState(false);
-  const [runtimeSaved, setRuntimeSaved] = useState(false);
-  const [ecContent, setEcContent] = useState("");
-  const [ecSavedContent, setEcSavedContent] = useState("");
-  const [ecSource, setEcSource] = useState<"default" | "user">("default");
-  const [ecSaving, setEcSaving] = useState(false);
-  const [ecSaved, setEcSaved] = useState(false);
-  const [memBudgets, setMemBudgets] = useState<MemoryBudgets>({ persona: 4000, memberPrinciples: 4000, mainline: 4000, roomPrinciples: 8000 });
-  const [memBudgetsSaving, setMemBudgetsSaving] = useState(false);
-  const [memBudgetsSaved, setMemBudgetsSaved] = useState(false);
   const [profiles, setProfiles] = useState<PublicModelCredentialProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<PublicModelCredentialProfile | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
@@ -99,99 +61,8 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
 
 
   useEffect(() => {
-    getRuntimeSettings().then((v) => setRuntimeSettings(normalizeRuntimeSettings(v))).catch(console.error);
     getModelCredentialProfiles().then(setProfiles).catch(console.error);
-    getEnvironmentCommunication().then((a) => { setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source); }).catch(console.error);
-    getMemoryBudgets().then(setMemBudgets).catch(console.error);
   }, []);
-
-  const handleEcSave = async () => {
-    setEcSaving(true);
-    try {
-      const a = await saveEnvironmentCommunication(ecContent);
-      setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source);
-      setEcSaved(true);
-      setTimeout(() => setEcSaved(false), 3000);
-    } catch (err: any) {
-      console.error("Failed to save Environment & Communication:", err);
-      toast(userActionError("save Environment & Communication"), "error");
-    } finally {
-      setEcSaving(false);
-    }
-  };
-
-  const handleEcReset = async () => {
-    if (!(await confirm("Restore the product default Environment & Communication? Your edits will be discarded."))) return;
-    setEcSaving(true);
-    try {
-      const a = await resetEnvironmentCommunication();
-      setEcContent(a.content); setEcSavedContent(a.content); setEcSource(a.source);
-      setEcSaved(true);
-      setTimeout(() => setEcSaved(false), 3000);
-    } catch (err: any) {
-      console.error("Failed to restore Environment & Communication:", err);
-      toast(userActionError("restore Environment & Communication"), "error");
-    } finally {
-      setEcSaving(false);
-    }
-  };
-
-  const handleMemBudgetChange = (key: keyof MemoryBudgets, value: string) => {
-    const n = Number(value);
-    setMemBudgets((prev) => ({ ...prev, [key]: Number.isFinite(n) && n > 0 ? Math.floor(n) : prev[key] }));
-  };
-
-  const handleMemBudgetsSave = async () => {
-    setMemBudgetsSaving(true);
-    try {
-      const saved = await updateMemoryBudgets(memBudgets);
-      setMemBudgets(saved);
-      setMemBudgetsSaved(true);
-      setTimeout(() => setMemBudgetsSaved(false), 3000);
-    } catch (err: any) {
-      console.error("Failed to save memory budgets:", err);
-      toast(userActionError("save memory budgets"), "error");
-    } finally {
-      setMemBudgetsSaving(false);
-    }
-  };
-
-  const handleRuntimeChange = async (updates: Partial<RuntimeSettings>) => {
-    const previous = runtimeSettings;
-    const next = normalizeRuntimeSettings({ ...runtimeSettings, ...updates });
-    setRuntimeSettings(next);
-    setRuntimeSaving(true);
-    try {
-      const saved = await updateRuntimeSettings(next);
-      setRuntimeSettings(normalizeRuntimeSettings(saved));
-      setRuntimeSaved(true);
-      setTimeout(() => setRuntimeSaved(false), 2000);
-    } catch (err: any) {
-      console.error("Failed to save runtime settings:", err);
-      toast(userActionError("save Runtime settings"), "error");
-      setRuntimeSettings(previous);
-    } finally {
-      setRuntimeSaving(false);
-    }
-  };
-
-  const handleSessionResumeToggle = async () => {
-    await handleRuntimeChange({ sessionResume: !runtimeSettings.sessionResume });
-  };
-
-  const handleRuntimeNetworkSave = async () => {
-    const websocketConnectTimeoutMs = runtimeSettings.websocketConnectTimeoutMs ?? 15000;
-    const wsSeconds = Math.round(websocketConnectTimeoutMs / 1000);
-    if (wsSeconds < 5 || wsSeconds > 180) {
-      toast("WebSocket connect timeout must be between 5 and 180 seconds", "error");
-      return;
-    }
-    await handleRuntimeChange({
-      codexTransport: runtimeSettings.codexTransport || "auto",
-      websocketConnectTimeoutMs,
-      httpIdleTimeoutMs: runtimeSettings.httpIdleTimeoutMs,
-    });
-  };
 
   const refreshProfiles = async () => setProfiles(await getModelCredentialProfiles());
 
@@ -240,176 +111,6 @@ export function SettingsPage({ section = "models", onOpenMobileSidebar }: Settin
           onSyncCatalog={handleSyncCatalog}
         />
       )}
-
-      {/* Runtime */}
-      {section === "runtime" && (
-      <div className="space-y-4">
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-2">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Continue previous sessions</div>
-              <div className="text-xs text-ink-3 mt-0.5">Continue each member’s conversation after Bossmode restarts. Applies to new sessions.</div>
-            </div>
-            <ToggleSwitch
-              on={!!runtimeSettings.sessionResume}
-              onToggle={() => handleSessionResumeToggle()}
-              label="Continue previous sessions"
-              disabled={runtimeSaving}
-            />
-          </div>
-        </div>
-
-        <details className="bg-surface-1 border border-line rounded-lg p-4">
-          <summary className="cursor-pointer text-sm font-medium text-ink-1">Connection troubleshooting</summary>
-          <div className="mt-4 space-y-4">
-          <p className="text-xs text-ink-3">Automatic is recommended. Change these options only when a provider connection repeatedly fails.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Transport mode</span>
-              <select
-                className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
-                value={runtimeSettings.codexTransport || "auto"}
-                onChange={(e) => setRuntimeSettings({ ...runtimeSettings, codexTransport: e.target.value as PiTransportSetting })}
-              >
-                <option value="auto">Automatic (recommended)</option>
-                <option value="websocket-cached">WebSocket cached</option>
-                <option value="websocket">WebSocket</option>
-                <option value="sse">SSE</option>
-              </select>
-              <span className="block text-[11px] text-ink-4">Choose a specific mode only when Automatic cannot maintain a connection.</span>
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Connection timeout</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={5}
-                  max={180}
-                  step={1}
-                  disabled={(runtimeSettings.codexTransport || "auto") === "sse"}
-                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  value={secondsFromMs(runtimeSettings.websocketConnectTimeoutMs, 15)}
-                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, websocketConnectTimeoutMs: Math.max(0, Number(e.target.value || 0)) * 1000 })}
-                />
-                <span className="text-xs text-ink-3">sec</span>
-              </div>
-              <span className="block text-[11px] text-ink-4">How long Bossmode waits while establishing a provider connection.</span>
-            </label>
-          </div>
-          <details className="rounded-md border border-line-soft bg-inset/40 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-ink-2">Advanced</summary>
-            <label className="mt-3 block space-y-1 max-w-sm">
-              <span className="text-xs font-medium text-ink-2">HTTP idle timeout</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1"
-                  value={runtimeSettings.httpIdleTimeoutMs == null ? "" : Math.round(runtimeSettings.httpIdleTimeoutMs / 1000)}
-                  placeholder="SDK default"
-                  onChange={(e) => setRuntimeSettings({ ...runtimeSettings, httpIdleTimeoutMs: e.target.value === "" ? null : Math.max(0, Number(e.target.value || 0)) * 1000 })}
-                />
-                <span className="text-xs text-ink-3">sec</span>
-              </div>
-              <span className="block text-[11px] text-ink-4">Leave empty to use the recommended default.</span>
-            </label>
-          </details>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-ink-4">Changes apply when a member starts or restarts.</p>
-            <button
-              onClick={handleRuntimeNetworkSave}
-              disabled={runtimeSaving}
-              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
-            >
-              {runtimeSaving ? "Saving..." : "Save connection settings"}
-            </button>
-          </div>
-          {runtimeSaved && <div className="text-xs text-onair">Saved!</div>}
-          </div>
-        </details>
-      </div>
-      )}
-
-      {/* Prompt — Environment & Communication global asset (0.20 experience ③) */}
-      {section === "prompt" && (
-      <div className="space-y-4">
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium text-ink-1">Environment &amp; Communication</div>
-              <div className="text-xs text-ink-3 mt-0.5">
-                Global prompt asset compiled into every member (room and DM). Editing changes how members present themselves; applies after members Reload or start a new session.{" "}
-                {ecSource === "user" && <span className="text-amber-600">(customized)</span>}
-                {ecSource === "default" && <span className="text-ink-4">(product default)</span>}
-              </div>
-            </div>
-            <button
-              onClick={handleEcReset}
-              disabled={ecSaving || ecSource !== "user"}
-              className="px-3 py-1.5 text-xs border border-line text-ink-2 hover:bg-surface-2 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Restore default
-            </button>
-          </div>
-          <textarea
-            value={ecContent}
-            onChange={(e) => setEcContent(e.target.value)}
-            rows={18}
-            spellCheck={false}
-            className="w-full bg-inset border border-line rounded-lg px-3 py-2 text-xs font-mono text-ink-1 focus:outline-none focus:border-accent"
-          />
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-ink-4">Markdown is preserved verbatim. Keep it short — it is injected into every member's system prompt.</p>
-            <button
-              onClick={handleEcSave}
-              disabled={ecSaving || ecContent.trim() === ecSavedContent.trim() || ecContent.trim() === ""}
-              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
-            >
-              {ecSaving ? "Saving..." : "Save"}
-            </button>
-          </div>
-          {ecSaved && <div className="text-xs text-onair">Saved! Members pick this up after Reload or a new session.</div>}
-        </div>
-
-        <div className="bg-surface-1 border border-line rounded-lg p-4 space-y-3">
-          <div>
-            <div className="text-sm font-medium text-ink-1">Memory budgets</div>
-            <div className="text-xs text-ink-3 mt-0.5">Character limits for each member memory asset. Lowering never truncates existing content — a write is rejected until the asset is trimmed. Applies to new sessions / after Reload.</div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Persona</span>
-              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.persona} onChange={(e) => handleMemBudgetChange("persona", e.target.value)} />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Member principles</span>
-              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.memberPrinciples} onChange={(e) => handleMemBudgetChange("memberPrinciples", e.target.value)} />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Mainline</span>
-              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.mainline} onChange={(e) => handleMemBudgetChange("mainline", e.target.value)} />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-ink-2">Room principles</span>
-              <input type="number" min={1} className="w-full bg-inset border border-line rounded px-3 py-2 text-sm text-ink-1" value={memBudgets.roomPrinciples} onChange={(e) => handleMemBudgetChange("roomPrinciples", e.target.value)} />
-            </label>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] text-ink-4">Defaults: persona 4,000 · member principles 4,000 · mainline 4,000 · room principles 8,000.</p>
-            <button
-              onClick={handleMemBudgetsSave}
-              disabled={memBudgetsSaving}
-              className="px-3 py-1.5 bg-accent text-accent-contrast hover:opacity-90 disabled:opacity-40 text-sm font-medium rounded-lg cursor-pointer disabled:cursor-not-allowed"
-            >
-              {memBudgetsSaving ? "Saving..." : "Save budgets"}
-            </button>
-          </div>
-          {memBudgetsSaved && <div className="text-xs text-onair">Saved! Applies to new sessions / after Reload.</div>}
-        </div>
-      </div>
-      )}
-
 
       </div>
     </div>
