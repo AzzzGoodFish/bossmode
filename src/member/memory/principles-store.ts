@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { documentContentMeta } from "../data/repositories/document-repository.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
+import { documentContentMeta } from "../../data/repositories/document-repository.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "../assets/document-assets.js";
 import { join } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
+import { getBossmodeDir } from "../../config/config.js";
 import { getMemoryBudget } from "./memory-budgets.js";
-import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../kernel/types.js";
+import type { Principles, PrinciplesMeta, PromptAssetBudget } from "../../kernel/types.js";
 
 export type PrinciplesScope = "room" | "member";
 

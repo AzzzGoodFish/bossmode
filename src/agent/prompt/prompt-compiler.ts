@@ -12,7 +12,7 @@ import { getBossmodeDir } from "../../config/config.js";
 import {
   formatMemberPromptSegment,
   readMemberProfile,
-} from "../../member/member-profile.js";
+} from "../../member/profile/member-profile.js";
 import {
   memberArchiveDir,
   memberDir,
@@ -20,7 +20,7 @@ import {
   memberProfilePath,
   memberSkillsDir,
 } from "../../files/layout.js";
-import { buildSkillCatalog } from "../../member/skill-catalog.js";
+import { buildSkillCatalog } from "../../member/skills/skill-catalog.js";
 
 export type PromptSectionId = "persona" | "environment" | "communication" | "memory" | "workspace" | "assets";
 

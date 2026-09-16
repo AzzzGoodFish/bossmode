@@ -54,7 +54,7 @@ describe("rooms without cwd", () => {
     expect(roots).toContain(join(dir, "members", m.id));
 
     // adding a workspace extends the roots
-    const wsr = await import("../../src/member/workspace-registry.js");
+    const wsr = await import("../../src/member/workspaces/workspace-registry.js");
     wsr.createWorkspace(m.id, { id: "web1", kind: "ssh", host: "h", user: "u", root: "/srv/app" });
     expect(roomMemberAssetRoots(room.id)).toContain("/srv/app");
   });

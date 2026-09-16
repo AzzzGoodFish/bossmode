@@ -67,7 +67,7 @@ describe("self-only profile_update", () => {
     const originalName = f.own.name;
     const next = `New ${randomUUID().slice(0, 6)}`;
     await f.call("profile_update", { name: next });
-    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
     updateProfileForMember(f.peer.id, { name: originalName });
     for (const tools of toolSets) {
       await (tools.find(t => t.name === "chat_send")!.execute as any)("chat-id", { message: "after rename" });
@@ -119,7 +119,7 @@ describe("self-only profile_update", () => {
       await Promise.resolve();
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });
       const originalContext = captured.ctx;
-      const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+      const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
       const next = `${f.own.name}-renamed`;
       await f.call("profile_update", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
@@ -138,7 +138,7 @@ describe("self-only profile_update", () => {
 
   it("creates chats with current Unicode identity and keeps historical template tools ID-bound", async () => {
     const f = await fixture();
-    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
     const pending = f.call("chat_create", { name: "Creator race", members: [f.peer.id] }, `dm:${f.own.id}`);
     const next = `创建者 ${randomUUID().slice(0, 6)}`;
     updateProfileForMember(f.own.id, { name: next });

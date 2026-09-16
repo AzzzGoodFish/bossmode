@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
 import {
   scopeIdOf,
   parseScopeId,
@@ -90,7 +90,7 @@ describe("member-registry", () => {
 describe("member-memory-store + dm-message-store", () => {
   it("writes persona and per-scope layers under member dir", async () => {
     const reg = await import("../../src/member/member-registry.js");
-    const mem = await import("../../src/member/member-memory-store.js");
+    const mem = await import("../../src/member/memory/member-memory-store.js");
     const m = reg.createMember({ name: "qa", agentTemplate: "qa" });
     mem.ensureMemorySkeleton(m.id, "dm:" + m.id);
     mem.writeMemoryLayer(m.id, "persona", "## Persona\nI am qa.\n", { type: "user" }, { reason: "init" });

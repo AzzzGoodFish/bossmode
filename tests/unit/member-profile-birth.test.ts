@@ -43,7 +43,7 @@ describe("member birth skeleton", () => {
 
   it("database identity updates leave all persona Markdown untouched", async () => {
     const { createMember, getMember, updateMemberIdentity } = await import("../../src/member/member-registry.js");
-    const { readMemberProfile, formatMemberPromptSegment } = await import("../../src/member/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { readMemberProfile, formatMemberPromptSegment } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const { writeFileSync } = await import("node:fs");
     const m = createMember({ name: "nova" });
     const raw = "\uFEFF---\nname: not-identity\ntitle: not-title\n---\n\nArbitrary Markdown.\n\n";
@@ -67,7 +67,7 @@ describe("member birth skeleton", () => {
 
   it("reads persona literally at and above the UTF-16 limit without truncating bytes", async () => {
     const { createMember } = await import("../../src/member/member-registry.js");
-    const { readMemberProfile, MEMBER_PROFILE_BUDGET_CHARS } = await import("../../src/member/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { readMemberProfile, MEMBER_PROFILE_BUDGET_CHARS } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const m = createMember({ name: "literal" });
     expect(MEMBER_PROFILE_BUDGET_CHARS).toBe(4000);
     for (const length of [4000, 4001]) {
@@ -81,7 +81,7 @@ describe("member birth skeleton", () => {
   });
 
   it("missing persona is empty but non-ENOENT read failures are not hidden", async () => {
-    const { readMemberProfile } = await import("../../src/member/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { readMemberProfile } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const { mkdirSync } = await import("node:fs");
     expect(readMemberProfile("missing")).toMatchObject({ body: "", raw: "", exists: false, overBudget: false });
     mkdirSync(memberProfilePath("missing"), { recursive: true });

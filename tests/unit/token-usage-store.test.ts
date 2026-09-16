@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { appendAgentEvent, importAgentEvent } from "../../src/data/repositories/event-repository.js";
-import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../../src/member/token-usage-store.js";
+import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../../src/member/stats/token-usage-store.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
 
 let fixture: ReturnType<typeof coreFixture>;

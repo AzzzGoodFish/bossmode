@@ -1,5 +1,5 @@
-import { readStats, hasStats, rebuildEventAggregates } from "../data/repositories/event-repository.js";
-import type { MemberStats } from "../data/types.js";
+import { readStats, hasStats, rebuildEventAggregates } from "../../data/repositories/event-repository.js";
+import type { MemberStats } from "../../data/types.js";
 
 export type { MemberStats };
 

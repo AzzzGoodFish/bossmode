@@ -6,16 +6,16 @@
 // marked `[stale]`, never silently deleted.
 import { existsSync, readFileSync } from "node:fs";
 import { documentContentMeta } from "../data/repositories/document-repository.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "../member/document-assets.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "../member/assets/document-assets.js";
 import { join } from "node:path";
 import { getBossmodeDir } from "../config/config.js";
-import { getMemoryBudget } from "../member/memory-budgets.js";
+import { getMemoryBudget } from "../member/memory/memory-budgets.js";
 import type { Mainline, MainlineIndexEntry, ParsedMainline, PromptAssetBudget } from "../kernel/types.js";
 import { logger } from "../kernel/logger.js";
 import { readAllMessages } from "./message-store.js";
 import { readAllDmMessages } from "./dm-message-store.js";
 import { entryExists } from "../knowledge/store.js";
-import { AssetBudgetError, computeAssetBudget } from "../member/principles-store.js";
+import { AssetBudgetError, computeAssetBudget } from "../member/memory/principles-store.js";
 
 export { AssetBudgetError };
 

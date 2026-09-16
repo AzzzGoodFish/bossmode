@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
 import { loadShortIdMapping, migrateShortIds } from "../../src/data/migrations/short-id-migration.js";
-import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;
 beforeEach(() => { fixture = coreFixture(); root = fixture.root; });

@@ -50,7 +50,7 @@ function room(): Room {
 
 describe("prompt compiler (prompt v2: Persona → How to work)", () => {
   it("assembles Persona → Environment → Communication → Memory → Workspace → Assets, scope-free", async () => {
-    const { writeMemberProfileSkeleton } = await import("../../src/member/member-profile.js");
+    const { writeMemberProfileSkeleton } = await import("../../src/member/profile/member-profile.js");
     writeMemberProfileSkeleton("mem_qa");
     writeFileSync(
       join(tmpDir, "members", "mem_qa", "persona.md"),
@@ -128,7 +128,7 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
     const path = join(tmpDir, "members", "mem_qa", "persona.md");
     writeFileSync(path, raw, "utf-8");
     const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
-    const { readMemberProfile } = await import("../../src/member/member-profile.js");
+    const { readMemberProfile } = await import("../../src/member/profile/member-profile.js");
     const expected = `# Persona\n\nI am qa, an AI teammate in Bossmode.${body ? `\n\n${body}` : ""}`;
     const compiled = compileMemberPrompt({ memberId: "mem_qa", memberName: "qa" });
     expect(Buffer.from(compiled.sections.find((s) => s.id === "persona")!.content)).toEqual(Buffer.from(expected));

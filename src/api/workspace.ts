@@ -20,9 +20,9 @@ import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-res
 import { getModelCredentialProfile } from "../config/model-credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/pi-adapt/runtime-bridge.js";
 import * as attachmentStore from "../files/attachment-store.js";
-import * as principlesStore from "../member/principles-store.js";
+import * as principlesStore from "../member/memory/principles-store.js";
 import * as mainlineStore from "../chat/mainline-store.js";
-import { readMemoryLayerInfo } from "../member/member-memory-store.js";
+import { readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp/mcp-settings.js";

@@ -8,8 +8,8 @@ import {
 import { getMemberInstances, abortMember, compactMemberById, resetMemberSession, restartMember } from "../agent/orchestrator/agent-manager.js";
 import { getLatestMessageId } from "../communication/message-bus.js";
 import * as roomStore from "../chat/room-store.js";
-import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../member/token-usage-store.js";
-import { readMemberStats } from "../member/member-stats-store.js";
+import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../member/stats/token-usage-store.js";
+import { readMemberStats } from "../member/stats/member-stats-store.js";
 import { getMember, resolveMemberRef } from "../member/member-registry.js";
 import { parseScopeId } from "../shared/conversation-ref.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";

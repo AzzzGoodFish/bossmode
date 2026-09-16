@@ -5,8 +5,8 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { parseFrontmatter } from "../kernel/frontmatter.js";
-import { memberSkillsDir } from "../files/layout.js";
+import { parseFrontmatter } from "../../kernel/frontmatter.js";
+import { memberSkillsDir } from "../../files/layout.js";
 
 export type SkillCatalogMode =
   | "under_budget"
@@ -63,7 +63,7 @@ function truncate(s: string, max: number): string {
 
 /** Package assets/skills — resolved from compiled dist/engine → ../../assets/skills. */
 export function platformSkillsDir(): string {
-  return join(import.meta.dirname, "../../assets/skills");
+  return join(import.meta.dirname, "../../../assets/skills");
 }
 
 function scanSkillsDir(

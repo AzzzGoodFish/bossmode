@@ -3,7 +3,7 @@ import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRu
 import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
-import {readMemberProfile,isBlankPersona} from "../../member/member-profile.js";
+import {readMemberProfile,isBlankPersona} from "../../member/profile/member-profile.js";
 import type {MentionActivationCtx} from "../../communication/router.js";
 import { getDatabase } from "../../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
@@ -15,7 +15,7 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 import { join } from "node:path";
 import { logger } from "../../kernel/logger.js";
 import { resolveGlobalSkillPaths } from "../../member/skills/skill-store.js";
-import { activeWorkspaceRoot } from "../../member/workspace-registry.js";
+import { activeWorkspaceRoot } from "../../member/workspaces/workspace-registry.js";
 import { resolveRoomMember } from "../../member/room-member-resolver.js";
 import { getBossmodeDir } from "../../config/config.js";
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";

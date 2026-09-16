@@ -7,7 +7,7 @@ import { postMessage } from "../../communication/message-bus.js";
 import * as messageStore from "../../chat/message-store.js";
 import * as roomStore from "../../chat/room-store.js";
 import * as mainlineStore from "../../chat/mainline-store.js";
-import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/member-memory-store.js";
+import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/memory/member-memory-store.js";
 import { getMember, resolveMemberRef } from "../../member/member-registry.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../../member/scope-access.js";
 import { unknownMemberToolMessage } from "./member-tool-names.js";
@@ -269,7 +269,7 @@ export async function handleToolCallback(
       const input: { name?: unknown; title?: unknown } = {};
       if (params?.name !== undefined) input.name = params.name;
       if (params?.description !== undefined) input.title = params.description;
-      const { updateProfileForMember } = await import("../../member/member-profile-update.js");
+      const { updateProfileForMember } = await import("../../member/profile/member-profile-update.js");
       try {
         const result = updateProfileForMember(context.memberId, input);
         return {
@@ -590,7 +590,7 @@ export async function handleToolCallback(
     case "workspace_use":
     case "workspace_remove": {
       const wsMemberId = resolveCallerMemberId(roomId, actorRef);
-      const reg = await import("../../member/workspace-registry.js");
+      const reg = await import("../../member/workspaces/workspace-registry.js");
       if (tool === "workspace_list") {
         const list = reg.listWorkspaces(wsMemberId);
         return {

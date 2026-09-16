@@ -15,9 +15,9 @@ import { memberSessionsMigration } from "../../src/data/schema/member-sessions.j
 import { memberRuntimeStateMigration } from "../../src/data/schema/member-runtime-state.js";
 import { roomDescriptionMigration } from "../../src/data/schema/room-description.js";
 import * as registry from "../../src/member/member-registry.js";
-import * as profile from "../../src/member/member-profile.js";
+import * as profile from "../../src/member/profile/member-profile.js";
 import * as wizard from "../../src/data/upgrade/member-archive.js";
-import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/member-archive-lifecycle.js";
+import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/archive/member-archive-lifecycle.js";
 import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
 import { MembersRepository } from "../../src/data/repositories/members.js";
 import { ConversationsRepository } from "../../src/data/repositories/conversations.js";

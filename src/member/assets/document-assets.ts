@@ -2,11 +2,11 @@
 import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { getBossmodeDir } from "../config/config.js";
-import { getDatabase } from "../data/database.js";
+import { getBossmodeDir } from "../../config/config.js";
+import { getDatabase } from "../../data/database.js";
 import { assertDocumentIdentity, commitDocumentRevision, documentContentMeta, documentSnapshotPath, getDocument, validateDocumentPath,
-  type DocumentIdentity } from "../data/repositories/document-repository.js";
-import type { PrinciplesMeta } from "../kernel/types.js";
+  type DocumentIdentity } from "../../data/repositories/document-repository.js";
+import type { PrinciplesMeta } from "../../kernel/types.js";
 
 export function documentIdentity(path: string, layer: DocumentIdentity["layer"], memberId?: string, scopeId?: string): DocumentIdentity {
   return { path: validateDocumentPath(relative(getBossmodeDir(), path).split(sep).join("/")), layer, memberId,

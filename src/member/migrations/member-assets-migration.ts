@@ -24,7 +24,7 @@ import {
   disableDeferredMcpCapabilities,
 } from "../mcp/mcp-settings.js";
 import { listMembers } from "../member-registry.js";
-import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../ssh-keygen.js";
+import { ensureMemberSshKeyPair, readMemberSshPublicKey } from "../workspaces/ssh-keygen.js";
 import { memberDir } from "../../files/layout.js";
 
 export interface MemberAssetsMigrationReport {

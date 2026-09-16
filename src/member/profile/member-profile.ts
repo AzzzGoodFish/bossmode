@@ -2,9 +2,9 @@
  * persona.md — literal free-form Markdown. Member identity lives in the database.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { memberDir, memberProfilePath, memberSkillsDir, memberExtensionsDir, memberArchiveDir } from "../files/layout.js";
-import { getDatabase } from "../data/database.js";
-import { logger } from "../kernel/logger.js";
+import { memberDir, memberProfilePath, memberSkillsDir, memberExtensionsDir, memberArchiveDir } from "../../files/layout.js";
+import { getDatabase } from "../../data/database.js";
+import { logger } from "../../kernel/logger.js";
 
 export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 

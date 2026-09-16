@@ -1,10 +1,10 @@
 /** Member workspace metadata is authoritative in the bound core database. */
-import { getDatabase } from "../data/database.js";
-import { WorkspacesRepository } from "../data/repositories/workspace-settings.js";
+import { getDatabase } from "../../data/database.js";
+import { WorkspacesRepository } from "../../data/repositories/workspace-settings.js";
 function repository(): WorkspacesRepository { return new WorkspacesRepository(getDatabase()); }
 import { join } from "node:path";
-import { memberDir } from "../files/layout.js";
-import type { OriginalWorkspace, SshWorkspace, WorkspaceEntry, WorkspaceRegistry } from "../data/types.js";
+import { memberDir } from "../../files/layout.js";
+import type { OriginalWorkspace, SshWorkspace, WorkspaceEntry, WorkspaceRegistry } from "../../data/types.js";
 
 export type { OriginalWorkspace, SshWorkspace, WorkspaceEntry, WorkspaceRegistry };
 

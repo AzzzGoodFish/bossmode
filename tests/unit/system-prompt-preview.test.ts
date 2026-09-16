@@ -41,7 +41,7 @@ describe("member system-prompt preview", () => {
     // contract test in system-prompt-final.test.ts locks the full assembly).
     expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);
     // Batch 7 P1: session cwd = active workspace root (original → member dir).
-    const { activeWorkspaceRoot } = await import("../../src/member/workspace-registry.js");
+    const { activeWorkspaceRoot } = await import("../../src/member/workspaces/workspace-registry.js");
     const sessionCwd = activeWorkspaceRoot(memberId);
     expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}\n`)).toBe(true);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);

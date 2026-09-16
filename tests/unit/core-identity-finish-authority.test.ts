@@ -10,7 +10,7 @@ import { resolveRoomMember } from "../../src/member/room-member-resolver.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 import { TemplateRepository } from "../../src/data/repositories/templates.js";
 import { readTemplateBody } from "../../src/data/upgrade/template-files.js";
-import { readMemberProfile } from "../../src/member/member-profile.js";
+import { readMemberProfile } from "../../src/member/profile/member-profile.js";
 import type { Database } from "../../src/data/database.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 

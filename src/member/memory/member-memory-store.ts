@@ -5,9 +5,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { memberDir } from "../files/layout.js";
-import { scopeDirName, parseScopeId, type ScopeId } from "../shared/conversation-ref.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "./document-assets.js";
+import { memberDir } from "../../files/layout.js";
+import { scopeDirName, parseScopeId, type ScopeId } from "../../shared/conversation-ref.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "../assets/document-assets.js";
 import {
   AssetBudgetError,
   PRINCIPLES_TEMPLATE,
@@ -16,7 +16,7 @@ import {
 } from "./principles-store.js";
 import {
   MAINLINE_TEMPLATE,
-} from "../chat/mainline-store.js";
+} from "../../chat/mainline-store.js";
 import { getMemoryBudget } from "./memory-budgets.js";
 
 export type MemoryLayer = "persona" | "principles" | "mainline";

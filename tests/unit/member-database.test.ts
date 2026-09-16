@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { MemberRecord } from "../../src/member/member-registry.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 import * as registry from "../../src/member/member-registry.js";
-import { MemberArchiveService } from "../../src/member/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
 import { rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;

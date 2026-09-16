@@ -16,7 +16,7 @@ it("captures mention target IDs before attachment IO while refreshing the sender
   const gate = new Promise<void>(r => { release = r; });
   processAttachments.mockImplementation(async () => { await gate; return []; });
   const { handleToolCallback, loadScopeMessages } = await import("../../src/agent/tools/tools.js");
-  const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+  const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
   const router = await import("../../src/communication/router.js");
   const activate = vi.fn();
   const stop = router.initRouter({mention:activate});

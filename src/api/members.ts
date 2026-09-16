@@ -1,6 +1,6 @@
 import { postMessage } from "../communication/message-bus.js";
 import { archiveMember } from "../member/archive/member-archive-service.js";
-import { updateProfileForMember, InvalidProfileError } from "../member/member-profile-update.js";
+import { updateProfileForMember, InvalidProfileError } from "../member/profile/member-profile-update.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
@@ -20,18 +20,18 @@ import {
   MemberNotFoundError,
   type MemberRecord,
 } from "../member/member-registry.js";
-import { readMemoryLayer, readMemoryLayerInfo } from "../member/member-memory-store.js";
+import { readMemoryLayer, readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import * as mainlineStore from "../chat/mainline-store.js";
-import * as principlesStore from "../member/principles-store.js";
+import * as principlesStore from "../member/memory/principles-store.js";
 import {
   readAllDmMessages,
   getLatestDmSeq,
 } from "../chat/dm-message-store.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp/mcp-settings.js";
-import { listMemberExtensions } from "../member/member-extensions.js";
-import { listMemberSkills } from "../member/skill-catalog.js";
-import { activeWorkspaceRoot, listWorkspaces } from "../member/workspace-registry.js";
-import { readMemberSshPublicKey } from "../member/ssh-keygen.js";
+import { listMemberExtensions } from "../member/assets/member-extensions.js";
+import { listMemberSkills } from "../member/skills/skill-catalog.js";
+import { activeWorkspaceRoot, listWorkspaces } from "../member/workspaces/workspace-registry.js";
+import { readMemberSshPublicKey } from "../member/workspaces/ssh-keygen.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../shared/conversation-ref.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/orchestrator/agent-manager.js";
 import * as roomStore from "../chat/room-store.js";
@@ -39,7 +39,7 @@ import * as messageStore from "../chat/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
 import { readConfig } from "../config/config.js";
 import type { RoomMessage } from "../kernel/types.js";
-import { readMemberProfile } from "../member/member-profile.js";
+import { readMemberProfile } from "../member/profile/member-profile.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -577,7 +577,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { readMemberProfile } = await import("../member/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+    const { readMemberProfile } = await import("../member/profile/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -644,7 +644,7 @@ addRoute("GET", "/api/members/:id/skills", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { listMemberSkills } = await import("../member/skill-catalog.js");
+    const { listMemberSkills } = await import("../member/skills/skill-catalog.js");
     sendJson(res, 200, { skills: listMemberSkills(m.id) });
   } catch (err) {
     const e = errCode(err);
@@ -668,7 +668,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     if (layer === "profile") {
-      const { readMemberProfile } = await import("../member/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+      const { readMemberProfile } = await import("../member/profile/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
       const profile = readMemberProfile(m.id);
       sendJson(res, 200, {
         layer: "profile",

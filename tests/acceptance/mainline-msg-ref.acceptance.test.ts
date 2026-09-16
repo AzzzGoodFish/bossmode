@@ -72,7 +72,7 @@ describe("Acceptance: mainline msg refs + DM jump (体验批②)", () => {
     const sent = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/messages`, { token, body: { content: "room decision msg" } });
     const msg = JSON.parse(sent.body);
 
-    const ml = await import("../../src/member/member-memory-store.js");
+    const ml = await import("../../src/member/memory/member-memory-store.js");
     ml.writeMemoryLayer(memberId, "mainline", `## Focus\nX\n\n## Dynamic Index\n- msg:#${msg.seq} — decision\n`, { type: "user" }, { scopeId: roomScope });
 
     const res = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/members/pm/mainline`, { token });

@@ -84,7 +84,7 @@ it("reconciles a rename while handle construction is awaiting", async () => {
   try {
     const building = manager.buildMemberAgentSession(member.id, scope);
     await entered.promise;
-    const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
     const next = `Constructed-${randomUUID()}`;
     updateProfileForMember(member.id, { name: next });
     release.resolve();
@@ -100,7 +100,7 @@ it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name i
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { postMessage } = await import("../../src/communication/message-bus.js");
-  const { updateProfileForMember } = await import("../../src/member/member-profile-update.js");
+  const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
   const suffix = randomUUID().slice(0, 6);
   const own = reg.createMember({ name: `Queued-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
   const peer = reg.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });

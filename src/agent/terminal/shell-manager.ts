@@ -16,7 +16,7 @@ import { memberRuntimeAllowed } from "../orchestrator/runtime-admission.js";
  * Known limit (documented in guide): a shell started inside a terminal does
  * not emit markers — the outer exec stays "running" until it returns.
  */
-import { getWorkspace, type SshWorkspace } from "../../member/workspace-registry.js";
+import { getWorkspace, type SshWorkspace } from "../../member/workspaces/workspace-registry.js";
 import { logger } from "../../kernel/logger.js";
 
 export const SHELL_COLS = 160;
@@ -362,7 +362,7 @@ async function createShellInternal(args: {
   if (args.workspace && !ws) {
     return { ok: false, error: `Workspace not found: ${args.workspace}` };
   }
-  const workspace = ws ?? (await import("../../member/workspace-registry.js")).getActiveWorkspace(args.memberId);
+  const workspace = ws ?? (await import("../../member/workspaces/workspace-registry.js")).getActiveWorkspace(args.memberId);
   const id = newShellId();
   try {
     let shell: LiveShell;

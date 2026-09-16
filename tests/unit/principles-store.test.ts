@@ -16,14 +16,14 @@ afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("principles-store", () => {
   it("returns empty revision 0 for missing principles", async () => {
-    const { readPrinciples } = await import("../../src/member/principles-store.js");
+    const { readPrinciples } = await import("../../src/member/memory/principles-store.js");
     const result = readPrinciples("room-a", "member", "rm_1");
     expect(result.content).toBe("");
     expect(result.revision).toBe(0);
   });
 
   it("writes metadata and increments revision", async () => {
-    const { writePrinciples, readPrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, readPrinciples } = await import("../../src/member/memory/principles-store.js");
     const saved = writePrinciples({ roomId: "room-a", scope: "room", content: "## Rules\n- One", actor: { type: "member", memberId: "rm_1", name: "pm" }, reason: "initial" });
     expect(saved.revision).toBe(1);
     expect(saved.contentLength).toBe(saved.content.length);
@@ -33,14 +33,14 @@ describe("principles-store", () => {
   });
 
   it("requires a non-empty reason on write and edit", async () => {
-    const { writePrinciples, editPrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, editPrinciples } = await import("../../src/member/memory/principles-store.js");
     expect(() => writePrinciples({ roomId: "room-a", scope: "room", content: "x", actor: { type: "member" }, reason: "" })).toThrow(/reason is required/);
     writePrinciples({ roomId: "room-a", scope: "room", content: "alpha", actor: { type: "member" }, reason: "seed" });
     expect(() => editPrinciples({ roomId: "room-a", scope: "room", oldText: "alpha", newText: "beta", actor: { type: "member" }, reason: "  " })).toThrow(/reason is required/);
   });
 
   it("edits exactly one match", async () => {
-    const { writePrinciples, editPrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, editPrinciples } = await import("../../src/member/memory/principles-store.js");
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "alpha beta", actor: { type: "member", memberId: "rm_1" }, reason: "seed" });
     const edited = editPrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", oldText: "beta", newText: "gamma", actor: { type: "member", memberId: "rm_1" }, reason: "user feedback" });
     expect(edited.content).toBe("alpha gamma");
@@ -48,14 +48,14 @@ describe("principles-store", () => {
   });
 
   it("rejects zero and multiple edit matches", async () => {
-    const { writePrinciples, editPrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, editPrinciples } = await import("../../src/member/memory/principles-store.js");
     writePrinciples({ roomId: "room-a", scope: "room", content: "x x", actor: { type: "member" }, reason: "seed" });
     expect(() => editPrinciples({ roomId: "room-a", scope: "room", oldText: "z", newText: "a", actor: { type: "member" }, reason: "r" })).toThrow(/not found/);
     expect(() => editPrinciples({ roomId: "room-a", scope: "room", oldText: "x", newText: "a", actor: { type: "member" }, reason: "r" })).toThrow(/multiple/);
   });
 
   it("enforces per-scope budgets (member 4K / room 8K)", async () => {
-    const { writePrinciples, PRINCIPLES_MEMBER_MAX_CHARS, PRINCIPLES_ROOM_MAX_CHARS } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, PRINCIPLES_MEMBER_MAX_CHARS, PRINCIPLES_ROOM_MAX_CHARS } = await import("../../src/member/memory/principles-store.js");
     expect(PRINCIPLES_MEMBER_MAX_CHARS).toBe(4_000);
     expect(PRINCIPLES_ROOM_MAX_CHARS).toBe(8_000);
     expect(() => writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "x".repeat(4_001), actor: { type: "member" }, reason: "r" })).toThrow(/exceed its budget/);
@@ -64,7 +64,7 @@ describe("principles-store", () => {
   });
 
   it("budget error carries current full content for same-turn curation", async () => {
-    const { writePrinciples, AssetBudgetError } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, AssetBudgetError } = await import("../../src/member/memory/principles-store.js");
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "existing rules", actor: { type: "member" }, reason: "seed" });
     try {
       writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "y".repeat(5_000), actor: { type: "member" }, reason: "too big" });
@@ -76,12 +76,12 @@ describe("principles-store", () => {
       expect(err.message).toMatch(/Curate now/);
       // Failed write must not persist
     }
-    const { readPrinciples } = await import("../../src/member/principles-store.js");
+    const { readPrinciples } = await import("../../src/member/memory/principles-store.js");
     expect(readPrinciples("room-a", "member", "rm_1").content).toBe("existing rules");
   });
 
   it("grandfathered over-budget content is flagged, not cut; a curating write is accepted", async () => {
-    const { writePrinciples, readPrinciplesWithBudget, editPrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples, readPrinciplesWithBudget, editPrinciples } = await import("../../src/member/memory/principles-store.js");
     // Simulate a legacy 20K-era asset by writing under the limit then inflating the file on disk
     writePrinciples({ roomId: "room-a", scope: "member", memberId: "rm_1", content: "seed", actor: { type: "member" }, reason: "seed" });
     const path = join(tmpDir, "rooms", "room-a", "memory", "members", "rm_1", "principles.md");
@@ -99,7 +99,7 @@ describe("principles-store", () => {
   });
 
   it("stores a content snapshot and reason in history for every revision", async () => {
-    const { writePrinciples } = await import("../../src/member/principles-store.js");
+    const { writePrinciples } = await import("../../src/member/memory/principles-store.js");
     writePrinciples({ roomId: "room-a", scope: "room", content: "v1 content", actor: { type: "member", memberId: "rm_1" }, reason: "first" });
     writePrinciples({ roomId: "room-a", scope: "room", content: "v2 content", actor: { type: "user" }, reason: "user correction" });
     const { readFileSync } = await import("node:fs");
@@ -117,7 +117,7 @@ describe("principles-store", () => {
   });
 
   it("computes budget headers in the plan format", async () => {
-    const { computeAssetBudget, formatBudgetHeader } = await import("../../src/member/principles-store.js");
+    const { computeAssetBudget, formatBudgetHeader } = await import("../../src/member/memory/principles-store.js");
     expect(formatBudgetHeader(computeAssetBudget(1_340, 4_000))).toBe("34% — 1,340/4,000");
     expect(formatBudgetHeader(computeAssetBudget(19_900, 4_000))).toContain("498% — 19,900/4,000");
     expect(formatBudgetHeader(computeAssetBudget(19_900, 4_000))).toContain("pending curation");

@@ -6,7 +6,7 @@ import { checkPath, type PathPolicy } from "../../kernel/path-security.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
 import * as roomStore from "../../chat/room-store.js";
 import { memberDir } from "../../files/layout.js";
-import { readWorkspaces } from "../../member/workspace-registry.js";
+import { readWorkspaces } from "../../member/workspaces/workspace-registry.js";
 import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/room-store.js";
 import { chatScopeRoomId } from "../../shared/conversation-ref.js";
 import { getBossmodeDir } from "../../config/config.js";
