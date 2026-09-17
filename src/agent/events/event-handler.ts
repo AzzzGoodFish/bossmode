@@ -8,7 +8,7 @@ import { broadcastToAgentSubscribers } from "../../app/server/ws.js";
 import { refreshContextUsage } from "../orchestrator/agent-manager.js";
 import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
 import { getRoom } from "../../chat/conversations.js";
-import type { AgentStreamEvent } from "../runtime/types.js";
+import type { AgentStreamEvent } from "../types.js";
 import type { AgentStatus } from "../../kernel/types.js";
 import { limitRuntimeErrorEvent } from "../../kernel/runtime-error-limit.js";
 

@@ -218,7 +218,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
   it("SM-6: AgentHandle interface does not declare isWorking property", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const src = readFileSync(join(process.cwd(), "src/agent/runtime/types.ts"), "utf-8");
+    const src = readFileSync(join(process.cwd(), "src/agent/types.ts"), "utf-8");
 
     // Find the AgentHandle interface block
     const ifaceStart = src.indexOf("interface AgentHandle");

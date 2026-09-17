@@ -29,7 +29,7 @@ vi.mock("../../src/chat/message-bus.js", async (importOriginal) => {
  * - room / DM instances all key by their real scopeId
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentHandle, AgentStreamEvent } from "../../src/agent/runtime/types.js";
+import type { AgentHandle, AgentStreamEvent } from "../../src/agent/types.js";
 
 const handles: TestHandle[] = [];
 const { loggerError, loggerWarn, loggerInfo } = vi.hoisted(() => ({ loggerError: vi.fn(), loggerWarn: vi.fn(), loggerInfo: vi.fn() }));

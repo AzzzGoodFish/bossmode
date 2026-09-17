@@ -1,4 +1,4 @@
-import type { AgentStreamEvent, ContextUsage, TokenUsage } from "./types.js";
+import type { AgentStreamEvent, ContextUsage, TokenUsage } from "../types.js";
 
 function textFromMessage(msg: any): string {
   const content = msg?.content;

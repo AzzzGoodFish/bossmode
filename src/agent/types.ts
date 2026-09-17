@@ -1,10 +1,11 @@
 // ============================================================================
-// Agent Runtime Abstraction Layer V2
+// Agent runtime contracts — inputs, member snapshot config, handle, events,
+// tool info. Owned by the agent capability; no chat-kind branches here.
 // ============================================================================
 
-import type { AgentMemberConfig } from "../../kernel/types.js";
+import type { AgentMemberConfig } from "../kernel/types.js";
 
-// Re-export AgentMemberConfig as the member config type for runtimes
+// The member config type consumed by runtimes (name kept for existing callers).
 export type { AgentMemberConfig };
 
 // -- Runtime interface --

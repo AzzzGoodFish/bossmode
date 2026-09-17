@@ -25,7 +25,7 @@ vi.mock("../../src/chat/message-bus.js", async (importOriginal) => {
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentStreamEvent, CreateAgentOpts } from "../../src/agent/runtime/types.js";
+import type { AgentStreamEvent, CreateAgentOpts } from "../../src/agent/types.js";
 
 const state = vi.hoisted(() => ({
   promptImpl: vi.fn(async (_message: string) => {}),

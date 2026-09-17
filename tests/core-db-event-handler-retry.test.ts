@@ -8,7 +8,7 @@ const messagesMigration = getMigration("core-messages-v1");
 const eventSourceMigration = getMigration("core-event-source-v1");
 import { appendAgentEvent, readAgentEvents, readStats } from "../src/data/repositories/event-repository.js";
 import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/agent/events/event-handler.js";
-import type { AgentStreamEvent } from "../src/agent/runtime/types.js";
+import type { AgentStreamEvent } from "../src/agent/types.js";
 
 const transport = vi.hoisted(() => ({ agent: vi.fn(), refresh: vi.fn(), knowledge: vi.fn() }));
 vi.mock("../src/app/server/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));

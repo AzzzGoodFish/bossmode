@@ -23,7 +23,7 @@ vi.mock("../../src/chat/message-bus.js", async (importOriginal) => {
 });
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentHandle, AgentStreamEvent } from "../../src/agent/runtime/types.js";
+import type { AgentHandle, AgentStreamEvent } from "../../src/agent/types.js";
 
 let availableModels: Array<{ ref: string }>;
 let exportedCalls: any[];

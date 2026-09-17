@@ -5,7 +5,7 @@ import { createAssistantMessageEventStream, type AssistantMessage } from "@earen
 import { Type } from "typebox";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { PiSdkRuntime } from "../../src/agent/runtime/pi-sdk.js";
-import type { RuntimePromptDispatch } from "../../src/agent/runtime/types.js";
+import type { RuntimePromptDispatch } from "../../src/agent/types.js";
 
 // Real installed SDK, real SQL, and an explicitly injected in-process model runtime.
 // No private SDK fields, provider/account access, sockets, or hand-written SDK history.

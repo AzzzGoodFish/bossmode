@@ -49,7 +49,7 @@ import {
 } from "./activation-context.js";
 import type { AgentHistoryEvent } from "../events/event-handler.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../runtime/types.js";
+import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { exportPiConfigForMember } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../../config/models.js";
@@ -1978,9 +1978,9 @@ export function getMemberInstances(memberName: string): Array<{
   runtime: string;
   pid?: number;
   spawnArgs?: string[];
-  runtimeParams?: import("../runtime/types.js").AgentRuntimeParams;
+  runtimeParams?: import("../types.js").AgentRuntimeParams;
 }> {
-  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("../runtime/types.js").AgentRuntimeParams }> = [];
+  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("../types.js").AgentRuntimeParams }> = [];
   for (const instance of instances.values()) {
     if (instance.agentName === memberName || instance.memberId === memberName) {
       const roomId = instance.roomId;
