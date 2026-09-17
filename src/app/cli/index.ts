@@ -146,7 +146,7 @@ async function cmdOn(flags: Record<string, string>): Promise<void> {
   if (!/^\d+$/.test(port) || Number(port)<1 || Number(port)>65535) throw new Error("Invalid listen port");
 
   // Fork daemon process with IPC channel, stdout/stderr → log file
-  const serverModule = join(__dirname, "../server/daemon.js");
+  const serverModule = join(__dirname, "../daemon.js");
   const logPath = join(getBossmodeDir(), "bossmode.log");
   const logFd = openSync(logPath, "a");
 

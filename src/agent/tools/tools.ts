@@ -18,7 +18,7 @@ import { logger } from "../../kernel/logger.js";
 import { processAgentAttachments } from "../orchestrator/agent-attachments.js";
 import * as attachmentStore from "../../files/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
-import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../../kernel/attachments.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../../files/attachments.js";
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;

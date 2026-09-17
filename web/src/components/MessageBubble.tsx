@@ -6,7 +6,7 @@ import { copyText } from "../utils/clipboard";
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
-import { inferAttachmentPreviewType } from "../../../src/kernel/attachments";
+import { inferAttachmentPreviewType } from "../../../src/files/attachments";
 
 interface MessageBubbleProps {
   sender: string;

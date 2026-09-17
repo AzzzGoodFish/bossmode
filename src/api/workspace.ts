@@ -18,7 +18,7 @@ import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-res
 import { getModelCredentialProfile } from "../config/models.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import * as attachmentStore from "../files/attachment-store.js";
-import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
+import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../files/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp.js";
 

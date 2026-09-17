@@ -375,7 +375,7 @@ export interface Room {
 
 // -- Message --
 
-import type { RoomMessageAttachment } from "./attachments.js";
+import type { RoomMessageAttachment } from "../files/attachments.js";
 
 export interface RoomMessage {
   id: string;
