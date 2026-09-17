@@ -16,7 +16,6 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 import { join } from "node:path";
 import { logger } from "../../kernel/logger.js";
 import { resolveGlobalSkillPaths } from "../../member/skills.js";
-import { activeWorkspaceRoot } from "../../member/workspaces.js";
 import { resolveRoomMember } from "../../member/room-member-resolver.js";
 
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
@@ -49,7 +48,7 @@ import {
 } from "./activation-context.js";
 import type { AgentHistoryEvent } from "../events.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../types.js";
+import type { AgentHandle, AgentStreamEvent, AgentMemberConfig, AgentMemberSnapshot } from "../types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { exportPiConfigForMember } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../../config/models.js";
@@ -87,6 +86,7 @@ export type { SessionSources } from "../instance.js";
 
 let registry: RuntimeRegistry | null = null;
 let promptSource: ((memberId: string) => MemberPromptSource) | null = null;
+let memberSnapshotSource: ((memberId: string) => AgentMemberSnapshot | null) | null = null;
 function compileForMember(memberId: string) {
   if (!promptSource) throw new Error("Member prompt source is not connected");
   return compileMemberPrompt(promptSource(memberId));
@@ -94,13 +94,14 @@ function compileForMember(memberId: string) {
 let shutdownSettlement: Promise<void> | null = null;
 let shutdownRunning = false;
 
-export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource): void {
+export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
   if(registry&&(instances.size||pendingCreations.size||inputPumps.size))throw new Error("Runtime initialization requires completed teardown");
   recoverRuntimeInputState();
   shutdownSettlement = null; openRuntimeAdmission();
   registry = reg;
   promptSource = loadPrompt;
+  memberSnapshotSource = loadSnapshot;
 }
 
 /** Called only after HTTP/PID publication, never during historical import. */
@@ -855,11 +856,12 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       return null;
     }
 
-    const member = memberRecordToConfig(memberId);
-    if (!member) {
+    const snapshot = memberSnapshotSource?.(memberId) ?? null;
+    if (!snapshot) {
       logger.error("agent", "member not found", { memberId });
       return null;
     }
+    const member = snapshot.config;
     if (!isMemberConfigured(member)) {
       logger.error("agent", "member unconfigured", { member: member.name, memberId });
       return null;
@@ -872,12 +874,11 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
     const compiled = compileForMember(memberId);
     setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     clearStaleMounts(memberId);
-    const skills = resolveSkills(member);
-    const skillPaths = resolveGlobalSkillPaths(skills);
-    const cwd = activeWorkspaceRoot(memberId);
+    const skills = member.skills ?? [];
+    const skillPaths = snapshot.skillPaths;
+    const cwd = snapshot.workspaceRoot;
     const sessionDir = mainSessionDirectory(memberId);
-    const savedSession = sessionStore.getCurrentSession(memberId);
-    const resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
+    const resumeSession = snapshot.resumeSession;
     const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
       if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session });
     };

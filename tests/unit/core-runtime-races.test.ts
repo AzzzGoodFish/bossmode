@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 import {it,expect,vi} from "vitest";
 import {setupTestWorkspace,createTestServer,closeTestServer,createMockRoom,loginAndGetToken,jsonRequest} from "../helpers/test-server.js";
 import {resetMocks,mockPromptFn,mockAbortFn,MockRuntime,emitMockEvent} from "../helpers/mock-runtime.js";
@@ -39,7 +39,7 @@ it("shutdown during creation preserves a safe pending input and restart can exec
     await f.post("survives shutdown");await vi.waitFor(()=>expect(spy).toHaveBeenCalledTimes(1));
     const stop=shutdownAll();gate.release();await stop;
     expect(getDatabase().get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND status='pending'",f.room.id)?.n).toBe(1);expect(debts(f.room.id,f.id)).toHaveLength(1);expect(mockPromptFn).not.toHaveBeenCalled();
-    const registry=new RuntimeRegistry();registry.register(new MockRuntime("pi-cli"));initAgentManager(registry, loadMemberPromptSource);resumePendingRuntimeInputs();
+    const registry=new RuntimeRegistry();registry.register(new MockRuntime("pi-cli"));initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);resumePendingRuntimeInputs();
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));expect(String(mockPromptFn.mock.calls[0][0])).toContain("survives shutdown");
   }finally{gate.release();spy.mockRestore();await closeTestServer(f.server);}
 });

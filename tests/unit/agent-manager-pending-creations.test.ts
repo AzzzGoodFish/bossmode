@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
@@ -119,7 +119,7 @@ describe("agent-manager pending creation dedup", () => {
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
     await shutdownAll();
-    initAgentManager(reg, loadMemberPromptSource);
+    initAgentManager(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   it.each(["room:room1", "dm:mem_developer", "mm:mem_developer-mem_qa"])("assembles the same global member assets from %s", async scope => {

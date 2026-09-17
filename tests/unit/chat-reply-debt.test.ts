@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 // Reply-debt turns without a chat call: nothing is delivered, the silence is
 // made visible as a system note. The final-text fallback (autoDelivered) was
@@ -73,7 +73,7 @@ async function setup() {
   };
   const registry = new RuntimeRegistry();
   registry.register(runtime as any);
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 }
 
 /** Messages posted as the member itself — must stay empty when chat was not called. */

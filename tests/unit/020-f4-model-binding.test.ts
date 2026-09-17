@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 /**
  * F4 (2026-08-04, fish live report): model switch must persist to the 0.20
@@ -226,7 +226,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const room = await makeStampedRoom(member.id);
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource);
+    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     (await import("../../src/chat/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
@@ -252,7 +252,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource);
+    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(1);

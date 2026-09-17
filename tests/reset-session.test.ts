@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../src/app/member-actions.js";
 import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 
 import { mainSessionDirectory } from "../src/files/layout.js";
@@ -56,7 +56,7 @@ beforeEach(() => {
   runtime = new MockRuntime("pi-cli");
   const registry = new RuntimeRegistry();
   registry.register(runtime);
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
   // The composition root connects agent event facts to the websocket transport.
   setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));
   setStatusSink((target, payload) => vi.mocked(broadcastToRoom)(target, payload));

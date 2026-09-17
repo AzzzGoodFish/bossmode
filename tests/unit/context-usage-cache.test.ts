@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
@@ -116,7 +116,7 @@ describe("agent-manager context usage cache", () => {
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
     await shutdownAll();
-    initAgentManager(reg, loadMemberPromptSource);
+    initAgentManager(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
     await activateAgent("room1", "developer");
   });
 

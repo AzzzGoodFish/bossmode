@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 import { it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { setupTestWorkspace } from "../helpers/test-server.js";
@@ -68,7 +68,7 @@ it("regression: a rename does not crash the next batch of an instance born in a 
   };
   const runtimes = new RuntimeRegistry();
   runtimes.register(runtime as any);
-  manager.initAgentManager(runtimes, loadMemberPromptSource);
+  manager.initAgentManager(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
   const stopRouter = manager.wireMentionRouter();
   try {
     // First message: bob is activated and his instance is born in the pair scope.

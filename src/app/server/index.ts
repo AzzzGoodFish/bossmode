@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../member-actions.js";
 import { readConfig, writeConfig } from "../../config/settings.js";
 import { ensureDirectory } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
@@ -66,7 +66,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeConfigPatches = wireMemberConfigPatches();

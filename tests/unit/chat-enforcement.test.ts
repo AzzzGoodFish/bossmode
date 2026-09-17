@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
@@ -69,7 +69,7 @@ async function setup() {
   };
   const registry = new RuntimeRegistry();
   registry.register(runtime as any);
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 }
 
 beforeEach(async () => {

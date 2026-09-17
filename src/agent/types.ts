@@ -8,6 +8,19 @@ import type { AgentMemberConfig } from "../kernel/types.js";
 // The member config type consumed by runtimes (name kept for existing callers).
 export type { AgentMemberConfig };
 
+/** Build material for a member session, assembled outside the agent core.
+ *  The app layer reads member state; agent code consumes only this snapshot. */
+export interface AgentMemberSnapshot {
+  /** Effective member config at assembly time (the memberRecordToConfig projection). */
+  config: AgentMemberConfig;
+  /** Resolved absolute skill directories. */
+  skillPaths: string[];
+  /** Active workspace root (cwd for the runtime). */
+  workspaceRoot: string;
+  /** Stored session to resume, if any. */
+  resumeSession?: { sessionId: string; sessionFile: string };
+}
+
 // -- Runtime interface --
 
 export interface AgentRuntime {

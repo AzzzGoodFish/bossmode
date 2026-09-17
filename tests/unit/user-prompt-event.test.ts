@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 import { writeConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
@@ -31,7 +31,7 @@ describe("user_prompt activity event", () => {
     postMessage("room1", "user", "@developer hi", ["developer"]);
     const registry = new RuntimeRegistry();
     registry.register(new MockRuntime("pi-cli"));
-    initAgentManager(registry, loadMemberPromptSource);
+    initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
     setMockPromptFn(vi.fn(async () => {}));
     // The composition root connects agent event facts to the websocket transport.
     setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));

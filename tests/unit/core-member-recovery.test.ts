@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn, MockRuntime } from "../helpers/mock-runtime.js";
@@ -34,7 +34,7 @@ it("restart resumes pending work from every chat through one rebuilt instance", 
     const stop = shutdownAll(); gate.release(); await stop;
     mockPromptFn.mockImplementation(async () => { /* prompts run free after restart */ });
     const registry = new RuntimeRegistry(); registry.register(new MockRuntime("pi-cli"));
-    initAgentManager(registry, loadMemberPromptSource);
+    initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
     resumePendingRuntimeInputs();
 
     await vi.waitFor(() => expect(mockPromptFn).toHaveBeenCalledTimes(3), { timeout: 15000 });

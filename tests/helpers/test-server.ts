@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 /** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
 import { beforeAll, afterAll } from "vitest";
@@ -114,7 +114,7 @@ export async function createTestServer(): Promise<TestServer> {
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime());
   registry.register(new MockRuntime("pi-cli"));
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 
   // Same mention-router as production — scope routing stays on one code path.
   const stopRouter = wireMentionRouter();

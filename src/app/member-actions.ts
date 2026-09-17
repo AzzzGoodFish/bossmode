@@ -5,8 +5,11 @@ import { getBossmodeDir, memberDir, membersRoot } from "../files/layout.js";
 import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
 import { ensureDmScope } from "../chat/conversations.js";
-import { getMember, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, normalizeMemberName, validateMemberName, deleteMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
-import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential } from "../member/workspaces.js";
+import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, normalizeMemberName, validateMemberName, deleteMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
+import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot } from "../member/workspaces.js";
+import { resolveGlobalSkillPaths } from "../member/skills.js";
+import { getCurrentSession } from "../member/sessions.js";
+import type { AgentMemberSnapshot } from "../agent/types.js";
 import { writeMemberProfileSkeleton } from "../member/profile.js";
 
 function insertWithDm(record: MemberRecord): void {
@@ -74,6 +77,36 @@ export function deleteMemberForTests(id: string): void {
 
 import { MemberArchiveService } from "../member/archive.js";
 import { quiesceMember } from "../agent/orchestrator/agent-manager.js";
+
+/** Session build material for the agent core: member config projection, resolved
+ *  skill paths, workspace root and the stored session to resume. Assembled here
+ *  so agent code never imports member state directly. */
+export function loadAgentMemberSnapshot(memberId: string): AgentMemberSnapshot | null {
+  const rec = getMember(memberId);
+  if (!rec) return null;
+  const eff = getMemberConfiguration(memberId);
+  const skills = eff.skills || [];
+  const savedSession = getCurrentSession(memberId);
+  return {
+    config: {
+      id: rec.id,
+      name: rec.name,
+      type: "agent",
+      agent: rec.agentTemplate,
+      runtime: "pi-cli",
+      model: eff.model || undefined,
+      credentialId: eff.credentialId || undefined,
+      thinkingLevel: (eff.thinkingLevel as string) || "off",
+      skills,
+      mcpServers: eff.mcpServers || [],
+    },
+    skillPaths: resolveGlobalSkillPaths(skills),
+    workspaceRoot: activeWorkspaceRoot(memberId),
+    resumeSession: savedSession?.sessionId && savedSession.sessionFile
+      ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
+      : undefined,
+  };
+}
 import { detachMemberFromConversations } from "../chat/conversations.js";
 function memberArchives(): MemberArchiveService {
   return new MemberArchiveService(getDatabase(), getBossmodeDir(), { quiesce: quiesceMember, detachFromConversations: detachMemberFromConversations });

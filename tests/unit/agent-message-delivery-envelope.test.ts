@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 import { writeConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
@@ -28,7 +28,7 @@ beforeEach(() => {
   stampGlobalMemberIds(roomId, [memberId]);
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime("pi-cli"));
-  initAgentManager(registry, loadMemberPromptSource);
+  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 });
 afterEach(async () => {
   await shutdownAll();

@@ -1,4 +1,4 @@
-import { loadMemberPromptSource } from "../../src/app/member-actions.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
@@ -221,7 +221,7 @@ describe("agent-manager model hot switch", () => {
     vi.clearAllMocks();
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
-    manager.initAgentManager(registry as any, loadMemberPromptSource);
+    manager.initAgentManager(registry as any, loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   it("uses fast session.setModel path for same credential/provider model changes", async () => {
