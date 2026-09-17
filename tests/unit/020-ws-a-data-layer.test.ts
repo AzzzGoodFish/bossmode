@@ -9,8 +9,8 @@ import {
   parseScopeId,
   scopeDirName,
   parseScopeDirName,
-  instanceKey,
 } from "../../src/chat/conversations.js";
+import { instanceKey } from "../../src/agent/instance.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });

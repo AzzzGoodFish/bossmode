@@ -28,7 +28,7 @@ import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/me
 import { initRouter } from "../../chat/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../../app/server/ws.js";
 import { compileMemberPrompt, currentContractFingerprint, type MemberPromptSource } from "../prompt.js";
-import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversations.js";
+import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversations.js";
 import { listRoomsForMember } from "../../chat/conversations.js";
 import { getMember, getMemberConfiguration, applyMemberConfigPatch, type MemberRecord } from "../../member/identity.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
@@ -55,6 +55,30 @@ import { exportPiConfigForMember } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../../config/models.js";
 import { settleMemberShellWaits } from "../terminal/shell-manager.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/types.js";
+import {
+  cancelledCreations,
+  contextCompactionWarningCache,
+  contextUsageCache,
+  getMemberLiveStatus,
+  instanceKey,
+  instances,
+  isCompactUsageDrop,
+  memberSwitchGates,
+  pendingCreations,
+  pendingCreationsFor,
+  sessionPublishOwners,
+  settleMemberOperations,
+  shouldKeepCompactedMarker,
+  trackMemberOperation,
+  updateDispatchState,
+  type AgentInstance,
+  type DispatchState,
+  type PendingCredentialRefresh,
+  type PendingThinkingSwitch,
+  type SessionSources,
+} from "../instance.js";
+export { getMemberLiveStatus } from "../instance.js";
+export type { SessionSources } from "../instance.js";
 
 // -- Registry injection --
 
@@ -89,8 +113,6 @@ export function getRegistry(): RuntimeRegistry | null {
 }
 
 // -- Instance tracking --
-
-type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
 
 function formatRuntimeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -174,115 +196,6 @@ export function buildUnreadBacklogHint(backlog: RoomMessage[], opts?: { total?: 
   return `[Earlier in this room ${range}: ${senders}${eventClause}. Read them with chat_read (from_seq ${fromSeq}); reading marks them seen.]`;
 }
 
-interface PendingThinkingSwitch {
-  thinkingLevel: string;
-}
-
-interface PendingCredentialRefresh {
-  profileId: string;
-  providerSlug: string;
-  changeType: "profileUpdated" | "profileDeleted";
-}
-
-/** Start-time sources a live instance was built from: member config as
- *  applied at build, compiled prompts, skills, cwd, roster, runtime name.
- *  Refresh paths consume these instead of re-resolving config. */
-export interface SessionSources {
-  /** Member config as applied at instance build (model/credential/thinking of that moment). */
-  member: AgentMemberConfig;
-  compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[] };
-  skills: string[];
-  skillPaths: string[];
-  cwd: string;
-  roomMembers: string[];
-  runtimeName: string;
-}
-
-interface AgentInstance {
-  handle: AgentHandle;
-  /** ① B1: the chat currently being processed; one instance serves every chat. */
-  activeChat: { scopeId: string };
-  /** Conversation scope id: "room:<roomId>" | "dm:<memberId>". */
-  scopeId: ScopeId;
-  /** Room id when scope is room:*; empty string for dm. */
-  roomId: string;
-  memberId: string;
-  agentName: string; // current member name snapshot for display/mentions
-  sourceAgent: string;
-  status: AgentStatus;
-  dispatchState: DispatchState;
-  promptInFlight: boolean;
-  profilePromptDirty?: boolean;
-  pendingThinkingSwitch?: PendingThinkingSwitch;
-  pendingCredentialRefresh?: PendingCredentialRefresh;
-  hadErrorInTurn: boolean;
-  /** Last turn failure text for wait() error-idle wake. Cleared at next runPrompt start. */
-  lastTurnError: string | null;
-  /** Defer system error notice until final agent_end (suppress during willRetry). */
-  pendingErrorNotice: string | null;
-  lastMessageEndWasLength: boolean;
-  lengthContinuationPending: boolean;
-  lengthContinuationAttempted: boolean;
-  /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
-  compacting: boolean;
-  /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
-  turnActive: boolean;
-  /** Start-time session sources: exactly what this instance was built from —
-   *  member config, compiled prompts, skills, cwd, roster, runtime name.
-   *  Refresh/reload paths consume these instead of re-resolving config. */
-  sessionSources: SessionSources;
-  unsubscribe: () => void;
-  eventBuffer: AgentHistoryEvent[];
-  appliedModel: string;
-  appliedCredentialId?: string;
-  /** Live model switch in progress (design-model-switch-single-path-v1): the
-   * TARGET credential served to setModel's auth check before the applied
-   * binding flips. Set/cleared only by applyModelSwitchToInstance. */
-  /** Batch 6 §3: reload requested mid-run — flushed when the turn settles. */
-  pendingReload: string | null;
-}
-
-// Application continuations outlive SDK idle; keep their ownership until all
-// post-prompt/config work has settled, including fire-and-forget control work.
-const memberOperations = new Map<Promise<unknown>,string>();
-function trackMemberOperation<T>(memberId: string, operation:()=>Promise<T>): Promise<T> {
-  let resolve!: (value:T|PromiseLike<T>)=>void;
-  let reject!: (error:unknown)=>void;
-  const pending=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});
-  const settlement=pending.finally(()=>memberOperations.delete(settlement));
-  memberOperations.set(settlement,memberId);
-  try {operation().then(resolve,reject);}catch(error){reject(error);}
-  return settlement;
-}
-async function settleMemberOperations(memberId?: string): Promise<void> {
-  for (;;) {
-    const pending=[...memberOperations].filter(([,owner])=>memberId===undefined || owner===memberId).map(([operation])=>operation);
-    if (!pending.length) return;
-    // Execution/control failures are reported by their caller. Here only
-    // completion matters; SDK/resource cleanup failures are collected separately.
-    await Promise.allSettled(pending);
-  }
-}
-
-const instances = new Map<string, AgentInstance>();
-const cancelledCreations = new Set<string>();
-const sessionPublishOwners = new Map<string, object>();
-const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
-
-/** §10 interlock, ONE map: presence = a member model switch is in progress.
- * The promise resolves when that switch finishes (commit or rollback). It is
- * both the switch lock (synchronous has/set at switchMemberModel entry) and
- * the creation gate (creations wait for it to end before building). */
-const memberSwitchGates = new Map<string, Promise<void>>();
-
-/** §10: creations of this member already in flight (pendingCreations is keyed
- * by member after ① B1) — the switch awaits them so its instance snapshot is
- * complete. */
-function pendingCreationsFor(memberId: string): Array<Promise<AgentInstance | null>> {
-  const pending = pendingCreations.get(instanceKey(memberId));
-  return pending ? [pending] : [];
-}
-
 function roomScopeId(roomId: string): ScopeId {
   return scopeIdOf({ kind: "room", roomId });
 }
@@ -361,12 +274,6 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
   return Array.from(out);
 }
 
-/** ① B4: member-level live status — one runtime, one status, every chat. */
-export function getMemberLiveStatus(memberId: string): AgentStatus {
-  const instance = instances.get(instanceKey(memberId));
-  return instance ? instance.status : "inactive";
-}
-
 function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
   return memberId && memberId !== agentName ? { memberId } : {};
 }
@@ -392,17 +299,6 @@ function transition(
 /** ① B1: postMessage/transition target for a scope id — bare room id or dm:<id>. */
 function chatTargetOf(scopeId: string): string {
   return scopeId.startsWith("room:") ? scopeId.slice("room:".length) : scopeId;
-}
-
-function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
-  if (instance.dispatchState === next) return;
-  logger.info("agent", "dispatchStateTransition", {
-    member: instance.agentName,
-    from: instance.dispatchState,
-    to: next,
-    trigger,
-  });
-  instance.dispatchState = next;
 }
 
 function queueDepth(instance:AgentInstance):number{return memberPendingInputCount(instance.memberId);}
@@ -1719,25 +1615,6 @@ export function broadcastMemberStatus(roomId: string, memberRef: string): void {
 }
 
 // -- Context usage (cache-only API + idle refresh push) --
-
-const contextUsageCache = new Map<string, ContextUsage>();
-const contextCompactionWarningCache = new Set<string>();
-
-function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
-  if (!previous) return false;
-  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
-  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
-  const max = next.rawMaxTokens || previous.rawMaxTokens || 0;
-  const wasNearOrOverLimit = max > 0 ? previous.totalTokens >= max * 0.8 : previous.percentage >= 80;
-  return wasNearOrOverLimit && next.totalTokens <= previous.totalTokens * 0.25;
-}
-
-function shouldKeepCompactedMarker(previous: ContextUsage | undefined, next: ContextUsage): boolean {
-  if (!previous?.compacted) return false;
-  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
-  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
-  return next.totalTokens <= previous.totalTokens * 1.25;
-}
 
 export function getAgentContextUsage(roomId: string, memberRef: string): ContextUsage | null {
   const member = resolveRoomMember(roomId, memberRef);

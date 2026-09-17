@@ -722,12 +722,6 @@ export function parseScopeDirName(dirName: string, memberIdForDm: string): Conve
   return null;
 }
 
-/** Runtime instance table key: one runtime per member, wherever it serves (① B1 2026-09-15). */
-export function instanceKey(memberId: string): string {
-  if (!memberId) throw new Error("instanceKey requires memberId");
-  return memberId;
-}
-
 /** Wide member-id check: recognizes legacy `mem_<uuid>` and current `mem_<nanoid10>` ids. */
 export function isMemberId(id: string): boolean {
   return typeof id === "string" && /^mem_[A-Za-z0-9-]+$/.test(id);
