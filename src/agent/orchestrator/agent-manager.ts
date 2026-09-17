@@ -35,7 +35,7 @@ import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events.js";
 import { loadScopeMessages } from "../tools/tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../../member/runtime-state.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../instance.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,

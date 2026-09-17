@@ -7,12 +7,20 @@ export function wireConfiguration(): () => void {
 }
 
 import { onMemberProfileChanged } from "../member/profile.js";
+import { setGlobalConfigPatchObserver } from "../member/identity.js";
+import { markStaleMounts } from "../agent/instance.js";
 import { broadcastMemberProfileChanged } from "./server/ws.js";
 
 export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberProfileChanged(member => notifyMemberProfileChanged(member));
   const stopViews = onMemberProfileChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
+}
+
+/** Stale-mount bookkeeping rides the config-patch transaction (failure rolls back together). */
+export function wireMemberConfigPatches(): () => void {
+  setGlobalConfigPatchObserver((id, fields) => markStaleMounts(id, fields));
+  return () => setGlobalConfigPatchObserver(undefined);
 }
 
 import { connectConversationMembers } from "../chat/conversations.js";

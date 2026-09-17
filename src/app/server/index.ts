@@ -23,7 +23,7 @@ import { RuntimeRegistry } from "../../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/templates.js";
-import { wireConfiguration, wireMemberProfiles, wireConversationMembers, wireAgentEvents } from "../wire.js";
+import { wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireAgentEvents } from "../wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -69,6 +69,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   initAgentManager(registry, loadMemberPromptSource);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
+  const unsubscribeConfigPatches = wireMemberConfigPatches();
   const unsubscribeMembers = wireConversationMembers();
   const unsubscribeAgentEvents = wireAgentEvents();
 
@@ -125,6 +126,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     unsubscribeRouter();
     unsubscribeConfiguration();
     unsubscribeProfiles();
+    unsubscribeConfigPatches();
     unsubscribeAgentEvents();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);

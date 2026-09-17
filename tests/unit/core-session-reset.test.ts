@@ -7,7 +7,7 @@ import { getDatabase } from "../../src/data/database.js";
 import { resetAgentSession } from "../../src/agent/orchestrator/agent-manager.js";
 import * as sessions from "../../src/member/sessions.js";
 import * as rooms from "../../src/chat/conversations.js";
-import * as runtime from "../../src/member/runtime-state.js";
+import * as runtime from "../../src/agent/instance.js";
 import { updateMemberIdentity } from "../../src/member/identity.js";
 setupTestWorkspace();
 

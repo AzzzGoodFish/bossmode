@@ -13,6 +13,7 @@ if (!process.env.BOSSMODE_TEST_ROOT || !TEST_BOSSMODE_DIR) throw new Error("HTTP
 const servers = new Set<TestServer>();
 let storage: ReturnType<typeof coreFixture>;
 let stopProfiles: (() => void) | undefined;
+let stopConfigPatches: (() => void) | undefined;
 export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR!; }
 export function getTestWorkspace() {
   if (!storage) throw new Error("Test workspace has not been initialized");
@@ -24,12 +25,14 @@ export function setupTestWorkspace(): void {
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
     stopProfiles = (await import("../../src/app/wire.js")).wireMemberProfiles();
+    stopConfigPatches = (await import("../../src/app/wire.js")).wireMemberConfigPatches();
     const { getDefaultConfig, writeConfig } = await import("../../src/config/settings.js");
     const { hashPassword } = await import("../../src/api/auth.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
   });
   afterAll(async () => {
     stopProfiles?.();
+    stopConfigPatches?.();
     const errors: unknown[] = [];
     for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
     try { const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }

@@ -1,5 +1,4 @@
 import { getDatabase, type Database } from "../data/database.js";
-import { markStaleMounts } from "./runtime-state.js";
 import { newMemberId } from "../kernel/ids.js";
 import { validateArchivePath } from "../files/layout.js";
 import type { MemberGlobalConfig, MemberRecord } from "../data/types.js";
@@ -152,13 +151,21 @@ export function getMemberConfiguration(id: string): MemberGlobalConfig {
 }
 
 export function renameMember(id: string, name: string): MemberRecord { return updateMemberIdentity(id, { name }); }
+
+/** Runs inside the config-patch transaction: stale-mount bookkeeping stays atomic
+ *  with the patch (a failure rolls both back). Connected by the composition root
+ *  to the runtime checkpoint owner; member code never imports the agent. */
+export type GlobalConfigPatchObserver = (id: string, fields: string[]) => void;
+let globalConfigPatchObserver: GlobalConfigPatchObserver | undefined;
+export function setGlobalConfigPatchObserver(observer: GlobalConfigPatchObserver | undefined): void { globalConfigPatchObserver = observer; }
+
 export function applyMemberConfigPatch(id: string, patch: Record<string, unknown>): MemberRecord {
   return getDatabase().transaction(() => {
     requireMember(id);
     const keys = ["model", "credentialId", "thinkingLevel", "mcpServers"];
     const global = Object.fromEntries(Object.entries(patch).filter(([key]) => keys.includes(key)));
     if (Object.keys(global).length) updateMember(id, { global });
-    if ("mcpServers" in patch) markStaleMounts(id, ["mcpServers"]);
+    if ("mcpServers" in patch) globalConfigPatchObserver?.(id, ["mcpServers"]);
     return requireMember(id);
   });
 }

@@ -18,6 +18,8 @@ const memberSessionsMigration = getMigration("core-member-session-v1");
 const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1");
 const roomDescriptionMigration = getMigration("core-room-description-v1");
 import * as registry from "../../src/member/identity.js";
+import { setGlobalConfigPatchObserver } from "../../src/member/identity.js";
+import { markStaleMounts } from "../../src/agent/instance.js";
 import * as __registry_app_member_actions from "../../src/app/member-actions.js";
 import * as profile from "../../src/member/profile.js";
 import * as wizard from "../../src/app/upgrade/assets.js";
@@ -74,6 +76,7 @@ function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
     unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:2};
 }
 beforeEach(() => {
+  setGlobalConfigPatchObserver((id, fields) => markStaleMounts(id, fields));
   failRename = false; failSyncAfterRename = false; moved = false; forcedUUID = undefined; forcedIdDraw = undefined;
   root = process.env.BOSSMODE_DIR!;
   mkdirSync(join(root,"knowledge"), {recursive:true});

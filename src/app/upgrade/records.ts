@@ -22,7 +22,7 @@ import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "
 import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailability } from "../../member/mcp.js";
 import { importWorkspaceRegistry, importSshCredential } from "../../member/workspaces.js";
 import { isDeepStrictEqual } from "node:util";
-import { RuntimeRepository } from "../../data/repositories/runtime-repository.js";
+import { RuntimeRepository } from "../../agent/instance.js";
 import { executionScopeId, importExecutionAmbiguity } from "../../data/repositories/execution-identity.js";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
 

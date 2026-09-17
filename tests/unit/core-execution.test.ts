@@ -10,12 +10,12 @@ const executionMigration = getMigration("core-execution-v1");
 const memberSessionsMigration = getMigration("core-member-session-v1");
 const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1");
 import { importSessionAssociation, readSessionAssociation } from "../../src/member/sessions.js";
-import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
+import { RuntimeRepository } from "../../src/agent/instance.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
 import { importExecutionAmbiguity } from "../../src/data/repositories/execution-identity.js";
 import * as sessions from "../../src/member/sessions.js";
-import * as runtime from "../../src/member/runtime-state.js";
+import * as runtime from "../../src/agent/instance.js";
 import * as cursors from "../../src/chat/user-read-cursors.js";
 
 let sandbox: string;

@@ -195,3 +195,86 @@ export function shouldKeepCompactedMarker(previous: ContextUsage | undefined, ne
   if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
   return next.totalTokens <= previous.totalTokens * 1.25;
 }
+
+// -- Runtime checkpoints (member-level recovery metadata; ① B8 / C3) --
+// DB-owned state; module import never initializes storage.
+import { getDatabase } from "../data/database.js";
+import type { Database } from "../data/database.js";
+import type { MountStale, RuntimeStateEntry, RuntimeStateMap } from "../data/types.js";
+import { assertExecutionMember } from "../data/repositories/execution-identity.js";
+
+export type { MountStale, RuntimeStateEntry, RuntimeStateMap };
+
+interface RuntimeCheckpointRow {
+  member_id: string; contract_fingerprint: string | null;
+  contract_version: number | null; drift_notified: number | null; stale_since: number | null;
+}
+
+/** One checkpoint per member (① B8 / C3). Exported for the upgrade importer, which runs against its own database handle. */
+export class RuntimeRepository {
+  constructor(private readonly db: Database) {}
+  private map(r: RuntimeCheckpointRow): RuntimeStateEntry {
+    return {
+      ...(r.contract_fingerprint === null ? {} : {contractFingerprint: r.contract_fingerprint}),
+      ...(r.contract_version === null ? {} : {contractVersion: r.contract_version}),
+      ...(r.drift_notified === null ? {} : {driftNotified: r.drift_notified}),
+      ...(r.stale_since === null ? {} : {staleMounts: {since: r.stale_since,
+        fields: this.db.all<{field: string}>("SELECT field FROM runtime_stale_fields WHERE member_id=? ORDER BY ordinal", r.member_id).map(f => f.field)}}),
+    };
+  }
+  get(memberId: string): RuntimeStateEntry {
+    const r = this.db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
+    return r ? this.map(r) : {};
+  }
+  list(): RuntimeStateMap {
+    return Object.fromEntries(this.db.all<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints")
+      .map(r => [r.member_id, this.map(r)]));
+  }
+  /** Pure import with the source's timestamp (or importer-declared source mtime). */
+  importEntry(memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
+    this.db.transaction(tx => {
+      assertExecutionMember(tx, memberId);
+      tx.run(`INSERT INTO runtime_checkpoints(member_id,contract_fingerprint,contract_version,drift_notified,stale_since,updated_at)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET contract_fingerprint=excluded.contract_fingerprint,
+        contract_version=excluded.contract_version, drift_notified=excluded.drift_notified, stale_since=excluded.stale_since, updated_at=excluded.updated_at`,
+      memberId, entry.contractFingerprint ?? null, entry.contractVersion ?? null, entry.driftNotified ?? null, entry.staleMounts?.since ?? null, updatedAt);
+      tx.run("DELETE FROM runtime_stale_fields WHERE member_id=?", memberId);
+      [...new Set(entry.staleMounts?.fields ?? [])].forEach((field, i) => {
+        tx.run("INSERT INTO runtime_stale_fields(member_id,field,ordinal) VALUES(?,?,?)", memberId, field, i);
+      });
+    });
+  }
+  update(memberId: string, change: (current: RuntimeStateEntry) => RuntimeStateEntry | undefined, updatedAt: number): void {
+    this.db.transaction(() => {
+      const next = change(this.get(memberId));
+      if (next) this.importEntry(memberId, next, updatedAt);
+    });
+  }
+  clear(memberId: string): void {
+    this.db.run("DELETE FROM runtime_checkpoints WHERE member_id=?", memberId);
+  }
+}
+
+function runtimeRepository(): RuntimeRepository { return new RuntimeRepository(getDatabase()); }
+
+export function readRuntimeState(): RuntimeStateMap { return runtimeRepository().list(); }
+export function getRuntimeStateEntry(memberId: string): RuntimeStateEntry { return runtimeRepository().get(memberId); }
+export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEntry): void {
+  runtimeRepository().update(memberId, current => ({...current, ...patch}), Date.now());
+}
+export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
+  updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
+}
+export function markDriftNotified(memberId: string, version: number): void {
+  updateRuntimeStateEntry(memberId, {driftNotified: version});
+}
+export function markStaleMounts(memberId: string, fields: string[]): void {
+  const now = Date.now();
+  runtimeRepository().update(memberId, current => ({...current, staleMounts: {
+    since: now, fields: [...new Set([...(current.staleMounts?.fields ?? []), ...fields])],
+  }}), now);
+}
+export function clearStaleMounts(memberId: string): void {
+  runtimeRepository().update(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
+}
+export function clearRuntimeStateEntry(memberId: string): void { runtimeRepository().clear(memberId); }

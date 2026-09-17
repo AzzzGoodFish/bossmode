@@ -11,7 +11,7 @@ import { getDocument } from "../../src/member/assets.js";
 import { insertMemberIdentity, getMember } from "../../src/member/identity.js";
 import { readStoredRoom, readMemberCursors } from "../../src/chat/conversations.js";
 import {  } from "../../src/member/sessions.js";
-import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
+import { RuntimeRepository } from "../../src/agent/instance.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 

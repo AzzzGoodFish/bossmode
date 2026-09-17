@@ -8,7 +8,7 @@ import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyExecution } from "../../src/app/upgrade/records.js";
 import { insertMemberIdentity } from "../../src/member/identity.js";
 import { readSessionAssociation } from "../../src/member/sessions.js";
-import {RuntimeRepository} from "../../src/data/repositories/runtime-repository.js";
+import {RuntimeRepository} from "../../src/agent/instance.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});

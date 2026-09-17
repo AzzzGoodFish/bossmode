@@ -14,7 +14,7 @@ import {
 } from "../../src/agent/orchestrator/agent-manager.js";
 import { getMember, updateMember } from "../../src/member/identity.js";
 import { memberProfilePath } from "../../src/files/layout.js";
-import { getRuntimeStateEntry } from "../../src/member/runtime-state.js";
+import { getRuntimeStateEntry } from "../../src/agent/instance.js";
 import { getCurrentSession } from "../../src/member/sessions.js";
 import { storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
 import { readTemplateMetadata, deleteTemplateMetadata, importTemplateMetadata } from "../../src/member/templates.js";
