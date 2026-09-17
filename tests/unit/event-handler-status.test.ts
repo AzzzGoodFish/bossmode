@@ -7,22 +7,10 @@ import { importAgentEvent, readAgentEvents } from "../../src/data/repositories/e
 
 let fixture: ReturnType<typeof coreFixture>;
 
+/** Wire-equivalent output ports under test control. */
+const transport = { agent: vi.fn(), refresh: vi.fn() };
 
-
-vi.mock("../../src/app/server/ws.js", () => ({
-  broadcastToAgentSubscribers: vi.fn(),
-}));
-
-const agentManagerMocks = vi.hoisted(() => ({
-  refreshContextUsage: vi.fn(),
-}));
-
-vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
-  refreshContextUsage: agentManagerMocks.refreshContextUsage,
-}));
-
-import { handleAgentEvent, loadEventsFromDisk, type AgentHistoryEvent } from "../../src/agent/events/event-handler.js";
-import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
+import { handleAgentEvent, loadEventsFromDisk, setAgentEventSink, setContextUsageRefreshHook, type AgentHistoryEvent } from "../../src/agent/events.js";
 
 describe("event-handler status authority", () => {
   beforeEach(() => {
@@ -30,10 +18,12 @@ describe("event-handler status authority", () => {
     insertMemberIdentity({ id: "mem_dev", name: "developer", agentTemplate: "developer",
       global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, fixture.db);
     storeRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 }, fixture.db);
-    agentManagerMocks.refreshContextUsage.mockReset();
-    vi.mocked(broadcastToAgentSubscribers).mockClear();
+    transport.refresh.mockReset();
+    transport.agent.mockClear();
+    setAgentEventSink(transport.agent);
+    setContextUsageRefreshHook(transport.refresh);
   });
-  afterEach(async () => { await Promise.resolve(); fixture.close(); });
+  afterEach(async () => { await Promise.resolve(); setAgentEventSink(undefined); setContextUsageRefreshHook(undefined); fixture.close(); });
   it("maps runtime agent_start to public working status", () => {
     const buffer: AgentHistoryEvent[] = [];
     const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "agent_start" }, buffer, "mem_dev");
@@ -55,7 +45,7 @@ describe("event-handler status authority", () => {
     const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "message_end", text: "done" }, buffer, "mem_dev");
 
     expect(status).toBeUndefined();
-    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "mem_dev");
+    expect(transport.refresh).toHaveBeenCalledWith("room1", "mem_dev");
   });
 
   it("forces and retries context usage refresh on compaction_end", () => {
@@ -63,19 +53,19 @@ describe("event-handler status authority", () => {
     const status = handleAgentEvent("room1", "developer", "room1:mem_dev", { type: "compaction_end", reason: "manual", aborted: false, willRetry: false }, buffer, "mem_dev");
 
     expect(status).toBeUndefined();
-    expect(agentManagerMocks.refreshContextUsage).toHaveBeenCalledWith("room1", "mem_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
+    expect(transport.refresh).toHaveBeenCalledWith("room1", "mem_dev", { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
   });
 
   it("stamps numeric ts on WS agent:event and SQL with the same identity", async () => {
     const roomId = "room1";
     const memberId = "mem_dev";
     const buffer: AgentHistoryEvent[] = [];
-    vi.mocked(broadcastToAgentSubscribers).mockClear();
+    transport.agent.mockClear();
 
     handleAgentEvent(roomId, "developer", `${roomId}:${memberId}`, { type: "agent_start" }, buffer, memberId);
 
-    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
-    const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { type?: string; ts?: number } };
+    await vi.waitFor(() => expect(transport.agent).toHaveBeenCalled());
+    const wsPayload = transport.agent.mock.calls.at(-1)?.[2] as { event?: { type?: string; ts?: number } };
     const wsTs = wsPayload?.event?.ts;
     expect(typeof wsTs).toBe("number");
     expect(Number.isFinite(wsTs)).toBe(true);
@@ -92,7 +82,7 @@ describe("event-handler status authority", () => {
     const memberId = "mem_dev";
     const buffer: AgentHistoryEvent[] = [];
     const fixedTs = 1_700_000_000_123;
-    vi.mocked(broadcastToAgentSubscribers).mockClear();
+    transport.agent.mockClear();
 
     handleAgentEvent(
       roomId,
@@ -103,8 +93,8 @@ describe("event-handler status authority", () => {
       memberId,
     );
 
-    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
-    const wsPayload = vi.mocked(broadcastToAgentSubscribers).mock.calls.at(-1)?.[2] as { event?: { ts?: number } };
+    await vi.waitFor(() => expect(transport.agent).toHaveBeenCalled());
+    const wsPayload = transport.agent.mock.calls.at(-1)?.[2] as { event?: { ts?: number } };
     expect(wsPayload?.event?.ts).toBe(fixedTs);
     const persisted = loadEventsFromDisk(roomId, memberId);
     expect((persisted.find((e) => e.type === "tool_start") as { ts?: number } | undefined)?.ts).toBe(fixedTs);
@@ -123,8 +113,8 @@ describe("event-handler status authority", () => {
     expect(buffered.errorMessage?.endsWith("…")).toBe(true);
     const stored = readAgentEvents<{ errorMessage: string }>(roomId, memberId)[0];
     expect(stored.errorMessage).toBe(buffered.errorMessage);
-    await vi.waitFor(() => expect(broadcastToAgentSubscribers).toHaveBeenCalled());
-    expect(broadcastToAgentSubscribers).toHaveBeenCalledWith(roomId, "developer", expect.objectContaining({
+    await vi.waitFor(() => expect(transport.agent).toHaveBeenCalled());
+    expect(transport.agent).toHaveBeenCalledWith(roomId, "developer", expect.objectContaining({
       event: expect.objectContaining({ errorMessage: buffered.errorMessage }),
     }));
 

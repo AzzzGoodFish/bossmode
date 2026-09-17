@@ -95,6 +95,7 @@ export interface TestServer {
   url: string;
   wsUrl: string;
   stopRouter: () => void;
+  stopAgentEvents: () => void;
 }
 
 export async function createTestServer(): Promise<TestServer> {
@@ -114,6 +115,8 @@ export async function createTestServer(): Promise<TestServer> {
 
   // Same mention-router as production — scope routing stays on one code path.
   const stopRouter = wireMentionRouter();
+  // Same output wiring as production — agent facts reach WS and chat on one code path.
+  const stopAgentEvents = (await import("../../src/app/wire.js")).wireAgentEvents();
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -133,13 +136,14 @@ export async function createTestServer(): Promise<TestServer> {
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
 
-  const result = { server, stopRouter, port, url: `http://127.0.0.1:${port}`, wsUrl: `ws://127.0.0.1:${port}` };
+  const result = { server, stopRouter, stopAgentEvents, port, url: `http://127.0.0.1:${port}`, wsUrl: `ws://127.0.0.1:${port}` };
   servers.add(result);
   return result;
 }
 
 export async function closeTestServer(ts: TestServer): Promise<void> {
   ts.stopRouter();
+  ts.stopAgentEvents();
   const { shutdownWebSocket } = await import("../../src/app/server/ws.js");
   await shutdownWebSocket();
   const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js");

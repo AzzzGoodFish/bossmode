@@ -13,7 +13,7 @@ import { importLegacyConversations } from "../../src/app/upgrade/conversations.j
 import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 import { getMessages, readAllMessages, getMessagesSince, getLatestMessageId, searchMessages } from "../../src/chat/message-store.js";
-import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
+import { loadEventsFromDisk } from "../../src/agent/events.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let upgraded: Awaited<ReturnType<typeof prepareStorageUpgrade>> | undefined;

@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/chat/message-bus.js";
-import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
+import { loadEventsFromDisk } from "../../src/agent/events.js";
 import { getMember, updateMember } from "../../src/member/identity.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };

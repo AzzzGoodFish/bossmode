@@ -10,7 +10,7 @@ import { getDatabase } from "../../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
 // Prompt compilation → agent/prompt/prompt-compiler.ts
-// Event handling → agent/events/event-handler.ts
+// Event handling → agent/events.ts
 // Tool callbacks → agent/tools/tools.ts
 
 import { join } from "node:path";
@@ -32,7 +32,7 @@ import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type
 import { listRoomsForMember } from "../../chat/conversations.js";
 import { getMember, getMemberConfiguration, applyMemberConfigPatch, type MemberRecord } from "../../member/identity.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
-import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events/event-handler.js";
+import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events.js";
 import { loadScopeMessages } from "../tools/tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
 import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../../member/runtime-state.js";
@@ -47,7 +47,7 @@ import {
   clearActivationSource,
   clearAllActivationSources,
 } from "./activation-context.js";
-import type { AgentHistoryEvent } from "../events/event-handler.js";
+import type { AgentHistoryEvent } from "../events.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig } from "../types.js";
 import { getModelCredentialProfile } from "../../config/models.js";

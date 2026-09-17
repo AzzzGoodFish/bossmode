@@ -1,16 +1,16 @@
-// Agent event handling — stream accumulation, authoritative persistence, commit-safe WS push
+// Agent event handling — stream accumulation, authoritative persistence, commit-safe delivery.
+//
+// This module owns agent event facts and read models. It never imports app/chat:
+// websocket push, chat knowledge cards and context-usage refresh are connected by
+// the composition root through the output ports below.
 import { randomUUID } from "node:crypto";
-import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../../data/repositories/message-dispatch-repository.js";
-import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../../data/repositories/event-repository.js";
-import { getDatabase } from "../../data/database.js";
-import { logger } from "../../kernel/logger.js";
-import { broadcastToAgentSubscribers } from "../../app/server/ws.js";
-import { refreshContextUsage } from "../orchestrator/agent-manager.js";
-import { maybeEmitKnowledgeActivity } from "./knowledge-activity.js";
-import { getRoom } from "../../chat/conversations.js";
-import type { AgentStreamEvent } from "../types.js";
-import type { AgentStatus } from "../../kernel/types.js";
-import { limitRuntimeErrorEvent } from "../../kernel/runtime-error-limit.js";
+import { pendingAgentEventDispatches, recordDispatchAttempt, markDispatchDelivered } from "../data/repositories/message-dispatch-repository.js";
+import { appendSourceAgentEvent, hasAgentEvent, readAgentEvents, pageAgentEvents, type EventOwner } from "../data/repositories/event-repository.js";
+import { getDatabase } from "../data/database.js";
+import { logger } from "../kernel/logger.js";
+import type { AgentStreamEvent } from "./types.js";
+import type { AgentStatus } from "../kernel/types.js";
+import { limitRuntimeErrorEvent } from "../kernel/runtime-error-limit.js";
 
 export type AgentHistoryEvent =
   | AgentStreamEvent
@@ -18,6 +18,24 @@ export type AgentHistoryEvent =
   | { type: "user_steer"; text: string; ts?: number }
   | { type: "agent_reply"; text: string; ts?: number }
   | { type: "system"; text: string; ts?: number };
+
+// -- Output ports (connected by app/wire) --
+/** Same shape as the websocket `agent:event` payload; the app owns the transport. */
+export interface AgentEventBroadcast { type: "agent:event"; roomId: string; agent: string; memberId?: string; event: unknown }
+export type AgentEventSink = (scopeId: string, agentName: string, payload: AgentEventBroadcast) => void;
+/** A finished tool call, offered to the chat/knowledge layer (never resolved here). */
+export interface ToolActivity { scopeId: string; agentName: string; toolName: string; args: unknown; isError: boolean }
+export type AgentToolActivityHook = (activity: ToolActivity) => void;
+export type AgentContextUsageRefresh = (scopeId: string, memberIdOrName: string,
+  options?: { acceptCompactedSnapshot: boolean; retries: number; retryDelayMs: number }) => void;
+
+let agentEventSink: AgentEventSink | undefined;
+let toolActivityHook: AgentToolActivityHook | undefined;
+let contextUsageRefreshHook: AgentContextUsageRefresh | undefined;
+export function setAgentEventSink(sink: AgentEventSink | undefined): void { agentEventSink = sink; }
+export function setToolActivityHook(hook: AgentToolActivityHook | undefined): void { toolActivityHook = hook; }
+export function setContextUsageRefreshHook(hook: AgentContextUsageRefresh | undefined): void { contextUsageRefreshHook = hook; }
+const broadcast = (scopeId: string, agentName: string, payload: AgentEventBroadcast): void => { agentEventSink?.(scopeId, agentName, payload); };
 
 // -- Event persistence (DB). Existing public names remain for caller integration. --
 const eventIdentities = new WeakMap<object,string>();
@@ -52,7 +70,7 @@ export function scheduleAgentEventDispatch(): void {
       const rows = pendingAgentEventDispatches();
       for (const {id,fact,agentName,memberId} of rows) {
         recordDispatchAttempt(id);
-        broadcastToAgentSubscribers(fact.scopeId,agentName,{type:"agent:event",roomId:fact.scopeId,agent:agentName,memberId:memberId ?? undefined,event:fact.event});
+        broadcast(fact.scopeId,agentName,{type:"agent:event",roomId:fact.scopeId,agent:agentName,memberId:memberId ?? undefined,event:fact.event});
         markDispatchDelivered(id);
       }
       if (rows.length === 500) scheduleAgentEventDispatch();
@@ -104,7 +122,7 @@ function consumeStream(instanceKey: string, eventId: string, captured: StreamSta
  * 1. Accumulate text/thinking from message_update
  * 2. Enrich message_end with accumulated content
  * 3. Persist non-streaming events to DB
- * 4. Push all events via WebSocket
+ * 4. Push all events to the injected sink
  * 5. Update public instance status from runtime agent_start/agent_end
  *
  * Returns the new status if it changed, undefined otherwise.
@@ -138,17 +156,12 @@ export function handleAgentEvent(
       }
     } else if (event.type === "tool_end") {
       logger.info("runtime", "event", { agent: agentName, type: "tool_end", tool: event.toolName, isError: !!(event as any).isError });
-      // Surface knowledge doc writes into the room chat stream (event cards).
+      // Offer finished tool calls to the chat layer (knowledge cards, activity views).
       const cacheKey = `${instanceKey}:${(event as any).toolCallId}`;
       const cachedArgs = toolArgsCache.get(cacheKey);
       toolArgsCache.delete(cacheKey);
       try {
-        const room = getRoom(roomId);
-        maybeEmitKnowledgeActivity(
-          roomId, agentName, event.toolName,
-          cachedArgs,
-          !!(event as any).isError, room?.cwd,
-        );
+        toolActivityHook?.({ scopeId: roomId, agentName, toolName: event.toolName, args: cachedArgs, isError: !!(event as any).isError });
       } catch (err) {
         logger.error("knowledge-activity", "hook failed", { roomId, error: String(err) });
       }
@@ -159,9 +172,9 @@ export function handleAgentEvent(
     }
   };
 
-  // cli:stdout / cli:stderr — forward via WS only, no disk persistence, no status change
+  // cli:stdout / cli:stderr — forward via the sink only, no disk persistence, no status change
   if (event.type === "cli:stdout" || event.type === "cli:stderr") {
-    broadcastToAgentSubscribers(roomId, agentName, {
+    broadcast(roomId, agentName, {
       type: "agent:event",
       roomId,
       agent: agentName,
@@ -178,7 +191,7 @@ export function handleAgentEvent(
     logger.info("runtime", "exit", {
       agent: agentName, code: event.code, signal: event.signal, unexpected: event.unexpected,
     });
-    broadcastToAgentSubscribers(roomId, agentName, {
+    broadcast(roomId, agentName, {
       type: "agent:event", roomId, agent: agentName, memberId, event,
     });
     if (event.unexpected) {
@@ -228,9 +241,9 @@ export function handleAgentEvent(
       getDatabase().afterCommit(observeEvent);
       getDatabase().afterCommit(() => {
         if (committedEvent.type === "message_end" || (committedEvent.type === "agent_end" && !committedEvent.willRetry)) {
-          refreshContextUsage(roomId, memberId || agentName);
+          contextUsageRefreshHook?.(roomId, memberId || agentName);
         } else if (committedEvent.type === "compaction_end") {
-          refreshContextUsage(roomId, memberId || agentName, { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
+          contextUsageRefreshHook?.(roomId, memberId || agentName, { acceptCompactedSnapshot: true, retries: 3, retryDelayMs: 500 });
         }
       });
     }
@@ -238,7 +251,7 @@ export function handleAgentEvent(
     const transient = event as AgentStreamEvent & { ts?: number };
     stamped = typeof transient.ts === "number" && Number.isFinite(transient.ts) ? transient : { ...transient, ts: Date.now() };
     // Intentional transient deltas remain realtime-only.
-    broadcastToAgentSubscribers(roomId,agentName,{type:"agent:event",roomId,agent:agentName,memberId,event:stamped});
+    broadcast(roomId,agentName,{type:"agent:event",roomId,agent:agentName,memberId,event:stamped});
   }
 
   // Public status is sourced only from runtime lifecycle events.

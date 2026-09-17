@@ -29,7 +29,7 @@ describe("knowledge-activity", () => {
     vi.resetModules();
     fixture = (await import("../helpers/core-fixture.js")).coreFixture();
     tmpDir = fixture.root;
-    const { _resetDedup } = await import("../../src/agent/events/knowledge-activity.js");
+    const { _resetDedup } = await import("../../src/app/wire.js");
     _resetDedup();
   });
 
@@ -39,10 +39,10 @@ describe("knowledge-activity", () => {
   });
 
   it("emits a knowledge_event card for write tool inside docs root without parsing frontmatter", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k1");
     const abs = writeDoc("proj/arch.md", "---\ntitle: 架构总览\n---\n\n# 架构\n内容");
-    maybeEmitKnowledgeActivity("k1", "architect", "write", { path: abs }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k1", "architect", "write", { path: abs }, false);
 
     const messages = await getRoomMessages("k1");
     const card = messages.find((m) => m.type === "knowledge_event");
@@ -53,60 +53,60 @@ describe("knowledge-activity", () => {
   });
 
   it("falls back to first heading then filename for title", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k2");
     const abs = writeDoc("proj/no-fm.md", "# Heading Title\n\nbody");
-    maybeEmitKnowledgeActivity("k2", "pm", "edit", { path: abs }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k2", "pm", "edit", { path: abs }, false);
     const messages = await getRoomMessages("k2");
     expect(messages.find((m) => m.type === "knowledge_event")!.knowledge_event_meta?.title).toBe("Heading Title");
   });
 
   it("ignores writes outside docs root", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k3");
-    maybeEmitKnowledgeActivity("k3", "dev", "write", { path: "/tmp/some-code.ts" }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k3", "dev", "write", { path: "/tmp/some-code.ts" }, false);
     const messages = await getRoomMessages("k3");
     expect(messages.find((m) => m.type === "knowledge_event")).toBeUndefined();
   });
 
   it("ignores non-write tools and errored calls", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k4");
     const abs = writeDoc("proj/x.md", "# X");
-    maybeEmitKnowledgeActivity("k4", "dev", "bash", { command: `echo hi > ${abs}` }, false, "/tmp");
-    maybeEmitKnowledgeActivity("k4", "dev", "write", { path: abs }, true, "/tmp");
+    maybeEmitKnowledgeActivity("k4", "dev", "bash", { command: `echo hi > ${abs}` }, false);
+    maybeEmitKnowledgeActivity("k4", "dev", "write", { path: abs }, true);
     const messages = await getRoomMessages("k4");
     expect(messages.find((m) => m.type === "knowledge_event")).toBeUndefined();
   });
 
   it("dedups repeated writes to the same doc within the window", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k5");
     const abs = writeDoc("proj/repeat.md", "# R");
-    maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false, "/tmp");
-    maybeEmitKnowledgeActivity("k5", "dev", "edit", { path: abs }, false, "/tmp");
-    maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false);
+    maybeEmitKnowledgeActivity("k5", "dev", "edit", { path: abs }, false);
+    maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false);
     const messages = await getRoomMessages("k5");
     expect(messages.filter((m) => m.type === "knowledge_event").length).toBe(1);
   });
 
   it("resolves relative paths against room cwd", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
-    await ensureRoom("k6");
-    writeDoc("proj/rel.md", "# Rel");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     const docsRoot = join(tmpDir, "memory", "projects");
-    maybeEmitKnowledgeActivity("k6", "dev", "write", { path: "proj/rel.md" }, false, docsRoot);
+    await ensureRoom("k6", { cwd: docsRoot });
+    writeDoc("proj/rel.md", "# Rel");
+    maybeEmitKnowledgeActivity("k6", "dev", "write", { path: "proj/rel.md" }, false);
     const messages = await getRoomMessages("k6");
     expect(messages.find((m) => m.type === "knowledge_event")!.knowledge_event_meta?.path).toBe("proj/rel.md");
   });
 
   it("marks doc writes outside the room docsPath", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/agent/events/knowledge-activity.js");
+    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
     await ensureRoom("k7", { docsPath: "bossmode/" });
     const inside = writeDoc("bossmode/inside.md", "# In");
     const outside = writeDoc("other/outside.md", "# Out");
-    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: inside }, false, "/tmp");
-    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: outside }, false, "/tmp");
+    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: inside }, false);
+    maybeEmitKnowledgeActivity("k7", "dev", "write", { path: outside }, false);
     const cards = (await getRoomMessages("k7")).filter((m) => m.type === "knowledge_event");
     expect(cards[0].knowledge_event_meta?.outsideRoomDocsPath).toBeUndefined();
     expect(cards[1].knowledge_event_meta?.outsideRoomDocsPath).toBe(true);

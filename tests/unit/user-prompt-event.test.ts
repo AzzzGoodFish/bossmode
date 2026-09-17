@@ -8,7 +8,7 @@ import { storeRoom } from "../../src/chat/conversations.js";
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 import { postMessage } from "../../src/chat/message-bus.js";
-import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
+import { loadEventsFromDisk, setAgentEventSink } from "../../src/agent/events.js";
 import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
 
 import { formatToolArgsFull, getSanitizedArgs } from "../../web/src/components/agent-event-utils.js";
@@ -33,8 +33,10 @@ describe("user_prompt activity event", () => {
     registry.register(new MockRuntime("pi-cli"));
     initAgentManager(registry, loadMemberPromptSource);
     setMockPromptFn(vi.fn(async () => {}));
+    // The composition root connects agent event facts to the websocket transport.
+    setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));
   });
-  afterEach(async () => { await shutdownAll(); fixture.close(); });
+  afterEach(async () => { setAgentEventSink(undefined); await shutdownAll(); fixture.close(); });
 
   it("emits user_prompt with the full composed payload on activate", async () => {
     await activateAgent("room1", "mem_dev");

@@ -13,7 +13,7 @@ import { readMemberStats } from "../member/stats/member-stats-store.js";
 import { getMember, resolveMemberRef } from "../member/identity.js";
 import { parseScopeId } from "../chat/conversations.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
-import { loadEventsPaginated } from "../agent/events/event-handler.js";
+import { loadEventsPaginated } from "../agent/events.js";
 
 // ── Skill CRUD ──
 

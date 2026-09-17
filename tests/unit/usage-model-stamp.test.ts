@@ -3,27 +3,12 @@ import { coreFixture } from "../helpers/core-fixture.js";
 import { readStats } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 
-vi.mock("../../src/app/server/ws.js", () => ({
-  broadcastToAgentSubscribers: vi.fn(),
-}));
-
-const agentManagerMocks = vi.hoisted(() => ({
-  refreshContextUsage: vi.fn(),
-}));
-vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
-  refreshContextUsage: agentManagerMocks.refreshContextUsage,
-}));
-
-vi.mock("../../src/agent/events/knowledge-activity.js", () => ({
-  maybeEmitKnowledgeActivity: vi.fn(),
-}));
-
 function usageEvent(usage: Record<string, number>) {
   return { type: "message_end" as const, text: "hi", usage };
 }
 
 async function loadModules() {
-  const eh = await import("../../src/agent/events/event-handler.js");
+  const eh = await import("../../src/agent/events.js");
   return { eh, db: fixture.db };
 }
 
@@ -31,7 +16,6 @@ describe("model stamps and atomic SQL usage", () => {
   beforeEach(() => {
     fixture = coreFixture();
     fixture.db.run("INSERT INTO scopes VALUES('room1','room','room1',NULL)");
-    agentManagerMocks.refreshContextUsage.mockReset();
   });
   afterEach(async () => {
     await new Promise<void>(resolve => queueMicrotask(resolve));

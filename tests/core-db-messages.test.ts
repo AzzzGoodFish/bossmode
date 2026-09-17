@@ -12,13 +12,11 @@ import { appendAgentEvent, importAgentEvent, readAgentEvents, pageActivity, read
 import { recordDailyUsage } from "../src/data/repositories/token-rollup.js";
 import { getDmCursor, setDmCursor, addDmMessage } from "../src/chat/dm-message-store.js";
 import { postMessage, onMessage, scheduleMessageDispatch } from "../src/chat/message-bus.js";
-import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentEventDispatch } from "../src/agent/events/event-handler.js";
+import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentEventDispatch, setAgentEventSink } from "../src/agent/events.js";
 import type { RoomMessage } from "../src/kernel/types.js";
 
 const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
 vi.mock("../src/app/server/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
-vi.mock("../src/agent/orchestrator/agent-manager.js",() => ({refreshContextUsage:vi.fn()}));
-vi.mock("../src/agent/events/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity:vi.fn()}));
 vi.mock("../src/kernel/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
 
 let db: Database; let root: string; let fixture: ReturnType<typeof coreFixture>;
@@ -29,8 +27,10 @@ beforeEach(() => {
   fixture = coreFixture(); root = fixture.root; db = fixture.db;
   db.run("INSERT INTO scopes VALUES('room','room','room',NULL),('dm:mem_old','dm',NULL,'mem_old'),('topic:t','topic','room',NULL)");
   vi.clearAllMocks();
+  // The composition root connects agent event facts to the websocket transport.
+  setAgentEventSink((scopeId,agentName,payload)=>transport.agent(scopeId,agentName,payload));
 });
-afterEach(async () => { await flush(); fixture.close(); });
+afterEach(async () => { await flush(); setAgentEventSink(undefined); fixture.close(); });
 
 describe("authoritative message transactions",() => {
   it("commits message, sequence, all literal target IDs, reply and intent atomically in every scope",() => {

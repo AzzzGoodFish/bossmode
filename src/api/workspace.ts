@@ -10,7 +10,7 @@ import { postMessage } from "../chat/message-bus.js";
 import { broadcastToRoom } from "../app/server/ws.js";
 import { parseMentionMemberIds, parseMentions } from "../chat/router.js";
 import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../agent/orchestrator/agent-manager.js";
-import { loadEventsPaginated } from "../agent/events/event-handler.js";
+import { loadEventsPaginated } from "../agent/events.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
 

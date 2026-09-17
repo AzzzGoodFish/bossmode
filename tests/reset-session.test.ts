@@ -15,7 +15,7 @@ import { updateMemberIdentity } from "../src/member/identity.js";
 import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/conversations.js";
 import { addMessage } from "../src/chat/message-store.js";
 import * as sessionStore from "../src/member/sessions.js";
-import { loadEventsFromDisk } from "../src/agent/events/event-handler.js";
+import { loadEventsFromDisk, setAgentEventSink } from "../src/agent/events.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/server/ws.js";
 
 vi.mock("../src/app/server/ws.js", () => ({
@@ -56,9 +56,12 @@ beforeEach(() => {
   const registry = new RuntimeRegistry();
   registry.register(runtime);
   initAgentManager(registry, loadMemberPromptSource);
+  // The composition root connects agent event facts to the websocket transport.
+  setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));
 });
 
 afterEach(async () => {
+  setAgentEventSink(undefined);
   try { await shutdownAll(); }
   finally { vi.restoreAllMocks(); fixture.close(); }
 });

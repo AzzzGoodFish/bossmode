@@ -23,7 +23,7 @@ import { RuntimeRegistry } from "../../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/templates.js";
-import { wireConfiguration, wireMemberProfiles, wireConversationMembers } from "../wire.js";
+import { wireConfiguration, wireMemberProfiles, wireConversationMembers, wireAgentEvents } from "../wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -70,6 +70,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeMembers = wireConversationMembers();
+  const unsubscribeAgentEvents = wireAgentEvents();
 
   // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();
@@ -124,6 +125,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     unsubscribeRouter();
     unsubscribeConfiguration();
     unsubscribeProfiles();
+    unsubscribeAgentEvents();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);
     cleanupSettlement = (async () => {

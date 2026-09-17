@@ -20,7 +20,7 @@ import {
   compactMember,
   getMemberBusyState,
 } from "../agent/orchestrator/agent-manager.js";
-import { loadEventsPaginated } from "../agent/events/event-handler.js";
+import { loadEventsPaginated } from "../agent/events.js";
 import { logger } from "../kernel/logger.js";
 
 function decodeScope(raw: string): ScopeId | null {

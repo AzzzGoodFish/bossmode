@@ -7,14 +7,10 @@ const baseStorageMigration = getMigration("core-base-v1");
 const messagesMigration = getMigration("core-messages-v1");
 const eventSourceMigration = getMigration("core-event-source-v1");
 import { appendAgentEvent, readAgentEvents, readStats } from "../src/data/repositories/event-repository.js";
-import { handleAgentEvent, persistAgentEvent, type AgentHistoryEvent } from "../src/agent/events/event-handler.js";
+import { handleAgentEvent, persistAgentEvent, setAgentEventSink, setContextUsageRefreshHook, setToolActivityHook, type AgentHistoryEvent } from "../src/agent/events.js";
 import type { AgentStreamEvent } from "../src/agent/types.js";
 
 const transport = vi.hoisted(() => ({ agent: vi.fn(), refresh: vi.fn(), knowledge: vi.fn() }));
-vi.mock("../src/app/server/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));
-vi.mock("../src/agent/orchestrator/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
-vi.mock("../src/agent/events/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
-vi.mock("../src/chat/conversations.js", () => ({ getRoom: vi.fn() }));
 vi.mock("../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 
 let db: Database;
@@ -48,9 +44,16 @@ beforeEach(() => {
   db.run("INSERT INTO scopes VALUES('room','room','room',NULL)");
   buffer = [];
   vi.clearAllMocks();
+  // The composition root connects these ports in production; tests connect the same way.
+  setAgentEventSink(transport.agent);
+  setContextUsageRefreshHook(transport.refresh);
+  setToolActivityHook(transport.knowledge);
 });
 afterEach(async () => {
   await flush();
+  setAgentEventSink(undefined);
+  setContextUsageRefreshHook(undefined);
+  setToolActivityHook(undefined);
   vi.restoreAllMocks();
   db.close();
   rmSync(root, { recursive: true, force: true });
