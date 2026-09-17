@@ -25,6 +25,9 @@ it("activates the receiver of a member↔member message (mm scope)", async () =>
     const prompt = String(mockPromptFn.mock.calls[0][0] ?? "");
     expect(prompt).toContain("private chat with member");
     expect(prompt).toContain("ping bob");
+    // Private turns carry only the delivered message — no repeated history transcript.
+    expect(prompt).toContain("New message:");
+    expect(prompt).not.toContain("Recent messages:");
 
     // The delivery was accepted for the pair scope — never skipped as unavailable.
     const rows = getDatabase().all<{ status: string; outcome: string | null; diagnosis: string | null }>(

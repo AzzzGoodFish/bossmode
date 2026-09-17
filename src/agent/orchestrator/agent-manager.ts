@@ -1239,28 +1239,30 @@ function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,c
   const captured=capture?.snapshot.message as unknown as RoomMessage|undefined;
   if(scope.startsWith("dm:")){
     const all=readAllDmMessages(memberId).filter(m=>!isSystemNoticeHiddenFromMembers(m));
-    const bounded=captured?all.filter(m=>m.id!==captured.id&&(m.seq??0)<(captured.seq??Number.MAX_SAFE_INTEGER)).concat(captured):all;
+    // Private messages are delivered to this member immediately; the turn carries only the
+    // target message itself. Earlier history stays available through chat_read.
+    const target=captured??all.at(-1);
     // ① D1: every delivered message carries its source chat id and sender id;
     // this private chat is `dm:<memberId>`.
     const dmLabel=`dm:${memberId}`;
-    const transcript=bounded.slice(-40).map(m=>m.sender==="user"?`[User] ${m.content}`:`[Member \`${m.sender}\`${m.senderMemberId?` (${m.senderMemberId})`:''}] ${m.content}`).join("\n\n");
+    const delivered=target?(target.sender==="user"?`[User] ${target.content}`:`[Member \`${target.sender}\`${target.senderMemberId?` (${target.senderMemberId})`:''}] ${target.content}`):undefined;
     let prompt:string;
-    if(transcript)prompt=`You are in a private chat with the user (${dmLabel}). Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
+    if(delivered)prompt=`You are in a private chat with the user (${dmLabel}). New message:\n\n${delivered}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
     else if(isBlankPersona(readMemberProfile(memberId)))prompt=`You are in a private chat with the user (${dmLabel}). You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.`;
     else prompt=`You are in a private chat with the user (${dmLabel}). They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
     return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
   }
   if(scope.startsWith("mm:")){
-    // ⑤ B: member↔member private chat — mirror the DM transcript path for the peer.
+    // ⑤ B: member↔member private chat — mirror the DM delivery-only path for the peer.
     const pair=parseMmScopeId(scope);
     if(!pair||!pair.includes(memberId))throw new Error(`Member chat scope does not include member ${memberId}`);
     const otherId=pair.find(id=>id!==memberId)!;
     const otherName=getMember(otherId)?.name??otherId;
     const all=loadScopeMessages(scope).filter(m=>!isSystemNoticeHiddenFromMembers(m));
-    const bounded=captured?all.filter(m=>m.id!==captured.id&&(m.seq??0)<(captured.seq??Number.MAX_SAFE_INTEGER)).concat(captured):all;
-    const transcript=bounded.slice(-40).map(m=>`[Member \`${m.sender}\`${m.senderMemberId?` (${m.senderMemberId})`:''}] ${m.content}`).join("\n\n");
+    const target=captured??all.at(-1);
+    const delivered=target?`[Member \`${target.sender}\`${target.senderMemberId?` (${target.senderMemberId})`:''}] ${target.content}`:undefined;
     let prompt:string;
-    if(transcript)prompt=`You are in a private chat with member \`${otherName}\` (${scope}). Recent messages:\n\n${transcript}${replyExpected?"\n\nRespond to the latest message with the chat tool.":""}`;
+    if(delivered)prompt=`You are in a private chat with member \`${otherName}\` (${scope}). New message:\n\n${delivered}${replyExpected?"\n\nRespond to the latest message with the chat tool.":""}`;
     else prompt=`You are in a private chat with member \`${otherName}\` (${scope}). They just opened it — reply with the chat tool, or wait for their next message.`;
     return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"mm-activate"},replyExpected};
   }

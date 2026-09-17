@@ -34,6 +34,12 @@ it("HTTP DM posting captures one recipient and invokes the runtime only once",as
     resetMocks();const token=await loginAndGetToken(server.port);const room=await createMockRoom(server.port,token,"DM capture",["dm-capture-owner"]);const id=room.globalMemberIds![0];
     const response=await jsonRequest(server.port,"POST",`/api/dm/${id}/messages`,{token,body:{content:"Direct request"}});expect(response.status,response.body).toBe(200);
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));await new Promise<void>(resolve=>setImmediate(resolve));expect(mockPromptFn).toHaveBeenCalledTimes(1);
+    // Private turns carry only the delivered message — no repeated history transcript.
+    const dmPrompt=String(mockPromptFn.mock.calls[0][0]??"");
+    expect(dmPrompt).toContain("private chat with the user");
+    expect(dmPrompt).toContain("New message:");
+    expect(dmPrompt).toContain("Direct request");
+    expect(dmPrompt).not.toContain("Recent messages:");
     const message=JSON.parse(response.body).message;
     expect(new DeliveryRepository(getDatabase()).getCapture(`dm:${id}`,message.id)?.snapshot).toMatchObject({origin:"user",targets:{ordinary:[],dm:[{actorKey:id,memberId:id}]}});
   }finally{await closeTestServer(server);}
