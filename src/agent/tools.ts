@@ -1,4 +1,67 @@
-// Centralized agent tool descriptions used by agent tool definitions.
+// Agent tool catalog — the single source of truth for tool names and descriptions.
+//
+// Members reach tools two ways: directly registered tools (MEMBER_DIRECT_TOOL_NAMES)
+// and capabilities behind the `bossmode` gateway (MEMBER_GATEWAY_TOOL_NAMES). The
+// runtime adapter (`agent/runtime/tools.ts`) converts this catalog into SDK tools;
+// it never keeps a second copy of names or descriptions.
+//
+// Description scope: capability + mechanical facts only (no usage guidance —
+// that belongs to the prompt layers).
+
+export const MEMBER_DIRECT_TOOL_NAMES = [
+  "chat_send",
+  "chat_read",
+  "chat_search",
+  "chat_list",
+  "bossmode",
+  "workspace_list",
+  "workspace_create",
+  "workspace_use",
+  "workspace_remove",
+  "read",
+  "write",
+  "edit",
+  "terminal_create",
+  "terminal_exec",
+  "terminal_read",
+  "terminal_wait",
+  "terminal_list",
+  "terminal_close",
+  "reload",
+] as const;
+
+export const MEMBER_GATEWAY_TOOL_NAMES = [
+  "chat_info",
+  "chat_create",
+  "chat_edit",
+  "member_list",
+  "member_info",
+  "profile_read",
+  "profile_update",
+] as const;
+
+/** qm-style guidance for a tool name the member surface does not know. */
+export function unknownMemberToolMessage(tool: string): string {
+  return `Unknown tool "${tool}" — available: ${MEMBER_DIRECT_TOOL_NAMES.join(", ")}. `
+    + `Gateway capabilities (${MEMBER_GATEWAY_TOOL_NAMES.join(", ")}) are called through bossmode: `
+    + `{action:"list"} to discover them, {action:"describe", tool:"<name>"} for parameters, `
+    + `{action:"call", tool:"<name>", args:{…}} to run one.`;
+}
+
+// Canonical description for the `chat_send` tool used by agent tool definitions;
+// the @mention contract stays in a single source of truth.
+export function buildChatSendToolDescription(): string {
+  return `Send a message to one chat.
+- to (required): target chat — id or name; your private chat with the user is "dm:<your member id>" (or "user"). Private chats need no prior creation.
+- message (required): text content.
+- attachments (optional): local file paths, copied into that chat's attachment store.`;
+}
+
+export const CHAT_SEND_TO_PARAM_DESCRIPTION = "Target chat id or name; your private chat with the user is \"dm:<your member id>\" (or \"user\").";
+
+export const CHAT_SEND_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member (exact match required; a plain name never activates).";
+
+export const CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION = "Local file paths to attach. Files are copied to the target chat's attachment store.";
 
 export const CHAT_READ_DESCRIPTION = `Read an ordered window of messages from one chat.
 

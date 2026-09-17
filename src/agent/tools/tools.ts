@@ -8,7 +8,7 @@ import * as messageStore from "../../chat/message-store.js";
 import * as roomStore from "../../chat/conversations.js";
 import { getMember, resolveMemberRef } from "../../member/identity.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../../chat/conversations.js";
-import { unknownMemberToolMessage } from "./member-tool-names.js";
+import { unknownMemberToolMessage } from "../tools.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../chat/conversations.js";
 import type { RoomMessage } from "../../kernel/types.js";

@@ -1,6 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import { buildChatSendToolDescription, CHAT_SEND_TO_PARAM_DESCRIPTION, CHAT_SEND_MESSAGE_PARAM_DESCRIPTION, CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION } from "../tools/chat-tool-description.js";
+import { buildChatSendToolDescription, CHAT_SEND_TO_PARAM_DESCRIPTION, CHAT_SEND_MESSAGE_PARAM_DESCRIPTION, CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION } from "../tools.js";
 import { renderQueryRowsForMember } from "../tools/query-render.js";
 import {
   CHAT_READ_DESCRIPTION,
@@ -29,7 +29,7 @@ import {
   TERMINAL_LIST_DESCRIPTION,
   TERMINAL_CLOSE_DESCRIPTION,
   PARAM_DESCRIPTIONS,
-} from "../tools/mcp-tool-descriptions.js";
+} from "../tools.js";
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
 }
