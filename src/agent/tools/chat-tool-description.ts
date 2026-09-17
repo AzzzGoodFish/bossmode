@@ -1,7 +1,7 @@
 // Canonical copy for the `chat_send` tool used by agent tool definitions.
 // Centralizing this keeps the @mention contract in a single source of truth.
 // Description scope: capability + mechanical facts only (no usage guidance —
-// that belongs to Room/Member Principles and Core).
+// that belongs to the prompt layers).
 
 export function buildChatSendToolDescription(): string {
   return `Send a message to one chat.

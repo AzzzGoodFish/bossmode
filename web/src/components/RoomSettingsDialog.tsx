@@ -167,7 +167,7 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-ink-1">Room Settings</h2>
-            <p className="text-xs text-ink-4 mt-1">Room-level settings, leadership, and principles preview.</p>
+            <p className="text-xs text-ink-4 mt-1">Room-level settings, leadership, and members.</p>
           </div>
           <button onClick={onClose} className="text-ink-4 hover:text-ink-1 text-lg transition-colors cursor-pointer" aria-label="Close">×</button>
         </div>
@@ -195,7 +195,6 @@ export function RoomSettingsDialog({ room, open, onClose, onSaved, onDeleted }: 
                 <option value="">No leader</option>
                 {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
-              <p className="text-xs text-ink-4">The leader can edit Room Principles.</p>
               {currentLeader && <p className="text-xs text-ink-3">Current leader: <span className="font-mono text-ink-2">@{currentLeader.name}</span></p>}
               {missingLeader && <p className="text-xs text-blocked">Saved leader is no longer a current room member. Select a new leader or clear it.</p>}
             </section>

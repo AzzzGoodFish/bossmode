@@ -87,14 +87,15 @@ describe("explicit historical identity import, not recurring name/marker repair"
     expect(fixture.db.all("SELECT * FROM room_members")).toEqual([]);
   });
 
-  it("imports old per-room mainline/principles as historical documents without rehoming by a reused name", async () => {
+  it("retires old per-room mainline/principles documents without rehoming by a reused name", async () => {
     seedMember();
     const mainline = "rooms/r/memory/members/rm_pm/mainline.md";
     const principles = "rooms/r/memory/members/rm_pm/principles.md";
     const {ctx, entries} = source({[mainline]: "## Focus\nShip 0.19\n", [principles]: "## Rules\nLead well.\n"});
-    await importLegacyDocuments(ctx, entries, []);
-    expect(getDocument(fixture.db, mainline)).toBeDefined();
-    expect(getDocument(fixture.db, principles)).toBeDefined();
+    const consumed = await importLegacyDocuments(ctx, entries, []);
+    expect(consumed.size).toBe(entries.length);
+    expect(getDocument(fixture.db, mainline)).toBeUndefined();
+    expect(getDocument(fixture.db, principles)).toBeUndefined();
     expect(readFileSync(join(ctx.sourceRoot, mainline), "utf8")).toBe("## Focus\nShip 0.19\n");
     expect(getDocument(fixture.db, "members/mem_one/persona.md")).toBeUndefined();
     expect(getDocument(fixture.db, "members/mem_one/memory/scopes/room-r/mainline.md")).toBeUndefined();

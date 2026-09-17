@@ -88,26 +88,7 @@ describe("member-registry", () => {
   });
 });
 
-describe("member-memory-store + dm-message-store", () => {
-  it("writes persona and per-scope layers under member dir", async () => {
-    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
-    const mem = await import("../../src/member/memory/member-memory-store.js");
-    const m = __reg_app_member_actions.createMember({ name: "qa", agentTemplate: "qa" });
-    mem.ensureMemorySkeleton(m.id, "dm:" + m.id);
-    mem.writeMemoryLayer(m.id, "persona", "## Persona\nI am qa.\n", { type: "user" }, { reason: "init" });
-    mem.writeMemoryLayer(
-      m.id,
-      "principles",
-      "## Rules\nBe thorough.\n",
-      { type: "member", memberId: m.id, name: "qa" },
-      { scopeId: "dm:" + m.id, reason: "note" },
-    );
-    const persona = mem.readMemoryLayer(m.id, "persona");
-    expect(persona.content).toMatch(/I am qa/);
-    const prin = mem.readMemoryLayer(m.id, "principles", "dm:" + m.id);
-    expect(prin.content).toMatch(/thorough/);
-  });
-
+describe("dm-message-store", () => {
   it("dm messages append with seq and cursor", async () => {
     const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const dm = await import("../../src/chat/dm-message-store.js");

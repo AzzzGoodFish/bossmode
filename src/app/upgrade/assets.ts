@@ -10,8 +10,7 @@ import { requireObject } from "../../kernel/json.js";
 import { isDeepStrictEqual } from "node:util";
 import { dirname } from "node:path";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
-import { documentContentMeta, importDocument, type DocumentImport, type DocumentIdentity, type ImportedDocumentHistory } from "../../member/assets.js";
-import { type PrinciplesMeta } from "../../kernel/types.js";
+import { documentContentMeta, importDocument, type DocumentImport, type DocumentIdentity, type DocumentMeta, type ImportedDocumentHistory } from "../../member/assets.js";
 import { type Database } from "../../data/database.js";
 
 export interface FiredArchiveSource {
@@ -136,30 +135,17 @@ function text(bytes:Uint8Array,path:string):string{
 /** Legacy writers replaced every character outside this set when deriving filesystem owner segments. */
 const safeSegment=(value:string)=>value.replace(/[^a-zA-Z0-9._-]/g,"_");
 
-/** Pre-Principles prompt supplements recorded metadata, never historical bodies
- * (prompt-supplement-store before 1094dd7). Retire that obsolete bookkeeping in
- * the one-time upgrade; the source remains in the upgrade backup. Do not invent
- * a snapshot, add a live compatibility record, or excuse a damaged newer entry.
- */
-function obsoleteSupplementHistory(entry:LegacySourceEntry,event:Record<string,any>):boolean{
- const keys=new Set(["ts","scope","memberId","revision","contentHash","contentLength","actorType","actorMemberId","actorName","operation","note"]);
- return entry.layer==="principles"&&(entry.layout==="room-memory"||entry.layout==="copy-forward")
-  &&Object.keys(event).every(key=>keys.has(key))
-  &&Number.isFinite(event.ts)&&Number.isSafeInteger(event.revision)&&event.revision>=1
-  &&typeof event.contentHash==="string"&&/^[a-f0-9]{64}$/.test(event.contentHash)
-  &&Number.isSafeInteger(event.contentLength)&&event.contentLength>=0
-  &&(event.scope==="room"&&event.memberId===undefined||event.scope==="member"&&typeof event.memberId==="string"&&!!event.memberId)
-  &&(event.actorType==="user"||event.actorType==="member")&&(event.operation==="write"||event.operation==="edit")
-  &&[event.actorMemberId,event.actorName,event.note].every(value=>value===undefined||typeof value==="string");
-}
-
 /** Current layouts and old copy-forward layouts remain separate document identities.
  * History is never fabricated from today's body; body assets stay outside SQLite. */
 export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[],personas:MemberSourceImport["personas"]):Promise<Set<string>>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();const plans=new Map<string,DocumentImport>();
  // Topic feature retired (fish #19358): member-scope topic documents are not
  // imported; they follow the standard source-retire flow like other topic sources.
- for(const e of entries)if(retiredTopicScope(e.scopeId))consumed.add(e.path);
+ // Principles/mainline retired (fish 2026-09-17): their document sources are not
+ // imported either — the old files stay in place, nothing serves them.
+ const retiredMemoryLayer=(layer:string|undefined)=>layer==="principles"||layer==="mainline";
+ const importable=entries.filter(e=>!retiredMemoryLayer(e.layer));
+ for(const e of entries)if(retiredTopicScope(e.scopeId)||retiredMemoryLayer(e.layer))consumed.add(e.path);
  const bodies=new Map(personas.map(p=>[p.path,text(p.body,p.path)]));
  const check=(e:LegacySourceEntry)=>{if(!ctx.sourceFiles.includes(e.path))throw new Error(`Unsnapshotted document source: ${e.path}`);};
  const scope=(s:string|undefined)=>s===undefined?undefined:ensureImportedScope(ctx.db,s);
@@ -185,17 +171,16 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
  // Metadata/history contain unsanitized legacy subject keys. Process them first so
  // a sanitized body basename cannot silently choose between colliding identities.
  let completed=0;
- for(const e of entries.filter(e=>e.kind==="document-meta"||e.kind==="document-history")){
+ for(const e of importable.filter(e=>e.kind==="document-meta"||e.kind==="document-history")){
   if(retiredTopicScope(e.scopeId))continue;
   check(e);
   if(e.kind==="document-meta"){
    const meta=requireObject(readLegacyJson(ctx.sourceRoot,e), `Invalid legacy document object: ${e.path}`);
-   if(meta.room!==undefined)roomDocument(e).meta=requireObject(meta.room, `Invalid legacy document object: ${e.path}`) as PrinciplesMeta;
-   if(meta.members!==undefined)for(const [owner,value]of Object.entries(requireObject(meta.members, `Invalid legacy document object: ${e.path}`)))roomDocument(e,owner).meta=requireObject(value, `Invalid legacy document object: ${e.path}`) as PrinciplesMeta;
+   if(meta.room!==undefined)roomDocument(e).meta=requireObject(meta.room, `Invalid legacy document object: ${e.path}`) as DocumentMeta;
+   if(meta.members!==undefined)for(const [owner,value]of Object.entries(requireObject(meta.members, `Invalid legacy document object: ${e.path}`)))roomDocument(e,owner).meta=requireObject(value, `Invalid legacy document object: ${e.path}`) as DocumentMeta;
   }else{
    for await(const row of readLegacyJsonl(ctx.sourceRoot,e)){
     const event=requireObject(row.value, `Invalid legacy document object: ${e.path}`);
-    if(obsoleteSupplementHistory(e,event)){if(++completed%128===0)ctx.progress(completed);continue;}
     const p=e.layout==="member"?direct(e):roomDocument(e,event.scope==="room"?undefined:event.memberId);
     if(e.layout!=="member"&&event.scope!=="room"&&typeof event.memberId!=="string")throw new Error(`Missing document history subject: ${e.path}`);
     if(typeof event.content!=="string")throw new Error(`Missing historical document body: ${e.path}`);
@@ -206,7 +191,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   }
   consumed.add(e.path);
  }
- for(const e of entries.filter(e=>e.kind==="document-body")){
+ for(const e of importable.filter(e=>e.kind==="document-body")){
   if(retiredTopicScope(e.scopeId))continue;
   check(e);const file=managedPath(ctx.sourceRoot,e.path);requireRegularFile(file);const content=text(readFileSync(file),e.path);
   if(bodies.has(e.path)&&bodies.get(e.path)!==content)throw new Error(`Conflicting current document body: ${e.path}`);
@@ -241,7 +226,7 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
   }},p);ctx.progress(++completed);
  }
  // Existing content-addressed snapshots remain assets, not legacy metadata.
- for(const e of entries.filter(e=>e.kind==="document-snapshot")){if(retiredTopicScope(e.scopeId))continue;check(e);consumed.add(e.path);}
+ for(const e of importable.filter(e=>e.kind==="document-snapshot")){if(retiredTopicScope(e.scopeId))continue;check(e);consumed.add(e.path);}
  return consumed;
 }
 

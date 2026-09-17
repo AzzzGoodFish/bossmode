@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetTone, formatRelativeTime, formatSinceDate, promptAssetCount } from "../../web/src/utils/member-panel-view.js";
+import { budgetTone, formatRelativeTime, formatSinceDate } from "../../web/src/utils/member-panel-view.js";
 
 describe("member panel view helpers", () => {
   it("formats relative times for revision lines", () => {
@@ -23,10 +23,4 @@ describe("member panel view helpers", () => {
     expect(budgetTone({ pct: 125, overLimit: true })).toBe("over");
   });
 
-  it("counts non-empty assets for the tab badge, null while loading", () => {
-    const filled = (content: string) => ({ content });
-    expect(promptAssetCount([filled("x"), filled(""), filled("y")])).toBe(2);
-    expect(promptAssetCount([filled(""), filled(""), filled("")])).toBe(0);
-    expect(promptAssetCount([null, filled("x"), filled("y")])).toBeNull();
-  });
 });

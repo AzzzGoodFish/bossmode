@@ -53,7 +53,7 @@ export interface CreateAgentOpts {
   // Layered prompt content
   agentPrompt: string;       // Source agent role prompt only. Empty for builtin/general.
   envPrompt?: string;        // Legacy compatibility: Bossmode overlay. Prefer appendSystemPrompt.
-  appendSystemPrompt?: string[]; // Bossmode core + prompt assets (principles/mainline).
+  appendSystemPrompt?: string[]; // Bossmode core + prompt assets.
   skillPaths: string[];      // Skill directory paths
   skillNames?: string[];     // Resolved skill names for status display
   rulesPrompt?: string;      // Legacy compatibility; ignored by new prompt compiler.

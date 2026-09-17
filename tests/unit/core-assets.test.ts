@@ -20,10 +20,7 @@ const membersMigration = getMigration("core-members-v1");
 
 const { getDefaultConfig } = await import("../../src/config/settings.js");
 const assetsMigration = getMigration("core-assets-v1");
-const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/member/assets.js");
-const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/memory/principles-store.js");
-const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/member/memory/member-memory-store.js");
-const { saveDocument } = await import("../../src/member/assets.js");
+const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision, readDocumentMeta, saveDocument } = await import("../../src/member/assets.js");
 import type { Database } from "../../src/data/database.js";
 import type { DocumentIdentity, DocumentImport } from "../../src/member/assets.js";
 
@@ -35,8 +32,21 @@ const actor = { type: "member" as const, memberId: member, name: "original-name"
 const roomPath = `rooms/${room}/memory/room-principles.md`;
 const personaPath = `members/${member}/persona.md`;
 const roomIdentity: DocumentIdentity = { path: roomPath, layer: "principles", scopeId: room };
+const personaIdentity: DocumentIdentity = { path: personaPath, layer: "persona", memberId: member };
+const scopedMainlinePath = `members/${member}/memory/scopes/room-${room}/mainline.md`;
+const scopedMainline: DocumentIdentity = { path: scopedMainlinePath, layer: "mainline", memberId: member, scopeId: room };
 function write(path: string, content: string | Uint8Array): void { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content); }
 function current(path: string): string { return readFileSync(join(root, path), "utf8"); }
+/** Read a document the way callers see it: current body from disk + DB-authoritative meta. */
+function readDoc(path: string) {
+  const meta = getDocument(db, path)?.meta;
+  const content = existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : "";
+  return { content, revision: meta?.revision ?? 0, ...documentContentMeta(content),
+    updatedAt: meta?.updatedAt, updatedBy: meta?.updatedBy, updatedByMemberId: meta?.updatedByMemberId, updatedByName: meta?.updatedByName };
+}
+function writeDoc(identity: DocumentIdentity, content: string, who = user, reason = "r") {
+  return saveDocument(identity, content, who, { operation: "write", reason });
+}
 function stageAsset(path: string, bytes: Uint8Array): void {
   validateDocumentPath(path);
   if (existsSync(join(root, path))) { if (!readFileSync(join(root, path)).equals(Buffer.from(bytes))) throw new Error("stage conflict"); return; }
@@ -64,31 +74,31 @@ afterEach(() => {
   mkdirSync(join(root, "memory", "projects"), { recursive: true });
 });
 
-it("requires explicit binding without opening or migrating from a getter or writer", () => {
+it("requires explicit binding without opening or migrating from a reader or writer", () => {
   db.close();
   const files = readdirSync(root);
-  expect(() => readPrinciples(room, "room")).toThrow("not initialized");
-  expect(() => readMemoryLayerInfo(member, "persona")).toThrow("not initialized");
-  expect(() => writeMemoryLayer(member, "persona", "new", user)).toThrow("not initialized");
+  expect(() => readDocumentMeta(roomIdentity)).toThrow("not initialized");
+  expect(() => saveDocument(roomIdentity, "new", user, { operation: "write", reason: "r" })).toThrow("not initialized");
   expect(readdirSync(root)).toEqual(files);
   expect(existsSync(join(root, "members"))).toBe(false);
 });
 
-it("returns original missing-document DTOs without DB writes", () => {
-  expect(readPrinciples(room, "room")).toEqual({ content: "", revision: 0, ...documentContentMeta(""),
-    updatedAt: undefined, updatedBy: undefined, updatedByMemberId: undefined, updatedByName: undefined });
-  expect(readMemoryLayerInfo(member, "persona")).toMatchObject({ content: "", revision: 0, updatedAt: null, updatedBy: null });
+it("fabricates no document metadata for missing bodies", () => {
+  expect(getDocument(db, roomPath)).toBeUndefined();
+  expect(getDocument(db, personaPath)).toBeUndefined();
+  expect(readDoc(roomPath)).toMatchObject({ content: "", revision: 0, updatedAt: undefined, updatedBy: undefined });
   expect(db.all("SELECT * FROM memory_documents")).toEqual([]);
 });
 
 it("persists normalized metadata and immutable Markdown snapshots, never SQL body blobs", () => {
   const bytes = "\uFEFF## Rules\r\n保留 😀\r\n\t \n";
-  const first = writePrinciples({ roomId: room, scope: "room", content: bytes, actor, reason: " initial " });
-  const second = editPrinciples({ roomId: room, scope: "room", oldText: "保留", newText: "edited", actor: user, reason: " correction " });
+  const first = saveDocument(roomIdentity, bytes, actor, { operation: "write", reason: "initial" });
+  const edited = bytes.replace("保留", "edited");
+  const second = saveDocument(roomIdentity, edited, user, { operation: "edit", reason: "correction" });
   expect(first.revision).toBe(1);
   expect(first.contentLength).toBe(bytes.length);
   expect(second.revision).toBe(2);
-  expect(readPrinciples(room, "room")).toEqual(second);
+  expect(readDoc(roomPath)).toMatchObject({ content: edited, revision: 2, contentHash: second.contentHash, contentLength: edited.length });
   const events = listDocumentHistory(db, roomPath);
   expect(events).toHaveLength(2);
   expect(events[0]).toMatchObject({ revision: 1, actorMemberId: member, actorName: "original-name", reason: "initial", operation: "write", contentLength: bytes.length });
@@ -101,7 +111,7 @@ it("persists normalized metadata and immutable Markdown snapshots, never SQL bod
     expect(columns.some(c => c.name === "content" || c.type === "BLOB" || c.name.endsWith("json"))).toBe(false);
   }
   db.close(); db = openDatabase(join(root, "bossmode.db")); bindDatabase(db);
-  expect(readPrinciples(room, "room")).toEqual(second);
+  expect(readDoc(roomPath)).toMatchObject({ content: edited, revision: 2, contentHash: second.contentHash, contentLength: edited.length });
   expect(listDocumentHistory(db, roomPath)).toEqual(events);
 });
 
@@ -112,85 +122,63 @@ it("never consults or updates retained legacy metadata/history", () => {
   write(`rooms/${room}/memory/mainline-meta.json`, "not json\n");
   write(`rooms/${room}/memory/mainline-history.jsonl`, "not json\n");
   write(`members/${member}/memory/persona-history.jsonl`, "not json\n");
-  expect(readPrinciples(room, "room").revision).toBe(0);
-  expect(readMemoryLayerInfo(member, "persona").revision).toBe(0);
-  expect(writePrinciples({ roomId: room, scope: "room", content: "next", actor: user, reason: "r" }).revision).toBe(1);
-  writeMemoryLayer(member, "mainline", "main", actor, { scopeId: `room:${room}` });
-  writeMemoryLayer(member, "persona", "persona", user);
+  expect(readDoc(roomPath).revision).toBe(0);
+  expect(readDoc(personaPath).revision).toBe(0);
+  expect(writeDoc(roomIdentity, "next", user).revision).toBe(1);
+  writeDoc(scopedMainline, "main", actor);
+  writeDoc(personaIdentity, "persona", user);
   expect(current(`rooms/${room}/memory/principles-meta.json`)).toBe(JSON.stringify({ room: { revision: 900 } }));
   for (const path of [`rooms/${room}/memory/principles-history.jsonl`, `rooms/${room}/memory/mainline-meta.json`,
     `rooms/${room}/memory/mainline-history.jsonl`, `members/${member}/memory/persona-history.jsonl`]) expect(current(path)).toBe("not json\n");
 });
 
 it("preserves user/global, member, room and DM ownership with no fabricated IDs", () => {
-  writeMemoryLayer(member, "persona", "global", user);
+  writeDoc(personaIdentity, "global", user);
   expect(getDocument(db, personaPath)).toMatchObject({ memberId: member, scopeId: undefined, meta: { updatedBy: "user", updatedByMemberId: undefined } });
-  for (const [scopeId, dir, sqlScope] of [[`room:${room}`, `room-${room}`, room], [`dm:${member}`, "dm", `dm:${member}`]]) {
+  const scopedCases: Array<[string, string, string]> = [[room, `room-${room}`, room], [`dm:${member}`, "dm", `dm:${member}`]];
+  for (const [identityScope, dir, sqlScope] of scopedCases) {
     for (const layer of ["principles", "mainline"] as const) {
-      writeMemoryLayer(member, layer, `text ${scopeId}`, actor, { scopeId });
-      expect(readMemoryLayerInfo(member, layer, scopeId).revision).toBe(1);
-      expect(getDocument(db, `members/${member}/memory/scopes/${dir}/${layer}.md`)).toMatchObject({ memberId: member, scopeId: sqlScope, layer });
+      const path = `members/${member}/memory/scopes/${dir}/${layer}.md`;
+      writeDoc({ path, layer, memberId: member, scopeId: identityScope }, `text ${identityScope}`, actor);
+      expect(readDoc(path).revision).toBe(1);
+      expect(getDocument(db, path)).toMatchObject({ memberId: member, scopeId: sqlScope, layer });
     }
   }
-  writePrinciples({ roomId: room, scope: "member", memberId: member, content: "room-member", actor, reason: "r" });
+  writeDoc({ path: `rooms/${room}/memory/members/${member}/principles.md`, layer: "principles", memberId: member, scopeId: room }, "room-member", actor);
   expect(getDocument(db, `rooms/${room}/memory/members/${member}/principles.md`)).toMatchObject({ memberId: member, scopeId: room });
   // An asset with genuinely global ownership needs no fake room/member row.
   importDocument(db, { stageAsset }, { identity: { path: "memory/user/principles.md", layer: "principles" }, currentContent: "", metadataSource: "file", history: [] });
   expect(getDocument(db, "memory/user/principles.md")).toMatchObject({ memberId: undefined, scopeId: undefined });
 });
 
-it("keeps exact member-layer edit behavior and does not touch skeletons or Pi files", () => {
+it("keeps exact member-document edit behavior and does not touch Pi files", () => {
   const pi = `members/${member}/sessions/pi-session.jsonl`;
   write(pi, "{\"type\":\"session\",\"id\":\"unchanged\"}\n");
-  ensureMemorySkeleton(member, `room:${room}`);
-  expect(readMemoryLayer(member, "persona").content).toBe("");
-  expect(db.all("SELECT * FROM memory_documents")).toEqual([]);
-  writeMemoryLayer(member, "persona", "alpha 😀\r\n", actor);
-  editMemoryLayer(member, "persona", "alpha", "beta", user, { reason: "source" });
-  expect(readMemoryLayerInfo(member, "persona")).toMatchObject({ content: "beta 😀\r\n", revision: 2, contentLength: 9, updatedBy: "user" });
-  writeMemoryLayer(member, "mainline", "## Focus\r\nalpha\r\n", actor, { scopeId: `room:${room}` });
-  editMemoryLayer(member, "mainline", "alpha", "beta", user, { scopeId: `room:${room}`, reason: "edit" });
-  expect(readMemoryLayerInfo(member, "mainline", `room:${room}`)).toMatchObject({ content: "## Focus\r\nbeta\r\n", revision: 2 });
+  expect(readDoc(personaPath).content).toBe("");
+  writeDoc(personaIdentity, "alpha 😀\r\n", actor);
+  saveDocument(personaIdentity, "beta 😀\r\n", user, { operation: "edit", reason: "source" });
+  expect(readDoc(personaPath)).toMatchObject({ content: "beta 😀\r\n", revision: 2, contentLength: 9, updatedBy: "user" });
+  writeDoc(scopedMainline, "## Focus\r\nalpha\r\n", actor);
+  saveDocument(scopedMainline, "## Focus\r\nbeta\r\n", user, { operation: "edit", reason: "edit" });
+  expect(readDoc(scopedMainlinePath)).toMatchObject({ content: "## Focus\r\nbeta\r\n", revision: 2 });
   expect(current(pi)).toBe("{\"type\":\"session\",\"id\":\"unchanged\"}\n");
-  expect(() => editMemoryLayer(member, "persona", "", "", actor)).toThrow("required");
-  expect(() => editMemoryLayer(member, "mainline", "missing", "", actor, { scopeId: `room:${room}` })).toThrow("oldText not found in current content");
 });
 
-it("uses UTF-16 budgets, exact limits, reason validation and unchanged over-budget bodies", () => {
-  writePrinciples({ roomId: room, scope: "room", content: "😀".repeat(4000), actor, reason: "r" });
-  expect(readPrinciplesWithBudget(room, "room").budget).toMatchObject({ usage: 8000, overLimit: false });
-  expect(() => writePrinciples({ roomId: room, scope: "room", content: "😀".repeat(4001), actor, reason: "r" })).toThrow(AssetBudgetError);
-  for (const layer of ["persona", "mainline", "principles"] as const) {
-    const scopeId = layer === "persona" ? undefined : `room:${room}`;
-    writeMemoryLayer(member, layer, "x".repeat(4000), actor, { scopeId });
-    expect(() => writeMemoryLayer(member, layer, "x".repeat(4001), actor, { scopeId })).toThrow(AssetBudgetError);
-    expect(readMemoryLayerInfo(member, layer, scopeId).revision).toBe(1);
-  }
-  write(roomPath, "legacy".repeat(2000));
-  expect(readPrinciplesWithBudget(room, "room").budget.overLimit).toBe(true);
-  expect(readPrinciples(room, "room").content.length).toBe(12000);
-  writePrinciples({ roomId: room, scope: "room", content: "curated", actor: user, reason: "curation" });
-  expect(readPrinciples(room, "room").revision).toBe(2);
-});
-
-it("rejects ownership collisions and absent shared scope references", () => {
-  writeMemoryLayer(member, "principles", "first", actor, { scopeId: `dm:${member}` });
-  expect(() => readMemoryLayerInfo(member, "principles", "dm:other")).toThrow("ownership mismatch");
-  expect(() => writeMemoryLayer(member, "principles", "second", actor, { scopeId: "dm:other" })).toThrow("ownership mismatch");
-  expect(() => writeMemoryLayer(member, "mainline", "missing", actor, { scopeId: "room:missing-room" })).toThrow();
-  expect(getDocument(db, `members/${member}/memory/scopes/room-missing-room/mainline.md`)).toBeUndefined();
-  expect(existsSync(join(root, `members/${member}/memory/scopes/room-missing-room/mainline.md`))).toBe(false);
+it("rejects ownership collisions against the stored document identity", () => {
+  writeDoc(personaIdentity, "one", actor);
+  expect(() => readDocumentMeta({ path: personaPath, layer: "principles", memberId: member })).toThrow("ownership mismatch");
+  expect(() => writeDoc({ path: personaPath, layer: "persona", memberId: "mem_other" }, "two", actor)).toThrow("ownership mismatch");
+  expect(readDoc(personaPath).content).toBe("one");
 });
 
 it("deduplicates identical snapshots but never overwrites different retained content", () => {
-  const args = { roomId: room, scope: "room" as const, content: "same", actor, reason: "r" };
-  writePrinciples(args); writePrinciples(args);
+  writeDoc(roomIdentity, "same", actor); writeDoc(roomIdentity, "same", actor);
   const events = listDocumentHistory(db, roomPath);
   expect(events[0].snapshotPath).toBe(events[1].snapshotPath);
   const hash = documentContentMeta("third").contentHash;
   write(documentSnapshotPath(roomPath, hash), "conflicting retained body");
-  expect(() => writePrinciples({ ...args, content: "third" })).toThrow("snapshot content conflict");
-  expect(readPrinciples(room, "room").revision).toBe(2);
+  expect(() => writeDoc(roomIdentity, "third", actor)).toThrow("snapshot content conflict");
+  expect(readDoc(roomPath).revision).toBe(2);
   expect(current(roomPath)).toBe("same");
   expect(current(documentSnapshotPath(roomPath, hash))).toBe("conflicting retained body");
 });
@@ -199,7 +187,7 @@ it("does not commit history if snapshot/current preparation fails", () => {
   const hash = documentContentMeta("x").contentHash;
   const snapshot = documentSnapshotPath(roomPath, hash);
   mkdirSync(join(root, snapshot), { recursive: true });
-  expect(() => writePrinciples({ roomId: room, scope: "room", content: "x", actor, reason: "r" })).toThrow("Invalid document asset");
+  expect(() => writeDoc(roomIdentity, "x", actor)).toThrow("Invalid document asset");
   expect(getDocument(db, roomPath)).toBeUndefined();
   expect(existsSync(join(root, roomPath))).toBe(false);
   rmSync(join(root, snapshot), { recursive: true });
@@ -297,11 +285,11 @@ it("rejects symlink/traversal assets without modifying the target", () => {
 });
 
 it("rolls back SQL/history and restores exact prior bytes on a commit failure", () => {
-  writePrinciples({ roomId: room, scope: "room", content: "old\r\n😀", actor, reason: "r" });
-  const before = readPrinciples(room, "room");
+  writeDoc(roomIdentity, "old\r\n😀", actor);
+  const before = readDoc(roomPath);
   db.exec("CREATE TRIGGER fail_history BEFORE INSERT ON memory_document_history BEGIN SELECT RAISE(ABORT, 'injected history failure'); END");
-  expect(() => writePrinciples({ roomId: room, scope: "room", content: "new", actor: user, reason: "r" })).toThrow("injected history failure");
-  expect(readPrinciples(room, "room")).toEqual(before);
+  expect(() => writeDoc(roomIdentity, "new", user)).toThrow("injected history failure");
+  expect(readDoc(roomPath)).toEqual(before);
   expect(listDocumentHistory(db, roomPath)).toHaveLength(1);
   // Prepared but unreferenced assets are retained; not advertised as saved revisions.
   expect(current(documentSnapshotPath(roomPath, documentContentMeta("new").contentHash))).toBe("new");
@@ -309,7 +297,7 @@ it("rolls back SQL/history and restores exact prior bytes on a commit failure", 
 
 it("removes a new current body when its first metadata commit fails", () => {
   db.exec("CREATE TRIGGER fail_document BEFORE INSERT ON memory_documents BEGIN SELECT RAISE(ABORT, 'injected document failure'); END");
-  expect(() => writeMemoryLayer(member, "persona", "new", actor)).toThrow("injected document failure");
+  expect(() => writeDoc(personaIdentity, "new", actor)).toThrow("injected document failure");
   expect(existsSync(join(root, personaPath))).toBe(false);
   expect(getDocument(db, personaPath)).toBeUndefined();
   expect(listDocumentHistory(db, personaPath)).toEqual([]);
@@ -338,20 +326,20 @@ describe("pure startup import", () => {
     expect(current(stageCalls[0])).toBe(old);
     expect(current(stageCalls[1])).toBe("");
     bindDatabase(db);
-    expect(writePrinciples({ roomId: room, scope: "room", content: "next", actor: user, reason: "r" }).revision).toBe(18);
+    expect(writeDoc(roomIdentity, "next", user).revision).toBe(18);
     expect(listDocumentHistory(db, roomPath).at(-1)).toMatchObject({ ordinal: 3, revision: 18 });
   });
 
-  it("derives member-memory revisions from event count and current hashes from current bytes", () => {
+  it("derives persona document revisions from event count and current hashes from current bytes", () => {
     const content = "current different from history";
     write(personaPath, content);
     importDocument(db, { stageAsset }, { identity: { path: personaPath, memberId: member, layer: "persona" }, currentContent: content, metadataSource: "history",
       history: [{ content: "one", contentHash: documentContentMeta("one").contentHash.slice(0, 16), ts: 1 },
         { content: "two", actorType: "member", actorMemberId: member, actorName: "old name", ts: 2 }] });
-    expect(readMemoryLayerInfo(member, "persona")).toMatchObject({ revision: 2, updatedByMemberId: member, updatedByName: "old name", updatedAt: 2, ...documentContentMeta(content) });
+    expect(readDoc(personaPath)).toMatchObject({ revision: 2, updatedByMemberId: member, updatedByName: "old name", updatedAt: 2, ...documentContentMeta(content) });
     expect(listDocumentHistory(db, personaPath)[0].contentHash).toHaveLength(16);
-    writeMemoryLayer(member, "persona", "three", user);
-    expect(readMemoryLayerInfo(member, "persona").revision).toBe(3);
+    writeDoc(personaIdentity, "three", user);
+    expect(readDoc(personaPath).revision).toBe(3);
   });
 
   it("never reports a missing snapshot or failed staging/SQL import as saved", () => {
@@ -373,13 +361,13 @@ describe("pure startup import", () => {
 it("preserves revision zero for absent room metadata despite historical writes", () => {
   write(roomPath, "current");
   importDocument(db, { stageAsset }, { identity: roomIdentity, currentContent: "current", metadataSource: "file", history: [{ content: "old", revision: 8, ts: 3, actorType: "user" }] });
-  expect(readPrinciples(room, "room")).toMatchObject({ revision: 0, updatedAt: undefined, ...documentContentMeta("current") });
+  expect(readDoc(roomPath)).toMatchObject({ revision: 0, updatedAt: undefined, ...documentContentMeta("current") });
   expect(listDocumentHistory(db, roomPath)[0].revision).toBe(8);
-  expect(writePrinciples({ roomId: room, scope: "room", content: "next", actor, reason: "r" }).revision).toBe(1);
+  expect(writeDoc(roomIdentity, "next", actor).revision).toBe(1);
 });
 
 it("rejects stale revision commits without changing metadata or history", () => {
-  const saved = writePrinciples({ roomId: room, scope: "room", content: "first", actor, reason: "r" });
+  const saved = writeDoc(roomIdentity, "first", actor);
   const event = listDocumentHistory(db, roomPath)[0];
   expect(() => commitDocumentRevision(db, roomIdentity, { ...saved, revision: 2 }, { ...event, revision: 2 }, 0)).toThrow("revision changed");
   expect(getDocument(db, roomPath)?.meta.revision).toBe(1);

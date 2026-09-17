@@ -27,9 +27,3 @@ export function budgetTone(budget: { pct: number; overLimit?: boolean }): Budget
   if (budget.pct >= 70) return "warn";
   return "ok";
 }
-
-/** Count of non-empty prompt assets shown on the assets tab badge (member/room principles + mainline). */
-export function promptAssetCount(assets: Array<{ content: string } | null>): number | null {
-  if (assets.some((a) => a === null)) return null;
-  return assets.filter((a) => a!.content.trim().length > 0).length;
-}

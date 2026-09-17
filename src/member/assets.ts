@@ -4,14 +4,24 @@ import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openS
 import { randomUUID, createHash } from "node:crypto";
 import { dirname, join, relative, resolve, sep, posix } from "node:path";
 import { getDatabase, type Database } from "../data/database.js";
-import { type PrinciplesMeta } from "../kernel/types.js";
+
+/** Revision metadata for a member document in the asset registry. */
+export interface DocumentMeta {
+  revision: number;
+  contentHash: string;
+  contentLength: number;
+  updatedAt?: number;
+  updatedBy?: "user" | "member";
+  updatedByMemberId?: string;
+  updatedByName?: string;
+}
 
 export function documentIdentity(path: string, layer: DocumentIdentity["layer"], memberId?: string, scopeId?: string): DocumentIdentity {
   return { path: validateDocumentPath(relative(getBossmodeDir(), path).split(sep).join("/")), layer, memberId,
     scopeId: scopeId?.startsWith("room:") ? scopeId.slice(5) : scopeId };
 }
 
-export function readDocumentMeta(identity: DocumentIdentity): PrinciplesMeta | undefined {
+export function readDocumentMeta(identity: DocumentIdentity): DocumentMeta | undefined {
   const record = getDocument(getDatabase(), identity.path);
   assertDocumentIdentity(record, identity);
   return record?.meta;
@@ -87,13 +97,13 @@ function retainSnapshot(path: string, bytes: Buffer): void {
  */
 export function saveDocument(identity: DocumentIdentity, content: string,
   actor: { type: "user" | "member"; memberId?: string; name?: string },
-  options: { operation: "write" | "edit"; reason: string; eventScopeId?: string }): PrinciplesMeta {
+  options: { operation: "write" | "edit"; reason: string; eventScopeId?: string }): DocumentMeta {
   const db = getDatabase(); // Fail before file preparation if storage or transaction state is unsafe.
   db.assertOutsideTransaction();
   const previous = getDocument(db, identity.path);
   assertDocumentIdentity(previous, identity);
   const expectedRevision = previous?.meta.revision ?? 0;
-  const meta: PrinciplesMeta = { revision: expectedRevision + 1, ...documentContentMeta(content), updatedAt: Date.now(),
+  const meta: DocumentMeta = { revision: expectedRevision + 1, ...documentContentMeta(content), updatedAt: Date.now(),
     updatedBy: actor.type, updatedByMemberId: actor.memberId, updatedByName: actor.name };
   const bytes = Buffer.from(content, "utf8");
   const snapshotPath = documentSnapshotPath(identity.path, meta.contentHash);
@@ -152,9 +162,9 @@ export interface DocumentHistory {
   snapshotBytes: number;
 }
 
-export interface DocumentRecord extends DocumentIdentity { meta: PrinciplesMeta }
+export interface DocumentRecord extends DocumentIdentity { meta: DocumentMeta }
 
-export function documentContentMeta(content: string): Pick<PrinciplesMeta, "contentHash" | "contentLength"> {
+export function documentContentMeta(content: string): Pick<DocumentMeta, "contentHash" | "contentLength"> {
   return { contentHash: createHash("sha256").update(content, "utf8").digest("hex"), contentLength: content.length };
 }
 
@@ -181,7 +191,7 @@ const selectDocument = `SELECT path, layer, member_id AS memberId, scope_id AS s
  updated_by_name AS updatedByName FROM memory_documents WHERE path=?`;
 
 export function getDocument(db: Database, path: string): DocumentRecord | undefined {
-  const row = db.get<DocumentIdentity & PrinciplesMeta>(selectDocument, validateDocumentPath(path));
+  const row = db.get<DocumentIdentity & DocumentMeta>(selectDocument, validateDocumentPath(path));
   if (!row) return undefined;
   // SQLite NULL maps to optional public DTO properties, not a fabricated actor.
   const { layer, memberId, scopeId, revision, contentHash, contentLength, updatedAt, updatedBy, updatedByMemberId, updatedByName } = row;
@@ -212,14 +222,14 @@ export function listDocumentHistory(db: Database, path: string): DocumentHistory
 /** SQL-only initial ownership for a durably prepared body. The caller includes this strict
  * insert in its creation transaction; birth has no historical revision or invented actor. */
 export function insertInitialDocument(db: Database, identity: DocumentIdentity,
-  meta: Pick<PrinciplesMeta, "contentHash" | "contentLength">): void {
+  meta: Pick<DocumentMeta, "contentHash" | "contentLength">): void {
   validateDocumentPath(identity.path);
   db.run(`INSERT INTO memory_documents (path, layer, member_id, scope_id, revision, content_hash, content_length)
     VALUES (?, ?, ?, ?, 0, ?, ?)`, identity.path, identity.layer, identity.memberId ?? null,
     identity.scopeId ?? null, meta.contentHash, meta.contentLength);
 }
 
-function putDocument(db: Database, identity: DocumentIdentity, meta: PrinciplesMeta): void {
+function putDocument(db: Database, identity: DocumentIdentity, meta: DocumentMeta): void {
   assertDocumentIdentity(getDocument(db, identity.path), identity);
   db.run(`INSERT INTO memory_documents (path, layer, member_id, scope_id, revision, content_hash, content_length,
     updated_at, updated_by, updated_by_member_id, updated_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -241,7 +251,7 @@ function insertHistory(db: Database, path: string, event: DocumentHistory): void
 }
 
 /** Commit references only AFTER the caller has durably prepared both file bodies. */
-export function commitDocumentRevision(db: Database, identity: DocumentIdentity, meta: PrinciplesMeta,
+export function commitDocumentRevision(db: Database, identity: DocumentIdentity, meta: DocumentMeta,
   event: Omit<DocumentHistory, "ordinal">, expectedRevision: number): void {
   db.transaction(tx => {
     const previous = getDocument(tx, identity.path);
@@ -281,10 +291,10 @@ export interface DocumentImport {
   /** Current body read by the startup inventory, never written by this importer. */
   currentContent: string;
   /** The parent identifies the legacy authority explicitly: member-memory used event count;
-   * room principles/mainline used metadata files (missing entry meant revision zero). */
+   * legacy metadata files were authoritative when present (missing entry meant revision zero). */
   metadataSource: "history" | "file";
   /** File metadata, when present, remains authoritative even if revision differs from event count. */
-  meta?: PrinciplesMeta;
+  meta?: DocumentMeta;
   /** Source order is significant. Member-memory revisions were the parsed event count. */
   history: readonly ImportedDocumentHistory[];
 }

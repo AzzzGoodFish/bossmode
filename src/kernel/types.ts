@@ -304,53 +304,6 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-// -- Prompt assets: Principles (准则) & Mainline (主线) --
-
-export interface PrinciplesMeta {
-  revision: number;
-  contentHash: string;
-  contentLength: number;
-  updatedAt?: number;
-  updatedBy?: "user" | "member";
-  updatedByMemberId?: string;
-  updatedByName?: string;
-}
-
-export interface Principles extends PrinciplesMeta {
-  content: string;
-}
-
-export interface Mainline extends PrinciplesMeta {
-  content: string;
-}
-
-/** Capacity view of a prompt asset, computed dynamically from content length. */
-export interface PromptAssetBudget {
-  limit: number;
-  usage: number;
-  pct: number;
-  /** True when the stored content exceeds the budget — pending curation, writes are rejected until within budget. */
-  overLimit: boolean;
-}
-
-/** Structured view of a Mainline document, parsed from the two-section markdown. */
-export interface MainlineIndexEntry {
-  kind: "doc" | "msg" | "other";
-  /** The reference token as written (e.g. docs/..., task:<id>, msg:#<seq>); empty for non-reference lines. */
-  ref: string;
-  /** Trailing note after the ref (the em-dash separated remark), or the full line for non-reference entries. */
-  note: string;
-  stale: boolean;
-  /** Original line text (without the list marker) for faithful rendering. */
-  raw: string;
-}
-
-export interface ParsedMainline {
-  /** Text of the focus section (领域基石), trimmed. */
-  focus: string;
-  index: MainlineIndexEntry[];
-}
-
 // -- Room --
 
 export interface RoomMemberConfig {

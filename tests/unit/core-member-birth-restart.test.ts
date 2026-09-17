@@ -4,12 +4,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import { bindDatabase, type Database } from "../../src/data/database.js";
-import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/member/assets.js";
+import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory, saveDocument } from "../../src/member/assets.js";
 
 import { createMember, createMemberWithPersona } from "../../src/app/member-actions.js";
 import { getMember, updateMemberIdentity } from "../../src/member/identity.js";
 import { readMemberProfile } from "../../src/member/profile.js";
-import { writeMemoryLayer } from "../../src/member/memory/member-memory-store.js";
 
 const root = process.env.BOSSMODE_DIR!;
 const literal = "\uFEFF---\r\nname: Not identity\r\n---\r\n内 文 😀 `literal`  \r\n\t\n";
@@ -61,7 +60,7 @@ it("commits initial ownership before returning, preserves it across profile upda
   expect(readMemberProfile(member.id).body).toBe(literal);
   expect(listDocumentHistory(db!, personaPath(member.id))).toEqual([]);
   for (const content of ["", literal + "edited\r\n"]) {
-    writeMemoryLayer(member.id, "persona", content, { type: "user" }, { reason: "profile edit" });
+    saveDocument({ path: personaPath(member.id), layer: "persona", memberId: member.id }, content, { type: "user" }, { operation: "write", reason: "profile edit" });
   }
   const history = listDocumentHistory(db!, personaPath(member.id));
   expect(history.map(event => [event.ordinal, event.revision, event.reason])).toEqual([[1, 1, "profile edit"], [2, 2, "profile edit"]]);

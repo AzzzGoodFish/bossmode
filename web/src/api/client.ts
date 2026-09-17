@@ -664,13 +664,6 @@ export interface RoomMemberRecord {
   updatedAt: number;
 }
 
-export interface PromptAssetBudget {
-  limit: number;
-  usage: number;
-  pct: number;
-  overLimit: boolean;
-}
-
 export interface Room {
   id: string;
   name: string;

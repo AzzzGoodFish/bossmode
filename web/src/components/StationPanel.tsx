@@ -9,7 +9,7 @@ import {
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
 } from "../api/client";
 import { useMemberFloat } from "./member-float";
-import { formatRelativeTime, formatSinceDate, budgetTone, promptAssetCount } from "../utils/member-panel-view";
+import { formatRelativeTime, formatSinceDate, budgetTone } from "../utils/member-panel-view";
 import { formatTokens, compactModelId, memberModelAvailabilityLabel, statusLabel, buildModelRows, type RowOption } from "./member-scope";
 import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-levels";
 

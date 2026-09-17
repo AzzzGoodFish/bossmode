@@ -11,8 +11,6 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { createMember } from "../app/member-actions.js";
-import { readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
-import * as principlesStore from "../member/memory/principles-store.js";
 import {
   readAllDmMessages,
   getLatestDmSeq,
@@ -650,41 +648,26 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     const url = new URL(req.url || "", "http://localhost");
-    const layer = (url.searchParams.get("layer") || "persona") as "persona" | "principles" | "mainline" | "profile";
-    const scope = url.searchParams.get("scope") || undefined;
-    // Identity batch-2: principles/mainline panel layers retired → persona.md only.
+    const layer = url.searchParams.get("layer") || "profile";
+    // Principles/mainline layers are retired (see GET /api/rooms/:id/principles).
     if (layer === "principles" || layer === "mainline") {
       sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read persona.md via layer=profile" });
       return;
     }
-    if (layer === "profile") {
-      const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
-      const profile = readMemberProfile(m.id);
-      sendJson(res, 200, {
-        layer: "profile",
-        path: memberProfilePath(m.id),
-        content: profile.body,
-        raw: profile.raw,
-        overBudget: profile.overBudget,
-        exists: profile.exists,
-      });
+    // "persona" is the historical name of the same file; profile is the live view.
+    if (layer !== "profile" && layer !== "persona") {
+      sendJson(res, 400, { error: "invalid_layer", message: "layer must be profile" });
       return;
     }
-    // Legacy persona layer (batch-3 migrates into persona.md). principles/mainline already 410 above.
-    if (layer !== "persona") {
-      sendJson(res, 400, { error: "invalid_layer", message: "layer must be profile or persona" });
-      return;
-    }
-    if (scope && !parseScopeId(scope)) {
-      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
-      return;
-    }
-    const info = readMemoryLayerInfo(m.id, "persona", scope as ScopeId | undefined);
+    const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+    const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
-      ...info,
-      content: info.content,
-      budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-      suggestedTemplate: info.content.trim() ? undefined : undefined,
+      layer: "profile",
+      path: memberProfilePath(m.id),
+      content: profile.body,
+      raw: profile.raw,
+      overBudget: profile.overBudget,
+      exists: profile.exists,
     });
   } catch (err) {
     const e = errCode(err);
