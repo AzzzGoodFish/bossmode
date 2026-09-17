@@ -70,7 +70,8 @@ describe("F4 model binding persists to the registry", () => {
     mkdirSync(join(dir, "rooms"), { recursive: true });
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     broadcastToRoom.mockClear();
-
+    const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+    (await import("../../src/agent/orchestrator/agent-manager.js")).initAgentManager(new RuntimeRegistry(), loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   afterEach(async () => {
