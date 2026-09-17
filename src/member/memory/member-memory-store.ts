@@ -14,9 +14,6 @@ import {
   computeAssetBudget,
   formatBudgetHeader,
 } from "./principles-store.js";
-import {
-  MAINLINE_TEMPLATE,
-} from "../../chat/mainline-store.js";
 import { getMemoryBudget } from "./memory-budgets.js";
 
 export type MemoryLayer = "persona" | "principles" | "mainline";
@@ -47,6 +44,9 @@ function layerPath(memberId: string, layer: MemoryLayer, scopeId?: ScopeId): str
   const base = scopeMemoryDir(memberId, scopeId);
   return join(base, layer === "principles" ? "principles.md" : "mainline.md");
 }
+
+/** Default body for a new mainline layer file. */
+const MAINLINE_TEMPLATE = "## Focus\n\n\n\n## Dynamic Index\n\n";
 
 function templateFor(layer: MemoryLayer): string {
   if (layer === "mainline") return MAINLINE_TEMPLATE;

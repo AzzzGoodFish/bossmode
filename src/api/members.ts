@@ -11,8 +11,7 @@ import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { createMember } from "../app/member-actions.js";
-import { readMemoryLayer, readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
-import * as mainlineStore from "../chat/mainline-store.js";
+import { readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import * as principlesStore from "../member/memory/principles-store.js";
 import {
   readAllDmMessages,

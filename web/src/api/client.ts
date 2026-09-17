@@ -671,43 +671,6 @@ export interface PromptAssetBudget {
   overLimit: boolean;
 }
 
-export interface Principles {
-  content: string;
-  revision: number;
-  contentHash: string;
-  contentLength: number;
-  updatedAt?: number;
-  updatedBy?: "user" | "member";
-  updatedByMemberId?: string;
-  updatedByName?: string;
-  budget?: PromptAssetBudget;
-  budgetHeader?: string;
-  suggestedTemplate?: string;
-  memberId?: string;
-  memberName?: string;
-}
-
-export interface MainlineIndexEntry {
-  kind: "doc" | "task" | "msg" | "other";
-  ref: string;
-  note: string;
-  stale: boolean;
-  raw: string;
-  /** msg entries only: resolvable message id for jump (absent = stale/unreachable) */
-  msgId?: string;
-  /** msg entries only: content preview from the referenced message */
-  summary?: string;
-}
-
-export interface ParsedMainline {
-  focus: string;
-  index: MainlineIndexEntry[];
-}
-
-export interface Mainline extends Principles {
-  parsed: ParsedMainline;
-}
-
 export interface Room {
   id: string;
   name: string;
@@ -773,14 +736,6 @@ export async function renameRoom(id: string, name: string): Promise<Room> {
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
-}
-
-export async function getMemberPrinciples(roomId: string, memberRef: string): Promise<Principles> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/principles`);
-}
-
-export async function getMemberMainline(roomId: string, memberRef: string): Promise<Mainline> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/mainline`);
 }
 
 export interface MemberActiveTool {
@@ -1459,12 +1414,6 @@ export async function getMemberScopedActivityEvents(
   if (beforeSeq !== undefined) qs.set("beforeSeq", String(beforeSeq));
   if (types && types.length) qs.set("types", types.join(","));
   return apiFetch(`/api/members/${encodeURIComponent(id)}/events?${qs}`);
-}
-
-/** Scope-addressed prompt asset (principles/mainline) — same rich payload the
- * room members routes return (revision/hash/budget header + parsed mainline). */
-export async function getMemberMemoryAsset(id: string, layer: "principles" | "mainline", scope: string): Promise<Principles & { parsed?: ParsedMainline }> {
-  return apiFetch(`/api/members/${encodeURIComponent(id)}/memory?layer=${layer}&scope=${encodeURIComponent(scope)}`);
 }
 
 export interface ConversationToolsInfo {

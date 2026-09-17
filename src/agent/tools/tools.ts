@@ -6,8 +6,6 @@ import { randomUUID } from "node:crypto";
 import { postMessage } from "../../chat/message-bus.js";
 import * as messageStore from "../../chat/message-store.js";
 import * as roomStore from "../../chat/conversations.js";
-import * as mainlineStore from "../../chat/mainline-store.js";
-import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/memory/member-memory-store.js";
 import { getMember, resolveMemberRef } from "../../member/identity.js";
 import { assertMemberScopeAccess, listRoomsForMember } from "../../chat/conversations.js";
 import { unknownMemberToolMessage } from "./member-tool-names.js";

@@ -22,7 +22,6 @@ const { getDefaultConfig } = await import("../../src/config/settings.js");
 const assetsMigration = getMigration("core-assets-v1");
 const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/member/assets.js");
 const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/memory/principles-store.js");
-const { readMainline, writeMainline, editMainline } = await import("../../src/chat/mainline-store.js");
 const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/member/memory/member-memory-store.js");
 const { saveDocument } = await import("../../src/member/assets.js");
 import type { Database } from "../../src/data/database.js";
@@ -78,7 +77,6 @@ it("requires explicit binding without opening or migrating from a getter or writ
 it("returns original missing-document DTOs without DB writes", () => {
   expect(readPrinciples(room, "room")).toEqual({ content: "", revision: 0, ...documentContentMeta(""),
     updatedAt: undefined, updatedBy: undefined, updatedByMemberId: undefined, updatedByName: undefined });
-  expect(readMainline(room, member).revision).toBe(0);
   expect(readMemoryLayerInfo(member, "persona")).toMatchObject({ content: "", revision: 0, updatedAt: null, updatedBy: null });
   expect(db.all("SELECT * FROM memory_documents")).toEqual([]);
 });
@@ -117,7 +115,7 @@ it("never consults or updates retained legacy metadata/history", () => {
   expect(readPrinciples(room, "room").revision).toBe(0);
   expect(readMemoryLayerInfo(member, "persona").revision).toBe(0);
   expect(writePrinciples({ roomId: room, scope: "room", content: "next", actor: user, reason: "r" }).revision).toBe(1);
-  writeMainline({ roomId: room, memberId: member, content: "main", actor, reason: "r" });
+  writeMemoryLayer(member, "mainline", "main", actor, { scopeId: `room:${room}` });
   writeMemoryLayer(member, "persona", "persona", user);
   expect(current(`rooms/${room}/memory/principles-meta.json`)).toBe(JSON.stringify({ room: { revision: 900 } }));
   for (const path of [`rooms/${room}/memory/principles-history.jsonl`, `rooms/${room}/memory/mainline-meta.json`,
@@ -141,7 +139,7 @@ it("preserves user/global, member, room and DM ownership with no fabricated IDs"
   expect(getDocument(db, "memory/user/principles.md")).toMatchObject({ memberId: undefined, scopeId: undefined });
 });
 
-it("keeps exact mainline and member-edit behavior and does not touch skeletons or Pi files", () => {
+it("keeps exact member-layer edit behavior and does not touch skeletons or Pi files", () => {
   const pi = `members/${member}/sessions/pi-session.jsonl`;
   write(pi, "{\"type\":\"session\",\"id\":\"unchanged\"}\n");
   ensureMemorySkeleton(member, `room:${room}`);
@@ -150,19 +148,18 @@ it("keeps exact mainline and member-edit behavior and does not touch skeletons o
   writeMemoryLayer(member, "persona", "alpha 😀\r\n", actor);
   editMemoryLayer(member, "persona", "alpha", "beta", user, { reason: "source" });
   expect(readMemoryLayerInfo(member, "persona")).toMatchObject({ content: "beta 😀\r\n", revision: 2, contentLength: 9, updatedBy: "user" });
-  const m = writeMainline({ roomId: room, memberId: member, content: "## Focus\r\nalpha\r\n", actor, reason: " initial " });
-  expect(editMainline({ roomId: room, memberId: member, oldText: "alpha", newText: "beta", actor: user, reason: "edit" }).revision).toBe(2);
-  expect(readMainline(room, member).content).toBe(m.content.replace("alpha", "beta"));
+  writeMemoryLayer(member, "mainline", "## Focus\r\nalpha\r\n", actor, { scopeId: `room:${room}` });
+  editMemoryLayer(member, "mainline", "alpha", "beta", user, { scopeId: `room:${room}`, reason: "edit" });
+  expect(readMemoryLayerInfo(member, "mainline", `room:${room}`)).toMatchObject({ content: "## Focus\r\nbeta\r\n", revision: 2 });
   expect(current(pi)).toBe("{\"type\":\"session\",\"id\":\"unchanged\"}\n");
   expect(() => editMemoryLayer(member, "persona", "", "", actor)).toThrow("required");
-  expect(() => editMainline({ roomId: room, memberId: member, oldText: "missing", newText: "", actor, reason: "r" })).toThrow("not found");
+  expect(() => editMemoryLayer(member, "mainline", "missing", "", actor, { scopeId: `room:${room}` })).toThrow("oldText not found in current content");
 });
 
 it("uses UTF-16 budgets, exact limits, reason validation and unchanged over-budget bodies", () => {
   writePrinciples({ roomId: room, scope: "room", content: "😀".repeat(4000), actor, reason: "r" });
   expect(readPrinciplesWithBudget(room, "room").budget).toMatchObject({ usage: 8000, overLimit: false });
   expect(() => writePrinciples({ roomId: room, scope: "room", content: "😀".repeat(4001), actor, reason: "r" })).toThrow(AssetBudgetError);
-  expect(() => writeMainline({ roomId: room, memberId: member, content: "x", actor, reason: " " })).toThrow("reason is required");
   for (const layer of ["persona", "mainline", "principles"] as const) {
     const scopeId = layer === "persona" ? undefined : `room:${room}`;
     writeMemoryLayer(member, layer, "x".repeat(4000), actor, { scopeId });

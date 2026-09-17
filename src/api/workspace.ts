@@ -18,9 +18,6 @@ import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-res
 import { getModelCredentialProfile } from "../config/models.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import * as attachmentStore from "../files/attachment-store.js";
-import * as principlesStore from "../member/memory/principles-store.js";
-import * as mainlineStore from "../chat/mainline-store.js";
-import { readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
 import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp.js";
@@ -214,58 +211,23 @@ addRoute("PATCH", "/api/rooms/:id", async (req, res, params) => {
   sendJson(res, 200, updated);
 });
 
-// ── Prompt Assets: Principles (准则) & Mainline (主线) — read-only public API ──
-// Writes happen exclusively through member tools (read/edit/write_memory) so governance
-// (reason, budget, history) is enforced in one place.
+// ── Prompt assets (principles / mainline) — retired serving layer ──
+// Q4 decision (record #16636/#20429; confirmed #20991): the dedicated
+// principles/mainline serving layer is retired. Historical Markdown and
+// revisions stay readable as files/archives; persona lives in persona.md.
 
 // ⑤ A: room principles is retired — the room description (rooms.description,
-// name + description) is the room's shared text. Member-scope assets below stay.
+// name + description) is the room's shared text.
 addRoute("GET", "/api/rooms/:id/principles", async (_req, res, _params) => {
   sendJson(res, 410, { error: "gone", message: "Room principles is retired — use the room description (GET /api/rooms/:id)" });
 });
 
-addRoute("GET", "/api/rooms/:id/members/:memberRef/principles", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const member = roomStore.resolveRoomMemberRef(params.id, params.memberRef);
-  if (!member) {
-    sendJson(res, 404, { error: "Member is not in this room" });
-    return;
-  }
-  // 0.20: member-level assets live in the member-global memory store (contract §6).
-  const info = readMemoryLayerInfo(member.id, "principles", `room:${params.id}`);
-  sendJson(res, 200, { ...info, asset: "principles", scope: "member", memberId: member.id, memberName: member.name, budgetHeader: principlesStore.formatBudgetHeader(info.budget), suggestedTemplate: info.content.trim() ? undefined : principlesStore.PRINCIPLES_TEMPLATE });
+addRoute("GET", "/api/rooms/:id/members/:memberRef/principles", async (_req, res, _params) => {
+  sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read persona.md via layer=profile" });
 });
 
-addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, params) => {
-  const room = roomStore.getRoom(params.id);
-  if (!room) {
-    sendJson(res, 404, { error: "Room not found" });
-    return;
-  }
-  const member = roomStore.resolveRoomMemberRef(params.id, params.memberRef);
-  if (!member) {
-    sendJson(res, 404, { error: "Member is not in this room" });
-    return;
-  }
-  // 0.20: member-level assets live in the member-global memory store (contract §6).
-  const info = readMemoryLayerInfo(member.id, "mainline", `room:${params.id}`);
-  const scopeMessages = mainlineStore.loadScopeMessages(params.id);
-  const resolvedContent = mainlineStore.resolveMainlineRefs(params.id, info.content, scopeMessages);
-  sendJson(res, 200, {
-    ...info,
-    content: resolvedContent,
-    parsed: mainlineStore.parseMainline(resolvedContent, mainlineStore.buildMsgLookup(scopeMessages)),
-    asset: "mainline",
-    scope: "member",
-    memberId: member.id,
-    memberName: member.name,
-    budgetHeader: principlesStore.formatBudgetHeader(info.budget),
-    suggestedTemplate: info.content.trim() ? undefined : mainlineStore.MAINLINE_TEMPLATE,
-  });
+addRoute("GET", "/api/rooms/:id/members/:memberRef/mainline", async (_req, res, _params) => {
+  sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read persona.md via layer=profile" });
 });
 
 /** Live active tools for a running member session (getAllTools ∩ active). No session → empty. */
