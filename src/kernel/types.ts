@@ -375,7 +375,17 @@ export interface Room {
 
 // -- Message --
 
-import type { RoomMessageAttachment } from "../files/attachments.js";
+/** Attachment metadata travels structurally; the canonical shape and preview
+ * classification live in files/attachments.ts. This aggregate is retired with
+ * kernel/types in the target tree, and kernel may not import files/ directly. */
+export interface MessageAttachmentRecord {
+  id: string;
+  storedFilename: string;
+  originalFilename: string;
+  size?: number;
+  mime?: string;
+  previewType: "image" | "markdown" | "html" | "text" | "download";
+}
 
 export interface RoomMessage {
   id: string;
@@ -397,7 +407,7 @@ export interface RoomMessage {
   /** Message-level deliverable/document references previewable through artifact-preview. */
   artifacts?: string[];
   /** Structured attachment metadata. Public tool input remains attachments?: string[]. */
-  attachments?: RoomMessageAttachment[];
+  attachments?: MessageAttachmentRecord[];
   /**
    * Captured reply-target labels; stable IDs take precedence when present.
    * Omitted/empty = FYI (no reply debt). User posts omit this; user @ always debts.
