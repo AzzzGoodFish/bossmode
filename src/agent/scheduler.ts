@@ -1,11 +1,11 @@
-import { type JsonValue } from "../../kernel/json.js";
+import { type JsonValue } from "../kernel/json.js";
 import {randomUUID} from "node:crypto";
-import {getDatabase} from "../../data/database.js";
-import { DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../data/repositories/delivery-repository.js";
-import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
-import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
-import {ExecutionAttemptRepository} from "../../data/repositories/execution-attempt-repository.js";
-import {executionScopeId,assertExecutionOwner} from "../../data/repositories/execution-identity.js";
+import {getDatabase} from "../data/database.js";
+import { DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../data/repositories/delivery-repository.js";
+import {InputQueueRepository,type QueuedInput} from "../data/repositories/input-queue-repository.js";
+import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
+import {ExecutionAttemptRepository} from "../data/repositories/execution-attempt-repository.js";
+import {executionScopeId,assertExecutionOwner} from "../data/repositories/execution-identity.js";
 
 export interface PreparedRuntimeInput {
   prompt:string;

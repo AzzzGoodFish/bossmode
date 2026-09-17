@@ -8,7 +8,7 @@ import {ReplyObligationRepository} from "../../src/data/repositories/reply-oblig
 import {ExecutionAttemptRepository} from "../../src/data/repositories/execution-attempt-repository.js";
 import {postMessage} from "../../src/chat/message-bus.js";
 import {readMessages,writeMemberCursor,readMemberCursors,importMessage} from "../../src/data/repositories/message-repository.js";
-import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeInputs,pendingRuntimeInputs,recoverRuntimeInputState,runtimeInputPayload} from "../../src/agent/orchestrator/runtime-input-service.js";
+import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeInputs,pendingRuntimeInputs,recoverRuntimeInputState,runtimeInputPayload} from "../../src/agent/scheduler.js";
 let f:ReturnType<typeof coreFixture>;
 const owner={scopeId:"input-room",targetActorKey:"mem_input"};
 beforeEach(()=>{

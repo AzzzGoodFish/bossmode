@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTestServer, closeTestServer, createMockRoom, getTestWorkspace, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
 import { resetMocks, setMockCompactFn, setMockPromptFn } from "../helpers/mock-runtime.js";
-import { pendingRuntimeInputCount, runtimeInputOwner } from "../../src/agent/orchestrator/runtime-input-service.js";
+import { pendingRuntimeInputCount, runtimeInputOwner } from "../../src/agent/scheduler.js";
 
 setupTestWorkspace();
 afterEach(() => { vi.restoreAllMocks(); resetMocks(); });
