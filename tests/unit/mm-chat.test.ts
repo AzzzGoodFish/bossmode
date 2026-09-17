@@ -83,14 +83,14 @@ describe("member↔member private chat (⑤ B)", () => {
     const listed = await handleToolCallback("chat_list", `dm:${bob.id}`, bob.id, {}, { memberId: bob.id }) as any;
     expect(listed.chats.some((c: any) => c.id === scope && c.kind === "mm" && c.name === "Private chat with alice")).toBe(true);
 
-    // Outsiders cannot read the pair chat; chat_edit has nothing to edit; attachments are rejected.
+    // Outsiders cannot read the pair chat; chat_edit has nothing to edit; a missing attachment fails atomically.
     const denied = await handleToolCallback("chat_read", `dm:${carol.id}`, carol.id, { chat: scope }, { memberId: carol.id }) as any;
     expect(denied.ok).toBe(false);
     const edit = await handleToolCallback("chat_edit", `dm:${alice.id}`, alice.id, { chat: scope, name: "x" }, { memberId: alice.id }) as any;
     expect(edit.ok).toBe(false);
     const attach = await handleToolCallback("chat_send", `dm:${alice.id}`, alice.id, { to: bob.id, message: "x", attachments: ["/tmp/nope.txt"] }, { memberId: alice.id }) as any;
     expect(attach.ok).toBe(false);
-    expect(attach.error).toMatch(/not supported/);
+    expect(attach.error).toMatch(/File not found/);
 
     expect(fixture.db.get("PRAGMA foreign_key_check")).toBeUndefined();
   });

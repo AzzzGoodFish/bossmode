@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { extname, basename, join } from "node:path";
 import type { Readable } from "node:stream";
-import { roomDir, memberDir } from "./layout.js";
+import { roomDir, memberDir, memberChatDir } from "./layout.js";
 import { logger } from "../kernel/logger.js";
 
 export const ATTACHMENT_DIR_NAME = ".bossmode-attachments";
@@ -33,6 +33,13 @@ function getAttachDir(roomId: string): string {
 /** DM attachments are member-owned (DM has no room cwd). */
 function getDmAttachDir(memberId: string): string {
   const dir = join(memberDir(memberId), "dm-attachments");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Member↔member attachments live in the pair's shared chat dir. */
+function getMemberChatAttachDir(memberA: string, memberB: string): string {
+  const dir = join(memberChatDir(memberA, memberB), "attachments");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -129,6 +136,27 @@ export async function copyToAttachment(
   return streamToAttachment(createReadStream(sourceAbsPath), roomId, name);
 }
 
+/** Copy a local file into a member's DM attachments dir (agent chat attachments). */
+export async function copyToDmAttachment(
+  sourceAbsPath: string,
+  memberId: string,
+  originalFilename?: string,
+): Promise<StoredAttachment> {
+  const name = originalFilename || basename(sourceAbsPath);
+  return streamToDir(createReadStream(sourceAbsPath), getDmAttachDir(memberId), name, MAX_UPLOAD_SIZE, { memberId });
+}
+
+/** Copy a local file into the pair's shared member-chat attachments dir (agent chat attachments). */
+export async function copyToMemberChatAttachment(
+  sourceAbsPath: string,
+  memberA: string,
+  memberB: string,
+  originalFilename?: string,
+): Promise<StoredAttachment> {
+  const name = originalFilename || basename(sourceAbsPath);
+  return streamToDir(createReadStream(sourceAbsPath), getMemberChatAttachDir(memberA, memberB), name, MAX_UPLOAD_SIZE, { memberA, memberB });
+}
+
 /** Get absolute path for a stored attachment (with path traversal protection). */
 export function getAttachmentPath(roomId: string, storedFilename: string): string {
   const safe = basename(storedFilename);
@@ -145,6 +173,15 @@ export function getDmAttachmentPath(memberId: string, storedFilename: string): s
     throw new Error("Invalid filename");
   }
   return join(getDmAttachDir(memberId), safe);
+}
+
+/** Member-chat variant of getAttachmentPath. */
+export function getMemberChatAttachmentPath(memberA: string, memberB: string, storedFilename: string): string {
+  const safe = basename(storedFilename);
+  if (safe !== storedFilename || safe.includes("..")) {
+    throw new Error("Invalid filename");
+  }
+  return join(getMemberChatAttachDir(memberA, memberB), safe);
 }
 
 /** Check if an attachment file exists. */

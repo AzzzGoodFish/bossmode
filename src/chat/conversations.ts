@@ -120,14 +120,10 @@ export function normalizeRoomDocsPath(input: string | null | undefined): string 
 
 /** Batch 7 P3: rooms no longer bind a cwd — attachment/artifact path policy
  * covers each room member's home directory and all their workspace roots. */
-export function roomMemberAssetRoots(roomId: string): string[] {
-  const room = getRoom(roomId);
-  if (!room) return [];
-  const ids = new Set<string>();
-  for (const m of getRoomMembersFromRoom(room)) ids.add(m.id);
-  for (const gid of room.globalMemberIds ?? []) ids.add(gid);
+/** Local asset roots for a set of members: their data dirs plus registered workspaces. */
+export function memberAssetRoots(memberIds: Iterable<string>): string[] {
   const roots: string[] = [];
-  for (const id of ids) {
+  for (const id of new Set(memberIds)) {
     roots.push(memberDir(id));
     try {
       const reg = readWorkspaces(id);
@@ -135,6 +131,24 @@ export function roomMemberAssetRoots(roomId: string): string[] {
     } catch { /* synthesized on read — ignore */ }
   }
   return roots;
+}
+
+export function roomMemberAssetRoots(roomId: string): string[] {
+  const room = getRoom(roomId);
+  if (!room) return [];
+  const ids = new Set<string>();
+  for (const m of getRoomMembersFromRoom(room)) ids.add(m.id);
+  for (const gid of room.globalMemberIds ?? []) ids.add(gid);
+  return memberAssetRoots(ids);
+}
+
+/** Asset roots for any chat scope: rooms use their roster; dm/mm use the participant members. */
+export function chatScopeAssetRoots(scope: string): string[] {
+  const pair = parseMmScopeId(scope);
+  if (pair) return memberAssetRoots(pair);
+  if (scope.startsWith(DM_PREFIX)) return memberAssetRoots([scope.slice(DM_PREFIX.length)]);
+  const roomId = chatScopeRoomId(scope);
+  return roomId ? roomMemberAssetRoots(roomId) : [];
 }
 
 /** Create membership and leadership together from existing stable contact IDs. */

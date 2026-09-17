@@ -1,7 +1,7 @@
 import { createMember } from "../../src/app/member-actions.js";
 import { findMemberByName } from "../../src/member/identity.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeTestServer, createTestServer, getTestBossmodeDir, httpRequest, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
@@ -173,5 +173,66 @@ describe("chat attachment artifacts", () => {
 
     // Test mock config path is isolated and not serialized accidentally.
     expect(serialized).not.toContain(getTestBossmodeDir());
+  });
+
+  it("agent chat attachments work in the member's user DM and stay member-owned", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
+    const dm = await import("../../src/chat/dm-message-store.js");
+    const { memberDir } = await import("../../src/files/layout.js");
+
+    const member = findMemberByName("developer") ?? createMember({ name: "developer" });
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-dm-attach-"));
+    const sourcePath = join(cwd, "dm-note.md");
+    writeFileSync(sourcePath, "# DM Note", "utf8");
+
+    const result = await handleToolCallback("chat_send", `dm:${member.id}`, "developer", {
+      to: "user",
+      message: "dm attached",
+      attachments: [sourcePath],
+    }, { memberId: member.id }) as any;
+    expect(result.ok).toBe(true);
+    expect(result.chat).toMatchObject({ kind: "dm", id: `dm:${member.id}` });
+
+    const message = dm.readAllDmMessages(member.id).at(-1)!;
+    expect(message.attachments?.[0]).toEqual(expect.objectContaining({ originalFilename: "dm-note.md" }));
+    const stored = message.attachments![0].storedFilename;
+    expect(existsSync(join(memberDir(member.id), "dm-attachments", stored))).toBe(true);
+    expect(JSON.stringify(message)).not.toContain(sourcePath);
+  });
+
+  it("agent chat attachments work in member↔member chats through one shared pair store", async () => {
+    const ts = await createTestServer();
+    servers.push(ts);
+    const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
+    const { mmScopeIdOf } = await import("../../src/chat/conversations.js");
+    const { readAllMmMessages } = await import("../../src/chat/mm-message-store.js");
+    const { memberChatDir } = await import("../../src/files/layout.js");
+
+    const alice = findMemberByName("alice") ?? createMember({ name: "alice" });
+    const bob = findMemberByName("bob") ?? createMember({ name: "bob" });
+    const scope = mmScopeIdOf(alice.id, bob.id);
+    const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-mm-attach-"));
+    const sourcePath = join(cwd, "mm-note.md");
+    writeFileSync(sourcePath, "# MM Note", "utf8");
+
+    const result = await handleToolCallback("chat_send", `dm:${alice.id}`, "alice", {
+      to: bob.id,
+      message: "mm attached",
+      attachments: [sourcePath],
+    }, { memberId: alice.id }) as any;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.chat).toMatchObject({ kind: "mm", id: scope });
+
+    const message = readAllMmMessages(scope).at(-1)!;
+    expect(message.attachments?.[0]).toEqual(expect.objectContaining({ originalFilename: "mm-note.md" }));
+    const stored = message.attachments![0].storedFilename;
+    expect(existsSync(join(memberChatDir(alice.id, bob.id), "attachments", stored))).toBe(true);
+
+    // The peer resolves the same stored file through the chat read path.
+    const read = await handleToolCallback("chat_read", `dm:${bob.id}`, "bob", { chat: scope }, { memberId: bob.id }) as any;
+    expect(JSON.stringify(read)).toContain("mm-note.md");
+    expect(JSON.stringify(read)).not.toContain("unavailable");
   });
 });

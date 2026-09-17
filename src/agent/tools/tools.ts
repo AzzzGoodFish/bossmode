@@ -303,9 +303,6 @@ export async function handleToolCallback(
       const target = resolveChatTarget(roomId, sendActor, params?.to);
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
-      if (isMmScopeId(targetRoomId) && Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        return { ok: false, error: "Attachments are not supported in member chats yet" };
-      }
 
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
       const rosterId = chatScopeRoomId(targetRoomId) || targetRoomId;
@@ -319,8 +316,7 @@ export async function handleToolCallback(
       // Process agent attachments (file paths → validate + copy → structured message metadata).
       // Absolute source/store paths are not written to room-visible message JSON.
       if (Array.isArray(params?.attachments) && params.attachments.length > 0) {
-        const attachRoomId = chatScopeRoomId(targetRoomId) || targetRoomId;
-        const outcomes = await processAgentAttachments(attachRoomId, params.attachments.map(String));
+        const outcomes = await processAgentAttachments(targetRoomId, params.attachments.map(String));
         const errors: string[] = [];
         for (const o of outcomes) {
           if (o.ok) {
@@ -342,9 +338,8 @@ export async function handleToolCallback(
         }
       }
 
-      // Member↔member chat: plain text only for now; opened on the first send.
+      // Member↔member chat: opened on the first send.
       if (isMmScopeId(targetRoomId)) {
-        if (attachments.length > 0) return { ok: false, error: "Attachments are not supported in member chats yet" };
         const senderId = context?.memberId ?? null;
         const pair = parseMmScopeId(targetRoomId);
         if (!senderId || !pair || !pair.includes(senderId)) {
@@ -352,7 +347,7 @@ export async function handleToolCallback(
         }
         roomStore.ensureMmScope(pair[0], pair[1]);
         const firstMessage = loadScopeMessages(targetRoomId).length === 0;
-        const mmMeta = messageMeta({ senderMemberId: senderId, senderName: actorName() });
+        const mmMeta = messageMeta({ attachments, senderMemberId: senderId, senderName: actorName() });
         if (mmMeta) postMessage(targetRoomId, actorName(), message, [], mmMeta);
         else postMessage(targetRoomId, actorName(), message, []);
         if (firstMessage) {
@@ -867,7 +862,10 @@ function resolveMessageAttachmentsForRead(
   return msg.attachments.map((a) => {
     try {
       let absPath: string;
-      if (scopeRoomId.startsWith("dm:")) {
+      const mmPair = parseMmScopeId(scopeRoomId);
+      if (mmPair) {
+        absPath = attachmentStore.getMemberChatAttachmentPath(mmPair[0], mmPair[1], a.storedFilename);
+      } else if (scopeRoomId.startsWith("dm:")) {
         absPath = attachmentStore.getDmAttachmentPath(scopeRoomId.slice(3), a.storedFilename);
       } else {
         absPath = attachmentStore.getAttachmentPath(scopeRoomId, a.storedFilename);

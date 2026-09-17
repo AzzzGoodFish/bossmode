@@ -42,6 +42,12 @@ export function roomDir(roomId: string): string {
   return join(getRoomsDir(), roomId);
 }
 
+/** Member↔member chat data dir; pair order is canonicalized (same dir for both members). */
+export function memberChatDir(memberA: string, memberB: string): string {
+  const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
+  return join(root, "member-chats", `${a}-${b}`);
+}
+
 export function documentsRoot(): string {
   return join(root, "memory", "projects");
 }
