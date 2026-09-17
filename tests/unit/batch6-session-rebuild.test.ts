@@ -133,9 +133,9 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     }
   });
 
-  it("assembly is unified: exactly one runtime.createAgent call site in agent-manager", () => {
+  it("assembly is unified: exactly one runtime.createAgent call site in assembly", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(here, "../../src/agent/orchestrator/agent-manager.ts"), "utf-8");
+    const src = readFileSync(join(here, "../../src/agent/assembly.ts"), "utf-8");
     expect(src.match(/await runtime\.createAgent\(/g)?.length).toBe(1);
     // ① batch 2 / C1: the scope-aware compiler is gone; no call site passes a scope.
     expect(src.match(/compileMemberPromptForScope/g)).toBeNull();

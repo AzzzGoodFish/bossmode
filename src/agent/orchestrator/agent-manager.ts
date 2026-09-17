@@ -1,5 +1,4 @@
-import { mainSessionDirectory } from "../../files/layout.js";
-import { recoverRuntimeInputState, acceptRuntimeInput, acceptControlInput, pendingRuntimeInputCount, memberPendingInputCount, pendingRuntimeInputOwners, runtimeInputOwner, cancelPendingRuntimeInputs, queueDepth, waitForInputSettlement, invalidateInputScope, configureScheduler, hasInputPumps, pumpRuntimeInputs, drainQueuedInputsAsPrompt, isLengthStopReason, type PreparedRuntimeInput } from "../scheduler.js";
+import { recoverRuntimeInputState, acceptRuntimeInput, acceptControlInput, pendingRuntimeInputOwners, runtimeInputOwner, cancelPendingRuntimeInputs, queueDepth, waitForInputSettlement, invalidateInputScope, configureScheduler, hasInputPumps, pumpRuntimeInputs, drainQueuedInputsAsPrompt, type PreparedRuntimeInput } from "../scheduler.js";
 export { resumePendingRuntimeInputs } from "../scheduler.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
@@ -22,18 +21,21 @@ import * as roomStore from "../../chat/conversations.js";
 import * as sessionStore from "../../member/sessions.js";
 
 import * as attachmentStore from "../../files/attachment-store.js";
-import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/message-bus.js";
+import { postMessage, getMessagesSince } from "../../chat/message-bus.js";
 import { initRouter } from "../../chat/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../../app/server/ws.js";
-import { compileMemberPrompt, currentContractFingerprint, type MemberPromptSource } from "../prompt.js";
+import { currentContractFingerprint, type MemberPromptSource } from "../prompt.js";
+import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, getRegistry, configureAssembly } from "../assembly.js";
+export { buildMemberAgentSession, reloadMemberSession, getRegistry } from "../assembly.js";
+export { notifyMemberProfileChanged } from "../instance.js";
 import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversations.js";
 import { listRoomsForMember } from "../../chat/conversations.js";
-import { getMember, getMemberConfiguration, applyMemberConfigPatch, type MemberRecord } from "../../member/identity.js";
+import { getMember, getMemberConfiguration, applyMemberConfigPatch } from "../../member/identity.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events.js";
 import { loadScopeMessages } from "../tools/tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, formatRuntimeErrorMessage, isMemberConfigured } from "../instance.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, formatRuntimeErrorMessage } from "../instance.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -42,60 +44,31 @@ import {
 } from "./message-envelope.js";
 import type { AgentHistoryEvent } from "../events.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
-import type { AgentHandle, AgentStreamEvent, AgentMemberConfig, AgentMemberSnapshot } from "../types.js";
+import type { AgentStreamEvent, AgentMemberConfig, AgentMemberSnapshot } from "../types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { exportPiConfigForMember } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef, assertModelAvailable } from "../../config/models.js";
 import { settleMemberShellWaits } from "../terminal/shell-manager.js";
-import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/types.js";
-import {
-  cancelledCreations,
-  chatTargetOf,
-  contextCompactionWarningCache,
-  contextUsageCache,
-  getMemberLiveStatus,
-  instanceKey,
-  instances,
-  isCompactUsageDrop,
-  memberSwitchGates,
-  memberIdentityMeta,
-  pendingCreations,
-  pendingCreationsFor,
-  sessionPublishOwners,
-  settleMemberOperations,
-  shouldKeepCompactedMarker,
-  trackMemberOperation,
-  transition,
-  updateDispatchState,
-  type AgentInstance,
-  type DispatchState,
-  type PendingCredentialRefresh,
-  type PendingThinkingSwitch,
-  type SessionSources,
-} from "../instance.js";
+import type { AgentStatus, RoomMessage, ContextUsage } from "../../kernel/types.js";
+import { cancelledCreations, chatTargetOf, contextCompactionWarningCache, contextUsageCache, getMemberLiveStatus, instanceKey, instances, isCompactUsageDrop, memberSwitchGates, memberIdentityMeta, pendingCreations, pendingCreationsFor, sessionPublishOwners, settleMemberOperations, shouldKeepCompactedMarker, trackMemberOperation, transition, updateDispatchState, type AgentInstance, type PendingCredentialRefresh, type PendingThinkingSwitch, type SessionSources } from "../instance.js";
 export { getMemberLiveStatus } from "../instance.js";
 export type { SessionSources } from "../instance.js";
-
-// -- Registry injection --
-
-let registry: RuntimeRegistry | null = null;
-let promptSource: ((memberId: string) => MemberPromptSource) | null = null;
-let memberSnapshotSource: ((memberId: string) => AgentMemberSnapshot | null) | null = null;
-function compileForMember(memberId: string) {
-  if (!promptSource) throw new Error("Member prompt source is not connected");
-  return compileMemberPrompt(promptSource(memberId));
-}
 let shutdownSettlement: Promise<void> | null = null;
 let shutdownRunning = false;
 
 export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
-  if(registry&&(instances.size||pendingCreations.size||hasInputPumps()))throw new Error("Runtime initialization requires completed teardown");
+  if(getRegistry()&&(instances.size||pendingCreations.size||hasInputPumps()))throw new Error("Runtime initialization requires completed teardown");
   recoverRuntimeInputState();
   shutdownSettlement = null; openRuntimeAdmission();
-  registry = reg;
-  promptSource = loadPrompt;
-  memberSnapshotSource = loadSnapshot;
+  configureAssembly(reg, loadPrompt, loadSnapshot, {
+    isValidScope: scopeId => !!parseScopeId(scopeId) || isMmScopeId(scopeId),
+    hasScopeAccess: memberHasScopeAccess,
+    currentName: currentRuntimeName,
+    conversation: sessionConversation,
+    saveSession: (memberId, runtime, session) => sessionStore.saveCurrentSession(memberId, { runtime, ...session }),
+    postSystemNotice: (scopeId, text) => { postMessage(scopeId, "system", text); },
+  });
   configureScheduler({
     buildSession: (memberId, scopeId) => buildMemberAgentSession(memberId,
       scopeId.startsWith("dm:") || isMmScopeId(scopeId) ? scopeId : roomScopeId(scopeId)),
@@ -106,11 +79,8 @@ export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: st
     refreshProfileSources,
     applyPendingControls: applyPendingAfterPromptSettlement,
     flushPendingReload: maybeFlushPendingReload,
+    reloadSession: reloadMemberSession,
   });
-}
-
-export function getRegistry(): RuntimeRegistry | null {
-  return registry;
 }
 
 function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
@@ -250,23 +220,6 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
 
 function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   applyPendingCredentialRefresh(instance,trigger);applyPendingThinkingSwitch(instance,trigger);
-}
-
-let profileRevision = 0;
-
-/** Publication after a committed DB identity update. Never resets an active handle. */
-export function notifyMemberProfileChanged(member: MemberRecord): void {
-  profileRevision += 1;
-  for (const instance of instances.values()) {
-    if (!instance.memberId.startsWith("mem_")) continue;
-    if (instance.memberId === member.id) {
-      instance.agentName = member.name;
-      instance.sessionSources.member.name = member.name;
-      instance.sessionSources.member.title = member.title;
-    }
-    // Environment includes current roster names, including other active members.
-    instance.profilePromptDirty = true;
-  }
 }
 
 function currentRuntimeName(memberId: string, initialName: string): string {
@@ -613,275 +566,6 @@ function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receive
 // Only current member configuration selects skills, including an explicit empty list.
 export function resolveSkills(member: AgentMemberConfig): string[] {
   return member.skills ?? [];
-}
-
-// -- Instance creation --
-
-// ── Unified member session builder (batch 6 §2) ──
-// Single assembly path for every member session — compiled prompt
-// (scope-mirrored args), skills, extensions, MCP scoped config, cwd, model —
-// consumed by all four lifecycle points: initial activation (auto-resume),
-// reset (store cleared first, so fresh), reload (resume, history kept),
-// post-compaction (resume from the compacted file).
-
-export interface BuildSessionOpts {
-  /** true = honor any stored session file (reload/compact paths); default auto. */
-  resume?: boolean;
-}
-
-export async function buildMemberAgentSession(memberId: string, scopeId: string, _opts: BuildSessionOpts = {}): Promise<AgentInstance | null> {
-  if (!memberRuntimeAllowed(memberId)) return null;
-  const creationProfileRevision = profileRevision;
-  const mmScope = isMmScopeId(scopeId);
-  const ref = parseScopeId(scopeId);
-  if (!ref && !mmScope) {
-    logger.error("agent", "buildMemberAgentSession: invalid scope", { scopeId, memberId });
-    return null;
-  }
-  const key = instanceKey(memberId);
-  // §10 creation gate: an in-progress member switch must not race a fresh
-  // build (stale binding the switch will never see). Wait for the switch to
-  // end, then re-run the whole lookup. Never register a creation while the
-  // gate is held — the switch awaits pending creations, so a registered
-  // waiter would deadlock both sides. No timeout: the switch always settles.
-  for (;;) {
-    if (!memberScopeAllowsExecution(scopeId, memberId)) return null;
-    const existing = instances.get(key);
-    if (existing) return existing;
-    const pending = pendingCreations.get(key);
-    if (pending) {
-      const retryAfterCancellation = cancelledCreations.has(key);
-      const built = await pending;
-      if (retryAfterCancellation) continue;
-      return memberScopeAllowsExecution(scopeId, memberId) ? built : null;
-    }
-    const gate = memberSwitchGates.get(memberId);
-    if (gate) {
-      await gate;
-      continue;
-    }
-    break;
-  }
-
-  const publicationOwner = {};
-  sessionPublishOwners.set(key,publicationOwner);
-  // Closing execution admission must not discard final session facts from an owned
-  // run — publish as long as this build's chat access holds (① B1: the key is the
-  // member, the access check stays the build chat's).
-  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner
-    && memberHasScopeAccess(scopeId, memberId);
-  const creation = (async (): Promise<AgentInstance | null> => {
-    if (!registry) {
-      logger.error("agent", "runtime registry not initialized");
-      return null;
-    }
-
-    const snapshot = memberSnapshotSource?.(memberId) ?? null;
-    if (!snapshot) {
-      logger.error("agent", "member not found", { memberId });
-      return null;
-    }
-    const member = snapshot.config;
-    if (!isMemberConfigured(member)) {
-      logger.error("agent", "member unconfigured", { member: member.name, memberId });
-      return null;
-    }
-    const runtime = registry.get(member.runtime);
-    if (!runtime) {
-      logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
-      return null;
-    }
-    const compiled = compileForMember(memberId);
-    setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-    clearStaleMounts(memberId);
-    const skills = member.skills ?? [];
-    const skillPaths = snapshot.skillPaths;
-    const cwd = snapshot.workspaceRoot;
-    const sessionDir = mainSessionDirectory(memberId);
-    const resumeSession = snapshot.resumeSession;
-    const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
-      if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session });
-    };
-
-    // Conversation routing is turn-local; it never selects member assets or a session directory.
-    const activeChat = { scopeId };
-    const chatTarget = () => chatTargetOf(activeChat.scopeId);
-    const memberName = () => currentRuntimeName(memberId, member.name);
-    const keyRoomId = chatTargetOf(scopeId);
-    const roomMembers = ref?.kind === "room" ? roomStore.getRoom(ref.roomId)?.members ?? [] : [member.name];
-    const callbacks = {
-      onChat: async (message: string) => {
-        postMessage(chatTarget(), memberName(), message, [], { senderMemberId: memberId });
-      },
-      onMention: async (targetMember: string, message: string) => {
-        const current = parseScopeId(activeChat.scopeId);
-        const target = current?.kind === "room" ? roomStore.resolveRoomMemberRef(current.roomId, targetMember) : null;
-        postMessage(chatTarget(), memberName(), message, current?.kind === "room" ? [targetMember] : [], {
-          senderMemberId: memberId, ...(current?.kind === "room" ? { mentionMemberIds: target ? [target.id] : [] } : {}),
-        });
-      },
-    };
-
-    try {
-      const handle = await runtime.createAgent({
-        cwd,
-        roomId: keyRoomId,
-        resolveChatId: () => activeChat.scopeId,
-        member,
-        agentPrompt: compiled.agentPrompt,
-        envPrompt: compiled.envPrompt,
-        appendSystemPrompt: compiled.appendSystemPrompt,
-        skillPaths,
-        skillNames: skills,
-        roomMembers,
-        resumeSession,
-        sessionDir,
-        onSessionChanged,
-        callbacks,
-      });
-
-      if (!canPublishSession() || !memberRuntimeAllowed(memberId)) {
-        if (!handle.destroyAndWait) throw new Error("Runtime cannot confirm rejected builder cleanup");
-        await handle.destroyAndWait();
-        return null;
-      }
-      logger.info("agent", "memberAgentCreated", { member: member.name, agent: member.agent, runtime: member.runtime, scopeId });
-
-      const instance: AgentInstance = {
-        handle,
-        /** ① B1: the chat whose turn is being processed right now. */
-        activeChat,
-        /** Build-time chat scope: source of cwd/session/roster material only.
-         *  Outbound traffic reads activeChat; never route from this field. */
-        scopeId,
-        roomId: keyRoomId,
-        memberId,
-        agentName: currentRuntimeName(memberId, member.name),
-        profilePromptDirty: memberId.startsWith("mem_") && creationProfileRevision !== profileRevision,
-        sourceAgent: member.agent,
-        status: "idle",
-        dispatchState: "idle",
-        promptInFlight: false,
-        hadErrorInTurn: false,
-        lastTurnError: null,
-        pendingErrorNotice: null,
-        lastMessageEndWasLength: false,
-        lengthContinuationPending: false,
-        lengthContinuationAttempted: false,
-        compacting: false,
-        turnActive: false,
-        sessionSources: {
-          member: { ...member },
-          compiled: {
-            agentPrompt: compiled.agentPrompt,
-            envPrompt: compiled.envPrompt,
-            appendSystemPrompt: [...compiled.appendSystemPrompt],
-          },
-          skills,
-          skillPaths: [...skillPaths],
-          cwd,
-          roomMembers: [...roomMembers],
-          runtimeName: member.runtime,
-        },
-        unsubscribe: () => {},
-        eventBuffer: [],
-        appliedModel: member.model ? normalizeSwitchModelRef(member.model) : "",
-        appliedCredentialId: member.credentialId,
-        pendingReload: null,
-      };
-
-      wireInstanceEvents(instance, key, keyRoomId, memberId);
-
-      instances.set(key, instance);
-      return instance;
-    } catch (err: any) {
-      logger.error("agent", "failed to create member agent", { member: member.name, agent: member.agent, runtime: member.runtime, error: formatRuntimeErrorMessage(err) });
-      postMessage(keyRoomId, "system", `Failed to create member "${member.name}": ${formatRuntimeErrorMessage(err)}`);
-      return null;
-    }
-  })();
-
-  pendingCreations.set(key, creation);
-  try {
-    return await creation;
-  } finally {
-    if (pendingCreations.get(key) === creation) { pendingCreations.delete(key); cancelledCreations.delete(key); }
-    if (!instances.has(key) && sessionPublishOwners.get(key) === publicationOwner) sessionPublishOwners.delete(key);
-  }
-}
-
-/** Batch 6 §3: rebuild a live member session with fresh assets, keeping the
- * session files (conversation history). Queued until the current run settles. */
-export async function reloadMemberSession(scopeId: string, memberId: string, reason: string): Promise<{ queued: boolean; rebuilt: boolean }> {
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  if (!instance) {
-    // Nothing live — plain activation semantics (resume if a file exists).
-    const built = await buildMemberAgentSession(memberId, scopeId);
-    return { queued: false, rebuilt: !!built };
-  }
-  if (instance.status === "working" || instance.compacting || instance.dispatchState !== "idle" || instance.promptInFlight || queueDepth(instance)>0) {
-    instance.pendingReload = reason;
-    logger.info("agent", "reloadQueued", { memberId, scopeId, reason });
-    return { queued: true, rebuilt: false };
-  }
-  await rebuildLiveInstance(instance, reason);
-  return { queued: false, rebuilt: true };
-}
-
-function rebuildLiveInstance(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
-  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve(null);
-  return trackMemberOperation(instance.memberId,()=>rebuildLiveInstanceInternal(instance, reason));
-}
-
-async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
-  const scopeId = instance.scopeId;
-  const memberId = instance.memberId;
-  updateDispatchState(instance,"aborting","session-reload");
-  if(!instance.handle.destroyAndWait)throw new Error("Runtime cannot confirm reload teardown");
-  await instance.handle.destroyAndWait();
-  if(instances.get(instanceKey(memberId))!==instance||!memberRuntimeAllowed(memberId))return null;
-  instance.unsubscribe();
-  instances.delete(instanceKey(memberId));
-  sessionPublishOwners.delete(instanceKey(memberId));
-  // Session files are kept — reload means same conversation, fresh assets.
-  const built = await buildMemberAgentSession(memberId, scopeId, { resume: true });
-  if(built)drainQueuedInputsAsPrompt(built,"session-reloaded");
-  logger.info("agent", "sessionReloaded", { memberId, scopeId, reason, rebuilt: !!built });
-  return built;
-}
-
-/** Flush a reload requested mid-run once the member is fully settled and
- * nothing is queued (queued prompts are delivered first; the rebuild waits for
- * the next settlement). */
-function maybeFlushPendingReload(instance: AgentInstance): void {
-  if (!instance.pendingReload) return;
-  if (instance.status !== "idle" || instance.compacting || instance.turnActive || instance.dispatchState !== "idle" || instance.promptInFlight) return;
-  if (queueDepth(instance) > 0) return;
-  const reason = instance.pendingReload;
-  instance.pendingReload = null;
-  const key = instanceKey(instance.memberId);
-  // Escape the current event handler before destroying the instance.
-  setTimeout(() => {
-    if (instances.get(key) !== instance) return; // replaced/destroyed meanwhile
-    void reloadMemberSession(instance.scopeId,instance.memberId,reason).catch((err) =>
-      logger.error("agent", "pendingReload failed", { memberId: instance.memberId, scopeId: instance.scopeId, error: String(err) }),
-    );
-  }, 0);
-}
-
-async function getOrCreate(roomId: string, memberRef: string): Promise<AgentInstance | null> {
-  const room = roomStore.getRoom(roomId);
-  if (!room) {
-    logger.error("agent", "room not found", { roomId });
-    return null;
-  }
-  const resolved = resolveRoomMember(roomId, memberRef);
-  if (!resolved) {
-    logger.error("agent", "no member or agent definition found", { name: memberRef, roomId });
-    return null;
-  }
-  return buildMemberAgentSession(resolved.id, roomScopeId(roomId));
 }
 
 // -- Activation --
@@ -1859,155 +1543,6 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
   };
 }
 
-// -- Instance event wiring (single implementation for room and DM scopes) --
-
-/**
- * THE one instance event subscription. Room and DM instances share this wiring;
- * the only scope difference is the notification address: `roomId` is the bare
- * room id for room scope and "dm:<memberId>" for DM scope, and postMessage
- * routes by that prefix (room store vs member-owned DM store). Failure notices
- * therefore reach the user in both UIs (G1), and lifecycle handling (length
- * continuation, compaction, unexpected exit, queued-input draining) cannot
- * drift between scopes.
- */
-function wireInstanceEvents(
-  instance: AgentInstance,
-  key: string,
-  builtRoomId: string,
-  memberId: string,
-): void {
-  const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
-    const memberName = instance.agentName;
-    // ① B1: persisted/streamed facts belong to the chat being served right
-    // now; event scopes keep the historical form (bare room id | dm:<id>).
-    const roomId = chatTargetOf(instance.activeChat?.scopeId || builtRoomId);
-    const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
-    if (event.type === "agent_start") {
-      instance.turnActive = true;
-      if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
-      if(instance.dispatchState!=="aborting")updateDispatchState(instance, "running", event.type);
-    } else if (event.type === "agent_end") {
-      // pi session-level retry: willRetry agent_end is not a real turn end — keep
-      // turnActive/dispatch/queue as-is so public status stays working and wait
-      // does not wake on the retry gap (fish 2026-08-09 experiment).
-      if (event.willRetry) {
-        instance.pendingErrorNotice = null; // suppress mid-retry error system messages
-        logger.info("agent", "agent_end_willRetry", { member: memberName, roomId, memberId });
-      } else {
-        // Final agent_end for this attempt budget — settle deferred error notice once.
-        if (instance.pendingErrorNotice) {
-          postMessage(roomId, "system", instance.pendingErrorNotice);
-          instance.pendingErrorNotice = null;
-        }
-        // Public status may become idle here, but the SDK run can still be finalizing.
-        // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
-        instance.turnActive = false;
-        if (!instance.promptInFlight) {
-          updateDispatchState(instance, "idle", event.type);
-          applyPendingAfterPromptSettlement(instance, event.type);
-          // Queue non-empty → continue without public idle flash (wait stays asleep).
-          if (drainQueuedInputsAsPrompt(instance, event.type)) {
-            (event as any)._skipIdleTransition = true;
-          }
-        } else {
-          // prompt() still settling — if more work is queued, skip idle now; finalize
-          // will drain after prompt resolves (same "queue empty" idle rule).
-          if (queueDepth(instance) > 0) {
-            (event as any)._skipIdleTransition = true;
-          }
-          if (instance.dispatchState === "idle") {
-            applyPendingAfterPromptSettlement(instance, event.type);
-          }
-        }
-      }
-    } else if (event.type === "compaction_start") {
-      instance.compacting = true;
-      transition(instance, roomId, memberName, "working", event.type);
-    } else if (event.type === "compaction_end") {
-      instance.compacting = false;
-      if (!instance.turnActive) {
-        transition(instance, roomId, memberName, "idle", event.type);
-        drainQueuedInputsAsPrompt(instance, event.type);
-        maybeFlushPendingReload(instance);
-        // Batch 6 §3: after compaction the session is rebuilt with fresh
-        // assets, resuming from the compacted file (member-invisible). If
-        // anything is still settling, defer via the pendingReload flag.
-        const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
-          && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
-        if (settled) {
-          const compactionScopeId = instance.activeChat?.scopeId || instance.scopeId;
-          const compactionMemberId = instance.memberId;
-          const compactionKey = instanceKey(compactionMemberId);
-          setTimeout(() => {
-            if (instances.get(compactionKey) !== instance) return; // replaced meanwhile
-            void reloadMemberSession(compactionScopeId, compactionMemberId, "compaction").catch((err) =>
-              logger.error("agent", "post-compaction reload failed", { memberId: compactionMemberId, scopeId: compactionScopeId, error: String(err) }),
-            );
-          }, 0);
-        } else {
-          instance.pendingReload = instance.pendingReload || "compaction";
-        }
-      }
-    } else if (event.type === "runtime_exit" && event.unexpected) {
-      updateDispatchState(instance, "idle", event.type);
-      // Pending SQL inputs survive a runtime exit; uncertain dispatched work is never replayed.
-    }
-    if (newStatus) {
-      if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
-        // drained next prompt — stay working publicly
-      } else {
-        transition(instance, roomId, memberName, newStatus, event.type);
-      }
-    }
-
-    if (event.type === "message_end") {
-      instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
-      if (instance.lastMessageEndWasLength) {
-        instance.lengthContinuationPending = true;
-        logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
-      }
-    }
-
-    if (event.type === "message_end" && event.stopReason === "error") {
-      instance.hadErrorInTurn = true;
-      const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
-      instance.lastTurnError = formattedError || "unrecoverable provider error";
-      const detail = formattedError
-        ? ` Error: ${formattedError}`
-        : " An unrecoverable provider error occurred.";
-      logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
-      // Defer system notice until final agent_end — willRetry attempts stay silent
-      // so a retry storm posts one death notice, not one per attempt (fish 2026-08-09).
-      instance.pendingErrorNotice = `Member "${memberName}" request failed.${detail}`;
-    }
-
-    // Unexpected runtime exit: notify the conversation and drop the dead
-    // instance so the next activation respawns it.
-    if (event.type === "runtime_exit" && event.unexpected) {
-      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
-      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
-      instance.hadErrorInTurn = true;
-      instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
-      // Wake the runtime teardown path (processEvent does not idle this path).
-      if (instance.status !== "idle") {
-        transition(instance, roomId, memberName, "idle", event.type);
-      }
-      postMessage(roomId, "system", `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
-      logger.warn("agent", "instance removed after unexpected exit", {
-        member: memberName, roomId, code: event.code, signal: event.signal,
-      });
-      if (instances.get(key) === instance) instances.delete(key);
-      try { instance.unsubscribe(); } catch {}
-      try { instance.handle.destroy(); } catch {}
-    }
-  });
-  instance.unsubscribe = unsubscribe;
-}
-
-async function getOrCreateDm(memberId: string): Promise<AgentInstance | null> {
-  return buildMemberAgentSession(memberId, scopeIdOf({ kind: "dm", memberId }));
-}
-
 /**
  * Activate a member in their DM scope (user message path — no @ required).
  * Builds context from recent DM messages and prompts the runtime.
@@ -2066,7 +1601,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
       contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);
     }catch(error){errors.push(error);}
   }
-  if (registry) for (const runtime of registry.getAll()) {
+  for (const runtime of getRegistry()?.getAll() ?? []) {
     try { await runtime.shutdownMember(memberId); } catch (error) { errors.push(error); }
   }
   await settleMemberOperations(memberId);
@@ -2091,7 +1626,7 @@ export async function shutdownAll(): Promise<void> {
     const {closeAllShellsForMember}=await import("../terminal/shell-manager.js");
     const resources = await Promise.allSettled([closeAllShellsForMember()]);
     for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
-    if (registry) for (const rt of registry.getAll()) {
+    for (const rt of getRegistry()?.getAll() ?? []) {
       try { await rt.shutdownAll(); } catch (error) { failures.push(error); }
     }
     await settleMemberOperations();
@@ -2101,4 +1636,27 @@ export async function shutdownAll(): Promise<void> {
     if (failures.length) throw new AggregateError(failures, "Runtime shutdown incomplete");
   })().finally(() => { shutdownRunning = false; });
   return shutdownSettlement;
+}
+
+
+// Conversation routing stays at the application boundary, not in session assembly.
+function sessionConversation(member: AgentMemberConfig, activeChat: { scopeId: string }) {
+  const memberId = member.id;
+  const ref = parseScopeId(activeChat.scopeId);
+  const chatTarget = () => chatTargetOf(activeChat.scopeId);
+  const memberName = () => currentRuntimeName(memberId, member.name);
+  const roomMembers = ref?.kind === "room" ? roomStore.getRoom(ref.roomId)?.members ?? [] : [member.name];
+  const callbacks = {
+    onChat: async (message: string) => {
+      postMessage(chatTarget(), memberName(), message, [], { senderMemberId: memberId });
+    },
+    onMention: async (targetMember: string, message: string) => {
+      const current = parseScopeId(activeChat.scopeId);
+      const target = current?.kind === "room" ? roomStore.resolveRoomMemberRef(current.roomId, targetMember) : null;
+      postMessage(chatTarget(), memberName(), message, current?.kind === "room" ? [targetMember] : [], {
+        senderMemberId: memberId, ...(current?.kind === "room" ? { mentionMemberIds: target ? [target.id] : [] } : {}),
+      });
+    },
+  };
+  return { roomMembers, callbacks };
 }

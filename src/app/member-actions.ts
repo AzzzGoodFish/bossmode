@@ -102,7 +102,7 @@ export function loadAgentMemberSnapshot(memberId: string): AgentMemberSnapshot |
     },
     skillPaths: resolveGlobalSkillPaths(skills),
     workspaceRoot: activeWorkspaceRoot(memberId),
-    resumeSession: savedSession?.sessionId && savedSession.sessionFile
+    resumeSession: savedSession
       ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
       : undefined,
   };

@@ -313,3 +313,22 @@ export function isMemberConfigured(member: AgentMemberConfig): boolean {
 export function memberUnconfiguredMessage(memberName: string): string {
   return `Member "${memberName}" hasn't selected a model yet. Open the member card to choose a model and credential, then try again.`;
 }
+
+
+let profileRevision = 0;
+export function currentProfileRevision(): number { return profileRevision; }
+
+/** Publication after a committed DB identity update. Never resets an active handle. */
+export function notifyMemberProfileChanged(member: { id: string; name: string; title?: string }): void {
+  profileRevision += 1;
+  for (const instance of instances.values()) {
+    if (!instance.memberId.startsWith("mem_")) continue;
+    if (instance.memberId === member.id) {
+      instance.agentName = member.name;
+      instance.sessionSources.member.name = member.name;
+      instance.sessionSources.member.title = member.title;
+    }
+    // Environment includes current roster names, including other active members.
+    instance.profilePromptDirty = true;
+  }
+}

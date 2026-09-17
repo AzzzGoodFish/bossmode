@@ -18,7 +18,7 @@ export interface AgentMemberSnapshot {
   /** Active workspace root (cwd for the runtime). */
   workspaceRoot: string;
   /** Stored session to resume, if any. */
-  resumeSession?: { sessionId: string; sessionFile: string };
+  resumeSession?: CreateAgentOpts["resumeSession"];
 }
 
 // -- Runtime interface --

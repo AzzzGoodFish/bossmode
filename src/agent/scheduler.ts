@@ -3,8 +3,8 @@ import {randomUUID} from "node:crypto";
 import {getDatabase, type Database} from "../data/database.js";
 import { instanceKey, instances, memberRuntimeAllowed, runtimeIsStopping, trackMemberOperation, transition, updateDispatchState, chatTargetOf, type AgentInstance } from "./instance.js";
 import { logger } from "../kernel/logger.js";
-import type { AgentHistoryEvent } from "./events.js";
-import type { AgentMemberConfig } from "./types.js";
+import { handleAgentEvent as processEvent, type AgentHistoryEvent } from "./events.js";
+import type { AgentMemberConfig, AgentStreamEvent } from "./types.js";
 import { formatRuntimeErrorMessage, isMemberConfigured, memberUnconfiguredMessage } from "./instance.js";
 import { DeliveryRepository, deliveryKeyParams, deliveryText, deliveryTime, type CapturedMessage, type DeliveryKey } from "../data/repositories/delivery-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
@@ -172,6 +172,7 @@ export interface SchedulerServices {
   refreshProfileSources(instance: AgentInstance): void;
   applyPendingControls(instance: AgentInstance, trigger: string): void;
   flushPendingReload(instance: AgentInstance): void;
+  reloadSession(scopeId: string, memberId: string, reason: string): Promise<{ queued: boolean; rebuilt: boolean }>;
 }
 let services: SchedulerServices | undefined;
 export function configureScheduler(next: SchedulerServices): void {
@@ -613,4 +614,147 @@ export class SdkExecutionService {
     });
     return new SdkExecutionAttempt(id, this.memberId, this.db);
   }
+}
+
+
+// -- SDK event subscription and turn/compaction lifecycle --
+// -- Instance event wiring (single implementation for room and DM scopes) --
+
+/**
+ * THE one instance event subscription. Room and DM instances share this wiring;
+ * the only scope difference is the notification address: `roomId` is the bare
+ * room id for room scope and "dm:<memberId>" for DM scope, and postMessage
+ * routes by that prefix (room store vs member-owned DM store). Failure notices
+ * therefore reach the user in both UIs (G1), and lifecycle handling (length
+ * continuation, compaction, unexpected exit, queued-input draining) cannot
+ * drift between scopes.
+ */
+export function wireInstanceEvents(instance: AgentInstance): void {
+  const key = instanceKey(instance.memberId), builtRoomId = instance.roomId, memberId = instance.memberId;
+  const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
+    const memberName = instance.agentName;
+    // ① B1: persisted/streamed facts belong to the chat being served right
+    // now; event scopes keep the historical form (bare room id | dm:<id>).
+    const roomId = chatTargetOf(instance.activeChat?.scopeId || builtRoomId);
+    const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
+    if (event.type === "agent_start") {
+      instance.turnActive = true;
+      if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
+      if(instance.dispatchState!=="aborting")updateDispatchState(instance, "running", event.type);
+    } else if (event.type === "agent_end") {
+      // pi session-level retry: willRetry agent_end is not a real turn end — keep
+      // turnActive/dispatch/queue as-is so public status stays working and wait
+      // does not wake on the retry gap (fish 2026-08-09 experiment).
+      if (event.willRetry) {
+        instance.pendingErrorNotice = null; // suppress mid-retry error system messages
+        logger.info("agent", "agent_end_willRetry", { member: memberName, roomId, memberId });
+      } else {
+        // Final agent_end for this attempt budget — settle deferred error notice once.
+        if (instance.pendingErrorNotice) {
+          schedulerServices().postSystemNotice(roomId, instance.pendingErrorNotice);
+          instance.pendingErrorNotice = null;
+        }
+        // Public status may become idle here, but the SDK run can still be finalizing.
+        // Keep dispatch busy until handle.prompt() settles to avoid a second prompt().
+        instance.turnActive = false;
+        if (!instance.promptInFlight) {
+          updateDispatchState(instance, "idle", event.type);
+          schedulerServices().applyPendingControls(instance, event.type);
+          // Queue non-empty → continue without public idle flash (wait stays asleep).
+          if (drainQueuedInputsAsPrompt(instance, event.type)) {
+            (event as any)._skipIdleTransition = true;
+          }
+        } else {
+          // prompt() still settling — if more work is queued, skip idle now; finalize
+          // will drain after prompt resolves (same "queue empty" idle rule).
+          if (queueDepth(instance) > 0) {
+            (event as any)._skipIdleTransition = true;
+          }
+          if (instance.dispatchState === "idle") {
+            schedulerServices().applyPendingControls(instance, event.type);
+          }
+        }
+      }
+    } else if (event.type === "compaction_start") {
+      instance.compacting = true;
+      transition(instance, roomId, memberName, "working", event.type);
+    } else if (event.type === "compaction_end") {
+      instance.compacting = false;
+      if (!instance.turnActive) {
+        transition(instance, roomId, memberName, "idle", event.type);
+        drainQueuedInputsAsPrompt(instance, event.type);
+        schedulerServices().flushPendingReload(instance);
+        // Batch 6 §3: after compaction the session is rebuilt with fresh
+        // assets, resuming from the compacted file (member-invisible). If
+        // anything is still settling, defer via the pendingReload flag.
+        const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
+          && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
+        if (settled) {
+          const compactionScopeId = instance.activeChat?.scopeId || instance.scopeId;
+          const compactionMemberId = instance.memberId;
+          const compactionKey = instanceKey(compactionMemberId);
+          setTimeout(() => {
+            if (instances.get(compactionKey) !== instance) return; // replaced meanwhile
+            void schedulerServices().reloadSession(compactionScopeId, compactionMemberId, "compaction").catch((err) =>
+              logger.error("agent", "post-compaction reload failed", { memberId: compactionMemberId, scopeId: compactionScopeId, error: String(err) }),
+            );
+          }, 0);
+        } else {
+          instance.pendingReload = instance.pendingReload || "compaction";
+        }
+      }
+    } else if (event.type === "runtime_exit" && event.unexpected) {
+      updateDispatchState(instance, "idle", event.type);
+      // Pending SQL inputs survive a runtime exit; uncertain dispatched work is never replayed.
+    }
+    if (newStatus) {
+      if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
+        // drained next prompt — stay working publicly
+      } else {
+        transition(instance, roomId, memberName, newStatus, event.type);
+      }
+    }
+
+    if (event.type === "message_end") {
+      instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
+      if (instance.lastMessageEndWasLength) {
+        instance.lengthContinuationPending = true;
+        logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+      }
+    }
+
+    if (event.type === "message_end" && event.stopReason === "error") {
+      instance.hadErrorInTurn = true;
+      const formattedError = typeof event.errorMessage === "string" ? formatRuntimeErrorMessage(event.errorMessage).trim() : "";
+      instance.lastTurnError = formattedError || "unrecoverable provider error";
+      const detail = formattedError
+        ? ` Error: ${formattedError}`
+        : " An unrecoverable provider error occurred.";
+      logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
+      // Defer system notice until final agent_end — willRetry attempts stay silent
+      // so a retry storm posts one death notice, not one per attempt (fish 2026-08-09).
+      instance.pendingErrorNotice = `Member "${memberName}" request failed.${detail}`;
+    }
+
+    // Unexpected runtime exit: notify the conversation and drop the dead
+    // instance so the next activation respawns it.
+    if (event.type === "runtime_exit" && event.unexpected) {
+      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
+      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
+      instance.hadErrorInTurn = true;
+      instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
+      // Wake the runtime teardown path (processEvent does not idle this path).
+      if (instance.status !== "idle") {
+        transition(instance, roomId, memberName, "idle", event.type);
+      }
+      schedulerServices().postSystemNotice(roomId, `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
+      logger.warn("agent", "instance removed after unexpected exit", {
+        member: memberName, roomId, code: event.code, signal: event.signal,
+      });
+      if (instances.get(key) === instance) instances.delete(key);
+      try { instance.unsubscribe(); } catch {}
+      try { instance.handle.destroy(); } catch {}
+    }
+  });
+  instance.unsubscribe = unsubscribe;
 }
