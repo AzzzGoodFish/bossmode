@@ -7,13 +7,8 @@ import {
   CHAT_SEARCH_DESCRIPTION,
   CHAT_LIST_DESCRIPTION,
   BOSSMODE_GATEWAY_DESCRIPTION,
-  CHAT_INFO_DESCRIPTION,
-  CHAT_CREATE_DESCRIPTION,
-  CHAT_EDIT_DESCRIPTION,
-  MEMBER_LIST_DESCRIPTION,
-  MEMBER_INFO_DESCRIPTION,
-  PROFILE_READ_DESCRIPTION,
-  PROFILE_UPDATE_DESCRIPTION,
+  GATEWAY_TOOL_SPECS,
+  type GatewayToolSpec,
   RELOAD_DESCRIPTION,
   WORKSPACE_LIST_DESCRIPTION,
   WORKSPACE_CREATE_DESCRIPTION,
@@ -46,14 +41,9 @@ type CallFn = (tool: string, params: Record<string, any>, signal?: AbortSignal) 
  * definition minus registration — `bossmode` exposes them via list/describe/call
  * and `call` executes through the same dispatch path as a direct tool.
  */
-interface GatewayEntry {
-  name: string;
-  label: string;
-  description: string;
-  parameters: TSchema;
-  example: Record<string, unknown>;
+type GatewayEntry = GatewayToolSpec & {
   execute: (id: string, params: Record<string, any>, signal?: AbortSignal) => Promise<any>;
-}
+};
 
 function requiredOf(schema: TSchema): string[] {
   const required = (schema as { required?: unknown }).required;
@@ -61,15 +51,15 @@ function requiredOf(schema: TSchema): string[] {
 }
 
 function buildGatewayEntries(call: CallFn): GatewayEntry[] {
+  const specs = new Map(GATEWAY_TOOL_SPECS.map((spec) => [spec.name, spec]));
+  const specOf = (name: GatewayToolSpec["name"]): GatewayToolSpec => {
+    const spec = specs.get(name);
+    if (!spec) throw new Error(`Gateway spec missing for "${name}"`);
+    return spec;
+  };
   const entries: GatewayEntry[] = [
     {
-      name: "chat_info",
-      label: "Chat Info",
-      description: CHAT_INFO_DESCRIPTION,
-      parameters: Type.Object({
-        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
-      }, { additionalProperties: false }),
-      example: { chat: "user" },
+      ...specOf("chat_info"),
       execute: async (_id, params) => {
         const data = await call("chat_info", params) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_info failed");
@@ -83,15 +73,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "chat_create",
-      label: "Chat Create",
-      description: CHAT_CREATE_DESCRIPTION,
-      parameters: Type.Object({
-        name: Type.String({ description: "Chat name." }),
-        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
-        members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.createMembers })),
-      }, { additionalProperties: false }),
-      example: { name: "<group chat name>" },
+      ...specOf("chat_create"),
       execute: async (_id, params) => {
         const data = await call("chat_create", params) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_create failed");
@@ -102,17 +84,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "chat_edit",
-      label: "Chat Edit",
-      description: CHAT_EDIT_DESCRIPTION,
-      parameters: Type.Object({
-        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
-        name: Type.Optional(Type.String({ description: "New chat name." })),
-        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
-        add_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.addMembers })),
-        remove_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.removeMembers })),
-      }, { additionalProperties: false }),
-      example: { chat: "<chat id or name>", name: "<new name>" },
+      ...specOf("chat_edit"),
       execute: async (_id, params) => {
         const data = await call("chat_edit", params) as any;
         if (data?.ok === false) throw new Error(data.error || data.message || "chat_edit failed");
@@ -123,15 +95,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "member_list",
-      label: "Member List",
-      description: MEMBER_LIST_DESCRIPTION,
-      parameters: Type.Object({
-        query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
-        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
-        offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
-      }, { additionalProperties: false }),
-      example: {},
+      ...specOf("member_list"),
       execute: async (_id, params) => {
         const data = await call("member_list", params) as any;
         if (data?.ok === false) throw new Error(data.error || "member_list failed");
@@ -147,13 +111,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "member_info",
-      label: "Member Info",
-      description: MEMBER_INFO_DESCRIPTION,
-      parameters: Type.Object({
-        member: Type.String({ description: PARAM_DESCRIPTIONS.memberRef }),
-      }, { additionalProperties: false }),
-      example: { member: "<member name or id>" },
+      ...specOf("member_info"),
       execute: async (_id, params) => {
         const data = await call("member_info", params) as any;
         if (data?.ok === false) throw new Error(data.error || "member_info failed");
@@ -164,11 +122,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "profile_read",
-      label: "Profile Read",
-      description: PROFILE_READ_DESCRIPTION,
-      parameters: Type.Object({}, { additionalProperties: false }),
-      example: {},
+      ...specOf("profile_read"),
       execute: async (_id, params) => {
         const data = await call("profile_read", params) as any;
         if (data?.ok === false) throw new Error(data.error || "profile_read failed");
@@ -179,14 +133,7 @@ function buildGatewayEntries(call: CallFn): GatewayEntry[] {
       },
     },
     {
-      name: "profile_update",
-      label: "Profile Update",
-      description: PROFILE_UPDATE_DESCRIPTION,
-      parameters: Type.Object({
-        name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileName })),
-        description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileDescription })),
-      }, { additionalProperties: false }),
-      example: { description: "<your description>" },
+      ...specOf("profile_update"),
       execute: async (_id, params) => {
         const data = await call("profile_update", params) as any;
         // Keep structured validation/conflict details visible in SDK errors.

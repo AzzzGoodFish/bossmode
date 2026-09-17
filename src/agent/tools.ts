@@ -1,3 +1,5 @@
+import { Type, type TSchema } from "typebox";
+
 // Agent tool catalog — the single source of truth for tool names and descriptions.
 //
 // Members reach tools two ways: directly registered tools (MEMBER_DIRECT_TOOL_NAMES)
@@ -167,3 +169,86 @@ export const PARAM_DESCRIPTIONS = {
   gatewayTool: "Capability name from action \"list\".",
   gatewayArgs: "Arguments object for the capability.",
 } as const;
+
+// Gateway capability specs (name + label + description + parameters + example);
+// the runtime adapter executes them through the same dispatch as direct tools.
+export interface GatewayToolSpec {
+  name: (typeof MEMBER_GATEWAY_TOOL_NAMES)[number];
+  label: string;
+  description: string;
+  parameters: TSchema;
+  example: Record<string, unknown>;
+}
+
+export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
+  {
+    name: "chat_info",
+    label: "Chat Info",
+    description: CHAT_INFO_DESCRIPTION,
+    parameters: Type.Object({
+      chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+    }, { additionalProperties: false }),
+    example: { chat: "user" },
+  },
+  {
+    name: "chat_create",
+    label: "Chat Create",
+    description: CHAT_CREATE_DESCRIPTION,
+    parameters: Type.Object({
+      name: Type.String({ description: "Chat name." }),
+      description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
+      members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.createMembers })),
+    }, { additionalProperties: false }),
+    example: { name: "<group chat name>" },
+  },
+  {
+    name: "chat_edit",
+    label: "Chat Edit",
+    description: CHAT_EDIT_DESCRIPTION,
+    parameters: Type.Object({
+      chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+      name: Type.Optional(Type.String({ description: "New chat name." })),
+      description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
+      add_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.addMembers })),
+      remove_members: Type.Optional(Type.Array(Type.String(), { description: PARAM_DESCRIPTIONS.removeMembers })),
+    }, { additionalProperties: false }),
+    example: { chat: "<chat id or name>", name: "<new name>" },
+  },
+  {
+    name: "member_list",
+    label: "Member List",
+    description: MEMBER_LIST_DESCRIPTION,
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
+      limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
+      offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
+    }, { additionalProperties: false }),
+    example: {},
+  },
+  {
+    name: "member_info",
+    label: "Member Info",
+    description: MEMBER_INFO_DESCRIPTION,
+    parameters: Type.Object({
+      member: Type.String({ description: PARAM_DESCRIPTIONS.memberRef }),
+    }, { additionalProperties: false }),
+    example: { member: "<member name or id>" },
+  },
+  {
+    name: "profile_read",
+    label: "Profile Read",
+    description: PROFILE_READ_DESCRIPTION,
+    parameters: Type.Object({}, { additionalProperties: false }),
+    example: {},
+  },
+  {
+    name: "profile_update",
+    label: "Profile Update",
+    description: PROFILE_UPDATE_DESCRIPTION,
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileName })),
+      description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileDescription })),
+    }, { additionalProperties: false }),
+    example: { description: "<your description>" },
+  },
+];
