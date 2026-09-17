@@ -1,6 +1,8 @@
 import { type JsonValue } from "../kernel/json.js";
 import {randomUUID} from "node:crypto";
 import {getDatabase} from "../data/database.js";
+import { instanceKey, type AgentInstance } from "./instance.js";
+import { memberRuntimeAllowed } from "./orchestrator/runtime-admission.js";
 import { DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../data/repositories/delivery-repository.js";
 import {InputQueueRepository,type QueuedInput} from "../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
@@ -132,4 +134,28 @@ export function recoverRuntimeInputState():void{
       replies.dismissPending(row.scope,row.actor,"failed","execution outcome uncertain after restart",at,runtimeReplySources([input]));
     }
   });
+}
+
+// -- Pump state & settlement waiters (the pump itself moves in a later slice) --
+
+export function queueDepth(instance:AgentInstance):number{return memberPendingInputCount(instance.memberId);}
+export const inputPumps=new Map<string,Promise<void>>();
+// Waiter handles observe committed receipts; they are not queue or reply authority.
+const inputProgress=new Map<string,Set<(error?:unknown)=>void>>();
+export function waitForInputSettlement(input:QueuedInput,operation:Promise<void>):Promise<void>{
+  const key=instanceKey(input.targetActorKey);
+  return new Promise((resolve,reject)=>{
+    const listeners=inputProgress.get(key)??new Set<(error?:unknown)=>void>();inputProgress.set(key,listeners);
+    let finished=false;
+    const cleanup=()=>{finished=true;listeners.delete(check);if(!listeners.size&&inputProgress.get(key)===listeners)inputProgress.delete(key);};
+    const check=(error?:unknown)=>{if(finished)return;try{if(error)throw error;if(!memberRuntimeAllowed(input.targetActorKey)){cleanup();resolve();return;}const row=new InputQueueRepository(getDatabase()).get(input);if(row&&row.status!=="pending"&&row.status!=="dispatched"&&!runtimeInputHasContinuation(input)){cleanup();resolve();}}catch(error){cleanup();reject(error);}};
+    listeners.add(check);
+    void operation.then(()=>check(),error=>check(error));
+  });
+}
+export const inputScopeEpoch=new Map<string,number>();
+export function invalidateInputScope(key:string):void{inputScopeEpoch.set(key,(inputScopeEpoch.get(key)??0)+1);}
+/** Wake settlement waiters for a member (success or failure). */
+export function notifyInputProgress(key:string,error?:unknown):void{
+  for(const notify of [...(inputProgress.get(key)??[])])notify(error);
 }

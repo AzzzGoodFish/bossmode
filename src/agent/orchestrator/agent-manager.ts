@@ -1,6 +1,6 @@
 import { mainSessionDirectory } from "../../files/layout.js";
 import {randomUUID} from "node:crypto";
-import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput} from "../scheduler.js";
+import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput,queueDepth,inputPumps,waitForInputSettlement,inputScopeEpoch,invalidateInputScope,notifyInputProgress} from "../scheduler.js";
 import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
@@ -277,23 +277,6 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
   return Array.from(out);
 }
 
-function queueDepth(instance:AgentInstance):number{return memberPendingInputCount(instance.memberId);}
-const inputPumps=new Map<string,Promise<void>>();
-// Waiter handles observe committed receipts; they are not queue or reply authority.
-const inputProgress=new Map<string,Set<(error?:unknown)=>void>>();
-function waitForInputSettlement(input:QueuedInput,operation:Promise<void>):Promise<void>{
-  const key=instanceKey(input.targetActorKey);
-  return new Promise((resolve,reject)=>{
-    const listeners=inputProgress.get(key)??new Set<(error?:unknown)=>void>();inputProgress.set(key,listeners);
-    let finished=false;
-    const cleanup=()=>{finished=true;listeners.delete(check);if(!listeners.size&&inputProgress.get(key)===listeners)inputProgress.delete(key);};
-    const check=(error?:unknown)=>{if(finished)return;try{if(error)throw error;if(!memberRuntimeAllowed(input.targetActorKey)){cleanup();resolve();return;}const row=new InputQueueRepository(getDatabase()).get(input);if(row&&row.status!=="pending"&&row.status!=="dispatched"&&!runtimeInputHasContinuation(input)){cleanup();resolve();}}catch(error){cleanup();reject(error);}};
-    listeners.add(check);
-    void operation.then(()=>check(),error=>check(error));
-  });
-}
-const inputScopeEpoch=new Map<string,number>();
-function invalidateInputScope(key:string):void{inputScopeEpoch.set(key,(inputScopeEpoch.get(key)??0)+1);}
 function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   applyPendingCredentialRefresh(instance,trigger);applyPendingThinkingSwitch(instance,trigger);
 }
@@ -334,13 +317,13 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
       }
       const inputs=pendingRuntimeInputs(owner);if(!inputs.length)break;
       await runInputBatch(instance,inputs);
-      for(const notify of [...(inputProgress.get(key)??[])])notify();
+      notifyInputProgress(key);
     }
     if(!queueDepth(instance))maybeFlushPendingReload(instance);
   }).catch(error=>{
     failed=true;
     if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch)cancelPendingRuntimeInputs(owner,"runtime input execution failed","failed");
-    for(const notify of [...(inputProgress.get(key)??[])])notify(error);
+    notifyInputProgress(key,error);
     if(memberRuntimeAllowed(memberId))postMessage(owner.scopeId,"system",`Failed to activate member "${getMember(memberId)?.name??memberId}": ${formatRuntimeErrorMessage(error)}`);
     throw error;
   });
@@ -355,7 +338,7 @@ function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
     if(quiet&&!quiet.promptInFlight&&!quiet.turnActive&&quiet.dispatchState==="idle"&&quiet.status!=="idle"&&!memberPendingInputCount(memberId)){
       transition(quiet,quiet.roomId,quiet.agentName,"idle","queue-cancelled");
     }
-    for(const notify of [...(inputProgress.get(key)??[])])notify();
+    notifyInputProgress(key);
     const live=instances.get(key);
     if(!failed&&memberRuntimeAllowed(memberId)&&memberPendingInputCount(memberId)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle"))){
       // ① B1: the member's pending work may live in several chats — wake every
