@@ -252,3 +252,198 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
     example: { description: "<your description>" },
   },
 ];
+
+// Direct tool specs (name + label + description + parameters); the runtime
+// adapter binds each spec to its execution path and registers it with the SDK.
+export interface DirectToolSpec {
+  name: (typeof MEMBER_DIRECT_TOOL_NAMES)[number];
+  label: string;
+  description: string;
+  parameters: TSchema;
+}
+
+export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
+  {
+    name: "chat_send",
+    label: "Chat Send",
+    description: buildChatSendToolDescription(),
+    parameters: Type.Object({
+      to: Type.String({ description: CHAT_SEND_TO_PARAM_DESCRIPTION }),
+      message: Type.String({ description: CHAT_SEND_MESSAGE_PARAM_DESCRIPTION }),
+      attachments: Type.Optional(Type.Array(Type.String(), { description: CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION })),
+    }, { additionalProperties: false }),
+  },
+  {
+    name: "chat_read",
+    label: "Chat Read",
+    description: CHAT_READ_DESCRIPTION,
+    parameters: Type.Object({
+      chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+      from_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.from_seq })),
+      around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
+      before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+      after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
+      limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
+      output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
+    }, { additionalProperties: false }),
+  },
+  {
+    name: "chat_search",
+    label: "Chat Search",
+    description: CHAT_SEARCH_DESCRIPTION,
+    parameters: Type.Object({
+      chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
+      query: Type.String({ description: PARAM_DESCRIPTIONS.query }),
+      from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
+      before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
+      after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
+      limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
+    }, { additionalProperties: false }),
+  },
+  {
+    name: "chat_list",
+    label: "Chat List",
+    description: CHAT_LIST_DESCRIPTION,
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
+      limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
+      offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
+    }, { additionalProperties: false }),
+  },
+  {
+    name: "bossmode",
+    label: "Bossmode",
+    description: BOSSMODE_GATEWAY_DESCRIPTION,
+    parameters: Type.Object({
+      action: Type.String({ description: PARAM_DESCRIPTIONS.gatewayAction }),
+      tool: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gatewayTool })),
+      args: Type.Optional(Type.Any({ description: PARAM_DESCRIPTIONS.gatewayArgs })),
+    }, { additionalProperties: false }),
+  },
+  {
+    name: "workspace_list",
+    label: "Workspace List",
+    description: WORKSPACE_LIST_DESCRIPTION,
+    parameters: Type.Object({}),
+  },
+  {
+    name: "workspace_create",
+    label: "Workspace Create",
+    description: WORKSPACE_CREATE_DESCRIPTION,
+    parameters: Type.Object({
+      id: Type.String({ description: "Workspace id — letters, digits, dot, dash, underscore." }),
+      host: Type.String({ description: PARAM_DESCRIPTIONS.sshHost }),
+      user: Type.String({ description: PARAM_DESCRIPTIONS.sshUser }),
+      port: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.sshPort })),
+      keyPath: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshKeyPath })),
+      root: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshRoot })),
+      description: Type.Optional(Type.String({ description: "Short human-readable description." })),
+    }),
+  },
+  {
+    name: "workspace_use",
+    label: "Workspace Use",
+    description: WORKSPACE_USE_DESCRIPTION,
+    parameters: Type.Object({ id: Type.String({ description: "Workspace id to activate." }) }),
+  },
+  {
+    name: "workspace_remove",
+    label: "Workspace Remove",
+    description: WORKSPACE_REMOVE_DESCRIPTION,
+    parameters: Type.Object({ id: Type.String({ description: "Workspace id to remove." }) }),
+  },
+  {
+    name: "read",
+    label: "Read File",
+    description: WORKSPACE_READ_DESCRIPTION,
+    parameters: Type.Object({
+      path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+      offset: Type.Optional(Type.Number({ description: "Line number to start from (1-indexed)." })),
+      limit: Type.Optional(Type.Number({ description: "Maximum lines to read (default 2000)." })),
+      workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+    }),
+  },
+  {
+    name: "write",
+    label: "Write File",
+    description: WORKSPACE_WRITE_DESCRIPTION,
+    parameters: Type.Object({
+      path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+      content: Type.String({ description: "Full file content to write." }),
+      workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+    }),
+  },
+  {
+    name: "edit",
+    label: "Edit File",
+    description: WORKSPACE_EDIT_DESCRIPTION,
+    parameters: Type.Object({
+      path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
+      edits: Type.Array(Type.Object({
+        oldText: Type.String({ description: "Exact text to find — must match exactly once." }),
+        newText: Type.String({ description: "Replacement text." }),
+      })),
+      workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+    }),
+  },
+  {
+    name: "terminal_create",
+    label: "Terminal Create",
+    description: TERMINAL_CREATE_DESCRIPTION,
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalName })),
+      workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
+      cwd: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCwd })),
+    }),
+  },
+  {
+    name: "terminal_exec",
+    label: "Terminal Exec",
+    description: TERMINAL_EXEC_DESCRIPTION,
+    parameters: Type.Object({
+      terminalId: Type.String({ description: "Terminal id from terminal_create / terminal_list." }),
+      command: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCommand })),
+      keys: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalKeys })),
+      blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalBlockSeconds })),
+    }),
+  },
+  {
+    name: "terminal_read",
+    label: "Terminal Read",
+    description: TERMINAL_READ_DESCRIPTION,
+    parameters: Type.Object({
+      terminalId: Type.String({ description: "Terminal id." }),
+      exec: Type.Optional(Type.String({ description: "Exec id (e.g. e3) — returns that command's lines." })),
+      fromLine: Type.Optional(Type.Number({ description: "First absolute line number to read." })),
+      toLine: Type.Optional(Type.Number({ description: "Last absolute line number to read." })),
+    }),
+  },
+  {
+    name: "terminal_wait",
+    label: "Terminal Wait",
+    description: TERMINAL_WAIT_DESCRIPTION,
+    parameters: Type.Object({
+      terminalId: Type.String({ description: "Terminal id." }),
+      exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
+      blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalWaitBlockSeconds })),
+    }),
+  },
+  {
+    name: "terminal_list",
+    label: "Terminal List",
+    description: TERMINAL_LIST_DESCRIPTION,
+    parameters: Type.Object({}),
+  },
+  {
+    name: "terminal_close",
+    label: "Terminal Close",
+    description: TERMINAL_CLOSE_DESCRIPTION,
+    parameters: Type.Object({ terminalId: Type.String({ description: "Terminal id to close." }) }),
+  },
+  {
+    name: "reload",
+    label: "Reload",
+    description: RELOAD_DESCRIPTION,
+    parameters: Type.Object({}),
+  },
+];

@@ -1,29 +1,11 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type, type TSchema } from "typebox";
-import { buildChatSendToolDescription, CHAT_SEND_TO_PARAM_DESCRIPTION, CHAT_SEND_MESSAGE_PARAM_DESCRIPTION, CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION } from "../tools.js";
+import type { TSchema } from "typebox";
 import { renderQueryRowsForMember } from "../tools/query-render.js";
 import {
-  CHAT_READ_DESCRIPTION,
-  CHAT_SEARCH_DESCRIPTION,
-  CHAT_LIST_DESCRIPTION,
-  BOSSMODE_GATEWAY_DESCRIPTION,
+  DIRECT_TOOL_SPECS,
   GATEWAY_TOOL_SPECS,
+  type DirectToolSpec,
   type GatewayToolSpec,
-  RELOAD_DESCRIPTION,
-  WORKSPACE_LIST_DESCRIPTION,
-  WORKSPACE_CREATE_DESCRIPTION,
-  WORKSPACE_USE_DESCRIPTION,
-  WORKSPACE_REMOVE_DESCRIPTION,
-  WORKSPACE_READ_DESCRIPTION,
-  WORKSPACE_WRITE_DESCRIPTION,
-  WORKSPACE_EDIT_DESCRIPTION,
-  TERMINAL_CREATE_DESCRIPTION,
-  TERMINAL_EXEC_DESCRIPTION,
-  TERMINAL_READ_DESCRIPTION,
-  TERMINAL_WAIT_DESCRIPTION,
-  TERMINAL_LIST_DESCRIPTION,
-  TERMINAL_CLOSE_DESCRIPTION,
-  PARAM_DESCRIPTIONS,
 } from "../tools.js";
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
@@ -179,17 +161,17 @@ export function createBossmodeSdkTools(opts: {
     return handleToolCallback(tool, chatIdOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
+  const specs = new Map(DIRECT_TOOL_SPECS.map((spec) => [spec.name, spec]));
+  const specOf = (name: DirectToolSpec["name"]): DirectToolSpec => {
+    const spec = specs.get(name);
+    if (!spec) throw new Error(`Direct tool spec missing for "${name}"`);
+    return spec;
+  };
+
   // ── Hot tools: registered directly (chat send/read/search/list) ──
   const tools: ToolDefinition[] = [
     defineTool({
-      name: "chat_send",
-      label: "Chat Send",
-      description: buildChatSendToolDescription(),
-      parameters: Type.Object({
-        to: Type.String({ description: CHAT_SEND_TO_PARAM_DESCRIPTION }),
-        message: Type.String({ description: CHAT_SEND_MESSAGE_PARAM_DESCRIPTION }),
-        attachments: Type.Optional(Type.Array(Type.String(), { description: CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION })),
-      }, { additionalProperties: false }),
+      ...specOf("chat_send"),
       execute: async (_id, params) => {
         const data = await call("chat_send", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_send failed");
@@ -198,18 +180,7 @@ export function createBossmodeSdkTools(opts: {
       },
     }),
     defineTool({
-      name: "chat_read",
-      label: "Chat Read",
-      description: CHAT_READ_DESCRIPTION,
-      parameters: Type.Object({
-        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
-        from_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.from_seq })),
-        around_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.around_seq })),
-        before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
-        after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
-        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
-        output: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.output })),
-      }, { additionalProperties: false }),
+      ...specOf("chat_read"),
       execute: async (_id, params) => {
         const data = await call("chat_read", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_read failed");
@@ -221,17 +192,7 @@ export function createBossmodeSdkTools(opts: {
       },
     }),
     defineTool({
-      name: "chat_search",
-      label: "Chat Search",
-      description: CHAT_SEARCH_DESCRIPTION,
-      parameters: Type.Object({
-        chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
-        query: Type.String({ description: PARAM_DESCRIPTIONS.query }),
-        from: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.from })),
-        before: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.before })),
-        after: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.after })),
-        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.limit })),
-      }, { additionalProperties: false }),
+      ...specOf("chat_search"),
       execute: async (_id, params) => {
         const data = await call("chat_search", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_search failed");
@@ -240,15 +201,8 @@ export function createBossmodeSdkTools(opts: {
       },
     }),
     defineTool({
-      name: "chat_list",
-      label: "Chat List",
-      description: CHAT_LIST_DESCRIPTION,
-      parameters: Type.Object({
-        query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
-        limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
-        offset: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listOffset })),
-      }, { additionalProperties: false }),
-      execute: async (_id, params) => {
+      ...specOf("chat_list"),
+      execute: async (_id, params: any) => {
         const data = await call("chat_list", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_list failed");
         const chats = Array.isArray(data?.chats) ? data.chats : [];
@@ -264,15 +218,8 @@ export function createBossmodeSdkTools(opts: {
     }),
     // ── Gateway: long-tail capabilities via list/describe/call ──
     defineTool({
-      name: "bossmode",
-      label: "Bossmode",
-      description: BOSSMODE_GATEWAY_DESCRIPTION,
-      parameters: Type.Object({
-        action: Type.String({ description: PARAM_DESCRIPTIONS.gatewayAction }),
-        tool: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gatewayTool })),
-        args: Type.Optional(Type.Any({ description: PARAM_DESCRIPTIONS.gatewayArgs })),
-      }, { additionalProperties: false }),
-      execute: async (_id, params, signal) => {
+      ...specOf("bossmode"),
+      execute: async (_id, params: any, signal) => {
         const entries = buildGatewayEntries(call);
         const action = String(params?.action ?? "").trim().toLowerCase();
         if (action === "list") return textResult(truncate(renderGatewayList(entries)));
@@ -303,144 +250,60 @@ export function createBossmodeSdkTools(opts: {
     // workspace root). File tool results pass through untouched so image
     // content blocks survive.
     defineTool({
-      name: "workspace_list",
-      label: "Workspace List",
-      description: WORKSPACE_LIST_DESCRIPTION,
-      parameters: Type.Object({}),
+      ...specOf("workspace_list"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_list", params as any), null, 2))),
     }),
     defineTool({
-      name: "workspace_create",
-      label: "Workspace Create",
-      description: WORKSPACE_CREATE_DESCRIPTION,
-      parameters: Type.Object({
-        id: Type.String({ description: "Workspace id — letters, digits, dot, dash, underscore." }),
-        host: Type.String({ description: PARAM_DESCRIPTIONS.sshHost }),
-        user: Type.String({ description: PARAM_DESCRIPTIONS.sshUser }),
-        port: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.sshPort })),
-        keyPath: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshKeyPath })),
-        root: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.sshRoot })),
-        description: Type.Optional(Type.String({ description: "Short human-readable description." })),
-      }),
+      ...specOf("workspace_create"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_create", params as any), null, 2))),
     }),
     defineTool({
-      name: "workspace_use",
-      label: "Workspace Use",
-      description: WORKSPACE_USE_DESCRIPTION,
-      parameters: Type.Object({ id: Type.String({ description: "Workspace id to activate." }) }),
+      ...specOf("workspace_use"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_use", params as any), null, 2))),
     }),
     defineTool({
-      name: "workspace_remove",
-      label: "Workspace Remove",
-      description: WORKSPACE_REMOVE_DESCRIPTION,
-      parameters: Type.Object({ id: Type.String({ description: "Workspace id to remove." }) }),
+      ...specOf("workspace_remove"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_remove", params as any), null, 2))),
     }),
     defineTool({
-      name: "read",
-      label: "Read File",
-      description: WORKSPACE_READ_DESCRIPTION,
-      parameters: Type.Object({
-        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
-        offset: Type.Optional(Type.Number({ description: "Line number to start from (1-indexed)." })),
-        limit: Type.Optional(Type.Number({ description: "Maximum lines to read (default 2000)." })),
-        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
-      }),
+      ...specOf("read"),
       execute: async (_id, params) => (await call("read", params as any)) as any,
     }),
     defineTool({
-      name: "write",
-      label: "Write File",
-      description: WORKSPACE_WRITE_DESCRIPTION,
-      parameters: Type.Object({
-        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
-        content: Type.String({ description: "Full file content to write." }),
-        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
-      }),
+      ...specOf("write"),
       execute: async (_id, params) => (await call("write", params as any)) as any,
     }),
     defineTool({
-      name: "edit",
-      label: "Edit File",
-      description: WORKSPACE_EDIT_DESCRIPTION,
-      parameters: Type.Object({
-        path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
-        edits: Type.Array(Type.Object({
-          oldText: Type.String({ description: "Exact text to find — must match exactly once." }),
-          newText: Type.String({ description: "Replacement text." }),
-        })),
-        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
-      }),
+      ...specOf("edit"),
       execute: async (_id, params) => (await call("edit", params as any)) as any,
     }),
     // ── Batch 7 P2: persistent terminals (real PTYs; bash is retired).
     defineTool({
-      name: "terminal_create",
-      label: "Terminal Create",
-      description: TERMINAL_CREATE_DESCRIPTION,
-      parameters: Type.Object({
-        name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalName })),
-        workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
-        cwd: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCwd })),
-      }),
+      ...specOf("terminal_create"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_create", params as any), null, 2))),
     }),
     defineTool({
-      name: "terminal_exec",
-      label: "Terminal Exec",
-      description: TERMINAL_EXEC_DESCRIPTION,
-      parameters: Type.Object({
-        terminalId: Type.String({ description: "Terminal id from terminal_create / terminal_list." }),
-        command: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCommand })),
-        keys: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalKeys })),
-        blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalBlockSeconds })),
-      }),
+      ...specOf("terminal_exec"),
       execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_exec", params as any, signal), null, 2))),
     }),
     defineTool({
-      name: "terminal_read",
-      label: "Terminal Read",
-      description: TERMINAL_READ_DESCRIPTION,
-      parameters: Type.Object({
-        terminalId: Type.String({ description: "Terminal id." }),
-        exec: Type.Optional(Type.String({ description: "Exec id (e.g. e3) — returns that command's lines." })),
-        fromLine: Type.Optional(Type.Number({ description: "First absolute line number to read." })),
-        toLine: Type.Optional(Type.Number({ description: "Last absolute line number to read." })),
-      }),
+      ...specOf("terminal_read"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_read", params as any), null, 2))),
     }),
     defineTool({
-      name: "terminal_wait",
-      label: "Terminal Wait",
-      description: TERMINAL_WAIT_DESCRIPTION,
-      parameters: Type.Object({
-        terminalId: Type.String({ description: "Terminal id." }),
-        exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
-        blockSeconds: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.terminalWaitBlockSeconds })),
-      }),
+      ...specOf("terminal_wait"),
       execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_wait", params as any, signal), null, 2))),
     }),
     defineTool({
-      name: "terminal_list",
-      label: "Terminal List",
-      description: TERMINAL_LIST_DESCRIPTION,
-      parameters: Type.Object({}),
+      ...specOf("terminal_list"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_list", params as any), null, 2))),
     }),
     defineTool({
-      name: "terminal_close",
-      label: "Terminal Close",
-      description: TERMINAL_CLOSE_DESCRIPTION,
-      parameters: Type.Object({ terminalId: Type.String({ description: "Terminal id to close." }) }),
+      ...specOf("terminal_close"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_close", params as any), null, 2))),
     }),
     defineTool({
-      name: "reload",
-      label: "Reload",
-      description: RELOAD_DESCRIPTION,
-      parameters: Type.Object({}),
+      ...specOf("reload"),
       execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("reload", params as any), null, 2))),
     }),
   ];

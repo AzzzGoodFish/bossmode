@@ -14,8 +14,29 @@ import {
   PARAM_DESCRIPTIONS,
 } from "../../src/agent/tools.js";
 import { buildChatSendToolDescription } from "../../src/agent/tools.js";
+import {
+  DIRECT_TOOL_SPECS,
+  GATEWAY_TOOL_SPECS,
+  MEMBER_DIRECT_TOOL_NAMES,
+  MEMBER_GATEWAY_TOOL_NAMES,
+} from "../../src/agent/tools.js";
 
 describe("tool catalog", () => {
+  it("direct tool specs cover every direct tool name exactly once", () => {
+    expect(DIRECT_TOOL_SPECS.map((spec) => spec.name)).toEqual([...MEMBER_DIRECT_TOOL_NAMES]);
+  });
+
+  it("gateway tool specs cover every gateway tool name exactly once", () => {
+    expect(GATEWAY_TOOL_SPECS.map((spec) => spec.name)).toEqual([...MEMBER_GATEWAY_TOOL_NAMES]);
+  });
+
+  it("every spec carries a label, a description and an object schema", () => {
+    for (const spec of [...DIRECT_TOOL_SPECS, ...GATEWAY_TOOL_SPECS]) {
+      expect(spec.label.length).toBeGreaterThan(0);
+      expect(spec.description.length).toBeGreaterThan(0);
+      expect((spec.parameters as { type?: string }).type).toBe("object");
+    }
+  });
   it("all batch-3 tool descriptions are non-empty strings", () => {
     for (const desc of [
       buildChatSendToolDescription(),
