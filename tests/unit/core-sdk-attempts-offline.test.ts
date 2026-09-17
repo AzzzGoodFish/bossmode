@@ -20,7 +20,7 @@ vi.mock("../../src/member/mcp.js", () => ({
   ensureBossmodeMcpDirs: () => {}, getBossmodeMcpRuntimeDir: () => mock.root,
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "unused-mcp.json"), serverNames: [], dispose() {} }),
 }));
-vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
+vi.mock("../../src/agent/runtime/tools.js", () => ({ createBossmodeSdkTools: () => [] }));
 vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => ({
   name: "pi-mcp-adapter", factory: (pi: any) => {
     mock.onLoad();

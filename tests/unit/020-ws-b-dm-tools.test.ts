@@ -101,7 +101,7 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("tool assembly is uniform: hot chat tools + gateway; wait and legacy names never registered", async () => {
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
     for (const scope of [
       { memberId: "mem_schema_fixture", roomId: "", scopeKind: "dm" as const },
       { memberId: "mem_schema_fixture", roomId: "r1", scopeKind: "room" as const },

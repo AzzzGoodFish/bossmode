@@ -47,7 +47,7 @@ describe("unknown tool guidance", () => {
   });
 
   it("keeps the SDK registration and the canonical name lists in lockstep", async () => {
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
     const tools = createBossmodeSdkTools({ roomId: "r1", memberId: "mem_drift_fixture" });
     expect(tools.map((tool) => tool.name)).toEqual([...MEMBER_DIRECT_TOOL_NAMES]);
 

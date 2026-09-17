@@ -61,7 +61,7 @@ vi.mock("../../src/app/server/ws.js", () => ({
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { activateAgent, getAgentStatus, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
-import { mapPiAgentEvent } from "../../src/agent/runtime/pi-events.js";
+import { mapPiAgentEvent } from "../../src/agent/runtime/events.js";
 import { handleAgentEvent as processEvent } from "../../src/agent/events.js";
 
 async function setup() {

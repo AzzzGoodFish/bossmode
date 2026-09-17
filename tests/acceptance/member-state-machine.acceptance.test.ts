@@ -208,7 +208,7 @@ describe("Acceptance: Member State Machine (0.8.7)", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const tools = readFileSync(join(process.cwd(), "src/agent/tools/tools.ts"), "utf-8");
-    const sdk = readFileSync(join(process.cwd(), "src/agent/runtime/bossmode-sdk-tools.ts"), "utf-8");
+    const sdk = readFileSync(join(process.cwd(), "src/agent/runtime/tools.ts"), "utf-8");
     expect(tools).not.toContain('case "write_summary"');
     expect(sdk).not.toContain('name: "write_summary"');
   });

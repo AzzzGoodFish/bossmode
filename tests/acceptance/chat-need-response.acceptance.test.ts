@@ -108,7 +108,7 @@ describe("Acceptance: chat tool and reply-debt silence", () => {
   it("④ chat_send exposes only to/message/attachments and rejects unknown parameters before posting", async () => {
     const room = await createRoomWithMembers("ftd-chat-tool", ["pm"]);
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
 
     // SDK tool surface exposes only current supported arguments.
     const chatTool = createBossmodeSdkTools({ memberId: "mem_schema_fixture", roomId: room.id })[0];

@@ -70,7 +70,7 @@ vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
 }));
 
 // Live customTools factory — sole source for "bossmode" classification (no static name whitelist).
-vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({
+vi.mock("../../src/agent/runtime/tools.js", () => ({
   createBossmodeSdkTools: (opts: any) => { toolsFactory(opts); return [
     { name: "chat_read" },
     { name: "wait" },

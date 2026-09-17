@@ -4,7 +4,7 @@ import { createMember } from "../../src/app/member-actions.js";
 import { createRoom, stampGlobalMemberIds } from "../../src/chat/conversations.js";
 import { addMessage } from "../../src/chat/message-store.js";
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
-import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

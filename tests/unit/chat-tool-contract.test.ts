@@ -8,7 +8,7 @@ import { postMessage } from "../../src/chat/message-bus.js";
 import { initRouter } from "../../src/chat/router.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
 import { handleToolCallback, loadScopeMessages } from "../../src/agent/tools/tools.js";
-import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 import * as attachments from "../../src/agent/orchestrator/agent-attachments.js";
 
 vi.mock("../../src/kernel/logger.js", () => ({

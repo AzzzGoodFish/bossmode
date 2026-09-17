@@ -23,8 +23,8 @@ import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfig
 import { normalizeModelRef } from "../../config/models.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
-import { createBossmodeSdkTools } from "./bossmode-sdk-tools.js";
-import { mapContextUsage, mapPiAgentEvent } from "./pi-events.js";
+import { createBossmodeSdkTools } from "./tools.js";
+import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);

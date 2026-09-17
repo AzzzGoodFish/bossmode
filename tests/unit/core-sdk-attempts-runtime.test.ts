@@ -24,7 +24,7 @@ vi.mock("../../src/member/mcp.js", () => ({
   writeMemberScopedMcpConfig: () => ({ configPath: join(mock.root, "mcp.json"), serverNames: [], dispose: mock.configDispose }),
 }));
 vi.mock("../../src/agent/runtime/mcp-factory.js", () => ({ loadDatabaseMcpFactory: async () => { mock.stage("mcp factory"); return {}; } }));
-vi.mock("../../src/agent/runtime/bossmode-sdk-tools.js", () => ({ createBossmodeSdkTools: () => [] }));
+vi.mock("../../src/agent/runtime/tools.js", () => ({ createBossmodeSdkTools: () => [] }));
 vi.mock("../../src/config/models.js", () => ({
   getModelCredentialProfile: () => ({}),
 }));

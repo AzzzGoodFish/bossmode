@@ -116,7 +116,7 @@ describe("chat attachment artifacts", () => {
     const roomStore = await import("../../src/chat/conversations.js");
     const messageStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-agent-attach-missing-"));
     const missingPath = join(cwd, "missing.md");

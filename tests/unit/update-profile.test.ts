@@ -59,7 +59,7 @@ describe("self-only profile_update", () => {
 
   it("keeps room/DM and subsequent SDK calls bound to caller ID through two renames and name reuse", async () => {
     const f = await fixture();
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
     const { loadScopeMessages, handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const scopes = [f.room.id, `dm:${f.own.id}`];
     const toolSets = scopes.map(roomId => createBossmodeSdkTools({ roomId, memberId: f.own.id }));
@@ -151,7 +151,7 @@ describe("self-only profile_update", () => {
     storeRoom(legacyRoom, getTestWorkspace().db);
     const local = f.rooms.getRoomMembers(legacyRoom.id)[0];
     const unrelated = f.actions.createMember({ name: local.name });
-    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
+    const { createBossmodeSdkTools } = await import("../../src/agent/runtime/tools.js");
     const tools = createBossmodeSdkTools({ roomId: legacyRoom.id, memberId: local.id });
     await expect(tools.find(t => t.name === "chat_send")!.execute("legacy-chat", { message: "Existing local tool" }, undefined, undefined, undefined as any)).resolves.toBeTruthy();
     await expect((tools.find(t => t.name === "bossmode")!.execute as any)("legacy-profile", { action: "call", tool: "profile_update", args: { description: "Do not claim DB names" } })).rejects.toThrow("database member ID");

@@ -11,7 +11,7 @@ vi.mock("../../src/agent/tools/tools.js", () => ({
 }));
 
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
-import { createBossmodeSdkTools } from "../../src/agent/runtime/bossmode-sdk-tools.js";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 
 // Defensive contract: every custom tool must serialize its JSON Schema with an
 // explicit `required` array. TypeBox omits it when all properties are optional
