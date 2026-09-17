@@ -13,7 +13,7 @@ import {
   type AgentSession,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import { SdkExecutionService, type SdkExecutionAttempt } from "./sdk-execution-service.js";
+import { SdkExecutionService, type SdkExecutionAttempt } from "../scheduler.js";
 import { logger } from "../../kernel/logger.js";
 import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../member/mcp.js";
 import { memberExtensionsDir, memberSkillsDir } from "../../files/layout.js";

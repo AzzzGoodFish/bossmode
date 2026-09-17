@@ -1,5 +1,5 @@
 import {awaitResourceClose} from "./resource-close.js";
-import { memberRuntimeAllowed } from "../orchestrator/runtime-admission.js";
+import { memberRuntimeAllowed } from "../instance.js";
 /**
  * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
  * terminals. A terminal is a real PTY (node-pty locally, an ssh2 channel for

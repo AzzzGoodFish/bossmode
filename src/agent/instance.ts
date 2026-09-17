@@ -278,3 +278,38 @@ export function clearStaleMounts(memberId: string): void {
   runtimeRepository().update(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }
 export function clearRuntimeStateEntry(memberId: string): void { runtimeRepository().clear(memberId); }
+
+// -- Runtime admission and public failure messages --
+let stopping = false;
+export function openRuntimeAdmission(): void { stopping = false; }
+export function closeRuntimeAdmission(): void { stopping = true; }
+export function runtimeIsStopping(): boolean { return stopping; }
+/** Archive intent closes member admission durably before quiescence starts. */
+export function memberRuntimeAllowed(memberId: string): boolean {
+  if (stopping) return false;
+  return !!getDatabase().get(`SELECT 1 FROM members m WHERE m.id=? AND m.archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM member_archive_intents a WHERE a.member_id=m.id AND a.state='pending')`, memberId);
+}
+
+// -- Instance tracking --
+
+export function formatRuntimeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Failed to extract accountId from token")) {
+    return "OAuth credential is invalid or expired. Reconnect it in Settings → Model Credentials.";
+  }
+  // Binding/session desync after a partial model switch (2026-07-30).
+  // Keep the provider name — fish needs it to diagnose which side is stuck.
+  const providerMismatch = message.match(/Provider is not configured:\s*(\S+)/i);
+  if (providerMismatch) {
+    return `Model switch did not finish applying (session still needs provider "${providerMismatch[1]}" but the binding moved on). Retry the model switch, or Restart the member. Original: ${message}`;
+  }
+  return message;
+}
+
+export function isMemberConfigured(member: AgentMemberConfig): boolean {
+  return Boolean(member.model && member.credentialId);
+}
+
+export function memberUnconfiguredMessage(memberName: string): string {
+  return `Member "${memberName}" hasn't selected a model yet. Open the member card to choose a model and credential, then try again.`;
+}

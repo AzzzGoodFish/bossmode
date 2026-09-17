@@ -8,11 +8,11 @@ const messagesMigration = getMigration("core-messages-v1");
 const runtimeInputsMigration = getMigration("core-runtime-inputs-v1");
 const deliveryMigration = getMigration("core-delivery-v1");
 const executionMigration = getMigration("core-execution-v1");
-import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
+import { ExecutionAttemptRepository } from "../../src/agent/scheduler.js";
 import { appendMessageInTransaction } from "../../src/data/repositories/message-repository.js";
 import { acceptCapturedDelivery, DeliveryRepository, type CapturedMessage, type DeliveryKey } from "../../src/data/repositories/delivery-repository.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
-import { InputQueueRepository, type QueuedInput } from "../../src/data/repositories/input-queue-repository.js";
+import { InputQueueRepository, type QueuedInput } from "../../src/agent/scheduler.js";
 
 let db: Database;
 let root: string;

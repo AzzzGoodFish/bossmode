@@ -1,5 +1,5 @@
 import {awaitResourceClose} from "../terminal/resource-close.js";
-import {memberRuntimeAllowed} from "../orchestrator/runtime-admission.js";
+import {memberRuntimeAllowed} from "../instance.js";
 /**
  * Batch 7 P1 (spec §3): workspace-aware file tools — read/write/edit override
  * pi's built-ins by name (the SDK tool registry lets custom tools shadow

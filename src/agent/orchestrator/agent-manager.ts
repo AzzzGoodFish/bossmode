@@ -1,13 +1,12 @@
 import { mainSessionDirectory } from "../../files/layout.js";
-import {randomUUID} from "node:crypto";
-import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRuntimeInputs,pendingRuntimeInputCount,memberPendingInputCount,pendingRuntimeInputOwners,runtimeInputOwner,runtimeInputPayload,runtimeReplySources,runtimeInputHasContinuation,hasRuntimeReply,claimRuntimeInputs,finishRuntimeInputs,dismissRuntimeReplies,cancelPendingRuntimeInputs,type PreparedRuntimeInput,queueDepth,inputPumps,waitForInputSettlement,inputScopeEpoch,invalidateInputScope,notifyInputProgress} from "../scheduler.js";
-import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
+import { recoverRuntimeInputState, acceptRuntimeInput, acceptControlInput, pendingRuntimeInputCount, memberPendingInputCount, pendingRuntimeInputOwners, runtimeInputOwner, cancelPendingRuntimeInputs, queueDepth, waitForInputSettlement, invalidateInputScope, configureScheduler, hasInputPumps, pumpRuntimeInputs, drainQueuedInputsAsPrompt, isLengthStopReason, type PreparedRuntimeInput } from "../scheduler.js";
+export { resumePendingRuntimeInputs } from "../scheduler.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
 import {readMemberProfile,isBlankPersona} from "../../member/profile.js";
 import type {MentionActivationCtx} from "../../chat/router.js";
 import { getDatabase } from "../../data/database.js";
-import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
+import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "../instance.js";
 // Agent Manager — agent lifecycle management (slimmed down)
 // Prompt compilation → agent/prompt/prompt-compiler.ts
 // Event handling → agent/events.ts
@@ -34,18 +33,13 @@ import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events.js";
 import { loadScopeMessages } from "../tools/tools.js";
 import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry } from "../instance.js";
+import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, formatRuntimeErrorMessage, isMemberConfigured } from "../instance.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
   resolveSenderRole,
   type SenderRole,
 } from "./message-envelope.js";
-import {
-  setActivationSource,
-  clearActivationSource,
-  clearAllActivationSources,
-} from "./activation-context.js";
 import type { AgentHistoryEvent } from "../events.js";
 import type { RuntimeRegistry } from "../runtime/registry.js";
 import type { AgentHandle, AgentStreamEvent, AgentMemberConfig, AgentMemberSnapshot } from "../types.js";
@@ -96,48 +90,27 @@ let shutdownRunning = false;
 
 export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
-  if(registry&&(instances.size||pendingCreations.size||inputPumps.size))throw new Error("Runtime initialization requires completed teardown");
+  if(registry&&(instances.size||pendingCreations.size||hasInputPumps()))throw new Error("Runtime initialization requires completed teardown");
   recoverRuntimeInputState();
   shutdownSettlement = null; openRuntimeAdmission();
   registry = reg;
   promptSource = loadPrompt;
   memberSnapshotSource = loadSnapshot;
-}
-
-/** Called only after HTTP/PID publication, never during historical import. */
-export function resumePendingRuntimeInputs():void{
-  const pending=new InputQueueRepository(getDatabase());let afterId=0;
-  for(;;){const page=pending.listPending({afterId,limit:1000});if(!page.length)break;
-    for(const input of page){afterId=input.id;void pumpRuntimeInputs(input.scopeId,input.targetActorKey).catch(error=>logger.error("agent","pending input recovery failed",{inputId:input.id,error:String(error)}));}
-  }
+  configureScheduler({
+    buildSession: (memberId, scopeId) => buildMemberAgentSession(memberId,
+      scopeId.startsWith("dm:") || isMmScopeId(scopeId) ? scopeId : roomScopeId(scopeId)),
+    memberConfig: memberRecordToConfig,
+    canExecuteScope: memberScopeAllowsExecution,
+    postSystemNotice: (scopeId, text) => { postMessage(scopeId, "system", text); },
+    emitEvent: emitAgentLocalEvent,
+    refreshProfileSources,
+    applyPendingControls: applyPendingAfterPromptSettlement,
+    flushPendingReload: maybeFlushPendingReload,
+  });
 }
 
 export function getRegistry(): RuntimeRegistry | null {
   return registry;
-}
-
-// -- Instance tracking --
-
-function formatRuntimeErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("Failed to extract accountId from token")) {
-    return "OAuth credential is invalid or expired. Reconnect it in Settings → Model Credentials.";
-  }
-  // Binding/session desync after a partial model switch (2026-07-30).
-  // Keep the provider name — fish needs it to diagnose which side is stuck.
-  const providerMismatch = message.match(/Provider is not configured:\s*(\S+)/i);
-  if (providerMismatch) {
-    return `Model switch did not finish applying (session still needs provider "${providerMismatch[1]}" but the binding moved on). Retry the model switch, or Restart the member. Original: ${message}`;
-  }
-  return message;
-}
-
-function isMemberConfigured(member: AgentMemberConfig): boolean {
-  return Boolean(member.model && member.credentialId);
-}
-
-function memberUnconfiguredMessage(memberName: string): string {
-  return `Member "${memberName}" hasn't selected a model yet. Open the member card to choose a model and credential, then try again.`;
 }
 
 function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
@@ -214,9 +187,6 @@ function memberHasScopeAccess(scopeValue: string, memberId: string): boolean {
 function memberScopeAllowsExecution(scopeValue: string, memberId: string): boolean {
   return memberRuntimeAllowed(memberId) && memberHasScopeAccess(scopeValue, memberId);
 }
-class RuntimeScopeRevokedError extends Error {
-  constructor() { super("Member no longer has access to this execution scope"); }
-}
 
 /** Aggregate live status for a conversation scope (chats list / working-set). */
 export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inactive" {
@@ -281,109 +251,6 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
 function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   applyPendingCredentialRefresh(instance,trigger);applyPendingThinkingSwitch(instance,trigger);
 }
-function drainQueuedInputsAsPrompt(instance:AgentInstance,trigger:string):boolean{
-  if(!memberRuntimeAllowed(instance.memberId)||!queueDepth(instance)||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")return false;
-  void pumpRuntimeInputs(instance.activeChat?.scopeId||instance.scopeId,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
-  return true;
-}
-function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<void>{
-  const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(memberId);
-  const current=inputPumps.get(key);if(current)return current;
-  if(!memberRuntimeAllowed(memberId)||!memberPendingInputCount(memberId))return Promise.resolve();
-  if(!memberScopeAllowsExecution(owner.scopeId,memberId)){
-    cancelPendingRuntimeInputs(owner,"execution scope access revoked");
-    return Promise.resolve();
-  }
-  const epoch=inputScopeEpoch.get(key)??0;
-  let failed=false;
-  const operation=trackMemberOperation(memberId,async()=>{
-    const scopeId=owner.scopeId.startsWith("dm:")||isMmScopeId(owner.scopeId)?owner.scopeId:roomScopeId(owner.scopeId);
-    const instance=await buildMemberAgentSession(memberId,scopeId);
-    if(!instance){
-      if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch){
-        const revoked=!memberScopeAllowsExecution(owner.scopeId,memberId);
-        cancelPendingRuntimeInputs(owner,revoked?"execution scope access revoked":"runtime creation failed",revoked?"cancelled":"failed");
-      }
-      if(memberScopeAllowsExecution(owner.scopeId,memberId)&&(inputScopeEpoch.get(key)??0)===epoch){
-        const member=memberRecordToConfig(memberId);
-        postMessage(owner.scopeId,"system",member&&!isMemberConfigured(member)?memberUnconfiguredMessage(member.name):`Failed to activate member "${getMember(memberId)?.name??memberId}": runtime unavailable.`);
-      }
-      return;
-    }
-    for(;;){
-      if(!memberRuntimeAllowed(memberId)||instances.get(key)!==instance||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")break;
-      if(!memberScopeAllowsExecution(owner.scopeId,memberId)){
-        cancelPendingRuntimeInputs(owner,"execution scope access revoked");
-        break;
-      }
-      const inputs=pendingRuntimeInputs(owner);if(!inputs.length)break;
-      await runInputBatch(instance,inputs);
-      notifyInputProgress(key);
-    }
-    if(!queueDepth(instance))maybeFlushPendingReload(instance);
-  }).catch(error=>{
-    failed=true;
-    if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch)cancelPendingRuntimeInputs(owner,"runtime input execution failed","failed");
-    notifyInputProgress(key,error);
-    if(memberRuntimeAllowed(memberId))postMessage(owner.scopeId,"system",`Failed to activate member "${getMember(memberId)?.name??memberId}": ${formatRuntimeErrorMessage(error)}`);
-    throw error;
-  });
-  inputPumps.set(key,operation);
-  return operation.finally(()=>{
-    if(inputPumps.get(key)===operation)inputPumps.delete(key);
-    // ① B1: a member left publicly "working" only because its queue was going
-    // to drain must fall back to idle once that queued work is gone (e.g. a
-    // membership removal cancelled it) — otherwise every later activation
-    // reads the member as busy.
-    const quiet=instances.get(key);
-    if(quiet&&!quiet.promptInFlight&&!quiet.turnActive&&quiet.dispatchState==="idle"&&quiet.status!=="idle"&&!memberPendingInputCount(memberId)){
-      transition(quiet,quiet.roomId,quiet.agentName,"idle","queue-cancelled");
-    }
-    notifyInputProgress(key);
-    const live=instances.get(key);
-    if(!failed&&memberRuntimeAllowed(memberId)&&memberPendingInputCount(memberId)&&(!live||(!live.compacting&&!live.promptInFlight&&!live.turnActive&&live.dispatchState==="idle"))){
-      // ① B1: the member's pending work may live in several chats — wake every
-      // owner scope, not just the one that started this pump.
-      queueMicrotask(()=>{for(const ownerScope of pendingRuntimeInputOwners(memberId))void pumpRuntimeInputs(ownerScope,memberId).catch(error=>logger.error("agent","input wake failed",{memberId,error:String(error)}));});
-    }
-  });
-}
-const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the `chat_send` tool.";
-const LENGTH_CONTINUATION_FAILED_WARNING="Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
-function isLengthStopReason(stopReason:unknown):boolean{
-  if(typeof stopReason!=="string")return false;
-  const value=stopReason.toLowerCase();return value==="length"||value.includes("max_tokens")||value.includes("max_output");
-}
-function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],trigger:string,skipChatWarning:boolean):void{
-  if(instances.get(instanceKey(instance.memberId))!==instance)return;
-  updateDispatchState(instance,"idle",trigger);
-  if(!memberRuntimeAllowed(instance.memberId))return;
-  applyPendingAfterPromptSettlement(instance,trigger);
-  // ① B1: this batch's chat, not the build-time scope.
-  const chat=instance.activeChat?.scopeId||instance.roomId;
-  const chatTarget=chatTargetOf(chat);
-  // Pending work does not inherit this batch's reply obligations. Complete or
-  // explicitly hand off this batch before the pump chooses its next inputs.
-  if(instance.lengthContinuationPending&&!skipChatWarning){
-    instance.lengthContinuationPending=false;instance.lastMessageEndWasLength=false;
-    if(instance.lengthContinuationAttempted){
-      dismissRuntimeReplies(inputs,"continuation-exhausted","length continuation budget exhausted");
-      postMessage(chatTarget,"system",`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
-    }else{
-      instance.lengthContinuationAttempted=true;
-      const owed=hasRuntimeReply(runtimeInputOwner(chat,instance.memberId),inputs);
-      acceptControlInput(chat,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
-    }
-    return;
-  }
-  const owner=runtimeInputOwner(chat,instance.memberId);
-  if(!skipChatWarning&&!instance.hadErrorInTurn&&hasRuntimeReply(owner,inputs)){
-    // A reply was owed but the turn ended without a chat call: nothing is
-    // delivered — the debt is dismissed and the silence is made visible.
-    dismissRuntimeReplies(inputs,"silent","member finished without replying");
-    postMessage(chatTarget,"system",`Member "${instance.agentName}" finished without replying.`);
-  }
-}
 
 let profileRevision = 0;
 
@@ -423,53 +290,6 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.member.title = member.title;
   instance.sessionSources.compiled = compiled;
   instance.sessionSources.roomMembers = room ? roomStore.getRoomMembers(room.id).map(m => m.name) : [member.name];
-}
-
-async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promise<void>{
-  if(!memberRuntimeAllowed(instance.memberId))return;
-  const payloads=inputs.map(runtimeInputPayload),message=payloads.map(x=>x.prompt).join("\n\n");
-  const trigger=payloads.length===1?payloads[0].trigger:"queued",token=randomUUID();
-  // ① B1: this batch's chat — the instance serves it now; outbound calls follow it.
-  const batchScope=inputs[0].scopeId;
-  instance.activeChat.scopeId=batchScope;
-  const batchTarget=chatTargetOf(batchScope);
-  updateDispatchState(instance,"promptSubmitted",trigger);
-  instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
-  instance.lastMessageEndWasLength=false;instance.lengthContinuationPending=false;
-  instance.lengthContinuationAttempted=payloads.some(payload=>payload.trigger==="length_continuation");
-  let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
-  setActivationSource(batchTarget,instance.memberId,payloads[0].source);
-  try{
-    if(trigger!=="length_continuation")emitAgentLocalEvent(batchTarget,instance.memberId,{type:"user_prompt",text:message,trigger});
-    if(instance.profilePromptDirty){
-      refreshProfileSources(instance);
-      if(!instance.handle.refreshPrompt)throw new Error("Runtime cannot refresh member identity without resetting the session.");
-      instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;
-    }
-    await instance.handle.prompt(message,{beforeDispatch:(event:{attemptId:string;dispatchIndex:number;message:string})=>{
-      if(!memberScopeAllowsExecution(batchScope,instance.memberId))throw new RuntimeScopeRevokedError();
-      if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
-      else{
-        const continuation=acceptControlInput(batchScope,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(batchScope,instance.memberId),inputs)).input;
-        claimRuntimeInputs([continuation],event.attemptId,token);inputs.push(continuation);
-      }
-    }});
-    if(!dispatched)throw new Error("Runtime returned without a durable input dispatch receipt");
-    outcome=instance.dispatchState==="aborting"?"cancelled":instance.hadErrorInTurn?"failed":"completed";
-  }catch(error){
-    if(error instanceof RuntimeScopeRevokedError){outcome="cancelled";instance.lastTurnError=null;}
-    else{failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);}
-  }
-  instance.promptInFlight=false;
-  // Provider settlement is not application publication. Publication failure cannot replay the input.
-  try{finalizePromptSettlement(instance,inputs,`${trigger}_settled`,outcome!=="completed");}
-  catch(error){failure=error;outcome="failed";instance.lastTurnError=formatRuntimeErrorMessage(error);updateDispatchState(instance,"idle",`${trigger}_publication_error`);}
-  finally{finishRuntimeInputs(inputs,token,outcome,failure?"runtime operation or publication failed":outcome);clearActivationSource(batchTarget,instance.memberId);}
-  if(failure){
-    logger.error("agent","input processing failed",{memberId:instance.memberId,scopeId:batchScope,error:String(failure)});
-    if(instances.get(instanceKey(instance.memberId))===instance)postMessage(batchTarget,"system",`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
-  }
-  if(instances.get(instanceKey(instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,batchTarget,instance.agentName,"idle",`${trigger}_settled`);
 }
 
 function normalizeSwitchModelRef(model: string): string {
@@ -1896,7 +1716,6 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
 
   destroyInstance(scopeId, memberId, {preservePending:true});
-  clearActivationSource(scopeId, memberId);
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
     cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");
@@ -1975,7 +1794,6 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
   });
   teardownMemberInstance(memberId);
   for (const scope of scopes) {
-    clearActivationSource(scope, memberId);
     clearRuntimeStateEntry(memberId);
     const target = chatTargetOf(scope);
     const statusEvent = { type: "agent:status" as const, roomId: target, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
@@ -2012,7 +1830,6 @@ export function destroyInstance(roomId: string, memberRef: string,options:{prese
     instances.delete(key);
     contextUsageCache.delete(key);
     contextCompactionWarningCache.delete(key);
-    clearActivationSource(roomId, memberId);
     logger.info("agent", "instance destroyed", { member: memberName, memberId, roomId });
   }
 }
@@ -2246,7 +2063,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
       requestInstanceStop(instance);
       if (!instance.handle.destroyAndWait) throw new Error("Runtime cannot confirm member teardown");
       await instance.handle.destroyAndWait();instance.unsubscribe();instances.delete(key);sessionPublishOwners.delete(key);
-      contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);clearActivationSource(instance.roomId,memberId);
+      contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);
     }catch(error){errors.push(error);}
   }
   if (registry) for (const runtime of registry.getAll()) {
@@ -2280,7 +2097,7 @@ export async function shutdownAll(): Promise<void> {
     await settleMemberOperations();
     for (const instance of instances.values()) {try {instance.unsubscribe();}catch(error){failures.push(error);}}
     instances.clear(); pendingCreations.clear(); sessionPublishOwners.clear();
-    contextUsageCache.clear(); contextCompactionWarningCache.clear(); clearAllActivationSources();
+    contextUsageCache.clear(); contextCompactionWarningCache.clear();
     if (failures.length) throw new AggregateError(failures, "Runtime shutdown incomplete");
   })().finally(() => { shutdownRunning = false; });
   return shutdownSettlement;
