@@ -7,7 +7,7 @@ import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyMembers } from "../../src/app/upgrade/records.js";
 import { importLegacyDocuments } from "../../src/app/upgrade/assets.js";
-import {listDocumentHistory,documentSnapshotPath,documentContentMeta} from "../../src/data/repositories/document-repository.js";
+import {listDocumentHistory,documentSnapshotPath,documentContentMeta} from "../../src/member/assets.js";
 it("ordinary coordinator retry reuses published older-persona history without replacing source bodies",async()=>{
  const root=mkdtempSync(join(tmpdir(),"legacy-persona-retry-"));let db:Awaited<ReturnType<typeof prepareStorageUpgrade>>["db"]|undefined;
  const path="members/mem_one/persona.md",current="  exact current\r\n",previous="earlier revision\n";

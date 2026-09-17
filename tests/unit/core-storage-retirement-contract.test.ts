@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createLegacyMemberStorageFixture } from "../helpers/legacy-member-storage.js";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 
-import { MembersRepository } from "../../src/data/repositories/members.js";
+import { getMember, listMembers } from "../../src/member/identity.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import { getDatabase, type Database } from "../../src/data/database.js";
 
@@ -135,7 +135,7 @@ describe("test-only historical fixture fidelity", () => {
     const mid = migratedMemberId(db!, "mem_old");
     expect(result.migrated).toBe(true);
     expect(result.warnings).toEqual([]);
-    expect(new MembersRepository(db!).get(mid)).toMatchObject({
+    expect(getMember(mid, db!)).toMatchObject({
       id: mid, name: "Old", title: "Engineer", agentTemplate: "general", global: { model: "p/m" }, createdAt: 123, updatedAt: 456,
     });
     expect(db!.get("SELECT member_id FROM memory_documents WHERE path=?", `members/${mid}/persona.md`))
@@ -150,7 +150,7 @@ describe("test-only historical fixture fidelity", () => {
     } finally { backup.close(); }
     db!.close();
     expect((await start()).migrated).toBe(false);
-    expect(new MembersRepository(db!).list()).toHaveLength(1);
+    expect(listMembers(db!)).toHaveLength(1);
     expect(readFileSync(join(root, `members/${mid}/persona.md`))).toEqual(Buffer.from(body));
   });
 

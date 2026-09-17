@@ -1,11 +1,13 @@
+import { detachMemberFromConversations } from "../../src/chat/conversations.js";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { MemberRecord } from "../../src/member/member-registry.js";
+import type { MemberRecord } from "../../src/member/identity.js";
 import { coreFixture } from "../helpers/core-fixture.js";
-import * as registry from "../../src/member/member-registry.js";
-import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
+import * as registry from "../../src/member/identity.js";
+import * as __registry_app_member_actions from "../../src/app/member-actions.js";
+import { MemberArchiveService } from "../../src/member/archive.js";
 import { rebuildEventAggregates } from "../../src/data/repositories/event-repository.js";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
@@ -18,7 +20,7 @@ function legacy(id = "mem_import", name = "imported"): MemberRecord {
 
 describe("authoritative member database", () => {
   it("creates a blank persona and persists identity/configuration only in SQLite across reopen", () => {
-    const member = registry.createMember({ name: " engineer ", title: " Engineer ", model: "test/model" });
+    const member = __registry_app_member_actions.createMember({ name: " engineer ", title: " Engineer ", model: "test/model" });
     expect(member.name).toBe("engineer"); expect(member.title).toBe("Engineer");
     expect(existsSync(join(dir, "members", member.id, "member.json"))).toBe(false);
     expect(readFileSync(join(dir, "members", member.id, "persona.md"), "utf8")).toBe("");
@@ -29,9 +31,9 @@ describe("authoritative member database", () => {
   });
 
   it("enforces Unicode-aware normalized uniqueness and updates name/title atomically", () => {
-    const a = registry.createMember({ name: "Änne", title: "old" });
-    const b = registry.createMember({ name: "second", title: "unchanged" });
-    expect(() => registry.createMember({ name: "änne" })).toThrow(registry.MemberNameTakenError);
+    const a = __registry_app_member_actions.createMember({ name: "Änne", title: "old" });
+    const b = __registry_app_member_actions.createMember({ name: "second", title: "unchanged" });
+    expect(() => __registry_app_member_actions.createMember({ name: "änne" })).toThrow(registry.MemberNameTakenError);
     expect(() => registry.updateMemberIdentity(b.id, { name: " ÄNNE ", title: "must not commit" })).toThrow(registry.MemberNameTakenError);
     expect(registry.getMember(b.id)).toMatchObject({ name: "second", title: "unchanged" });
     const changed = registry.updateMemberIdentity(a.id, { name: "言实", title: "工程师" });
@@ -50,16 +52,16 @@ describe("authoritative member database", () => {
 
   it("imports exact IDs/timestamps without persona creation and refuses overwrite", () => {
     const record = legacy();
-    expect(registry.importMemberRecord(record)).toEqual(record);
+    expect(__registry_app_member_actions.importMemberRecord(record)).toEqual(record);
     expect(existsSync(join(dir, "members", record.id, "persona.md"))).toBe(false);
-    expect(() => registry.importMemberRecord({ ...record, name: "replacement" })).toThrow();
-    expect(() => registry.importMemberRecord(legacy("mem_other", "IMPORTED"))).toThrow(registry.MemberNameTakenError);
+    expect(() => __registry_app_member_actions.importMemberRecord({ ...record, name: "replacement" })).toThrow();
+    expect(() => __registry_app_member_actions.importMemberRecord(legacy("mem_other", "IMPORTED"))).toThrow(registry.MemberNameTakenError);
     expect(registry.getMember(record.id)).toEqual(record);
-    expect(() => registry.importMemberRecord({ ...record, id: "../bad" })).toThrow("invalid_member_record");
+    expect(() => __registry_app_member_actions.importMemberRecord({ ...record, id: "../bad" })).toThrow("invalid_member_record");
   });
 
   it("reports storage corruption rather than silently returning no members", () => {
-    const a = registry.createMember({ name: "a" });
+    const a = __registry_app_member_actions.createMember({ name: "a" });
     expect(() => fixture.db.run("UPDATE members SET global_json = ? WHERE id = ?", "invalid", a.id)).toThrow();
     expect(registry.getMember(a.id)).toEqual(a);
     fixture.db.close();
@@ -68,8 +70,8 @@ describe("authoritative member database", () => {
   });
 
   it("retains archived identity while tombstoning the authoritative row", async () => {
-    const a = registry.createMember({ name: "fired", title: "Engineer" });
-    const result = await new MemberArchiveService(fixture.db, dir, { quiesce: async () => {} }).archive(a.id, { confirm: true });
+    const a = __registry_app_member_actions.createMember({ name: "fired", title: "Engineer" });
+    const result = await new MemberArchiveService(fixture.db, dir, { detachFromConversations: detachMemberFromConversations,  quiesce: async () => {} }).archive(a.id, { confirm: true });
     expect(registry.getMember(a.id)).toBeNull();
     expect(existsSync(join(dir, "members", a.id))).toBe(false);
     expect(fixture.db.get("SELECT id,name,title,archive_path FROM members WHERE id=?", a.id)).toEqual({ id: a.id, name: a.name, title: "Engineer", archive_path: result.archived });
@@ -78,7 +80,7 @@ describe("authoritative member database", () => {
   });
 
   it("never overwrites a concurrent rename with a stale configuration update", () => {
-    const member = registry.createMember({ name: "before", model: "old" });
+    const member = __registry_app_member_actions.createMember({ name: "before", model: "old" });
     const db = fixture.db;
     const originalGet = db.get.bind(db);
     let attempted = false;
@@ -101,13 +103,13 @@ describe("authoritative member database", () => {
   });
 
   it("preserves authoritative members across repeated aggregate rebuild and reopen", () => {
-    const a = registry.createMember({ name: "durable" });
+    const a = __registry_app_member_actions.createMember({ name: "durable" });
     rebuildEventAggregates(); rebuildEventAggregates(); fixture.reopen();
     expect(registry.getMember(a.id)).toEqual(a);
   });
 
   it("validates rename without changing either identity field", () => {
-    const a = registry.createMember({ name: "valid", title: "untouched" });
+    const a = __registry_app_member_actions.createMember({ name: "valid", title: "untouched" });
     expect(() => registry.renameMember(a.id, " ")).toThrow("invalid_member_name");
     expect(() => registry.updateMemberIdentity(a.id, { name: "next", title: 5 as any })).toThrow("invalid_member_title");
     expect(registry.getMember(a.id)).toMatchObject({ name: "valid", title: "untouched" });

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { conversationsFixture } from "./unit/core-conversations-fixture.js";
 const location = vi.hoisted(() => ({ root: "" }));
 
-import * as rooms from "../src/chat/room-store.js";
+import * as rooms from "../src/chat/conversations.js";
 import { roomDir } from "../src/files/layout.js";
 import * as messages from "../src/chat/message-store.js";
 

@@ -9,12 +9,12 @@ const baseStorageMigration = getMigration("core-base-v1");
 const executionMigration = getMigration("core-execution-v1");
 const memberSessionsMigration = getMigration("core-member-session-v1");
 const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1");
-import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import { importSessionAssociation, readSessionAssociation } from "../../src/member/sessions.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import { ExecutionAttemptRepository } from "../../src/data/repositories/execution-attempt-repository.js";
 import { importExecutionAmbiguity } from "../../src/data/repositories/execution-identity.js";
-import * as sessions from "../../src/member/session-store.js";
+import * as sessions from "../../src/member/sessions.js";
 import * as runtime from "../../src/member/runtime-state.js";
 import * as cursors from "../../src/chat/user-read-cursors.js";
 
@@ -109,13 +109,13 @@ describe("DB member sessions, unchanged SDK files", () => {
   });
   it("imports exact timestamps and legacy SDK references without moving or mirroring history", () => {
     const file = join(sandbox,"rooms/r/pi-sessions/old.jsonl"); mkdirSync(dirname(file),{recursive:true});writeFileSync(file,"old-sdk-bytes\n");
-    const repo = new SessionRepository(db);
-    repo.importAssociation({memberId:owner,referenceKind:"legacy-absolute",createdAt:123,updatedAt:456,
-      session:{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file}});
-    expect(repo.get(owner)).toMatchObject({createdAt:123,updatedAt:456});
+    const repo = db;
+    importSessionAssociation({memberId:owner,referenceKind:"legacy-absolute",createdAt:123,updatedAt:456,
+      session:{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file}}, repo);
+    expect(readSessionAssociation(owner, repo)).toMatchObject({createdAt:123,updatedAt:456});
     expect(sessions.getCurrentSession(owner)?.sessionFile).toBe(file);
     sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionId:"old-id",sessionFile:file});
-    expect(repo.get(owner)).toMatchObject({referenceKind:"legacy-absolute",createdAt:123});
+    expect(readSessionAssociation(owner, repo)).toMatchObject({referenceKind:"legacy-absolute",createdAt:123});
     expect(readFileSync(file,"utf8")).toBe("old-sdk-bytes\n");
     expect(db.all("SELECT name FROM sqlite_master WHERE name LIKE '%session%' AND type='table'")).toEqual([{name:"current_sessions"}]);
   });
@@ -146,9 +146,9 @@ describe("DB member sessions, unchanged SDK files", () => {
     expect(sessions.getCurrentSession(owner)).toBeUndefined();
   });
   it("rejects malformed pure-import archive references and non-file SDK references", () => {
-    const repo=new SessionRepository(db);
-    expect(() => repo.importAssociation({memberId:owner,referenceKind:"member-relative",createdAt:1,updatedAt:2,
-      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/rooms/other/wrong.jsonl"}})).toThrow(/does not match the member session archive/);
+    const repo=db;
+    expect(() => importSessionAssociation({memberId:owner,referenceKind:"member-relative",createdAt:1,updatedAt:2,
+      session:{runtime:"pi-sdk",sessionFile:"sessions/2026-09-09/rooms/other/wrong.jsonl"}}, repo)).toThrow(/does not match the member session archive/);
     const fake=join(sandbox,"members",owner,"sessions/2026-09-09/main/directory.jsonl");mkdirSync(fake,{recursive:true});
     expect(() => sessions.saveCurrentSession(owner,{runtime:"pi-sdk",sessionFile:fake})).toThrow(/not a file/);
   });

@@ -1,14 +1,15 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom } from "../../src/chat/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk } from "../../src/agent/events/event-handler.js";
-import { getMember, updateMember } from "../../src/member/member-registry.js";
+import { getMember, updateMember } from "../../src/member/identity.js";
 
 type PromptOptions = { beforeDispatch?: (event: { attemptId: string; dispatchIndex: number; message: string }) => void };
 function dispatch(message: string, options?: PromptOptions) {
@@ -159,8 +160,8 @@ vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
 // Member registry (single-path commit target): switchMemberModel commits the
 // global binding here, once, after every live instance accepted.
 
-vi.mock("../../src/member/skills/skill-store.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../src/member/skills/skill-store.js")>(),
+vi.mock("../../src/member/skills.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/member/skills.js")>(),
   resolveGlobalSkillPaths: (skillNames: string[]) => skillNames.map((s: string) => "/tmp/skills/" + s),
 }));
 
@@ -183,19 +184,19 @@ beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
   (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-  const members = new MembersRepository(fixture.db);
-  const conversations = new ConversationsRepository(fixture.db);
+  const members = fixture.db;
+  const conversations = fixture.db;
   for (const name of ["pm", "qa"]) {
     const id = `mem_${name}`;
-    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
-      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    conversations.ensureDmScope(id);
+    insertMemberIdentity({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, members);
+    ensureDmScope(id, conversations);
     const memberPath = join(fixture.root, "members", id);
     mkdirSync(memberPath, { recursive: true });
     writeFileSync(join(memberPath, "persona.md"), `You are ${name}.`);
   }
   for (const id of ["room", "room2", "room3"]) {
-    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });
+    storeRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 }, conversations);
   }
   bus.postMessage("room", "user", "@pm hi", ["pm"]);
   vi.mocked(bus.postMessage).mockClear();
@@ -217,7 +218,7 @@ describe("agent-manager model hot switch", () => {
     vi.clearAllMocks();
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
-    manager.initAgentManager(registry as any);
+    manager.initAgentManager(registry as any, loadMemberPromptSource);
   });
 
   it("uses fast session.setModel path for same credential/provider model changes", async () => {
@@ -517,7 +518,7 @@ describe("agent-manager model hot switch", () => {
 
   it("does not commit the global config when setModel fails — instance is restored", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const registry = await import("../../src/member/member-registry.js");
+    const registry = await import("../../src/member/identity.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     const first = handles[0];
@@ -538,7 +539,7 @@ describe("agent-manager model hot switch", () => {
 
   it("commits the global config exactly once, only after a successful live apply", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const registry = await import("../../src/member/member-registry.js");
+    const registry = await import("../../src/member/identity.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
 
@@ -552,7 +553,7 @@ describe("agent-manager model hot switch", () => {
 
   it("applies the switch to the member's single live instance, whatever chat it serves", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const registry = await import("../../src/member/member-registry.js");
+    const registry = await import("../../src/member/identity.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -571,7 +572,7 @@ describe("agent-manager model hot switch", () => {
 
   it("one instance per member: a failed switch rolls back the single runtime and commits nothing", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const registry = await import("../../src/member/member-registry.js");
+    const registry = await import("../../src/member/identity.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -593,7 +594,7 @@ describe("agent-manager model hot switch", () => {
 
   it("rollback that fails again stops the member's instance and names it in the error", async () => {
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const registry = await import("../../src/member/member-registry.js");
+    const registry = await import("../../src/member/identity.js");
     vi.spyOn(registry, "updateMember");
     await manager.activateAgent("room", "pm");
     await manager.activateAgent("room2", "pm");
@@ -753,7 +754,7 @@ describe("agent-manager model hot switch", () => {
       { id: "knowledge", type: "knowledge_event", sender: "system", content: "[Knowledge] qa updated document: **Report**", mentions: [], ts: now, seq: 6 },
       { id: "m1", type: "chat", sender: "user", content: "@pm continue", mentions: ["pm"], ts: now, seq: 7 },
     ];
-    (await import("../../src/chat/room-store.js")).setCursor("room", "mem_pm", bus.getLatestMessageId("room"));
+    (await import("../../src/chat/conversations.js")).setCursor("room", "mem_pm", bus.getLatestMessageId("room"));
     for (const message of messages) bus.postMessage("room", message.sender, message.content, message.mentions, message.type === "chat" ? undefined : { type: message.type as any });
 
     await manager.activateAgent("room", "pm");

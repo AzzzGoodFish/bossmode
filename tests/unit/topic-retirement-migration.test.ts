@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { openDatabase, applyStorageMigrations, type Database } from "../../src/data/database.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
 import { cleanupRetiredTopicSessionFiles } from "../../src/app/upgrade/retirements.js";
-import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import {  } from "../../src/member/sessions.js";
 import { importMessage, importMessageNextSequence } from "../../src/data/repositories/message-repository.js";
 import { importAgentEvent } from "../../src/data/repositories/event-repository.js";
 

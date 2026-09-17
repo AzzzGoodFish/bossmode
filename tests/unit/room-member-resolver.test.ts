@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { createMember, updateMember } from "../../src/member/member-registry.js";
+import { createMember, deleteMemberForTests } from "../../src/app/member-actions.js";
+import { updateMember } from "../../src/member/identity.js";
 import { roomDir } from "../../src/files/layout.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 let fixture: ReturnType<typeof coreFixture>;
 let dir: string;
@@ -18,7 +19,7 @@ function writeAgent(name: string, extraFrontmatter = ""): void {
 describe("room-member-resolver — no implicit model default", () => {
   it("leaves a freshly created current contact Unconfigured (no model, no credentialId)", async () => {
     const member = createMember({ name: "architect" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -32,7 +33,7 @@ describe("room-member-resolver — no implicit model default", () => {
   it("ignores a legacy model field in Agent definition frontmatter", async () => {
     writeAgent("pm", "model: claude-sonnet-4-6\n");
     const member = createMember({ name: "pm", agentTemplate: "pm" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -43,7 +44,7 @@ describe("room-member-resolver — no implicit model default", () => {
   });
 
   it("retains imported legacy model history without making an unlinked snapshot executable", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
     // The retired historical converter's SQL DTO, constructed directly: a retained
     // legacy model history (never executable) that resolution must not activate.
@@ -57,7 +58,7 @@ describe("room-member-resolver — no implicit model default", () => {
         migratedFrom: { memberName: "developer", memberId: "legacy-developer" },
       }],
     };
-    new ConversationsRepository(fixture.db).upsertRoom(room as any);
+    storeRoom(room as any, fixture.db);
     mkdirSync(join(dir,"rooms/legacy-room"),{recursive:true});
     writeFileSync(join(dir,"members.json"),"invalid retired data");
     writeFileSync(join(dir,"rooms/legacy-room/room.json"),"invalid retired room");
@@ -70,7 +71,7 @@ describe("room-member-resolver — no implicit model default", () => {
 
   it("resolves an explicitly configured member's model and credentialId together", async () => {
     const member = createMember({ name: "qa" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
@@ -83,15 +84,15 @@ describe("room-member-resolver — no implicit model default", () => {
 });
 
 async function currentMemberFixture() {
-  const registry = await import("../../src/member/member-registry.js");
+  const registry = await import("../../src/member/identity.js"), __registry_app_member_actions = await import("../../src/app/member-actions.js");
   const db = fixture.db;
-  const member = registry.importMemberRecord({
+  const member = __registry_app_member_actions.importMemberRecord({
     id: "mem_current", name: "current-name", title: "Engineer", agentTemplate: "developer",
     unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
     global: { model: "db-model", credentialId: "db-credential", thinkingLevel: "high", skills: ["db-skill"], mcpServers: ["db-mcp"] },
     createdAt: 1, updatedAt: 2,
   });
-  const roomStore = await import("../../src/chat/room-store.js");
+  const roomStore = await import("../../src/chat/conversations.js");
   const room = roomStore.createRoom("Current", dir, []);
   // A pre-cutover linked shadow must not supply identity or cleared settings.
   const shadow = {
@@ -102,7 +103,7 @@ async function currentMemberFixture() {
   const path = join(roomDir(room.id), "room.json");
   // createRoom now always sets a global roster, even when empty. This fixture
   // represents a pre-cutover local roster with an explicit current-member link.
-  new ConversationsRepository(db).upsertRoom({ ...room, globalMemberIds: undefined, roomMembers: [shadow] });
+  storeRoom({ ...room, globalMemberIds: undefined, roomMembers: [shadow] }, db);
   writeFileSync(path, "poison retired room");
   return { registry, member, roomStore, room, path, shadow, db };
 }
@@ -130,7 +131,7 @@ describe("room-member-resolver — database authority", () => {
   it("uses DB records for global membership and ignores old files and room shadows", async () => {
     const { member, room, path, shadow } = await currentMemberFixture();
     writeFileSync(join(dir, "members.json"), "invalid retired data");
-    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] });
+    storeRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] }, fixture.db);
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
     expect(resolveRoomMember(room.id, member.id)).toMatchObject({ id: member.id, name: "current-name", model: "db-model" });
     expect(resolveRoomMembers(room.id)).toHaveLength(1);
@@ -138,7 +139,7 @@ describe("room-member-resolver — database authority", () => {
 
   it("propagates effective-config read failures instead of using shadow config", async () => {
     const { registry, room } = await currentMemberFixture();
-    vi.spyOn(registry, "getEffectiveConfig").mockImplementation(() => { throw new Error("DB config read failed"); });
+    vi.spyOn(registry, "getMemberConfiguration").mockImplementation(() => { throw new Error("DB config read failed"); });
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
     expect(() => resolveRoomMember(room.id, "rm_shadow")).toThrow("DB config read failed");
     expect(() => resolveRoomMembers(room.id)).toThrow("DB config read failed");
@@ -146,7 +147,7 @@ describe("room-member-resolver — database authority", () => {
 
   it("does not revive a linked member missing from the DB", async () => {
     const { registry, member, room } = await currentMemberFixture();
-    registry.deleteMemberForTests(member.id);
+    deleteMemberForTests(member.id);
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
     expect(() => resolveRoomMember(room.id, "rm_shadow")).toThrow("Member not found");
   });
@@ -154,8 +155,8 @@ describe("room-member-resolver — database authority", () => {
   it("does not resolve a missing global member through a same-named agent or stale overrides", async () => {
     const { registry, member, room, path } = await currentMemberFixture();
     writeAgent(member.name);
-    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], memberOverrides: { [member.name]: { model: "stale-model" } } });
-    registry.deleteMemberForTests(member.id);
+    storeRoom({ ...room, globalMemberIds: [member.id], memberOverrides: { [member.name]: { model: "stale-model" } } }, fixture.db);
+    deleteMemberForTests(member.id);
     const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
     expect(resolveRoomMember(room.id, member.name)).toBeNull();
     expect(resolveRoomMembers(room.id, [member.name])).toEqual([]);
@@ -163,7 +164,7 @@ describe("room-member-resolver — database authority", () => {
 
   it("propagates corrupt DB configuration for global membership", async () => {
     const { member, room, path, shadow, db } = await currentMemberFixture();
-    new ConversationsRepository(fixture.db).upsertRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] });
+    storeRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] }, fixture.db);
     expect(() => db.run("UPDATE members SET global_json = ? WHERE id = ?", "invalid JSON", member.id)).toThrow();
     // Corruption cannot pass current SQL constraints. Inject a corrupt returned row
     // to independently exercise the registry decoder and final resolver error path.

@@ -1,3 +1,4 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 /** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
 import { beforeAll, afterAll } from "vitest";
@@ -11,6 +12,7 @@ const TEST_BOSSMODE_DIR = process.env.BOSSMODE_DIR;
 if (!process.env.BOSSMODE_TEST_ROOT || !TEST_BOSSMODE_DIR) throw new Error("HTTP fixtures require the isolated npm test launcher");
 const servers = new Set<TestServer>();
 let storage: ReturnType<typeof coreFixture>;
+let stopProfiles: (() => void) | undefined;
 export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR!; }
 export function getTestWorkspace() {
   if (!storage) throw new Error("Test workspace has not been initialized");
@@ -21,11 +23,13 @@ export function getTestWorkspace() {
 export function setupTestWorkspace(): void {
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
+    stopProfiles = (await import("../../src/app/wire.js")).wireMemberProfiles();
     const { getDefaultConfig, writeConfig } = await import("../../src/config/settings.js");
     const { hashPassword } = await import("../../src/api/auth.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
   });
   afterAll(async () => {
+    stopProfiles?.();
     const errors: unknown[] = [];
     for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
     try { const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }
@@ -106,7 +110,7 @@ export async function createTestServer(): Promise<TestServer> {
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime());
   registry.register(new MockRuntime("pi-cli"));
-  initAgentManager(registry);
+  initAgentManager(registry, loadMemberPromptSource);
 
   // Same mention-router as production — scope routing stays on one code path.
   const stopRouter = wireMentionRouter();
@@ -167,8 +171,8 @@ export const MOCK_MEMBER_MODEL = "mock-provider/mock-model";
 export const MOCK_MEMBER_CREDENTIAL_ID = "test-credential";
 
 export async function configureMockMemberModel(roomId: string, memberRef: string): Promise<void> {
-  const roomStore = await import("../../src/chat/room-store.js");
-  const registry = await import("../../src/member/member-registry.js");
+  const roomStore = await import("../../src/chat/conversations.js");
+  const registry = await import("../../src/member/identity.js");
   const member = registry.getMember(memberRef) || registry.getMember(roomStore.findRoomMemberByName(roomId, memberRef)?.id || "");
   if (!member) throw new Error("Mock execution requires a current global member; create the room with memberIds");
   if (member.global.model !== MOCK_MEMBER_MODEL || member.global.credentialId !== MOCK_MEMBER_CREDENTIAL_ID) {

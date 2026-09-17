@@ -3,16 +3,16 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { coreFixture } from "./helpers/core-fixture.js";
-import { MembersRepository } from "../src/data/repositories/members.js";
-import { SessionRepository } from "../src/data/repositories/session-repository.js";
-import * as sessionStore from "../src/member/session-store.js";
+import { insertMemberIdentity } from "../src/member/identity.js";
+import { readSessionAssociation, importSessionAssociation } from "../src/member/sessions.js";
+import * as sessionStore from "../src/member/sessions.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let tempDir: string;
 
 function insertMember(id: string, name: string): void {
-  new MembersRepository(fixture.db).insert({id, name, agentTemplate: "general", global: {},
-    createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}});
+  insertMemberIdentity({id, name, agentTemplate: "general", global: {},
+    createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}}, fixture.db);
   mkdirSync(join(tempDir, "members", id), {recursive: true});
 }
 
@@ -32,7 +32,7 @@ describe("session-store member sessions", () => {
 
     sessionStore.saveCurrentSession("rm_pm", { runtime: "pi-cli", sessionId: "session-123", sessionFile: file });
     expect(sessionStore.getCurrentSession("rm_pm")).toEqual({ runtime: "pi-cli", sessionId: "session-123", sessionFile: file });
-    expect(new SessionRepository(fixture.db).get("rm_pm")!.session.sessionFile).toBe("sessions/2026-09-07/main/session.jsonl");
+    expect(readSessionAssociation("rm_pm", fixture.db)!.session.sessionFile).toBe("sessions/2026-09-07/main/session.jsonl");
 
     fixture.reopen();
     expect(sessionStore.getCurrentSession("rm_pm")?.sessionFile).toBe(file);
@@ -45,7 +45,7 @@ describe("session-store member sessions", () => {
     sessionStore.saveCurrentSession("rm_pm", { runtime: "pi-cli", sessionId: "first" });
     sessionStore.saveCurrentSession("rm_pm", { runtime: "pi-cli", sessionId: "second" });
     expect(sessionStore.getCurrentSession("rm_pm")).toMatchObject({ sessionId: "second" });
-    expect(new SessionRepository(fixture.db).get("rm_pm")!.session.sessionId).toBe("second");
+    expect(readSessionAssociation("rm_pm", fixture.db)!.session.sessionId).toBe("second");
   });
 
   it("keeps member references independent", () => {
@@ -70,9 +70,9 @@ describe("session-store member sessions", () => {
     expect(() => sessionStore.saveCurrentSession("rm_pm", { runtime: "pi-sdk", sessionFile: otherMemberFile }))
       .toThrow(/outside the member session store/);
 
-    new SessionRepository(fixture.db).importAssociation({memberId: "rm_pm",
+    importSessionAssociation({memberId: "rm_pm",
       session: {runtime: "pi-sdk", sessionFile: "sessions/2026-09-07/main/missing.jsonl"},
-      referenceKind: "member-relative", createdAt: 1, updatedAt: 2});
+      referenceKind: "member-relative", createdAt: 1, updatedAt: 2}, fixture.db);
     expect(() => sessionStore.getCurrentSession("rm_pm")).toThrow(/is missing/);
     sessionStore.clearCurrentSession("rm_pm");
     expect(sessionStore.getCurrentSession("rm_pm")).toBeUndefined();

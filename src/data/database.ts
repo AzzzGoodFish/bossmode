@@ -79,8 +79,8 @@ export class Database {
     return this.connection.prepare(sql).all(...params as any[]) as T[];
   }
 
-  /** Synchronous only. Nested calls use savepoints, not independent commits. */
-  transaction<T>(fn: (db: Database) => T): T {
+  /** Synchronous only. Nested calls use savepoints. Deferred reads retain a snapshot without a writer lock. */
+  transaction<T>(fn: (db: Database) => T, mode: "immediate" | "deferred" = "immediate"): T {
     this.assertOpen();
     if (fn.constructor.name === "AsyncFunction") {
       throw new Error("Database transactions must be synchronous");
@@ -90,7 +90,7 @@ export class Database {
     let committed = false;
     const name = `bossmode_sp_${++this.savepoint}`;
     if (outer) this.transactionFailure = undefined;
-    this.connection.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
+    this.connection.exec(outer ? (mode === "deferred" ? "BEGIN" : "BEGIN IMMEDIATE") : `SAVEPOINT ${name}`);
     this.depth++;
     let valid = true;
     const scoped = new Proxy(this, {

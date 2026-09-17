@@ -248,8 +248,8 @@ describe("Acceptance: Private Chat & Steer (F10, F11, F13)", () => {
       writeFileSync(join(roomDir, "cursors.json"), JSON.stringify({ [pmMemberId]: "msg-123", pm: "legacy-msg" }, null, 2));
       const retiredSessions = readFileSync(join(memberSessions, "current.json"), "utf8");
       const retiredCursors = readFileSync(join(roomDir, "cursors.json"), "utf8");
-      const sessions = await import("../../src/member/session-store.js");
-      const rooms = await import("../../src/chat/room-store.js");
+      const sessions = await import("../../src/member/sessions.js");
+      const rooms = await import("../../src/chat/conversations.js");
       sessions.saveCurrentSession(pmMemberId, { runtime: "mock", sessionId: "session-123", sessionFile: join(archiveDir, "session.jsonl") });
       rooms.setCursor(room.id, pmMemberId, "msg-123");
       const res = await jsonRequest(ts.port, "POST", `/api/rooms/${room.id}/agents/pm/reset-session`, { token });

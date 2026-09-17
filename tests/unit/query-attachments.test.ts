@@ -48,11 +48,11 @@ afterEach(() => {
 
 describe("chat_read attachments", () => {
   it("room scope: JSON carries {originalFilename, path}; markdown appends Attachment lines", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const creds = await import("../../src/config/models.js");
     creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const m = __reg_app_member_actions.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("R", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -85,11 +85,11 @@ describe("chat_read attachments", () => {
   });
 
   it("missing file → path 'unavailable' in both modes", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const creds = await import("../../src/config/models.js");
     creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const m = __reg_app_member_actions.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("R2", undefined, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -116,10 +116,10 @@ describe("chat_read attachments", () => {
   });
 
   it("DM scope resolves the DM attachment dir", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const creds = await import("../../src/config/models.js");
     creds.saveModelCredentialProfile(PROFILE);
-    const m = reg.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
+    const m = __reg_app_member_actions.createMember({ name: "pm", model: "testprov/claude-a", credentialId: "x" });
 
     const dmAttachDir = join(dir, "members", m.id, "dm-attachments");
     mkdirSync(dmAttachDir, { recursive: true });

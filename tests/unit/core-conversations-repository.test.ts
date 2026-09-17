@@ -1,3 +1,4 @@
+import { storeRoom, readStoredRoom, storeMemberCursor } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -5,10 +6,10 @@ import { conversationsFixture } from "./core-conversations-fixture.js";
 import type { Room, Task } from "../../src/kernel/types.js";
 import { getRoom, listRooms, getRoomMembersFromRoom, stampGlobalMemberIds, resolveGlobalMemberId, removeRoomMemberByRef,
   getCursors, setCursor, deleteCursor, inviteGlobalMember, updateRoomName, updateRoomPromptLeader, updateRoomDocsPath, updateRoomRuleDocs,
-  updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom } from "../../src/chat/room-store.js";
+  updateRuleDocPaths, updateRuleDocPathsByPrefix, createRoom, deleteRoom } from "../../src/chat/conversations.js";
 import { roomDir } from "../../src/files/layout.js";
-import { chatScopeRoomId } from "../../src/chat/conversation-ref.js";
-import { ensureDmScope } from "../../src/data/repositories/conversations.js";
+import { chatScopeRoomId } from "../../src/chat/conversations.js";
+import { ensureDmScope } from "../../src/chat/conversations.js";
 
 let f: ReturnType<typeof conversationsFixture>;
 beforeEach(() => { f = conversationsFixture(); });
@@ -23,8 +24,8 @@ describe("normalized conversation authority", () => {
       docsPath: "项目/", ruleDocs: [], memberOverrides: { "旧名": { thinkingLevel: "high" } },
       promptLeaderMemberId: "mem_deleted", promptLeaderGlobalMemberId: "mem_deleted",
     };
-    f.repository().upsertRoom(room);
-    expect(f.repository().getRoom(room.id)).toEqual({ ...room, roomMembers: [{ ...room.roomMembers![0], roomId: room.id }] });
+    storeRoom(room, f.db);
+    expect(readStoredRoom(room.id, f.db)).toEqual({ ...room, roomMembers: [{ ...room.roomMembers![0], roomId: room.id }] });
     expect(getRoom(room.id)!.members).toEqual([]);
     expect(getRoomMembersFromRoom(getRoom(room.id)!)).toEqual([]);
     mkdirSync(roomDir("file-only"), { recursive: true });
@@ -33,22 +34,22 @@ describe("normalized conversation authority", () => {
     expect(listRooms().map(r => r.id)).toEqual([room.id]);
     expect(f.db.get("SELECT model,credential_id,source_member_id,migrated_id FROM room_member_snapshots")).toMatchObject({ model: "provider/model", source_member_id: "mem_deleted", migrated_id: "legacy-source" });
     f.reopen();
-    expect(f.repository().getRoom(room.id)!.roomMembers![0].createdAt).toBe(0);
-    expect(f.repository().getRoom(room.id)!.cwd).toBe("/historical/workspace");
+    expect(readStoredRoom(room.id, f.db)!.roomMembers![0].createdAt).toBe(0);
+    expect(readStoredRoom(room.id, f.db)!.cwd).toBe("/historical/workspace");
   });
 
   it.each([undefined, [], ["legacy label"]])("keeps names-only and explicitly local membership shapes (%j)", (labels) => {
     const room: Room = { id: "legacy-room", name: "Legacy", members: labels ?? [], createdAt: 1, ...(labels === undefined ? { roomMembers: [] } : {}) };
-    f.repository().upsertRoom(room);
-    expect(f.repository().getRoom(room.id)).toEqual(room);
-    expect(f.repository().getRoom(room.id)).not.toHaveProperty("globalMemberIds");
+    storeRoom(room, f.db);
+    expect(readStoredRoom(room.id, f.db)).toEqual(room);
+    expect(readStoredRoom(room.id, f.db)).not.toHaveProperty("globalMemberIds");
   });
 
   it("current names follow stable IDs without attaching reused names to historical records", () => {
     f.member("mem_original", "旧名字", 5);
     const room: Room = { id: "rename-room", name: "Room", members: ["旧名字"], globalMemberIds: ["mem_original"], createdAt: 0,
       roomMembers: [{ id: "rm_historical", name: "旧名字", sourceAgent: "old", createdAt: 0, updatedAt: 1 }] };
-    f.repository().upsertRoom(room);
+    storeRoom(room, f.db);
     f.member("mem_original", "新名字", 7);
     f.member("mem_reused", "旧名字", 10);
     expect(getRoom(room.id)!.members).toEqual(["新名字"]);
@@ -57,8 +58,8 @@ describe("normalized conversation authority", () => {
     expect(resolveGlobalMemberId({ ...room, globalMemberIds: ["mem_reused"] }, room.roomMembers![0])).toBeNull();
     f.db.run("DELETE FROM members WHERE id='mem_original'");
     expect(getRoom(room.id)!.members).toEqual([]);
-    expect(f.repository().getRoom(room.id)!.globalMemberIds).toEqual(["mem_original"]);
-    expect(f.repository().getRoom(room.id)!.roomMembers![0].name).toBe("旧名字");
+    expect(readStoredRoom(room.id, f.db)!.globalMemberIds).toEqual(["mem_original"]);
+    expect(readStoredRoom(room.id, f.db)!.roomMembers![0].name).toBe("旧名字");
   });
 
   it("persists canonical scope ownership and explicit DMs", () => {
@@ -71,9 +72,9 @@ describe("normalized conversation authority", () => {
     ]);
     expect(chatScopeRoomId("dm:mem_original")).toBeNull();
     f.reopen();
-    expect(f.repository().getRoom(room.id)).not.toBeNull();
+    expect(readStoredRoom(room.id, f.db)).not.toBeNull();
     expect(() => ensureDmScope("")).toThrow();
-    expect(() => f.repository().upsertRoom({ ...room, id: "room:not-bare" })).toThrow();
+    expect(() => storeRoom({ ...room, id: "room:not-bare" }, f.db)).toThrow();
   });
 
   it("creates and edits room metadata without JSON authority or stale path discovery", () => {
@@ -101,8 +102,8 @@ describe("normalized conversation authority", () => {
       { id: "rm_explicit", name: "alice", sourceAgent: "general", sourceMemberId: "mem_a", createdAt: 0, updatedAt: 0 },
       { id: "rm_unresolved", name: "alice", sourceAgent: "general", createdAt: 0, updatedAt: 0 },
     ] };
-    f.repository().upsertRoom(room);
-    f.repository().setCursor(room.id, "rm_explicit", "msg-one", 0);
+    storeRoom(room, f.db);
+    storeMemberCursor(room.id, "rm_explicit", "msg-one", 0, f.db);
     setCursor(room.id, "rm_unresolved", "msg-legacy");
     setCursor(room.id, "alice", "msg-ambiguous");
     setCursor(room.id, "mem_a", "msg-current");
@@ -127,11 +128,11 @@ describe("normalized conversation authority", () => {
     }));
     const room: Room = { id: "local-room", name: "Local", members: members.map(m => m.name), roomMembers: members,
       memberOverrides: { bob: { thinkingLevel: "high" } }, createdAt: 0 };
-    f.repository().upsertRoom(room);
-    members.forEach(m => f.repository().setCursor(room.id, m.id, `msg-${m.name}`, 0));
-    f.repository().setCursor(room.id, "alice", "ambiguous-name", 1);
+    storeRoom(room, f.db);
+    members.forEach(m => storeMemberCursor(room.id, m.id, `msg-${m.name}`, 0, f.db));
+    storeMemberCursor(room.id, "alice", "ambiguous-name", 1, f.db);
     expect(removeRoomMemberByRef(room.id, "rm_alice").ok).toBe(true);
-    expect(f.repository().getRoom(room.id)).toEqual({ ...room, members: ["bob", "carol"], roomMembers: members.slice(1) });
+    expect(readStoredRoom(room.id, f.db)).toEqual({ ...room, members: ["bob", "carol"], roomMembers: members.slice(1) });
     expect(getRoom(room.id)!.members).toEqual(["bob", "carol"]);
     expect(f.db.all("SELECT actor_key,value,updated_at FROM read_cursors ORDER BY actor_key")).toEqual([
       { actor_key: "alice", value: "ambiguous-name", updated_at: 1 },
@@ -150,16 +151,16 @@ describe("normalized conversation authority", () => {
           config: { model: "historical/model", contextLimit: 42 }, migratedFrom: { memberName: "source", memberId: "source-id" } },
         { id: "rm_unlinked", roomId: "room-uuid", name: "Alice", sourceAgent: "old", createdAt: 0, updatedAt: 0, config: { thinkingLevel: "high" } },
       ], memberOverrides: { "Old Bob": { model: "historical/override" } } };
-    f.repository().upsertRoom(room);
-    for (const key of ["mem_a", "mem_b", "rm_b", "rm_unlinked", "Alice"]) f.repository().setCursor(room.id, key, `msg-${key}`, 7);
+    storeRoom(room, f.db);
+    for (const key of ["mem_a", "mem_b", "rm_b", "rm_unlinked", "Alice"]) storeMemberCursor(room.id, key, `msg-${key}`, 7, f.db);
     expect(removeRoomMemberByRef(room.id, "mem_a").ok).toBe(true);
-    expect(f.repository().getRoom(room.id)).toEqual({ ...room, members: ["Bob"], globalMemberIds: ["mem_b"], roomMembers: room.roomMembers!.slice(1) });
+    expect(readStoredRoom(room.id, f.db)).toEqual({ ...room, members: ["Bob"], globalMemberIds: ["mem_b"], roomMembers: room.roomMembers!.slice(1) });
     expect(getRoom(room.id)!.members).toEqual(["Bob"]);
     expect(f.db.all("SELECT actor_key,value,updated_at FROM read_cursors ORDER BY actor_key")).toEqual(
       ["Alice", "mem_b", "rm_b", "rm_unlinked"].map(key => ({ actor_key: key, value: `msg-${key}`, updated_at: 7 })),
     );
     f.reopen();
-    expect(f.repository().getRoom(room.id)!.roomMembers).toEqual(room.roomMembers!.slice(1));
+    expect(readStoredRoom(room.id, f.db)!.roomMembers).toEqual(room.roomMembers!.slice(1));
   });
 
   it("rejects a direct SQL NULL room key independently of the shared scopes schema", () => {
@@ -187,8 +188,8 @@ describe("normalized conversation authority", () => {
     const other = f.room("other");
     f.member("mem_a", "alive");
     ensureDmScope("mem_a");
-    f.repository().setCursor(room.id, "mem_a", null);
-    f.repository().setCursor("dm:mem_a", "mem_a", null);
+    storeMemberCursor(room.id, "mem_a", null, undefined, f.db);
+    storeMemberCursor("dm:mem_a", "mem_a", null, undefined, f.db);
     expect(deleteRoom(room.id)).toBe(true);
     expect(deleteRoom(room.id)).toBe(false);
     expect(f.db.get<{ n: number }>("SELECT COUNT(*) n FROM read_cursors WHERE scope_id=?", room.id)!.n).toBe(0);
@@ -197,7 +198,7 @@ describe("normalized conversation authority", () => {
     for (const table of ["tasks", "task_comments", "task_references", "task_subscribers"]) {
       expect(f.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", table)).toBeUndefined();
     }
-    expect(f.repository().getRoom(other.id)).not.toBeNull();
+    expect(readStoredRoom(other.id, f.db)).not.toBeNull();
     expect(f.db.get("SELECT * FROM members WHERE id='mem_a'")).toBeDefined();
     expect(f.db.get("SELECT * FROM scopes WHERE id='dm:mem_a'")).toBeDefined();
     expect(f.db.all("PRAGMA foreign_key_check")).toEqual([]);

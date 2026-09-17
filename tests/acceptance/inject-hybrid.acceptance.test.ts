@@ -64,9 +64,9 @@ describe("Acceptance: inject hybrid (two-activation chain)", () => {
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const res = await handleToolCallback("chat_read", room.id, "pm", { from_seq: 0, limit: 50 });
     expect(Array.isArray(res)).toBe(true);
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const cursors = roomStore.getCursors(room.id);
-    const pmMemberId = (await import("../../src/member/member-registry.js")).findMemberByName("pm")!.id;
+    const pmMemberId = (await import("../../src/member/identity.js")).findMemberByName("pm")!.id;
     expect(cursors[pmMemberId]).toBe(triggerMsg.id); // cursor advanced past the trigger
 
     // Second activation: new @pm message, no backlog → NO hint

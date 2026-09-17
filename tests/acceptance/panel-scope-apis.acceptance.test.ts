@@ -104,9 +104,11 @@ describe("Authenticated member panel scope APIs", () => {
     expect(p2.status).toBe(400);
     expect(JSON.parse(p2.body).error).toBe("invalid_binding");
 
-    const eff = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/effective-config?scope=${encodeURIComponent(scope)}`, { token });
-    expect(eff.status).toBe(200);
-    expect(JSON.parse(eff.body).model ?? null).toBeNull();
+    const member = await jsonRequest(ts.port, "GET", `/api/members/${memberId}`, { token });
+    expect(member.status).toBe(200);
+    expect(JSON.parse(member.body).member.global.model ?? null).toBeNull();
+    const retired = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/effective-config?scope=${encodeURIComponent(scope)}`, { token });
+    expect(retired.status).toBe(404);
   });
 
   it("scope param validation: invalid scope → 400, missing scope → 400", async () => {

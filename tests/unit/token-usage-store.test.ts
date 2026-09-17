@@ -2,14 +2,14 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { appendAgentEvent, importAgentEvent } from "../../src/data/repositories/event-repository.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../../src/member/stats/token-usage-store.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const member = { ownerKey: "mem_dev", memberId: "mem_dev" };
 beforeEach(() => {
   fixture = coreFixture();
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_dev','developer','developer','general','{}',1,1)");
-  for (const id of ["room-a", "room-b"]) new ConversationsRepository().upsertRoom({ id, name: id, members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 });
+  for (const id of ["room-a", "room-b"]) storeRoom({ id, name: id, members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 }, fixture.db);
   fixture.db.run("INSERT INTO scopes VALUES('dm:mem_dev','dm',NULL,'mem_dev'),('topic:a','topic','room-a',NULL)");
 });
 afterEach(() => { fixture.close(); });

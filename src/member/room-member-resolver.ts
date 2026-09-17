@@ -1,5 +1,5 @@
-import * as roomStore from "../chat/room-store.js";
-import { getEffectiveConfig, getMember, MemberNotFoundError } from "./member-registry.js";
+import * as roomStore from "../chat/conversations.js";
+import { getMemberConfiguration, getMember, MemberNotFoundError } from "./identity.js";
 import type { AgentMemberConfig, RoomMemberRecord } from "../kernel/types.js";
 
 function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
@@ -10,7 +10,7 @@ function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | 
     // Cleared values must never revive config from a historical room shadow.
     const member = getMember(globalId);
     if (!member) throw new MemberNotFoundError(globalId);
-    const config = getEffectiveConfig(globalId, `room:${roomMember.roomId}`);
+    const config = getMemberConfiguration(globalId);
     return {
       id: globalId,
       name: member.name,

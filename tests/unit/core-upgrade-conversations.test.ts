@@ -7,7 +7,7 @@ import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
 import {readMessages,readArchivedMessages,appendMessageInTransaction} from "../../src/data/repositories/message-repository.js";
-import {ConversationsRepository} from "../../src/data/repositories/conversations.js";
+import { readStoredRoom } from "../../src/chat/conversations.js";
 import {UserCursorRepository} from "../../src/data/repositories/user-cursor-repository.js";
 import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
@@ -37,7 +37,7 @@ it("preserves room/DM facts, explicit empty rosters and independent cursors (ret
   "user-read-cursors.json":JSON.stringify({"room:room-one":{messageId:message.id,seq:3,updatedAt:10}}),
  });
  const consumed=await importLegacyConversations(ctx,entries);expect(consumed.size).toBe(entries.length);
- expect(new ConversationsRepository(ctx.db).getRoom(room.id)).toMatchObject(room);
+ expect(readStoredRoom(room.id, ctx.db)).toMatchObject(room);
  expect(readMessages(room.id,ctx.db)).toEqual([message]);expect(readMessages("dm:mem_one",ctx.db)[0].id).toBe("dm-message");
  // Topic feature retired (fish #19358): topic sources are consumed, never imported.
  expect(ctx.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();

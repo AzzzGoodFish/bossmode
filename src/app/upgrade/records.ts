@@ -2,11 +2,11 @@ import { getDefaultConfig, writeConfig } from "../../config/settings.js";
 import { parseDocument, parse } from "yaml";
 import { type MemberRecord } from "../../data/types.js";
 import { readFileSync, lstatSync } from "node:fs";
-import { MembersRepository } from "../../data/repositories/members.js";
-import { ConversationsRepository } from "../../data/repositories/conversations.js";
+import { listMembers, insertMemberIdentity } from "../../member/identity.js";
+import { ensureDmScope } from "../../chat/conversations.js";
 import { managedPath, requireRegularFile } from "../../files/io.js";
 import { assertLegacyMemberDirectories, type LegacySourceEntry, type UpgradeImportContext, readLegacyJson } from "./inventory.js";
-import { type TemplateMetadata, templateMetadataKeys, validateTemplateSlug, validateTemplatePath, TemplateRepository } from "../../data/repositories/templates.js";
+import { type TemplateMetadata, templateMetadataKeys, validateTemplateSlug, validateTemplatePath, importTemplateMetadata } from "../../member/templates.js";
 import { asString, asStringArray } from "../../kernel/markdown.js";
 import { isAbsolute, join } from "node:path";
 import { type Database } from "../../data/database.js";
@@ -15,12 +15,12 @@ import { requireObject } from "../../kernel/json.js";
 
 import { type BossmodeConfig } from "../../kernel/types.js";
 import { normalizeLegacyCredentialImport } from "../../config/models.js";
-import { McpOauthRepository, decodeLegacyMcpOauthEntry } from "../../data/repositories/mcp-oauth.js";
+import { decodeLegacyMcpOauthEntry, importHashedMcpOauthEntry } from "../../member/mcp.js";
 
 import { replaceCredentialStore } from "../../config/models.js";
 import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "../../config/catalog.js";
-import { McpSettingsRepository } from "../../data/repositories/mcp-settings.js";
-import { WorkspacesRepository, SshCredentialsRepository } from "../../data/repositories/workspace-settings.js";
+import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailability } from "../../member/mcp.js";
+import { importWorkspaceRegistry, importSshCredential } from "../../member/workspaces.js";
 import { isDeepStrictEqual } from "node:util";
 import { RuntimeRepository } from "../../data/repositories/runtime-repository.js";
 import { executionScopeId, importExecutionAmbiguity } from "../../data/repositories/execution-identity.js";
@@ -83,13 +83,13 @@ export function importLegacyMembers(ctx:UpgradeImportContext,entries:readonly Le
   if(!ctx.sourceFiles.includes(path))throw new Error(`Missing snapshotted member source: ${path}`);
   const file=managedPath(ctx.sourceRoot,path);requireRegularFile(file);return readFileSync(file);
  };
- const members=new MembersRepository(ctx.db);const conversations=new ConversationsRepository(ctx.db);
+ const members=ctx.db;const conversations=ctx.db;
  if(authority==="database"){
-  for(const record of members.list()){
+  for(const record of listMembers(members)){
    const path=`members/${record.id}/persona.md`;
    const bytes=read(path);
    try{new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{throw new Error(`Invalid current persona UTF-8: ${record.id}`);}
-   conversations.ensureDmScope(record.id);
+   ensureDmScope(record.id, conversations);
   }
   for(const e of legacyEntries)consumed.add(e.path);
   return {consumed,personas,ignoredLegacyPaths:legacyEntries.map(e=>e.path)};
@@ -134,8 +134,8 @@ export function importLegacyMembers(ctx:UpgradeImportContext,entries:readonly Le
   }else ctx.stageAsset(item.path,item.body);
  }
  ctx.db.transaction(tx=>{
-  const registry=new MembersRepository(tx);const scopes=new ConversationsRepository(tx);
-  for(const {record}of prepared){registry.insert(record);scopes.ensureDmScope(record.id);}
+  const registry=tx;const scopes=tx;
+  for(const {record}of prepared){insertMemberIdentity(record, registry);ensureDmScope(record.id, scopes);}
  });
  for(const {record,path,body}of prepared)personas.push({memberId:record.id,path,body,updatedAt:record.updatedAt});
  return {consumed,personas,ignoredLegacyPaths:[]};
@@ -217,8 +217,8 @@ export function importAgentTemplates(ctx: TemplateImportContext, sources: readon
   // No SQL transaction spans staging file IO. A staging failure publishes no metadata.
   for (const item of prepared) ctx.stageAsset(item.personaPath, Buffer.from(item.body, "utf8"));
   ctx.db.transaction(tx => {
-    const repository = new TemplateRepository(tx);
-    for (const item of prepared) repository.upsert({ ...item.metadata, personaPath: item.personaPath });
+    const repository = tx;
+    for (const item of prepared) importTemplateMetadata({ ...item.metadata, personaPath: item.personaPath }, repository);
   });
 }
 
@@ -272,15 +272,15 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
    }
    case "mcp-oauth":{
     if(!entry.serverKey)throw new Error("Missing MCP OAuth source key");
-    new McpOauthRepository(ctx.db).importHashedAuthEntry(entry.serverKey,decodeLegacyMcpOauthEntry(read(entry)));break;
+    importHashedMcpOauthEntry(entry.serverKey,decodeLegacyMcpOauthEntry(read(entry)), ctx.db);break;
    }
-   case "mcp-config":new McpSettingsRepository(ctx.db).importConfig(requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`));break;
+   case "mcp-config":importMcpConfiguration(requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`), "global", ctx.db);break;
    case "member-mcp":{
-    new McpSettingsRepository(ctx.db).importMemberConfig(owner(entry.memberId),requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`));break;
+    importMemberMcpConfiguration(owner(entry.memberId),requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`), ctx.db);break;
    }
-   case "mcp-status":new McpSettingsRepository(ctx.db).importStatus(read(entry) as any);break;
+   case "mcp-status":importMcpAvailability(read(entry) as any, ctx.db);break;
    case "workspaces":{
-    new WorkspacesRepository(ctx.db).importRegistry(owner(entry.memberId),read(entry) as any);break;
+    importWorkspaceRegistry(owner(entry.memberId),read(entry) as any, ctx.db);break;
    }
    default:continue;
   }
@@ -291,7 +291,7 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
   const memberId=owner(id);
   const owned=ssh.filter(e=>e.memberId===id);const privateKey=owned.find(e=>e.kind==="ssh-private-key");const publicKey=owned.find(e=>e.kind==="ssh-public-key");const config=owned.find(e=>e.kind==="ssh-config");
   if(!privateKey||!publicKey)throw new Error(`Incomplete owned SSH credential: ${id}`);
-  new SshCredentialsRepository(ctx.db).importKey(memberId,{privateKey:text(privateKey),publicKey:text(publicKey),...(config?{config:text(config)}:{})});
+  importSshCredential(memberId,{privateKey:text(privateKey),publicKey:text(publicKey),...(config?{config:text(config)}:{})}, ctx.db);
   for(const entry of owned)consumed.add(entry.path);
  }
  return consumed;

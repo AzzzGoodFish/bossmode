@@ -1,3 +1,4 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { setupTestWorkspace } from "../helpers/test-server.js";
@@ -7,13 +8,13 @@ setupTestWorkspace();
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
 it("renames a running member across room/DM without abort; next prompt refreshes self and peers", async () => {
-  const reg = await import("../../src/member/member-registry.js");
-  const roomStore = await import("../../src/chat/room-store.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+  const roomStore = await import("../../src/chat/conversations.js");
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const suffix = randomUUID().slice(0, 6);
-  const own = reg.createMember({ name: `Before-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
-  const peer = reg.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
+  const own = __reg_app_member_actions.createMember({ name: `Before-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
+  const peer = __reg_app_member_actions.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const room = roomStore.createRoom("Runtime identity", undefined, []);
   roomStore.stampGlobalMemberIds(room.id, [own.id, peer.id]);
   const started = deferred(), release = deferred();
@@ -34,7 +35,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
       return handle;
     }),
   };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource);
   try {
     const scopes = [`room:${room.id}`, `dm:${own.id}`];
     for (const scope of scopes) expect(await manager.buildMemberAgentSession(own.id, scope)).toBeTruthy();
@@ -72,19 +73,19 @@ it("renames a running member across room/DM without abort; next prompt refreshes
 });
 
 it("reconciles a rename while handle construction is awaiting", async () => {
-  const reg = await import("../../src/member/member-registry.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
-  const member = reg.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
+  const member = __reg_app_member_actions.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any; handle.refreshPrompt = vi.fn();
   const runtime = { name: "pi-cli", capabilities: {}, shutdownAll: async () => {}, createAgent: async () => { entered.resolve(); await release.promise; return handle; } };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource);
   const scope = `dm:${member.id}`;
   try {
     const building = manager.buildMemberAgentSession(member.id, scope);
     await entered.promise;
-    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile.js");
     const next = `Constructed-${randomUUID()}`;
     updateProfileForMember(member.id, { name: next });
     release.resolve();
@@ -95,15 +96,15 @@ it("reconciles a rename while handle construction is awaiting", async () => {
 });
 
 it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
-  const reg = await import("../../src/member/member-registry.js");
-  const rooms = await import("../../src/chat/room-store.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+  const rooms = await import("../../src/chat/conversations.js");
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { postMessage } = await import("../../src/chat/message-bus.js");
-  const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+  const { updateProfileForMember } = await import("../../src/member/profile.js");
   const suffix = randomUUID().slice(0, 6);
-  const own = reg.createMember({ name: `Queued-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
-  const peer = reg.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
+  const own = __reg_app_member_actions.createMember({ name: `Queued-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
+  const peer = __reg_app_member_actions.createMember({ name: `Other-${suffix}`, agentTemplate: "developer", model: "mock", credentialId: "cred" });
   const room = rooms.createRoom("Queued identity", undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
   const scope = room.id;
@@ -111,7 +112,7 @@ it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name i
   const handle = new MockAgentHandle() as any;
   handle.refreshPrompt = vi.fn(); handle.prompt = vi.fn(async () => {});
   const runtime = { name: "pi-cli", capabilities: {}, shutdownAll: async () => {}, createAgent: async () => { entered.resolve(); await release.promise; return handle; } };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource);
   try {
     const first = postMessage(scope, "user", `@${own.name} ORIGINAL_REQUEST`, [own.name], { mentionMemberIds: [own.id] });
     const ctx = { senderName: "user", needResponseMemberIds: [] };

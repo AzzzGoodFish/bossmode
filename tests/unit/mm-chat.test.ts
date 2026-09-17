@@ -16,7 +16,7 @@ afterEach(() => fixture.close());
 
 describe("member↔member private chat (⑤ B)", () => {
   it("canonical scope ids round-trip and reject malformed input", async () => {
-    const ref = await import("../../src/chat/conversation-ref.js");
+    const ref = await import("../../src/chat/conversations.js");
     const a = "mem_2a510c12-2357-463a-8546-c0f4ecea406f";
     const b = "mem_eabf18a7-aaaa-bbbb-cccc-dddddddddddd";
     const id = ref.mmScopeIdOf(a, b);
@@ -39,12 +39,12 @@ describe("member↔member private chat (⑤ B)", () => {
   });
 
   it("send opens the pair scope, captures the peer target, and read/list/info work for both", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const ref = await import("../../src/chat/conversation-ref.js");
-    const alice = reg.createMember({ name: "alice" });
-    const bob = reg.createMember({ name: "bob" });
-    const carol = reg.createMember({ name: "carol" });
+    const ref = await import("../../src/chat/conversations.js");
+    const alice = __reg_app_member_actions.createMember({ name: "alice" });
+    const bob = __reg_app_member_actions.createMember({ name: "bob" });
+    const carol = __reg_app_member_actions.createMember({ name: "carol" });
     const scope = ref.mmScopeIdOf(alice.id, bob.id);
 
     const sent = await handleToolCallback("chat_send", `dm:${alice.id}`, alice.id, { to: bob.id, message: "ping bob" }, { memberId: alice.id }) as any;
@@ -96,12 +96,12 @@ describe("member↔member private chat (⑤ B)", () => {
   });
 
   it("first send posts a read-only jump notice into the receiver's user DM; later sends do not duplicate it", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const chatApi = await import("../../src/api/member-chats.js");
-    const ref = await import("../../src/chat/conversation-ref.js");
-    const alice = reg.createMember({ name: "alice" });
-    const bob = reg.createMember({ name: "bob" });
+    const ref = await import("../../src/chat/conversations.js");
+    const alice = __reg_app_member_actions.createMember({ name: "alice" });
+    const bob = __reg_app_member_actions.createMember({ name: "bob" });
     const scope = ref.mmScopeIdOf(alice.id, bob.id);
 
     await handleToolCallback("chat_send", `dm:${alice.id}`, alice.id, { to: bob.id, message: "first" }, { memberId: alice.id });

@@ -12,12 +12,12 @@ import {
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
   reloadMemberResources, reloadMemberSession, resolveSkills,
 } from "../../src/agent/orchestrator/agent-manager.js";
-import { getMember, updateMember } from "../../src/member/member-registry.js";
+import { getMember, updateMember } from "../../src/member/identity.js";
 import { memberProfilePath } from "../../src/files/layout.js";
 import { getRuntimeStateEntry } from "../../src/member/runtime-state.js";
-import { getCurrentSession } from "../../src/member/session-store.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { TemplateRepository } from "../../src/data/repositories/templates.js";
+import { getCurrentSession } from "../../src/member/sessions.js";
+import { storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
+import { readTemplateMetadata, deleteTemplateMetadata, importTemplateMetadata } from "../../src/member/templates.js";
 import { resolveRoomMember, resolveRoomMembers } from "../../src/member/room-member-resolver.js";
 import type { AgentMemberConfig } from "../../src/kernel/types.js";
 
@@ -28,11 +28,11 @@ beforeEach(() => importHistoricalAgentTemplate(getTestWorkspace(), "general", "-
 // Damage the explicitly imported historical fixture, restoring it after each case.
 function damageHistoricalTemplate(mode: string): () => void {
   const fixture = getTestWorkspace();
-  const templates = new TemplateRepository(fixture.db);
-  const original = templates.get("general")!;
+  const templates = fixture.db;
+  const original = readTemplateMetadata("general", templates)!;
   const path = join(fixture.root, original.personaPath);
   const body = readFileSync(path);
-  if (mode === "absent catalog") templates.delete("general");
+  if (mode === "absent catalog") deleteTemplateMetadata("general", templates);
   if (mode === "corrupt catalog path") {
     fixture.db.run("UPDATE agent_templates SET persona_path=? WHERE slug=?", "invalid-persona-reference", "general");
   }
@@ -44,7 +44,7 @@ function damageHistoricalTemplate(mode: string): () => void {
   return () => {
     rmSync(path, { recursive: true, force: true });
     writeFileSync(path, body);
-    templates.upsert(original);
+    importTemplateMetadata(original, templates);
   };
 }
 
@@ -183,19 +183,19 @@ describe("current runtime does not depend on historical agent templates", () => 
   });
 
   it("legacy snapshots and same-named templates remain display data, not executable agents", () => {
-    const rooms = new ConversationsRepository(getTestWorkspace().db);
+    const rooms = getTestWorkspace().db;
     for (const migrated of [false, true]) {
       const roomId = `legacy-${migrated}`;
-      rooms.upsertRoom({ id: roomId, name: roomId, members: ["general"], createdAt: 1, roomMembers: [{
+      storeRoom({ id: roomId, name: roomId, members: ["general"], createdAt: 1, roomMembers: [{
         id: "local-general", name: "general", sourceAgent: "general", createdAt: 1, updatedAt: 1,
         config: { skills: ["historical-skill"] }, ...(migrated ? { migratedFrom: { memberName: "general" } } : {}),
-      }] });
+      }] }, rooms);
       expect(resolveRoomMember(roomId, "general")).toBeNull();
       expect(resolveRoomMember(roomId, "qa")).toBeNull();
       expect(resolveRoomMembers(roomId, ["general", "qa"])).toEqual([]);
-      expect(rooms.getRoom(roomId)!.roomMembers![0].config!.skills).toEqual(["historical-skill"]);
+      expect(readStoredRoom(roomId, rooms)!.roomMembers![0].config!.skills).toEqual(["historical-skill"]);
     }
-    rooms.upsertRoom({ id: "legacy-names", name: "Names", members: ["general"], createdAt: 1 });
+    storeRoom({ id: "legacy-names", name: "Names", members: ["general"], createdAt: 1 }, rooms);
     expect(resolveRoomMembers("legacy-names", ["general", "qa"])).toEqual([]);
   });
 
@@ -206,20 +206,20 @@ describe("current runtime does not depend on historical agent templates", () => 
       const room = await createMockRoom(server.port, token, "Current identity", ["current-config"]);
       const id = room.globalMemberIds![0];
       updateMember(id, { global: { skills: [], mcpServers: [], model: null, credentialId: null } });
-      const rooms = new ConversationsRepository(getTestWorkspace().db);
-      rooms.upsertRoom({ ...room, roomMembers: [{ id, name: "stale-name", sourceAgent: "general", avatar: "stale-avatar",
-        config: { skills: ["stale-skill"], model: "stale-model" }, createdAt: 1, updatedAt: 1 }] });
-      const templates = new TemplateRepository(getTestWorkspace().db);
-      const original = templates.get("general")!;
+      const rooms = getTestWorkspace().db;
+      storeRoom({ ...room, roomMembers: [{ id, name: "stale-name", sourceAgent: "general", avatar: "stale-avatar",
+        config: { skills: ["stale-skill"], model: "stale-model" }, createdAt: 1, updatedAt: 1 }] }, rooms);
+      const templates = getTestWorkspace().db;
+      const original = readTemplateMetadata("general", templates)!;
       try {
-        templates.upsert({ ...original, avatar: "template-avatar", skills: ["template-skill"] });
+        importTemplateMetadata({ ...original, avatar: "template-avatar", skills: ["template-skill"] }, templates);
         const resolved = resolveRoomMember(room.id, id)!;
         expect(resolved).toMatchObject({ id, name: "current-config", skills: [], mcpServers: [] });
         expect(resolved.model).toBeUndefined();
         expect(resolved.credentialId).toBeUndefined();
         expect(resolved.avatar).toBeUndefined();
         expect(resolveSkills(resolved)).toEqual([]);
-      } finally { templates.upsert(original); }
+      } finally { importTemplateMetadata(original, templates); }
     } finally { await closeTestServer(server); }
   });
 });

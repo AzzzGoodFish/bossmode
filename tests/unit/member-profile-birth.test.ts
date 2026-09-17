@@ -2,7 +2,7 @@ import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,13 +12,13 @@ let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
   writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
+  storeRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] }, fixture.db);
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("member birth skeleton", () => {
   it("createMember writes an empty persona.md and skills dir (no shared memory roots)", async () => {
-    const { createMember } = await import("../../src/member/member-registry.js");
+    const { createMember } = await import("../../src/app/member-actions.js");
     const { memberProfilePath } = await import("../../src/files/layout.js");
     const m = createMember({ name: "nova" });
     const path = memberProfilePath(m.id);
@@ -34,7 +34,7 @@ describe("member birth skeleton", () => {
   });
 
   it("empty name allocates New Member uniquely", async () => {
-    const { createMember, allocateUniqueMemberName } = await import("../../src/member/member-registry.js");
+    const { createMember } = await import("../../src/app/member-actions.js"), { allocateUniqueMemberName } = await import("../../src/member/identity.js");
     const a = createMember({ name: "" });
     expect(a.name).toBe("New Member");
     const b = createMember({});
@@ -43,8 +43,9 @@ describe("member birth skeleton", () => {
   });
 
   it("database identity updates leave all persona Markdown untouched", async () => {
-    const { createMember, getMember, updateMemberIdentity } = await import("../../src/member/member-registry.js");
-    const { readMemberProfile, formatMemberPromptSegment } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { createMember } = await import("../../src/app/member-actions.js"), { getMember, updateMemberIdentity } = await import("../../src/member/identity.js");
+    const { readMemberProfile } = await import("../../src/member/profile.js");
+    const { formatMemberPromptSegment } = await import("../../src/agent/prompt.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const { writeFileSync } = await import("node:fs");
     const m = createMember({ name: "nova" });
     const raw = "\uFEFF---\nname: not-identity\ntitle: not-title\n---\n\nArbitrary Markdown.\n\n";
@@ -67,8 +68,8 @@ describe("member birth skeleton", () => {
   });
 
   it("reads persona literally at and above the UTF-16 limit without truncating bytes", async () => {
-    const { createMember } = await import("../../src/member/member-registry.js");
-    const { readMemberProfile, MEMBER_PROFILE_BUDGET_CHARS } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { createMember } = await import("../../src/app/member-actions.js");
+    const { readMemberProfile, MEMBER_PROFILE_BUDGET_CHARS } = await import("../../src/member/profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const m = createMember({ name: "literal" });
     expect(MEMBER_PROFILE_BUDGET_CHARS).toBe(4000);
     for (const length of [4000, 4001]) {
@@ -82,7 +83,7 @@ describe("member birth skeleton", () => {
   });
 
   it("missing persona is empty but non-ENOENT read failures are not hidden", async () => {
-    const { readMemberProfile } = await import("../../src/member/profile/member-profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
+    const { readMemberProfile } = await import("../../src/member/profile.js"); const { memberProfilePath } = await import("../../src/files/layout.js");
     const { mkdirSync } = await import("node:fs");
     expect(readMemberProfile("missing")).toMatchObject({ body: "", raw: "", exists: false, overBudget: false });
     mkdirSync(memberProfilePath("missing"), { recursive: true });

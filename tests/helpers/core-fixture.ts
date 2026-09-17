@@ -1,6 +1,8 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { openDatabase, applyStorageMigrations, bindDatabase, type Database } from "../../src/data/database.js";
+import { connectConversationMembers } from "../../src/chat/conversations.js";
+import { readMemberIdentity } from "../../src/member/identity.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
 
 /** Explicit current-schema SQL fixture. Migration/bootstrap tests deliberately do not use it.
@@ -20,18 +22,19 @@ export function coreFixture(existingRoot?: string) {
   }
   const path = join(root, "bossmode.db");
   mkdirSync(join(root, "knowledge"), { recursive: true });
-  let db: Database;
+  let db!: Database;
+  let disconnectMembers: () => void;
   function open() {
     const next = openDatabase(path);
     try { applyStorageMigrations(next, coreStorageMigrations); bindDatabase(next); return next; }
     catch (error) { next.close(); throw error; }
   }
-  try { db = open(); }
-  catch (error) { rmSync(root, { recursive: true, force: true }); throw error; }
+  try { db = open(); disconnectMembers = connectConversationMembers(readMemberIdentity); }
+  catch (error) { db?.close(); rmSync(root, { recursive: true, force: true }); throw error; }
   return {
     root, path,
     get db() { return db; },
     reopen() { db.close(); db = open(); return db; },
-    close() { db.close(); rmSync(root, { recursive: true, force: true }); },
+    close() { disconnectMembers(); db.close(); rmSync(root, { recursive: true, force: true }); },
   };
 }

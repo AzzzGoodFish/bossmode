@@ -18,7 +18,7 @@ vi.mock("../../src/api/index.js", () => ({
   parseBody: vi.fn(),
 }));
 
-vi.mock("../../src/member/skills/skill-store.js", () => ({
+vi.mock("../../src/member/skills.js", () => ({
   loadSkillDefinitions: vi.fn(() => []),
   loadSkillDefinition: vi.fn(() => null),
   saveSkillDefinition: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
   restartMember: (...args: any[]) => restartMemberMock(...args),
 }));
 
-vi.mock("../../src/member/member-registry.js", () => ({
+vi.mock("../../src/member/identity.js", () => ({
   getMember: (...args: any[]) => getMemberMock(...args),
 }));
 

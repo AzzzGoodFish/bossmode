@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { postMessage } from "../../chat/message-bus.js";
 import * as messageStore from "../../chat/message-store.js";
-import * as roomStore from "../../chat/room-store.js";
+import * as roomStore from "../../chat/conversations.js";
 import * as mainlineStore from "../../chat/mainline-store.js";
 import { readMemoryLayerInfo, writeMemoryLayer, editMemoryLayer } from "../../member/memory/member-memory-store.js";
-import { getMember, resolveMemberRef } from "../../member/member-registry.js";
-import { assertMemberScopeAccess, listRoomsForMember } from "../../member/scope-access.js";
+import { getMember, resolveMemberRef } from "../../member/identity.js";
+import { assertMemberScopeAccess, listRoomsForMember } from "../../chat/conversations.js";
 import { unknownMemberToolMessage } from "./member-tool-names.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
-import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../chat/conversation-ref.js";
+import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../chat/conversations.js";
 import type { RoomMessage } from "../../kernel/types.js";
 import { parseMentions, parseMentionMemberIds } from "../../chat/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
@@ -269,7 +269,7 @@ export async function handleToolCallback(
       const input: { name?: unknown; title?: unknown } = {};
       if (params?.name !== undefined) input.name = params.name;
       if (params?.description !== undefined) input.title = params.description;
-      const { updateProfileForMember } = await import("../../member/profile/member-profile-update.js");
+      const { updateProfileForMember } = await import("../../member/profile.js");
       try {
         const result = updateProfileForMember(context.memberId, input);
         return {
@@ -572,7 +572,7 @@ export async function handleToolCallback(
       };
     }
     case "member_info": {
-      const { resolveMemberRef } = await import("../../member/member-registry.js");
+      const { resolveMemberRef } = await import("../../member/identity.js");
       const ref = params?.member !== undefined ? String(params.member).trim() : "";
       if (!ref) return { ok: false, error: "member is required — pass a name or id (see member_list)" };
       const member = resolveMemberRef(ref);
@@ -590,9 +590,9 @@ export async function handleToolCallback(
     case "workspace_use":
     case "workspace_remove": {
       const wsMemberId = resolveCallerMemberId(roomId, actorRef);
-      const reg = await import("../../member/workspaces/workspace-registry.js");
+      const reg = await import("../../member/workspaces.js");
       if (tool === "workspace_list") {
-        const list = reg.listWorkspaces(wsMemberId);
+        const list = reg.readWorkspaces(wsMemberId);
         return {
           ok: true,
           active: list.active,
@@ -702,7 +702,7 @@ export async function handleToolCallback(
     }
     case "member_list": {
       // Global member directory (gateway tool). id/name/description for member refs.
-      const { listMembers } = await import("../../member/member-registry.js");
+      const { listMembers } = await import("../../member/identity.js");
       const q = String(params?.query ?? "").trim().toLowerCase();
       let members = listMembers().map((m) => ({ id: m.id, name: m.name, description: m.title ?? "" }));
       if (q) {
@@ -723,7 +723,7 @@ export async function handleToolCallback(
       if (params?.cwd !== undefined) return { ok: false, error: "unknown parameter 'cwd' — chats no longer bind a working directory" };
       if (params?.memberIds !== undefined) return { ok: false, error: "unknown parameter 'memberIds' — use 'members' (member ids)" };
       if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
-      const { getMember } = await import("../../member/member-registry.js");
+      const { getMember } = await import("../../member/identity.js");
       const creator = getMember(actorRef);
       if (!creator) return { ok: false, error: `Creator member not found: ${actorName()}` };
 
@@ -762,7 +762,7 @@ export async function handleToolCallback(
       if (params?.roomId !== undefined) return { ok: false, error: "unknown parameter 'roomId' — use 'chat' (a chat id or name)" };
       if (params?.principles !== undefined) return { ok: false, error: "unknown parameter 'principles' — use 'description'" };
       if (params?.addMemberIds !== undefined || params?.removeMemberIds !== undefined) return { ok: false, error: "unknown parameter — use 'add_members' / 'remove_members' (member ids)" };
-      const { getMember } = await import("../../member/member-registry.js");
+      const { getMember } = await import("../../member/identity.js");
       const actorGlobal = getMember(actorRef);
       if (!actorGlobal) return { ok: false, error: `Member not found: ${actorName()}` };
 

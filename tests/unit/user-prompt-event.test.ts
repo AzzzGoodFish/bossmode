@@ -1,9 +1,10 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 import { writeConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn, mockPromptFn } from "../helpers/mock-runtime.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 import { postMessage } from "../../src/chat/message-bus.js";
@@ -23,14 +24,14 @@ describe("user_prompt activity event", () => {
     resetMocks();
     vi.mocked(broadcastToAgentSubscribers).mockClear();
     writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-    new MembersRepository(fixture.db).insert({ id: "mem_dev", name: "developer", agentTemplate: "developer",
+    insertMemberIdentity({ id: "mem_dev", name: "developer", agentTemplate: "developer",
       global: { model: "anthropic/claude-sonnet-4-6", credentialId: "cred-a" }, unifiedModel: true,
-      unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    new ConversationsRepository(fixture.db).upsertRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 });
+      unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, fixture.db);
+    storeRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 }, fixture.db);
     postMessage("room1", "user", "@developer hi", ["developer"]);
     const registry = new RuntimeRegistry();
     registry.register(new MockRuntime("pi-cli"));
-    initAgentManager(registry);
+    initAgentManager(registry, loadMemberPromptSource);
     setMockPromptFn(vi.fn(async () => {}));
   });
   afterEach(async () => { await shutdownAll(); fixture.close(); });

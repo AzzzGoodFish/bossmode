@@ -27,9 +27,9 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("member_list returns global registry with id/name/description", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm", title: "Product lead" });
-    reg.createMember({ name: "developer", agentTemplate: "developer" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", title: "Product lead" });
+    __reg_app_member_actions.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const result = await handleToolCallback("member_list", `dm:${pm.id}`, "pm", {}, { memberId: pm.id }) as any;
     expect(result.ok).toBe(true);
@@ -41,9 +41,9 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("chat_create makes creator leader and invites by id", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
+    const dev = __reg_app_member_actions.createMember({ name: "developer", agentTemplate: "developer" });
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 
     const result = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {
@@ -57,7 +57,7 @@ describe("batch 3 gateway tools", () => {
     expect(result.members.map((m: any) => m.name).sort()).toEqual(["developer", "pm"]);
 
     const roomId = String(result.chat.id).replace(/^room:/, "");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.getRoom(roomId)!;
     expect(room.name).toBe("Project X");
     expect(room.globalMemberIds || []).toEqual(expect.arrayContaining([pm.id, dev.id]));
@@ -77,10 +77,10 @@ describe("batch 3 gateway tools", () => {
   });
 
   it("chat_edit: any room member can rename and adjust members (leader gate retired)", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
-    const extra = reg.createMember({ name: "extra", agentTemplate: "general" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
+    const dev = __reg_app_member_actions.createMember({ name: "developer", agentTemplate: "developer" });
+    const extra = __reg_app_member_actions.createMember({ name: "extra", agentTemplate: "general" });
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 
     const created = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {

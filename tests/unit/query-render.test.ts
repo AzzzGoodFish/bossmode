@@ -6,7 +6,7 @@ import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
   writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
+  storeRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] }, fixture.db);
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
@@ -80,9 +80,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("inline query result rendered by the SDK carries seq/replyTo/attachment (through tool rows)", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({ name: "pm" });
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("R", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -121,9 +121,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("file output matches inline shape (same renderer): seq + replyTo + attachment lines", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({ name: "pm" });
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("R2", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -153,9 +153,9 @@ describe("query renderer (member view)", () => {
   });
 
   it("cross-window reply target resolves from the full scope; lost target degrades", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({ name: "pm" });
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({ name: "pm" });
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("R3", dir, []);
     roomStore.inviteGlobalMember(room.id, { id: m.id, name: "pm" });
 
@@ -194,8 +194,8 @@ describe("query renderer (member view)", () => {
   });
 
   it("dm output preserves attachment ownership and does not resolve foreign reply targets", async () => {
-    const { createMember } = await import("../../src/member/member-registry.js");
-    const { createRoom, inviteGlobalMember } = await import("../../src/chat/room-store.js");
+    const { createMember } = await import("../../src/app/member-actions.js");
+    const { createRoom, inviteGlobalMember } = await import("../../src/chat/conversations.js");
     const { addMessage } = await import("../../src/chat/message-store.js");
     const { getDmAttachmentPath } = await import("../../src/files/attachment-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");

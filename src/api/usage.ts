@@ -1,7 +1,7 @@
 // Usage reports read authoritative SQL facts and stable identity metadata.
 import { addRoute, sendJson } from "./index.js";
 import { readUsageReport } from "../data/repositories/usage-repository.js";
-import { getRoom } from "../chat/room-store.js";
+import { getRoom } from "../chat/conversations.js";
 import { logger } from "../kernel/logger.js";
 
 interface RollupRow {

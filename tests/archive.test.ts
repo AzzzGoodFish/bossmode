@@ -10,7 +10,7 @@ let database: import("../src/data/database.js").Database;
 
 
 describe("archive", () => {
-  let roomStore: typeof import("../src/chat/room-store.js");
+  let roomStore: typeof import("../src/chat/conversations.js");
   let messageStore: typeof import("../src/chat/message-store.js");
   let archiveStore: typeof import("../src/chat/archive-store.js");
 
@@ -20,7 +20,7 @@ describe("archive", () => {
     fixture = coreFixture();
     tempDir = fixture.root;
     database = fixture.db;
-    roomStore = await import("../src/chat/room-store.js");
+    roomStore = await import("../src/chat/conversations.js");
     messageStore = await import("../src/chat/message-store.js");
     archiveStore = await import("../src/chat/archive-store.js");
   });

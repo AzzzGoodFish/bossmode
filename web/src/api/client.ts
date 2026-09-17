@@ -1429,18 +1429,6 @@ export async function deleteGlobalMember(id: string): Promise<void> {
 }
 
 
-export interface MemberEffectiveConfig {
-  model?: string | null;
-  credentialId?: string | null;
-  thinkingLevel?: string | null;
-  skills?: string[];
-  mcpServers?: string[];
-}
-
-export async function getMemberEffectiveConfig(id: string, scope: string): Promise<MemberEffectiveConfig> {
-  return apiFetch(`/api/members/${encodeURIComponent(id)}/effective-config?scope=${encodeURIComponent(scope)}`);
-}
-
 export interface ConversationSessionInfo {
   scopeId: string;
   memberId: string;

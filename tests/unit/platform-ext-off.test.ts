@@ -38,14 +38,14 @@ describe("platform extensions.json retirement", () => {
       createdAt: 1,
       updatedAt: 1,
     };
-    const reg = await import("../../src/member/member-registry.js");
-    reg.importMemberRecord(legacy);
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    __reg_app_member_actions.importMemberRecord(legacy);
     reg.updateMember(mId, { global: { thinkingLevel: "high" } });
     const after = reg.getMember(mId)!;
     expect(after.global).not.toHaveProperty("extensions");
     expect(after.global.thinkingLevel).toBe("high");
     // effective config has no extensions channel either
-    const eff = reg.getEffectiveConfig(mId, "dm:x");
+    const eff = reg.getMemberConfiguration(mId);
     expect(eff).not.toHaveProperty("extensions");
   });
 });

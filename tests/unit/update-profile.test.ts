@@ -1,4 +1,4 @@
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,16 +7,16 @@ import { setupTestWorkspace, getTestBossmodeDir, getTestWorkspace } from "../hel
 setupTestWorkspace();
 
 async function fixture() {
-  const registry = await import("../../src/member/member-registry.js");
-  const rooms = await import("../../src/chat/room-store.js");
+  const registry = await import("../../src/member/identity.js"), __registry_app_member_actions = await import("../../src/app/member-actions.js");
+  const rooms = await import("../../src/chat/conversations.js");
   const suffix = randomUUID().slice(0, 8);
-  const own = registry.createMember({ name: `Self-${suffix}`, title: "Before" });
-  const peer = registry.createMember({ name: `Peer-${suffix}` });
+  const own = __registry_app_member_actions.createMember({ name: `Self-${suffix}`, title: "Before" });
+  const peer = __registry_app_member_actions.createMember({ name: `Peer-${suffix}` });
   const room = rooms.createRoom(`Room-${suffix}`, undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, peer.id]);
   const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
   const call = (tool: string, params: any, scope = room.id) => handleToolCallback(tool, scope, own.name, params, { memberId: own.id });
-  return { registry, rooms, own, peer, room, call };
+  return { registry, actions: __registry_app_member_actions, rooms, own, peer, room, call };
 }
 
 describe("self-only profile_update", () => {
@@ -51,7 +51,7 @@ describe("self-only profile_update", () => {
     expect(await f.call("profile_update", { name: f.peer.name.toUpperCase(), description: "partial" })).toMatchObject({ ok: false, code: "name_taken" });
     expect(f.registry.getMember(f.own.id)).toEqual(f.own);
     expect(f.registry.getMember(f.peer.id)).toEqual(f.peer);
-    for (const name of ["all", "USER", " System "]) expect(() => f.registry.createMember({ name })).toThrow("reserved_member_name");
+    for (const name of ["all", "USER", " System "]) expect(() => f.actions.createMember({ name })).toThrow("reserved_member_name");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     expect(await handleToolCallback("profile_update", f.room.id, f.own.name, { description: "bad" })).toMatchObject({ ok: false, code: "invalid_caller" });
     expect(await f.call("profile_update", { description: "bad" }, `dm:${f.peer.id}`)).toMatchObject({ ok: false, code: "scope_access_denied" });
@@ -67,7 +67,7 @@ describe("self-only profile_update", () => {
     const originalName = f.own.name;
     const next = `New ${randomUUID().slice(0, 6)}`;
     await f.call("profile_update", { name: next });
-    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile.js");
     updateProfileForMember(f.peer.id, { name: originalName });
     for (const tools of toolSets) {
       await (tools.find(t => t.name === "chat_send")!.execute as any)("chat-id", { message: "after rename" });
@@ -119,7 +119,7 @@ describe("self-only profile_update", () => {
       await Promise.resolve();
       expect(captured).toMatchObject({ id: f.peer.id, ctx: { needResponseMemberIds: [f.peer.id] } });
       const originalContext = captured.ctx;
-      const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+      const { updateProfileForMember } = await import("../../src/member/profile.js");
       const next = `${f.own.name}-renamed`;
       await f.call("profile_update", { name: next });
       updateProfileForMember(f.peer.id, { name: f.own.name });
@@ -138,7 +138,7 @@ describe("self-only profile_update", () => {
 
   it("creates chats with current Unicode identity and keeps historical template tools ID-bound", async () => {
     const f = await fixture();
-    const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+    const { updateProfileForMember } = await import("../../src/member/profile.js");
     const pending = f.call("chat_create", { name: "Creator race", members: [f.peer.id] }, `dm:${f.own.id}`);
     const next = `创建者 ${randomUUID().slice(0, 6)}`;
     updateProfileForMember(f.own.id, { name: next });
@@ -148,9 +148,9 @@ describe("self-only profile_update", () => {
     expect(f.rooms.getRoom(createdRoomId)!.globalMemberIds).toContain(f.own.id);
     const legacyRoom = { id: "historical-room", name: "Historical room", members: ["Historical-template"], createdAt: 1,
       roomMembers: [{ id: "rm_historical", roomId: "historical-room", name: "Historical-template", sourceAgent: "developer", createdAt: 1, updatedAt: 1 }] };
-    new ConversationsRepository(getTestWorkspace().db).upsertRoom(legacyRoom);
+    storeRoom(legacyRoom, getTestWorkspace().db);
     const local = f.rooms.getRoomMembers(legacyRoom.id)[0];
-    const unrelated = f.registry.createMember({ name: local.name });
+    const unrelated = f.actions.createMember({ name: local.name });
     const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
     const tools = createBossmodeSdkTools({ roomId: legacyRoom.id, memberId: local.id });
     await expect(tools.find(t => t.name === "chat_send")!.execute("legacy-chat", { message: "Existing local tool" }, undefined, undefined, undefined as any)).resolves.toBeTruthy();

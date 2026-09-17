@@ -37,12 +37,12 @@ const PROFILE = {
 
 /** Member "dev" belongs to roomA + roomB; "outsider" belongs to roomC only. */
 async function seedWorld() {
-  const reg = await import("../../src/member/member-registry.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const creds = await import("../../src/config/models.js");
   const cred = creds.saveModelCredentialProfile(PROFILE);
-  const dev = reg.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
-  const outsider = reg.createMember({ name: "outsider", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
-  const roomStore = await import("../../src/chat/room-store.js");
+  const dev = __reg_app_member_actions.createMember({ name: "dev", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
+  const outsider = __reg_app_member_actions.createMember({ name: "outsider", agentTemplate: "dev", model: "testprov/claude-a", credentialId: cred.id });
+  const roomStore = await import("../../src/chat/conversations.js");
   const roomA = roomStore.createRoom("alpha", undefined, []);
   roomStore.stampGlobalMemberIds(roomA.id, [dev.id], dev.id);
   const roomB = roomStore.createRoom("beta", undefined, []);
@@ -157,36 +157,36 @@ describe("cross-scope reads (flagship ①)", () => {
 
   it("members config PATCH write path: batch-5b writes global on any scope", async () => {
     const { dev, roomA } = await seedWorld();
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
 
     // Unified member patched at DM scope → global write, no scope override.
-    reg.applyMemberConfigPatch(dev.id, `dm:${dev.id}`, { thinkingLevel: "high" });
+    reg.applyMemberConfigPatch(dev.id, { thinkingLevel: "high" });
     let rec = reg.getMember(dev.id)!;
     expect(rec.global.thinkingLevel).toBe("high");
     expect(rec.scopeOverrides[`dm:${dev.id}`]).toBeUndefined();
 
     // Scoped-flag member (disk says false) patched at DM scope → still global.
-    const scoped = reg.createMember({
+    const scoped = __reg_app_member_actions.createMember({
       name: "scoped",
       agentTemplate: "dev",
       model: "testprov/claude-a",
       credentialId: rec.global.credentialId,
       unifiedModel: false,
     });
-    reg.applyMemberConfigPatch(scoped.id, `dm:${scoped.id}`, { thinkingLevel: "low" });
+    reg.applyMemberConfigPatch(scoped.id, { thinkingLevel: "low" });
     rec = reg.getMember(scoped.id)!;
     expect(rec.global.thinkingLevel).toBe("low");
     expect(rec.scopeOverrides[`dm:${scoped.id}`]).toBeUndefined();
 
     // Room scope same story: global write, no memberOverrides residue.
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const room2 = roomStore.createRoom("delta", undefined, []);
     roomStore.stampGlobalMemberIds(room2.id, [scoped.id], scoped.id);
-    reg.applyMemberConfigPatch(scoped.id, `room:${room2.id}`, { thinkingLevel: "max" });
+    reg.applyMemberConfigPatch(scoped.id, { thinkingLevel: "max" });
     rec = reg.getMember(scoped.id)!;
     expect(rec.global.thinkingLevel).toBe("max");
     expect(rec.scopeOverrides[`room:${room2.id}`]).toBeUndefined();
     expect(roomStore.getRoom(room2.id)!.memberOverrides).toBeUndefined();
-    expect(reg.getEffectiveConfig(scoped.id, `room:${roomA.id}`)).toBeDefined();
+    expect(reg.getMemberConfiguration(scoped.id)).toBeDefined();
   });
 });

@@ -20,13 +20,13 @@ const membersMigration = getMigration("core-members-v1");
 
 const { getDefaultConfig } = await import("../../src/config/settings.js");
 const assetsMigration = getMigration("core-assets-v1");
-const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/data/repositories/document-repository.js");
+const { getDocument, listDocumentHistory, importDocument, documentContentMeta, documentSnapshotPath, validateDocumentPath, commitDocumentRevision } = await import("../../src/member/assets.js");
 const { readPrinciples, writePrinciples, editPrinciples, readPrinciplesWithBudget, AssetBudgetError } = await import("../../src/member/memory/principles-store.js");
 const { readMainline, writeMainline, editMainline } = await import("../../src/chat/mainline-store.js");
 const { readMemoryLayerInfo, readMemoryLayer, writeMemoryLayer, editMemoryLayer, ensureMemorySkeleton } = await import("../../src/member/memory/member-memory-store.js");
-const { saveDocument } = await import("../../src/member/assets/document-assets.js");
+const { saveDocument } = await import("../../src/member/assets.js");
 import type { Database } from "../../src/data/database.js";
-import type { DocumentIdentity, DocumentImport } from "../../src/data/repositories/document-repository.js";
+import type { DocumentIdentity, DocumentImport } from "../../src/member/assets.js";
 
 let db: Database;
 const member = "mem_one";
@@ -387,4 +387,18 @@ it("rejects stale revision commits without changing metadata or history", () => 
   expect(() => commitDocumentRevision(db, roomIdentity, { ...saved, revision: 2 }, { ...event, revision: 2 }, 0)).toThrow("revision changed");
   expect(getDocument(db, roomPath)?.meta.revision).toBe(1);
   expect(listDocumentHistory(db, roomPath)).toHaveLength(1);
+});
+
+it.each(["managed", "raw"])("rejects live file publication inside an enclosing %s transaction", mode => {
+  write(roomPath, "before");
+  const publish = () => saveDocument(roomIdentity, "must not publish", user, { operation: "write", reason: "guard" });
+  if (mode === "managed") expect(() => db.transaction(publish)).toThrow(/enclosing/);
+  else {
+    db.exec("BEGIN");
+    try { expect(publish).toThrow(/enclosing/); }
+    finally { db.exec("ROLLBACK"); }
+  }
+  expect(current(roomPath)).toBe("before");
+  expect(getDocument(db, roomPath)).toBeUndefined();
+  expect(existsSync(join(root, "rooms", room, "memory", "history"))).toBe(false);
 });

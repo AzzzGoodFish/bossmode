@@ -19,7 +19,6 @@ const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
 vi.mock("../src/app/server/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
 vi.mock("../src/agent/orchestrator/agent-manager.js",() => ({refreshContextUsage:vi.fn()}));
 vi.mock("../src/agent/events/knowledge-activity.js",() => ({maybeEmitKnowledgeActivity:vi.fn()}));
-vi.mock("../src/chat/room-store.js",() => ({getRoom:vi.fn()}));
 vi.mock("../src/kernel/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
 
 let db: Database; let root: string; let fixture: ReturnType<typeof coreFixture>;

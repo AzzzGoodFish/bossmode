@@ -58,10 +58,10 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("message-store cursor primitives: unread history and strict from_seq retain the trigger", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
-    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const msgStore = await import("../../src/chat/message-store.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
     const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
     // Seed messages: m1 (backlog), m2 (backlog), m3 (@pm trigger)
@@ -80,11 +80,11 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("query read-to-clear: current-scope read advances cursor to furthest seq seen", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
-    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const msgStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
     const room = roomStore.createRoom("r", dir, [], undefined);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
     const m1 = msgStore.addMessage(room.id, { sender: "user", content: "one", mentions: [] } as any);
@@ -102,11 +102,11 @@ describe("inject hybrid — hint shape + cursor semantics", () => {
   });
 
   it("cross-scope query does not advance the room cursor", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
-    const reg = await import("../../src/member/member-registry.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const msgStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
     const roomA = roomStore.createRoom("ra", dir, [], undefined);
     roomStore.stampGlobalMemberIds(roomA.id, [pm.id], pm.id);
     const roomB = roomStore.createRoom("rb", dir, [], undefined);

@@ -1,36 +1,37 @@
+import { detachMemberFromConversations } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
+import { readMemberArchiveCatalog, beginMemberArchive } from "../../src/member/archive.js";
 import { loadShortIdMapping, migrateShortIds } from "../../src/app/upgrade/ids.js";
-import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/archive.js";
 let fixture: ReturnType<typeof coreFixture>;
 let root: string;
 beforeEach(() => { fixture = coreFixture(); root = fixture.root; });
 afterEach(() => fixture.close());
 it("archive retains SQL metadata and literal persona bytes", async () => {
-  const { createMember, getMember } = await import("../../src/member/member-registry.js"); const { memberDir } = await import("../../src/files/layout.js");
+  const { createMember } = await import("../../src/app/member-actions.js"), { getMember } = await import("../../src/member/identity.js"); const { memberDir } = await import("../../src/files/layout.js");
   const m = createMember({ name: "before", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: ["skill-a"], mcpServers: ["server-a"] });
   const markdown = "---\nname: this is Markdown, not identity\n---\n\n自由正文\n\n";
   writeFileSync(join(memberDir(m.id), "persona.md"), markdown);
   expect(existsSync(join(memberDir(m.id), "member.json"))).toBe(false);
-  const { archived } = await new MemberArchiveService(fixture.db, root, { quiesce: async () => {} }).archive(m.id, { confirm: true });
+  const { archived } = await new MemberArchiveService(fixture.db, root, { detachFromConversations: detachMemberFromConversations,  quiesce: async () => {} }).archive(m.id, { confirm: true });
   expect(getMember(m.id)).toBeNull();
   expect(fixture.db.get("SELECT archive_path FROM members WHERE id=?", m.id)).toEqual({ archive_path: archived });
-  expect(new MemberArchivesRepository(fixture.db).get(archived, m.name)).toMatchObject({ title: "Engineer", global: m.global });
+  expect(readMemberArchiveCatalog(archived, m.name, fixture.db)).toMatchObject({ title: "Engineer", global: m.global });
   expect(existsSync(join(root, archived, "member.json"))).toBe(false);
 });
 it("recoverPending finishes a pending intent across a short-id migration", async () => {
-  const { createMember, getMember } = await import("../../src/member/member-registry.js"); const { memberDir } = await import("../../src/files/layout.js");
+  const { createMember } = await import("../../src/app/member-actions.js"), { getMember } = await import("../../src/member/identity.js"); const { memberDir } = await import("../../src/files/layout.js");
   const m = createMember({ name: "pending-recover", title: "Engineer", model: "p/m", credentialId: "credential-ref", thinkingLevel: "high", skills: [], mcpServers: [] });
   writeFileSync(join(memberDir(m.id), "persona.md"), "p\n");
   // As if an archive began and the process died before the move: intent is pending.
   const stat = statSync(join(root, "members", m.id));
   const archivePath = `backups/fired-${m.id}-${randomUUID()}`;
-  new MemberArchivesRepository(fixture.db).begin({ memberId: m.id, sourcePath: `members/${m.id}`, archivePath,
-    sourceDevice: String(stat.dev), sourceInode: String(stat.ino), createdAt: Date.now() });
+  beginMemberArchive({ memberId: m.id, sourcePath: `members/${m.id}`, archivePath,
+    sourceDevice: String(stat.dev), sourceInode: String(stat.ino), createdAt: Date.now() }, fixture.db);
 
   const report = migrateShortIds(root, fixture.db);
   expect(report.status).toBe("migrated");
@@ -41,7 +42,7 @@ it("recoverPending finishes a pending intent across a short-id migration", async
 
   // Recovery runs against the renamed tree: inode matches at the new path, and the
   // (excluded-zone) archive path keeps its pre-migration form.
-  await new MemberArchiveService(fixture.db, root, { quiesce: async () => {} }).recoverPending();
+  await new MemberArchiveService(fixture.db, root, { detachFromConversations: detachMemberFromConversations,  quiesce: async () => {} }).recoverPending();
   expect(getMember(newId)).toBeNull();
   expect(fixture.db.get<{ archive_path: string }>("SELECT archive_path FROM members WHERE id=?", newId)).toEqual({ archive_path: archivePath });
   expect(existsSync(join(root, archivePath, "persona.md"))).toBe(true);

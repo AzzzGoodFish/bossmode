@@ -1,4 +1,5 @@
-import { createMember, findMemberByName } from "../../src/member/member-registry.js";
+import { createMember } from "../../src/app/member-actions.js";
+import { findMemberByName } from "../../src/member/identity.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,7 +38,7 @@ describe("chat attachment artifacts", () => {
     const ts = await createTestServer();
     servers.push(ts);
     const token = await login(ts.port);
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
 
     const cwd = mkdtempSync(join(tmpdir(), "bossmode-chat-attach-"));
     const room = roomStore.createRoom("Attachments", cwd, [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
@@ -82,7 +83,7 @@ describe("chat attachment artifacts", () => {
   it("agent chat rejects an empty message (designer incident 2026-09-04)", async () => {
     const ts = await createTestServer();
     servers.push(ts);
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const messageStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const room = roomStore.createRoom("Empty Chat", undefined, [(findMemberByName("developer") ?? createMember({ name: "developer" })).id]);
@@ -112,7 +113,7 @@ describe("chat attachment artifacts", () => {
   it("agent chat fails atomically when any attachment path is missing", async () => {
     const ts = await createTestServer();
     servers.push(ts);
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const messageStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
     const { createBossmodeSdkTools } = await import("../../src/agent/runtime/bossmode-sdk-tools.js");
@@ -142,7 +143,7 @@ describe("chat attachment artifacts", () => {
   it("agent chat attachments use structured metadata and do not leak source/store absolute paths in message JSON", async () => {
     const ts = await createTestServer();
     servers.push(ts);
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const messageStore = await import("../../src/chat/message-store.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
 

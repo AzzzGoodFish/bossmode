@@ -1,7 +1,6 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { memberExtensionsDir } from "../../files/layout.js";
+import { installationRoot, memberExtensionsDir } from "../files/layout.js";
 
 /** Filesystem discovery only: entries are not evidence of successful execution. */
 export interface ExtensionAsset {
@@ -16,7 +15,7 @@ export interface ExtensionAsset {
 const INSTALL_ARTIFACTS = new Set(["node_modules", "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"]);
 
 export function builtinMcpAdapterPath(): string {
-  return fileURLToPath(new URL("../../../vendor/pi-mcp-adapter/index.ts", import.meta.url));
+  return join(installationRoot, "vendor", "pi-mcp-adapter", "index.ts");
 }
 
 function assetAt(path: string, source: ExtensionAsset["source"]): ExtensionAsset {

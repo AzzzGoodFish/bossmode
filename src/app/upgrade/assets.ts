@@ -1,15 +1,16 @@
 import { type MemberRecord } from "../../data/types.js";
-import { validateArchivePath, type ArchiveCatalogSource, MemberArchivesRepository } from "../../data/repositories/member-archives.js";
+import { validateArchivePath } from "../../files/layout.js";
+import { type ArchiveCatalogSource, importMemberArchiveCatalog, readMemberArchiveIntent } from "../../member/archive.js";
 import { readFileSync, lstatSync } from "node:fs";
 import { type UpgradeImportContext, type LegacySourceEntry, readLegacyJson, readLegacyJsonl } from "./inventory.js";
 import { managedPath, requireRegularFile, syncPath, syncDirectoryChain } from "../../files/io.js";
 import { parseLegacyMemberPersona, parseLegacyMemberRecord, type MemberSourceImport } from "./records.js";
-import { MembersRepository } from "../../data/repositories/members.js";
+import { getRetainedMember, importArchivedMember, getMember, memberArchivePath } from "../../member/identity.js";
 import { requireObject } from "../../kernel/json.js";
 import { isDeepStrictEqual } from "node:util";
 import { dirname } from "node:path";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
-import { documentContentMeta, importDocument, type DocumentImport, type DocumentIdentity, type ImportedDocumentHistory } from "../../data/repositories/document-repository.js";
+import { documentContentMeta, importDocument, type DocumentImport, type DocumentIdentity, type ImportedDocumentHistory } from "../../member/assets.js";
 import { type PrinciplesMeta } from "../../kernel/types.js";
 import { type Database } from "../../data/database.js";
 
@@ -80,7 +81,7 @@ export function importLegacyArchives(ctx:UpgradeImportContext,entries:readonly L
   let value:any;try{value=JSON.parse(text(path));}catch{throw new Error(`Invalid archive metadata: ${path}`);}
   if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`Invalid archive metadata: ${path}`);return value;
  };
- const catalog=new MemberArchivesRepository(ctx.db);const members=new MembersRepository(ctx.db);
+ const catalog=ctx.db;const members=ctx.db;
  for(const archivePath of new Set(sources.map(e=>e.archivePath!))){
   if(!archivePath)throw new Error("Missing export archive identity");
   if(archivePath.startsWith("backups/fired-")){
@@ -97,13 +98,13 @@ export function importLegacyArchives(ctx:UpgradeImportContext,entries:readonly L
     // a still-live ID, or associate a name-only export with a current name.
     if(typeof raw.id==="string"&&at!==undefined&&raw.createdAt!==undefined&&raw.updatedAt!==undefined&&raw.agentTemplate!==undefined&&raw.global!==undefined){
      const record=parseLegacyMemberRecord(read(metadataPath),raw.id,metadataPath);
-     if(!members.getRetained(record.id))members.importArchived(record,archivePath,at);
-     if(!members.get(record.id)){
-      if(members.archivedPath(record.id)!==archivePath)throw new Error("Conflicting archived identity locations");
+     if(!getRetainedMember(record.id, members))importArchivedMember(record,archivePath,at, members);
+     if(!getMember(record.id, members)){
+      if(memberArchivePath(record.id, members)!==archivePath)throw new Error("Conflicting archived identity locations");
       source.memberId=record.id;
      }
     }
-    catalog.importCatalog(source);
+    importMemberArchiveCatalog(source, catalog);
    }
   }else{
    const manifestPath=`${archivePath}/manifest.json`;
@@ -120,7 +121,7 @@ export function importLegacyArchives(ctx:UpgradeImportContext,entries:readonly L
      }
      return {...member,personaPath,hasPersona:personaPath?!!text(personaPath).trim():false};
     });
-    for(const source of catalogFromLegacyManifest({archivePath,members:records}))catalog.importCatalog(source);
+    for(const source of catalogFromLegacyManifest({archivePath,members:records}))importMemberArchiveCatalog(source, catalog);
    }
   }
  }
@@ -250,13 +251,13 @@ export async function importLegacyDocuments(ctx:UpgradeImportContext,entries:rea
  * verify their recorded directory identity so activation can finish existing recovery. */
 export function verifyActiveMemberAssets(root: string, db: Database): void {
   db.assertOutsideTransaction();
-  const archives = new MemberArchivesRepository(db);
+  const archives = db;
   for (const { id } of db.all<{ id: string }>("SELECT id FROM members WHERE archived_at IS NULL")) {
     const path = `members/${id}/persona.md`;
     if (!db.get("SELECT 1 FROM memory_documents WHERE path=? AND member_id=? AND layer='persona' AND scope_id IS NULL", path, id)) {
       throw new Error(`Member persona metadata missing: ${id}`);
     }
-    const intent = archives.intent(id);
+    const intent = readMemberArchiveIntent(id, archives);
     let assetPath = path;
     if (intent?.state === "pending") {
       // Archive movement precedes its SQL completion. Only the explicit SQL intent,

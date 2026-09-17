@@ -12,13 +12,13 @@ import { openDatabase, bindDatabase, applyStorageMigrations, type Database } fro
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
 
-import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
-import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
+import { importMcpConfiguration } from "../../src/member/mcp.js";
+import { importWorkspaceRegistry, importSshCredential, readSshCredential } from "../../src/member/workspaces.js";
 
 
-import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/member/mcp/mcp-settings.js";
-import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, workspacesJsonPath, ensureDefaultRegistry } from "../../src/member/workspaces/workspace-registry.js";
-import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/member/workspaces/ssh-keygen.js";
+import { readMcpConfigText, writeMcpConfig, readRedactedMcpConfigText, readMemberMcpConfig, writeMemberMcpConfig, writeMemberScopedMcpConfig, readMcpStatusCache, writeMcpStatusCache, sanitizeMcpError } from "../../src/member/mcp.js";
+import { readWorkspaces, createWorkspace, useWorkspace, removeWorkspace, ensureDefaultRegistry } from "../../src/member/workspaces.js";
+import { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey, readWorkspaceSshPrivateKey, materializeMemberSshCredential } from "../../src/member/workspaces.js";
 
 let root: string;
 let db: Database;
@@ -91,7 +91,7 @@ describe("MCP normalized configuration and restricted derived input",()=>{
   });
   it("validates JSON and transactionally rejects broken server rows",()=>{
     writeMcpConfig(config);
-    expect(()=>new McpSettingsRepository(db).importConfig({mcpServers:{bad:{command:123}}})).toThrow("Invalid MCP");
+    expect(()=>importMcpConfiguration({mcpServers:{bad:{command:123}}}, "global", db)).toThrow("Invalid MCP");
     expect(JSON.parse(readMcpConfigText())).toEqual(config);
   });
   it("materializes a private filtered copy with explicit cleanup, not a second authority",()=>{
@@ -113,16 +113,16 @@ describe("workspaces and SSH credentials",()=>{
     ensureDefaultRegistry(id);expect(readWorkspaces(id).active).toBe("original");
     expect(createWorkspace(id,{id:"remote",kind:"ssh",host:"test",user:"fish",keyPath:"/external/key"}).ok).toBe(true);
     expect(useWorkspace(id,"remote").ok).toBe(true);
-    expect(existsSync(workspacesJsonPath(id))).toBe(false);
+    expect(existsSync(join(root, "members", id, "workspaces.json"))).toBe(false);
     db.close();open();expect(readWorkspaces(id).active).toBe("remote");
     expect(readWorkspaces(id).workspaces[1]).toMatchObject({keyPath:"/external/key"});
     expect(removeWorkspace(id,"remote").ok).toBe(true);expect(readWorkspaces(id).active).toBe("original");
     expect(removeWorkspace(id,"original").ok).toBe(false);
-    expect(()=>new WorkspacesRepository(db).importRegistry(id,{active:"missing",workspaces:[]})).toThrow("Active");
+    expect(()=>importWorkspaceRegistry(id,{active:"missing",workspaces:[]}, db)).toThrow("Active");
   });
   it("stores owned keys in DB and explicitly disposes derived material",()=>{
     const id="settings-ssh-test";
-    new SshCredentialsRepository(db).importKey(id,{privateKey:"private",publicKey:"public",config:"Host test"});
+    importSshCredential(id,{privateKey:"private",publicKey:"public",config:"Host test"}, db);
     expect(ensureMemberSshKeyPair(id)).toBe("public");expect(readMemberSshPublicKey(id)).toBe("public");
     expect(existsSync(memberSshKeyPath(id))).toBe(false);
     expect(readWorkspaceSshPrivateKey(id,memberSshKeyPath(id)).toString()).toBe("private");
@@ -142,6 +142,6 @@ describe("workspaces and SSH credentials",()=>{
     const publicKey=ensureMemberSshKeyPair(id);expect(publicKey).toMatch(/^ssh-ed25519 /);
     expect(ensureMemberSshKeyPair(id)).toBe(publicKey);
     expect(existsSync(memberSshKeyPath(id))).toBe(false);
-    expect(new SshCredentialsRepository(db).read(id)?.privateKey).toContain("OPENSSH PRIVATE KEY");
+    expect(readSshCredential(id, db)?.privateKey).toContain("OPENSSH PRIVATE KEY");
   });
 });

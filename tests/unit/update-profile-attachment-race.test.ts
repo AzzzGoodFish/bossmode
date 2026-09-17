@@ -5,18 +5,18 @@ const processAttachments = vi.hoisted(() => vi.fn());
 vi.mock("../../src/agent/orchestrator/agent-attachments.js", () => ({ processAgentAttachments: processAttachments }));
 
 it("captures mention target IDs before attachment IO while refreshing the sender label after IO", async () => {
-  const reg = await import("../../src/member/member-registry.js");
-  const rooms = await import("../../src/chat/room-store.js");
-  const own = reg.createMember({ name: "Sender" });
-  const target = reg.createMember({ name: "Target" });
-  const reuse = reg.createMember({ name: "Other" });
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+  const rooms = await import("../../src/chat/conversations.js");
+  const own = __reg_app_member_actions.createMember({ name: "Sender" });
+  const target = __reg_app_member_actions.createMember({ name: "Target" });
+  const reuse = __reg_app_member_actions.createMember({ name: "Other" });
   const room = rooms.createRoom("Attachment race", undefined, []);
   rooms.stampGlobalMemberIds(room.id, [own.id, target.id, reuse.id]);
   let release!: () => void;
   const gate = new Promise<void>(r => { release = r; });
   processAttachments.mockImplementation(async () => { await gate; return []; });
   const { handleToolCallback, loadScopeMessages } = await import("../../src/agent/tools/tools.js");
-  const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+  const { updateProfileForMember } = await import("../../src/member/profile.js");
   const router = await import("../../src/chat/router.js");
   const activate = vi.fn();
   const stop = router.initRouter({mention:activate});

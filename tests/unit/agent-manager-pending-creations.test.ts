@@ -1,8 +1,9 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom } from "../../src/chat/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -40,24 +41,24 @@ vi.mock("../../src/app/server/ws.js", () => ({
 }));
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, buildMemberAgentSession, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 
 beforeEach(async () => {
   fixture = coreFixture();
   (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-  const members = new MembersRepository(fixture.db);
-  const conversations = new ConversationsRepository(fixture.db);
+  const members = fixture.db;
+  const conversations = fixture.db;
   for (const name of ["developer", "qa"]) {
     const id = `mem_${name}`;
-    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
-      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    conversations.ensureDmScope(id);
+    insertMemberIdentity({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, members);
+    ensureDmScope(id, conversations);
     const memberPath = join(fixture.root, "members", id);
     mkdirSync(memberPath, { recursive: true });
     writeFileSync(join(memberPath, "persona.md"), `You are ${name}.`);
   }
   for (const id of ["room1", "room2", "room3"]) {
-    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+    storeRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 }, conversations);
   }
   bus.postMessage("room1", "user", "@developer hi", ["developer"]);
   vi.mocked(bus.postMessage).mockClear();
@@ -116,7 +117,21 @@ describe("agent-manager pending creation dedup", () => {
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
     await shutdownAll();
-    initAgentManager(reg);
+    initAgentManager(reg, loadMemberPromptSource);
+  });
+
+  it.each(["room:room1", "dm:mem_developer", "mm:mem_developer-mem_qa"])("assembles the same global member assets from %s", async scope => {
+    const { updateMember } = await import("../../src/member/identity.js");
+    const { resolveGlobalSkillPaths } = await import("../../src/member/skills.js");
+    const { mainSessionDirectory } = await import("../../src/files/layout.js");
+    updateMember("mem_developer", { global: { skills: ["assembly-fixture"], mcpServers: ["fixture"], thinkingLevel: "high" } });
+    const instance = await buildMemberAgentSession("mem_developer", scope);
+    expect(instance).not.toBeNull();
+    const opts = mocks.createAgent.mock.calls[0][0];
+    expect(opts.member).toMatchObject({ id: "mem_developer", model: "anthropic/claude-a", credentialId: "cred-a", thinkingLevel: "high", skills: ["assembly-fixture"], mcpServers: ["fixture"] });
+    expect(opts.skillPaths).toEqual(resolveGlobalSkillPaths(["assembly-fixture"]));
+    expect(opts.sessionDir).toBe(mainSessionDirectory("mem_developer"));
+    expect(opts.cwd).toBe(join(fixture.root, "members", "mem_developer"));
   });
 
   it("deduplicates concurrent activateAgent calls for same room/member", async () => {

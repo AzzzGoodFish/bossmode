@@ -1,6 +1,8 @@
 // Shared physical paths. Importing this module performs no I/O.
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { homedir } from "node:os";
+
+export const installationRoot = join(import.meta.dirname, "../..");
 
 const root = process.env.BOSSMODE_DIR || join(homedir(), ".bossmode");
 
@@ -51,4 +53,11 @@ export function knowledgeRoot(): string {
 /** One member-owned main session across all chats; preserve the established UTC-day layout. */
 export function mainSessionDirectory(memberId: string, startedAt = new Date()): string {
   return join(memberDir(memberId), "sessions", startedAt.toISOString().slice(0, 10), "main");
+}
+
+export function validateArchivePath(path: string): void {
+  if (typeof path !== "string" || !path.startsWith("backups/") || path === "backups/" ||
+    path.includes("\\") || path.includes("\0") || posix.normalize(path) !== path || path.split("/").includes("..")) {
+    throw new Error("invalid_archive_path");
+  }
 }

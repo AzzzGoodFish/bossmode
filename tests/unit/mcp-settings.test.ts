@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { readMcpConfigText, type MaterializedMcpConfig } from "../../src/member/mcp/mcp-settings.js";
+import { readMcpConfigText, type MaterializedMcpConfig } from "../../src/member/mcp.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 let materials: MaterializedMcpConfig[];
@@ -16,7 +16,7 @@ describe("mcp-settings helpers", () => {
   });
 
   it("writes scoped config with only assigned servers and drops imports", async () => {
-    const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
+    const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/member/mcp.js");
     writeMcpConfig({
       imports: ["vscode"],
       settings: { timeout: 1000 },
@@ -39,7 +39,7 @@ describe("mcp-settings helpers", () => {
   });
 
   it("returns only assignable MCP server names", async () => {
-    const { getAssignableMcpServerNames } = await import("../../src/member/mcp/mcp-settings.js");
+    const { getAssignableMcpServerNames } = await import("../../src/member/mcp.js");
     expect(getAssignableMcpServerNames({
       mcpServers: {
         http: { url: "http://127.0.0.1:8931/mcp" },
@@ -54,7 +54,7 @@ describe("mcp-settings helpers", () => {
   });
 
   it("forces deferred MCP capabilities off in scoped configs", async () => {
-    const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
+    const { writeMcpConfig, writeScopedMcpConfig } = await import("../../src/member/mcp.js");
     writeMcpConfig({
       settings: {
         timeout: 1000,

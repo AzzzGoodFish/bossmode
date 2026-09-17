@@ -14,7 +14,7 @@ const transport = vi.hoisted(() => ({ agent: vi.fn(), refresh: vi.fn(), knowledg
 vi.mock("../src/app/server/ws.js", () => ({ broadcastToAgentSubscribers: transport.agent }));
 vi.mock("../src/agent/orchestrator/agent-manager.js", () => ({ refreshContextUsage: transport.refresh }));
 vi.mock("../src/agent/events/knowledge-activity.js", () => ({ maybeEmitKnowledgeActivity: transport.knowledge }));
-vi.mock("../src/chat/room-store.js", () => ({ getRoom: vi.fn() }));
+vi.mock("../src/chat/conversations.js", () => ({ getRoom: vi.fn() }));
 vi.mock("../src/kernel/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 
 let db: Database;

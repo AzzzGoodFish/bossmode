@@ -13,7 +13,7 @@ beforeEach(async () => {
   mkdirSync(join(dir, "members"), { recursive: true });
   vi.resetModules();
   fixture = (await import("../helpers/core-fixture.js")).coreFixture();
-  const { importMemberRecord } = await import("../../src/member/member-registry.js");
+  const { importMemberRecord } = await import("../../src/app/member-actions.js");
   importMemberRecord({ id: MEMBER, name: "wsbot", agentTemplate: "general",
     unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
     global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
@@ -32,8 +32,8 @@ function seedMemberDir() {
 describe("workspace registry", () => {
   it("original is synthesized, immune, and default-active without a file", async () => {
     seedMemberDir();
-    const reg = await import("../../src/member/workspaces/workspace-registry.js");
-    const list = reg.listWorkspaces(MEMBER);
+    const reg = await import("../../src/member/workspaces.js");
+    const list = reg.readWorkspaces(MEMBER);
     expect(list.active).toBe("original");
     expect(list.workspaces).toHaveLength(1);
     expect(list.workspaces[0].kind).toBe("original");
@@ -44,7 +44,7 @@ describe("workspace registry", () => {
 
   it("ssh lifecycle: create → active switch → remove falls back to original", async () => {
     seedMemberDir();
-    const reg = await import("../../src/member/workspaces/workspace-registry.js");
+    const reg = await import("../../src/member/workspaces.js");
     const created = reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "srv.example", user: "deploy", root: "/srv/app" });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -56,14 +56,14 @@ describe("workspace registry", () => {
     expect(reg.activeWorkspaceRoot(MEMBER)).toBe("/srv/app");
 
     expect(reg.removeWorkspace(MEMBER, "web1").ok).toBe(true);
-    const after = reg.listWorkspaces(MEMBER);
+    const after = reg.readWorkspaces(MEMBER);
     expect(after.active).toBe("original");
     expect(after.workspaces).toHaveLength(1);
   });
 
   it("invalid ids and duplicates are rejected", async () => {
     seedMemberDir();
-    const reg = await import("../../src/member/workspaces/workspace-registry.js");
+    const reg = await import("../../src/member/workspaces.js");
     expect(reg.createWorkspace(MEMBER, { id: "bad id!", kind: "ssh", host: "h", user: "u" }).ok).toBe(false);
     expect(reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u" }).ok).toBe(true);
     expect(reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u" }).ok).toBe(false);
@@ -131,7 +131,7 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
       },
     }));
     try {
-      const reg = await import("../../src/member/workspaces/workspace-registry.js");
+      const reg = await import("../../src/member/workspaces.js");
       const created = reg.createWorkspace(MEMBER, { id: "web1", kind: "ssh", host: "h", user: "u", root: "/srv/app" });
       expect(created.ok).toBe(true);
       reg.useWorkspace(MEMBER, "web1");
@@ -157,8 +157,8 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
 describe("Workspace prompt chapter", () => {
   it("compile carries the Workspace chapter (per-chat current-workspace line retired with prompt v2)", async () => {
     seedMemberDir();
-    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ memberId: MEMBER, memberName: "wsbot" });
+    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
+    const compiled = previewMemberPrompt(MEMBER);
     expect(compiled.fullPrompt).toContain("## Workspace");
     expect(compiled.fullPrompt).toContain("workspace_list");
     expect(compiled.envPrompt).not.toContain("Current workspace:");
@@ -166,12 +166,12 @@ describe("Workspace prompt chapter", () => {
 });
 
 describe("ssh public key regression (qa rc.16 ③)", () => {
-  it("ssh-keygen.ts contains no require() — the package is ESM (source-level guard)", async () => {
+  it("workspaces.ts contains no require() — the package is ESM (source-level guard)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const src = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../../src/member/workspaces/ssh-keygen.ts"),
+      join(dirname(fileURLToPath(import.meta.url)), "../../src/member/workspaces.ts"),
       "utf-8",
     );
     // The rc.15 bug: require() in ESM throws, the catch swallowed it, and the
@@ -183,27 +183,27 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
 
 describe("SSH credentials for legacy members", () => {
   it("the member credential capability creates a missing SQL key once", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/workspaces/ssh-keygen.js");
-    const { SshCredentialsRepository } = await import("../../src/data/repositories/workspace-settings.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/workspaces.js");
+    const { readSshCredential } = await import("../../src/member/workspaces.js");
     // Import a pre-key member rather than deleting current authoritative credentials.
-    const legacy = reg.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",
+    const legacy = __reg_app_member_actions.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",
       unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
       global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
       createdAt: 1, updatedAt: 1 });
-    const credentials = new SshCredentialsRepository(fixture.db);
-    expect(credentials.read(legacy.id)).toBeNull();
+    const credentials = fixture.db;
+    expect(readSshCredential(legacy.id, credentials)).toBeNull();
     const first = ensureMemberSshKeyPair(legacy.id);
     expect(first).toMatch(/^ssh-ed25519 /);
     expect(existsSync(memberSshKeyPath(legacy.id))).toBe(false);
-    const key = credentials.read(legacy.id)!;
+    const key = readSshCredential(legacy.id, credentials)!;
     expect(key.privateKey).toContain("PRIVATE KEY");
     const pub = readMemberSshPublicKey(legacy.id);
     expect(pub).toMatch(/^ssh-ed25519 /);
 
     // Credential material remains stable on a repeat.
     expect(ensureMemberSshKeyPair(legacy.id)).toBe(first);
-    expect(credentials.read(legacy.id)).toEqual(key);
+    expect(readSshCredential(legacy.id, credentials)).toEqual(key);
   });
 
 });

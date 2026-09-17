@@ -1,11 +1,11 @@
 import { getDatabase } from "../data/database.js";
 import { appendMessageInTransaction, type MessageInput } from "../data/repositories/message-repository.js";
-import { parseMmScopeId } from "./conversation-ref.js";
+import { parseMmScopeId } from "./conversations.js";
 import { executionScopeId } from "../data/repositories/execution-identity.js";
 import { DeliveryRepository, type CapturedMessage, type DeliveryActor, type CapturedDeliverySnapshot } from "../data/repositories/delivery-repository.js";
 import { ReplyObligationRepository } from "../data/repositories/reply-obligation-repository.js";
-import { MembersRepository } from "../data/repositories/members.js";
-import { getRoomMembers } from "./room-store.js";
+import { conversationMember } from "./conversations.js";
+import { getRoomMembers } from "./conversations.js";
 import type { RoomMessage } from "../kernel/types.js";
 
 /** No routing callback, filesystem work or SDK activity occurs in this transaction.
@@ -15,8 +15,7 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
   const scopeId = executionScopeId(scopeValue);
   const db = getDatabase();
   return db.transaction(() => {
-    const members = new MembersRepository(db);
-    const actor = (id: string): DeliveryActor => ({ actorKey: id, memberId: members.getRetained(id) ? id : null });
+    const actor = (id: string): DeliveryActor => ({ actorKey: id, memberId: conversationMember(id, true) ? id : null });
     const isDm = scopeId.startsWith("dm:");
     const isMm = scopeId.startsWith("mm:");
     let roster: Array<{ id: string; name: string }> | undefined;
@@ -24,7 +23,7 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
       if (provided !== undefined) return [...new Set(provided)];
       if (!names?.length) return [];
       if (!roster) {
-        const owner = isDm ? members.getRetained(scopeId.slice(3)) : null;
+        const owner = isDm ? conversationMember(scopeId.slice(3), true) : null;
         roster = isDm ? (owner ? [owner] : []) : isMm ? [] : getRoomMembers(scopeId);
       }
       if (names.includes("all")) return roster.map(member => member.id);
@@ -52,7 +51,7 @@ export function appendCapturedMessage(scopeValue: string, input: MessageInput): 
         if (sender) {
           const pair = parseMmScopeId(scopeId);
           const other = pair?.find(id => id !== sender.memberId);
-          if (other && members.getRetained(other)) targets.ordinary = [{ actorKey: other, memberId: other }];
+          if (other && conversationMember(other, true)) targets.ordinary = [{ actorKey: other, memberId: other }];
         }
       } else {
         targets.ordinary = ids(message.mentionMemberIds, message.mentions).filter(id => id !== sender?.actorKey).map(actor);

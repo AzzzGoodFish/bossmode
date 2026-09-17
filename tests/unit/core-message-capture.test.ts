@@ -1,23 +1,23 @@
 import {beforeEach,afterEach,it,expect,vi} from "vitest";
 import {coreFixture} from "../helpers/core-fixture.js";
-import {MembersRepository} from "../../src/data/repositories/members.js";
-import {ConversationsRepository} from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity, storeMemberIdentity, getMember } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
 import {DeliveryRepository} from "../../src/data/repositories/delivery-repository.js";
 import {postMessage} from "../../src/chat/message-bus.js";
 import {initRouter} from "../../src/chat/router.js";
 import {patchMessage,archiveMessagesInTransaction,readMessages} from "../../src/data/repositories/message-repository.js";
-let fixture:ReturnType<typeof coreFixture>;let members:MembersRepository;let rooms:ConversationsRepository;let captures:DeliveryRepository;
+let fixture:ReturnType<typeof coreFixture>;let members:Database;let rooms:Database;let captures:DeliveryRepository;
 const transport=vi.hoisted(()=>({broadcast:vi.fn()}));
 vi.mock("../../src/app/server/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
 const stops:Array<()=>void>=[];
 const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
 beforeEach(()=>{
   transport.broadcast.mockClear();
-  fixture=coreFixture();members=new MembersRepository(fixture.db);rooms=new ConversationsRepository(fixture.db);captures=new DeliveryRepository(fixture.db);
+  fixture=coreFixture();members=fixture.db;rooms=fixture.db;captures=new DeliveryRepository(fixture.db);
   for(const [id,name] of [["mem_a","Alpha"],["mem_b","Beta"],["mem_c","Gamma"]]){
-    members.insert({id,name,agentTemplate:"general",global:{},unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:1});rooms.ensureDmScope(id);
+    insertMemberIdentity({id,name,agentTemplate:"general",global:{},unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:1}, members);ensureDmScope(id, rooms);
   }
-  rooms.upsertRoom({id:"capture-room",name:"Captured",members:["Alpha","Beta"],globalMemberIds:["mem_a","mem_b"],createdAt:1});
+  storeRoom({id:"capture-room",name:"Captured",members:["Alpha","Beta"],globalMemberIds:["mem_a","mem_b"],createdAt:1}, rooms);
 });
 afterEach(async()=>{await flush();for(const stop of stops.splice(0))stop();fixture.close();});
 
@@ -25,8 +25,8 @@ it("captures @all before rename/roster change, and never reads a patched or prun
   const mention=vi.fn();stops.push(initRouter({mention}));
   const message=postMessage("capture-room","user","@all original",["all"]);
   expect(message.mentionMemberIds).toEqual(["mem_a","mem_b"]);
-  members.update({...members.get("mem_a")!,name:"Renamed"});members.update({...members.get("mem_c")!,name:"Alpha"});
-  const room=rooms.getRoom("capture-room")!;room.globalMemberIds=["mem_b","mem_c"];rooms.upsertRoom(room);
+  storeMemberIdentity({...getMember("mem_a", members)!,name:"Renamed"}, members);storeMemberIdentity({...getMember("mem_c", members)!,name:"Alpha"}, members);
+  const room=readStoredRoom("capture-room", rooms)!;room.globalMemberIds=["mem_b","mem_c"];storeRoom(room, rooms);
   patchMessage("capture-room",message.id,{content:"Changed card",mentions:["Alpha"],mentionMemberIds:["mem_c"]});
   archiveMessagesInTransaction(fixture.db,"capture-room",0,10);expect(readMessages("capture-room")).toEqual([]);
   await flush();expect(mention.mock.calls.map(call=>call[1])).toEqual(["mem_a","mem_b"]);
@@ -89,7 +89,7 @@ it("message/debt settlement rolls back together and only the stable own-chat sen
   const {ReplyObligationRepository}=await import("../../src/data/repositories/reply-obligation-repository.js");const replies=new ReplyObligationRepository(fixture.db);
   const request=postMessage("capture-room","user","@Alpha answer",["Alpha"]);
   expect(replies.listPending("capture-room","mem_a").map(row=>row.messageId)).toEqual([request.id]);
-  members.update({...members.get("mem_a")!,name:"Renamed"});members.update({...members.get("mem_c")!,name:"Alpha"});
+  storeMemberIdentity({...getMember("mem_a", members)!,name:"Renamed"}, members);storeMemberIdentity({...getMember("mem_c", members)!,name:"Alpha"}, members);
   postMessage("capture-room","Alpha","Different owner",[],{senderMemberId:"mem_c"});
   postMessage("capture-room","Renamed","Task activity",[],{senderMemberId:"mem_a",type:"task_event"});
   expect(replies.listPending("capture-room","mem_a")).toHaveLength(1);

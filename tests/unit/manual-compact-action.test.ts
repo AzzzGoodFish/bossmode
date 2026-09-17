@@ -1,8 +1,9 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom } from "../../src/chat/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -147,19 +148,19 @@ beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
   (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-  const members = new MembersRepository(fixture.db);
-  const conversations = new ConversationsRepository(fixture.db);
+  const members = fixture.db;
+  const conversations = fixture.db;
   for (const name of ["pm", "qa"]) {
     const id = `mem_${name}`;
-    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
-      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    conversations.ensureDmScope(id);
+    insertMemberIdentity({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, members);
+    ensureDmScope(id, conversations);
     const memberPath = join(fixture.root, "members", id);
     mkdirSync(memberPath, { recursive: true });
     writeFileSync(join(memberPath, "persona.md"), `You are ${name}.`);
   }
   for (const id of ["room", "room2", "room3"]) {
-    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 });
+    storeRoom({ id, name: id, cwd: fixture.root, members: ["pm", "qa"], globalMemberIds: ["mem_pm", "mem_qa"], createdAt: 1 }, conversations);
   }
   bus.postMessage("room", "user", "@pm hi", ["pm"]);
   vi.mocked(bus.postMessage).mockClear();
@@ -178,7 +179,7 @@ describe("manual compaction conversation action", () => {
     vi.clearAllMocks();
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     await manager.shutdownAll();
-    manager.initAgentManager(registry as any);
+    manager.initAgentManager(registry as any, loadMemberPromptSource);
   });
 
   it("compacts an idle instance via its real scopeId and settles the lifecycle", async () => {

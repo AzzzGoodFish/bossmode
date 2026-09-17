@@ -8,8 +8,8 @@ beforeEach(() => { fixture = coreFixture(); root = fixture.root; });
 afterEach(() => fixture.close());
 
 it("member birth and room creation mint short ids (mem_/rm_ + nanoid10)", async () => {
-  const { createMember } = await import("../../src/member/member-registry.js");
-  const { createRoom } = await import("../../src/chat/room-store.js");
+  const { createMember } = await import("../../src/app/member-actions.js");
+  const { createRoom } = await import("../../src/chat/conversations.js");
 
   const a = createMember({ name: "Alpha" });
   const b = createMember({ name: "Beta" });
@@ -34,7 +34,7 @@ it("member birth and room creation mint short ids (mem_/rm_ + nanoid10)", async 
 });
 
 it("keeps minting distinct ids across many births", async () => {
-  const { createMember } = await import("../../src/member/member-registry.js");
+  const { createMember } = await import("../../src/app/member-actions.js");
   const ids = new Set<string>();
   for (let index = 0; index < 25; index++) ids.add(createMember({ name: `Member ${index}` }).id);
   expect(ids.size).toBe(25);

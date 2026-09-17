@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
-import * as roomStore from "../chat/room-store.js";
-import * as memberRegistry from "../member/member-registry.js";
+import * as roomStore from "../chat/conversations.js";
+import * as memberRegistry from "../member/identity.js";
 import * as messageStore from "../chat/message-store.js";
 import { postMessage } from "../chat/message-bus.js";
 import { broadcastToRoom } from "../app/server/ws.js";
@@ -23,7 +23,7 @@ import * as mainlineStore from "../chat/mainline-store.js";
 import { readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../kernel/attachments.js";
 import type { RoomMemberConfig, RoomMemberRecord, RoomMessage } from "../kernel/types.js";
-import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp/mcp-settings.js";
+import { getAssignableMcpServerNames, parseMcpConfigText, readMcpConfigText } from "../member/mcp.js";
 
 type AttachmentInput = { storedFilename?: string; filename?: string; originalFilename?: string; size?: number };
 
@@ -52,7 +52,7 @@ function parseUserAttachments(roomId: string, raw: unknown): { ok: true; attachm
 
 addRoute("GET", "/api/rooms", async (_req, res) => {
   try {
-    const rooms = roomStore.listRoomsStrict().map((room) => ({
+    const rooms = roomStore.listRooms().map((room) => ({
       ...room,
       agentStatuses: getRoomAgentStatuses(room.id),
       agentStale: getRoomAgentStale(room.id),
@@ -540,7 +540,7 @@ addRoute("POST", "/api/rooms/:id/members", async (req, res, params) => {
     sendJson(res, 400, { error: "Template member drafts are not supported; select an existing memberId" }); return;
   }
   try {
-    const { getMember } = await import("../member/member-registry.js");
+    const { getMember } = await import("../member/identity.js");
     const global = getMember(body.memberId);
     if (!global) { sendJson(res, 404, { error: "Member not found" }); return; }
     const added = roomStore.inviteGlobalMember(params.id, {id: global.id, name: global.name,
@@ -560,7 +560,7 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (req, res, params)
   }
   let globalMemberId: string | undefined;
   try {
-    const { resolveMemberRef, findMemberByName } = await import("../member/member-registry.js");
+    const { resolveMemberRef, findMemberByName } = await import("../member/identity.js");
     if (params.memberRef.startsWith("mem_")) {
       globalMemberId = params.memberRef;
     } else {

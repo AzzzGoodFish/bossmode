@@ -1,4 +1,4 @@
-import { resolveRoomMemberRef } from "../../chat/room-store.js";
+import { resolveRoomMemberRef } from "../../chat/conversations.js";
 import { memberTokenTotal } from "../../data/repositories/event-repository.js";
 export interface MemberTokenUsageSummary { totalTokens: number }
 export function getRoomMemberTokenUsage(roomId: string,memberRef: string): MemberTokenUsageSummary {

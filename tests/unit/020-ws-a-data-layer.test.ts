@@ -1,15 +1,16 @@
+import { detachMemberFromConversations } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
+import { storeRoom } from "../../src/chat/conversations.js";
+import { MemberArchiveService } from "../../src/member/archive.js";
 import {
   scopeIdOf,
   parseScopeId,
   scopeDirName,
   parseScopeDirName,
   instanceKey,
-} from "../../src/chat/conversation-ref.js";
+} from "../../src/chat/conversations.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => { fixture = coreFixture(); });
@@ -51,14 +52,14 @@ describe("ConversationRef / ScopeId", () => {
 
 describe("member-registry", () => {
   it("creates unique members, rejects name clash, renames, fires", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const a = reg.createMember({ name: "pm", agentTemplate: "pm", model: "anthropic/claude" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const a = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "anthropic/claude" });
     expect(a.id).toMatch(/^mem_/);
     expect(a.unifiedModel).toBe(true);
     expect(a.global.model).toBe("anthropic/claude");
 
-    expect(() => reg.createMember({ name: "pm", agentTemplate: "pm" })).toThrow(/taken/i);
-    expect(() => reg.createMember({ name: "PM", agentTemplate: "pm" })).toThrow(/taken/i);
+    expect(() => __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" })).toThrow(/taken/i);
+    expect(() => __reg_app_member_actions.createMember({ name: "PM", agentTemplate: "pm" })).toThrow(/taken/i);
 
     const renamed = reg.renameMember(a.id, "project-pm");
     expect(renamed.name).toBe("project-pm");
@@ -67,20 +68,20 @@ describe("member-registry", () => {
     expect(reg.resolveMemberRef("project-pm")?.id).toBe(a.id);
     expect(reg.resolveMemberRef(a.id)?.name).toBe("project-pm");
 
-    const { archived } = await new MemberArchiveService(fixture.db, fixture.root, {quiesce: async () => {}}).archive(a.id, {confirm: true});
+    const { archived } = await new MemberArchiveService(fixture.db, fixture.root, { detachFromConversations: detachMemberFromConversations, quiesce: async () => {}}).archive(a.id, {confirm: true});
     expect(archived.startsWith(`backups/fired-${a.id}-`)).toBe(true);
     expect(reg.getMember(a.id)).toBeNull();
     expect(reg.listMembers()).toHaveLength(0);
   });
 
   it("scope overrides retired (batch-5b): patches write global, never scope", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({ name: "patchscope" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({ name: "patchscope" });
     reg.updateMember(m.id, { unifiedModel: false });
-    reg.applyMemberConfigPatch(m.id, "room:r1", { model: "scope-model" });
-    const eff = reg.getEffectiveConfig(m.id, "room:r1");
+    reg.applyMemberConfigPatch(m.id, { model: "scope-model" });
+    const eff = reg.getMemberConfiguration(m.id);
     expect(eff.model).toBe("scope-model");
-    expect(eff.sources.model).toBe("global");
+    expect(eff).not.toHaveProperty("sources");
     const rec = reg.getMember(m.id)!;
     expect(rec.scopeOverrides["room:r1"]).toBeUndefined();
     expect(rec.unifiedModel).toBe(true); // normalized on read
@@ -89,9 +90,9 @@ describe("member-registry", () => {
 
 describe("member-memory-store + dm-message-store", () => {
   it("writes persona and per-scope layers under member dir", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const mem = await import("../../src/member/memory/member-memory-store.js");
-    const m = reg.createMember({ name: "qa", agentTemplate: "qa" });
+    const m = __reg_app_member_actions.createMember({ name: "qa", agentTemplate: "qa" });
     mem.ensureMemorySkeleton(m.id, "dm:" + m.id);
     mem.writeMemoryLayer(m.id, "persona", "## Persona\nI am qa.\n", { type: "user" }, { reason: "init" });
     mem.writeMemoryLayer(
@@ -108,9 +109,9 @@ describe("member-memory-store + dm-message-store", () => {
   });
 
   it("dm messages append with seq and cursor", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const dm = await import("../../src/chat/dm-message-store.js");
-    const m = reg.createMember({ name: "arch", agentTemplate: "architect" });
+    const m = __reg_app_member_actions.createMember({ name: "arch", agentTemplate: "architect" });
     const m1 = dm.addDmMessage(m.id, { sender: "user", content: "hello", mentions: [] });
     const m2 = dm.addDmMessage(m.id, {
       sender: "arch",
@@ -132,11 +133,11 @@ describe("member-memory-store + dm-message-store", () => {
 
 describe("SQL chats aggregation and ID membership", () => {
   it("inviteGlobalMember stamps globalMemberIds; remove clears membership", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const g = reg.createMember({ name: "ops", agentTemplate: "general" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const g = __reg_app_member_actions.createMember({ name: "ops", agentTemplate: "general" });
     const roomId = "room-inv-1";
-    new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "ops-room", members: [], globalMemberIds: [], createdAt: 1});
+    storeRoom({id: roomId, name: "ops-room", members: [], globalMemberIds: [], createdAt: 1}, fixture.db);
 
     const invited = roomStore.inviteGlobalMember(roomId, {
       id: g.id,
@@ -157,12 +158,12 @@ describe("SQL chats aggregation and ID membership", () => {
   });
 
   it("stampGlobalMemberIds after invite matches memberIds create path", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const a = reg.createMember({ name: "alice", agentTemplate: "general" });
-    const b = reg.createMember({ name: "bob", agentTemplate: "general" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const a = __reg_app_member_actions.createMember({ name: "alice", agentTemplate: "general" });
+    const b = __reg_app_member_actions.createMember({ name: "bob", agentTemplate: "general" });
     const roomId = "room-mid-1";
-    new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "r2", members: [], globalMemberIds: [], createdAt: 1});
+    storeRoom({id: roomId, name: "r2", members: [], globalMemberIds: [], createdAt: 1}, fixture.db);
     // Invite both by global id — membership is globalMemberIds only
     expect(roomStore.inviteGlobalMember(roomId, { id: a.id, name: a.name, agentTemplate: "general" }).ok).toBe(true);
     expect(roomStore.inviteGlobalMember(roomId, { id: b.id, name: b.name, agentTemplate: "general" }).ok).toBe(true);
@@ -176,11 +177,11 @@ describe("SQL chats aggregation and ID membership", () => {
   });
 
   it("user read cursor drives unread after mark-read", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const dm = await import("../../src/chat/dm-message-store.js");
     const cursors = await import("../../src/chat/user-read-cursors.js");
-    const { scopeIdOf } = await import("../../src/chat/conversation-ref.js");
-    const m = reg.createMember({ name: "chatty", agentTemplate: "general" });
+    const { scopeIdOf } = await import("../../src/chat/conversations.js");
+    const m = __reg_app_member_actions.createMember({ name: "chatty", agentTemplate: "general" });
     const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
     const a = dm.addDmMessage(m.id, { sender: "user", content: "hi", mentions: [] });
     dm.addDmMessage(m.id, { sender: "chatty", content: "yo @fish", mentions: [], senderMemberId: m.id });

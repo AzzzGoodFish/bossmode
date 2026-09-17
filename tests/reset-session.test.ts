@@ -1,3 +1,4 @@
+import { loadMemberPromptSource } from "../src/app/member-actions.js";
 import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 
 import { mainSessionDirectory } from "../src/files/layout.js";
@@ -9,10 +10,11 @@ import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
 import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
 
-import { createMember, updateMemberIdentity } from "../src/member/member-registry.js";
-import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/room-store.js";
+import { createMember } from "../src/app/member-actions.js";
+import { updateMemberIdentity } from "../src/member/identity.js";
+import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/chat/conversations.js";
 import { addMessage } from "../src/chat/message-store.js";
-import * as sessionStore from "../src/member/session-store.js";
+import * as sessionStore from "../src/member/sessions.js";
 import { loadEventsFromDisk } from "../src/agent/events/event-handler.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/server/ws.js";
 
@@ -53,7 +55,7 @@ beforeEach(() => {
   runtime = new MockRuntime("pi-cli");
   const registry = new RuntimeRegistry();
   registry.register(runtime);
-  initAgentManager(registry);
+  initAgentManager(registry, loadMemberPromptSource);
 });
 
 afterEach(async () => {

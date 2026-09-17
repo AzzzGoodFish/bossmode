@@ -6,9 +6,9 @@ import {openDatabase,applyStorageMigrations,bindDatabase,type Database} from "..
 import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyArchives } from "../../src/app/upgrade/assets.js";
-import {MembersRepository} from "../../src/data/repositories/members.js";
-import {MemberArchivesRepository} from "../../src/data/repositories/member-archives.js";
-import {getConversationMember} from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity, listMembers, getRetainedMember, getMember } from "../../src/member/identity.js";
+import { readMemberArchiveCatalog } from "../../src/member/archive.js";
+import {readMemberIdentity} from "../../src/member/identity.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
@@ -24,22 +24,22 @@ const archive="backups/fired-old-2026-09-09T00-00-00-000Z";
 const record={id:"mem_old",name:"reused-name",agentTemplate:"general",global:{},createdAt:1,updatedAt:2,unifiedModel:true,unifiedExtensions:true,scopeOverrides:{}};
 it("retains a fired ID without making it active or assigning the current reused name",()=>{
  const {ctx,entries}=setup({[`${archive}/member.json`]:JSON.stringify(record),[`${archive}/member.md`]:'---\ntitle: Old title\n---\n  old body\r\n'});
- const members=new MembersRepository(ctx.db);members.insert({...record,id:"mem_current"});
+ const members=ctx.db;insertMemberIdentity({...record,id:"mem_current"}, members);
  expect(importLegacyArchives(ctx,entries).size).toBe(entries.length);
- expect(members.list().map(m=>m.id)).toEqual(["mem_current"]);expect(members.getRetained("mem_old")?.name).toBe("reused-name");
- expect(getConversationMember("mem_old")).toBeNull();
- expect(new MemberArchivesRepository(ctx.db).get(archive,"reused-name")).toMatchObject({memberId:"mem_old",personaFormat:"frontmatter",hasPersona:true,title:"Old title"});
+ expect(listMembers(members).map(m=>m.id)).toEqual(["mem_current"]);expect(getRetainedMember("mem_old", members)?.name).toBe("reused-name");
+ expect(readMemberIdentity("mem_old")).toBeNull();
+ expect(readMemberArchiveCatalog(archive,"reused-name", ctx.db)).toMatchObject({memberId:"mem_old",personaFormat:"frontmatter",hasPersona:true,title:"Old title"});
 });
 it("relocates only manifest references present in the verified snapshot inventory",()=>{
  const dir="backups/legacy-test";const body=`${dir}/rooms/room-one/memory/members/old/principles.md`;
  const {ctx,entries}=setup({[`${dir}/manifest.json`]:JSON.stringify({members:[{name:"old",principlesPath:"/old/data/rooms/room-one/memory/members/old/principles.md"},{name:"missing",principlesPath:"/must/not/open/secrets.md"}]}),[body]:"retained body"});
- importLegacyArchives(ctx,entries);const catalog=new MemberArchivesRepository(ctx.db);
- expect(catalog.get(dir,"old")).toMatchObject({personaPath:body,hasPersona:true});
- expect(catalog.get(dir,"missing")?.personaPath).toBeUndefined();expect(catalog.get(dir,"missing")?.hasPersona).toBe(false);
+ importLegacyArchives(ctx,entries);const catalog=ctx.db;
+ expect(readMemberArchiveCatalog(dir,"old", catalog)).toMatchObject({personaPath:body,hasPersona:true});
+ expect(readMemberArchiveCatalog(dir,"missing", catalog)?.personaPath).toBeUndefined();expect(readMemberArchiveCatalog(dir,"missing", catalog)?.hasPersona).toBe(false);
 });
 it("does not turn a backup snapshot of a still-live ID into its archive authority",()=>{
- const {ctx,entries}=setup({[`${archive}/member.json`]:JSON.stringify(record)});const members=new MembersRepository(ctx.db);members.insert(record);
- importLegacyArchives(ctx,entries);expect(members.get("mem_old")).not.toBeNull();expect(new MemberArchivesRepository(ctx.db).get(archive,record.name)?.memberId).toBeUndefined();
+ const {ctx,entries}=setup({[`${archive}/member.json`]:JSON.stringify(record)});const members=ctx.db;insertMemberIdentity(record, members);
+ importLegacyArchives(ctx,entries);expect(getMember("mem_old", members)).not.toBeNull();expect(readMemberArchiveCatalog(archive,record.name, ctx.db)?.memberId).toBeUndefined();
 });
 it("refuses ambiguous physical locations for one archived ID",()=>{
  const second="backups/fired-copy-2026-09-09T01-00-00-000Z";

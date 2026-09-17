@@ -29,18 +29,18 @@ const PLATFORM_MCP = {
 };
 
 async function seedMcpOwner(id: string) {
-  const { importMemberRecord } = await import("../../src/member/member-registry.js");
+  const { importMemberRecord } = await import("../../src/app/member-actions.js");
   importMemberRecord({ id, name: id, agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
     global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
     scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-  const { ConversationsRepository } = await import("../../src/data/repositories/conversations.js");
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "r1", name: "MCP", members: [id], globalMemberIds: [id], createdAt: 1 });
+  const { storeRoom } = await import("../../src/chat/conversations.js");
+  storeRoom({ id: "r1", name: "MCP", members: [id], globalMemberIds: [id], createdAt: 1 }, fixture.db);
   mkdirSync(join(dir, "members", id), { recursive: true });
 }
 
 describe("SQL member MCP configuration as sole live source", () => {
   it("no member config → scoped config is empty (adapter stays bound)", async () => {
-    const { writeMemberScopedMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
+    const { writeMemberScopedMcpConfig } = await import("../../src/member/mcp.js");
     await seedMcpOwner("mem_x");
     const scoped = writeMemberScopedMcpConfig({ roomId: "r1", memberId: "mem_x" });
     const text = readFileSync(scoped.configPath, "utf-8");
@@ -50,7 +50,7 @@ describe("SQL member MCP configuration as sole live source", () => {
   });
 
   it("SQL member servers pass through; conflicting legacy file is ignored", async () => {
-    const { writeMemberScopedMcpConfig, writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
+    const { writeMemberScopedMcpConfig, writeMemberMcpConfig } = await import("../../src/member/mcp.js");
     await seedMcpOwner("mem_y");
     writeMemberMcpConfig("mem_y", PLATFORM_MCP);
     writeFileSync(join(dir, "members", "mem_y", "mcp.json"), '{"mcpServers":{}}');

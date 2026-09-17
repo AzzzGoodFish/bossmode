@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverMemberExtensions, discoverMemberExtensionEntries } from "../../src/member/assets/member-extensions.js";
+import { discoverMemberExtensions, discoverMemberExtensionEntries } from "../../src/member/extensions.js";
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "bm-ext-inventory-")); });

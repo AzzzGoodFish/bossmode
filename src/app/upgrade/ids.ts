@@ -1,6 +1,6 @@
 import { newMemberId, newRoomId, MEMBER_ID_PREFIX } from "../../kernel/ids.js";
 import { join, dirname } from "node:path";
-import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../../chat/conversation-ref.js";
+import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../../chat/conversations.js";
 import { readdirSync, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { logger } from "../../kernel/logger.js";
 import { inspectDatabase, type Database } from "../../data/database.js";

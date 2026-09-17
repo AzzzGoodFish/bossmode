@@ -16,10 +16,10 @@ afterEach(() => fixture.close());
 
 describe("room description (⑤ A)", () => {
   it("copy migration seeds description from legacy room-principles.md once", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { copyRoomPrinciplesToDescriptions } = await import("../../src/app/upgrade/retirements.js");
-    const pm = reg.createMember({ name: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project X", undefined, [pm.id], undefined, { promptLeaderMemberId: pm.id });
     mkdirSync(join(dir, "rooms", room.id, "memory"), { recursive: true });
     writeFileSync(join(dir, "rooms", room.id, "memory", "room-principles.md"), "Legacy principles body\n", "utf-8");
@@ -34,10 +34,10 @@ describe("room description (⑤ A)", () => {
   });
 
   it("an existing description is left untouched by the copy", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { copyRoomPrinciplesToDescriptions } = await import("../../src/app/upgrade/retirements.js");
-    const pm = reg.createMember({ name: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project Y", undefined, [pm.id], undefined, { description: "Fresh description" });
     mkdirSync(join(dir, "rooms", room.id, "memory"), { recursive: true });
     writeFileSync(join(dir, "rooms", room.id, "memory", "room-principles.md"), "Legacy body\n", "utf-8");
@@ -47,9 +47,9 @@ describe("room description (⑤ A)", () => {
   });
 
   it("updateRoomDescription sets, clears and enforces the 2000-char limit", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const pm = reg.createMember({ name: "pm" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm" });
     const room = roomStore.createRoom("Project Z", undefined, [pm.id]);
 
     expect(roomStore.updateRoomDescription(room.id, "  hello  ")?.description).toBe("hello");
@@ -59,11 +59,11 @@ describe("room description (⑤ A)", () => {
   });
 
   it("chat_create / chat_edit / chat_info / chat_list carry the room description", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-    const pm = reg.createMember({ name: "pm" });
-    const dev = reg.createMember({ name: "dev" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm" });
+    const dev = __reg_app_member_actions.createMember({ name: "dev" });
 
     const created = await handleToolCallback("chat_create", `dm:${pm.id}`, pm.id, {
       name: "Design sync",

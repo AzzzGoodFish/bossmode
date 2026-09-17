@@ -2,7 +2,7 @@ import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
   writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
+  storeRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] }, fixture.db);
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
@@ -43,7 +43,7 @@ describe("mainline-store", () => {
     expect(saved.revision).toBe(1);
     expect(readMainline("room-a", "rm_1").content).toBe(content);
     const { readFileSync } = await import("node:fs");
-    const { listDocumentHistory } = await import("../../src/data/repositories/document-repository.js");
+    const { listDocumentHistory } = await import("../../src/member/assets.js");
     const history = listDocumentHistory(fixture.db, "rooms/room-a/memory/members/rm_1/mainline.md");
     expect(history).toHaveLength(1);
     expect(readFileSync(join(tmpDir, history[0].snapshotPath), "utf8")).toBe(content);

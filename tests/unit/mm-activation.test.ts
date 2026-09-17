@@ -3,7 +3,7 @@ import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, 
 import { resetMocks, mockPromptFn } from "../helpers/mock-runtime.js";
 import { getDatabase } from "../../src/data/database.js";
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
-import { mmScopeIdOf } from "../../src/chat/conversation-ref.js";
+import { mmScopeIdOf } from "../../src/chat/conversations.js";
 setupTestWorkspace();
 
 // Batch 4 QA fix: the engine gate (`memberHasScopeAccess`) must accept pair

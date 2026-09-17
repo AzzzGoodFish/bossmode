@@ -1,7 +1,7 @@
 import {beforeEach,afterEach,it,expect,vi} from "vitest";
 import {coreFixture} from "../helpers/core-fixture.js";
-import {MembersRepository} from "../../src/data/repositories/members.js";
-import {ConversationsRepository} from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom } from "../../src/chat/conversations.js";
 import {DeliveryRepository} from "../../src/data/repositories/delivery-repository.js";
 import {InputQueueRepository} from "../../src/data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
@@ -12,9 +12,9 @@ import {acceptControlInput,acceptRuntimeInput,claimRuntimeInputs,finishRuntimeIn
 let f:ReturnType<typeof coreFixture>;
 const owner={scopeId:"input-room",targetActorKey:"mem_input"};
 beforeEach(()=>{
-  f=coreFixture();const members=new MembersRepository(f.db),rooms=new ConversationsRepository(f.db);
-  members.insert({id:"mem_input",name:"Input",agentTemplate:"general",global:{},unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:1});
-  rooms.ensureDmScope("mem_input");rooms.upsertRoom({id:"input-room",name:"Inputs",members:["Input"],globalMemberIds:["mem_input"],createdAt:1});
+  f=coreFixture();const members=f.db,rooms=f.db;
+  insertMemberIdentity({id:"mem_input",name:"Input",agentTemplate:"general",global:{},unifiedModel:true,unifiedExtensions:true,scopeOverrides:{},createdAt:1,updatedAt:1}, members);
+  ensureDmScope("mem_input", rooms);storeRoom({id:"input-room",name:"Inputs",members:["Input"],globalMemberIds:["mem_input"],createdAt:1}, rooms);
 });
 afterEach(()=>f.close());
 const control=(prompt:string,placement:"front"|"tail"="tail")=>acceptControlInput(owner.scopeId,owner.targetActorKey,{prompt,source:"system",trigger:"manual"},true,placement).input;

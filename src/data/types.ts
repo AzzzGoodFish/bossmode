@@ -63,30 +63,3 @@ export interface MemberStats {
   cost: number;
   updatedAt?: number;
 }
-
-export interface OriginalWorkspace {
-  id: string;
-  kind: "original";
-  description: string;
-  root: string;
-  builtin: true;
-}
-
-export interface SshWorkspace {
-  id: string;
-  kind: "ssh";
-  description: string;
-  host: string;
-  port: number;
-  user: string;
-  keyPath: string;
-  root: string;
-  builtin?: false;
-}
-
-export type WorkspaceEntry = OriginalWorkspace | SshWorkspace;
-
-export interface WorkspaceRegistry {
-  active: string;
-  workspaces: WorkspaceEntry[];
-}

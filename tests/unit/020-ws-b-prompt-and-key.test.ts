@@ -25,17 +25,17 @@ describe("020 WS-B prompt + instanceKey", () => {
   });
 
   it("instanceKey is member-only (one runtime per member, ① B1)", async () => {
-    const { scopeIdOf, instanceKey } = await import("../../src/chat/conversation-ref.js");
+    const { scopeIdOf, instanceKey } = await import("../../src/chat/conversations.js");
     const scope = scopeIdOf({ kind: "room", roomId: "abc" });
     expect(scope).toBe("room:abc");
     expect(instanceKey("mem_x")).toBe("mem_x");
   });
 
-  it("compileMemberPrompt (② batch 2) is Persona → Environment → Communication → Memory → Workspace → Assets", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
+  it("previewMemberPrompt (② batch 2) is Persona → Environment → Communication → Memory → Workspace → Assets", async () => {
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
 
-    const member = reg.createMember({ name: "architect", agentTemplate: "architect" });
+    const member = __reg_app_member_actions.createMember({ name: "architect", agentTemplate: "architect" });
     // Grow persona body beyond birth skeleton.
     writeFileSync(
       join(dir, "members", member.id, "persona.md"),
@@ -43,7 +43,7 @@ describe("020 WS-B prompt + instanceKey", () => {
       "utf-8",
     );
 
-    const compiled = compileMemberPrompt({ memberId: member.id, memberName: "architect" });
+    const compiled = previewMemberPrompt(member.id);
 
     const ids = compiled.sections.filter((s) => s.included).map((s) => s.id);
     expect(ids).toEqual(["persona", "environment", "communication", "memory", "workspace", "assets"]);
@@ -58,12 +58,12 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(compiled.fullPrompt).not.toContain("## Room Principles");
   });
 
-  it("compileMemberPrompt (dm-side member) shares one scope-free prompt", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
+  it("previewMemberPrompt (dm-side member) shares one scope-free prompt", async () => {
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
 
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const compiled = compileMemberPrompt({ memberId: member.id, memberName: "pm" });
+    const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
+    const compiled = previewMemberPrompt(member.id);
 
     expect(compiled.envPrompt).toContain("- You are pm (");
     expect(compiled.envPrompt).not.toContain("private chat");
@@ -89,19 +89,19 @@ describe("020 WS-B prompt + instanceKey", () => {
     expect(familyEnabled("room:r1", "chat_edit", { isRoomLeader: true })).toBe(true);
   });
 
-  it("getEffectiveConfig is global-only (unified flags retired, batch-5b)", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const member = reg.createMember({
+  it("getMemberConfiguration is global-only (unified flags retired, batch-5b)", async () => {
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const member = __reg_app_member_actions.createMember({
       name: "dev",
       agentTemplate: "developer",
       model: "global/model",
       credentialId: "cred-g",
       unifiedModel: false,
     });
-    reg.patchScopeOverride(member.id, "room:r1", { model: "scope/model", credentialId: "cred-s" });
-    const eff = reg.getEffectiveConfig(member.id, "room:r1");
+    expect(reg).not.toHaveProperty("patchScopeOverride");
+    const eff = reg.getMemberConfiguration(member.id);
     expect(eff.model).toBe("global/model");
     expect(eff.credentialId).toBe("cred-g");
-    expect(eff.sources.model).toBe("global");
+    expect(eff).not.toHaveProperty("sources");
   });
 });

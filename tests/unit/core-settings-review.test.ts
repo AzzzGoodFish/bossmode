@@ -8,16 +8,16 @@ import { openDatabase, bindDatabase, applyStorageMigrations, type Database } fro
 const baseStorageMigration = getMigration("core-base-v1");
 const settingsMigration = getMigration("core-settings-v1");
 import { importModelProfile, replaceCredentialStore, readCredentialStore, credentialRevision } from "../../src/config/models.js";
-import { WorkspacesRepository, SshCredentialsRepository } from "../../src/data/repositories/workspace-settings.js";
-import { McpSettingsRepository } from "../../src/data/repositories/mcp-settings.js";
+import { readWorkspaceRegistry, importWorkspaceRegistry, importSshCredential } from "../../src/member/workspaces.js";
+import { importMcpConfiguration } from "../../src/member/mcp.js";
 
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { saveModelCredentialProfile, deleteModelCredentialProfile, getModelCredentialProfile } from "../../src/config/models.js";
 import { startNativeOAuthConnection, startOAuthLoginJob, getOAuthLoginJob, setOAuthLoginAdapterForTests } from "../../src/config/oauth.js";
 import { setPiCatalogModelsForTests } from "../../src/config/catalog.js";
 import { createCredentialStore } from "../../src/config/pi-adapt/credentials.js";
-import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/member/workspaces/workspace-registry.js";
-import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/member/mcp/mcp-settings.js";
+import { createWorkspace, useWorkspace, removeWorkspace, readWorkspaces, ensureDefaultRegistry, originalWorkspace } from "../../src/member/workspaces.js";
+import { writeMcpConfig, readRedactedMcpConfigText, sanitizeMcpError, restoreRedactedMcpConfig } from "../../src/member/mcp.js";
 
 let root: string, db: Database, other: Database, repo: Database;
 function profile(id = "a", patch: Partial<ModelCredentialProfile> = {}): ModelCredentialProfile {
@@ -94,8 +94,8 @@ describe("review: concurrent service operations", () => {
   it.each(["register", "switch", "remove"])("workspace %s preserves concurrent additions", operation => {
     ensureDefaultRegistry("member"); createWorkspace("member", ssh("first"));
     const finish = interposeRead("SELECT * FROM workspaces WHERE member_id=? ORDER BY position", () => {
-      const r = new WorkspacesRepository(other), registry = r.read("member")!;
-      r.importRegistry("member", { ...registry, workspaces: [...registry.workspaces, ssh("concurrent")] });
+      const r = other, registry = readWorkspaceRegistry("member", r)!;
+      importWorkspaceRegistry("member", { ...registry, workspaces: [...registry.workspaces, ssh("concurrent")] }, r);
     });
     const result = operation === "register" ? createWorkspace("member", ssh("second")) : operation === "switch" ? useWorkspace("member", "first") : removeWorkspace("member", "first");
     expect(result.ok).toBe(true); finish();
@@ -178,10 +178,10 @@ describe("review: settings import identities", () => {
       switch (kind) {
         case "profile": importModelProfile({ ...profile(), id: null as any, models: [] }, undefined, repo); break;
         case "migration": replaceCredentialStore({ profiles: [profile()], migrations: [null as any] }, repo); break;
-        case "mcp-owner": new McpSettingsRepository(db, null as any).importConfig({ mcpServers: {} }); break;
-        case "workspace-owner": new WorkspacesRepository(db).importRegistry(null as any, { active: "original", workspaces: [originalWorkspace("m")] }); break;
-        case "workspace-id": new WorkspacesRepository(db).importRegistry("m", { active: "original", workspaces: [originalWorkspace("m"), { ...ssh("x"), id: null as any }] }); break;
-        case "ssh-owner": new SshCredentialsRepository(db).importKey(null as any, { privateKey: "private", publicKey: "public" }); break;
+        case "mcp-owner": importMcpConfiguration({ mcpServers: {} }, null as any, db); break;
+        case "workspace-owner": importWorkspaceRegistry(null as any, { active: "original", workspaces: [originalWorkspace("m")] }, db); break;
+        case "workspace-id": importWorkspaceRegistry("m", { active: "original", workspaces: [originalWorkspace("m"), { ...ssh("x"), id: null as any }] }, db); break;
+        case "ssh-owner": importSshCredential(null as any, { privateKey: "private", publicKey: "public" }, db); break;
         case "session-hash": importAuthSession(null as any, 100, db); break;
       }
     })).toThrow();

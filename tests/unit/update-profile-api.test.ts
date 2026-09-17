@@ -11,7 +11,7 @@ it("global PATCH publishes committed profile to authenticated clients and reject
     const request = (method: string, path: string, body?: unknown) => jsonRequest(server.port, method, path, { token, body });
     const created = await request("POST", "/api/members", { name: "Api before", title: "Original" });
     const id = JSON.parse(created.body).member.memberId;
-    const rooms = await import("../../src/chat/room-store.js");
+    const rooms = await import("../../src/chat/conversations.js");
     const room = rooms.createRoom("Profile API", undefined, []);
     rooms.stampGlobalMemberIds(room.id, [id]);
     ws = new WebSocket(`${server.wsUrl}?token=${token}`);

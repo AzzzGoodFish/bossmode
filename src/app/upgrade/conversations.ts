@@ -8,7 +8,7 @@ import { importAgentEvent, readAgentEvent, type EventPayload, rebuildEventAggreg
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { archiveRawRetiredSource } from "./retirements.js";
-import { ConversationsRepository } from "../../data/repositories/conversations.js";
+import { storeRoom } from "../../chat/conversations.js";
 import { MessageArchivesRepository, type ArchiveSummary } from "../../data/repositories/message-archives.js";
 import { UserCursorRepository } from "../../data/repositories/user-cursor-repository.js";
 import { importMessage, importMessageNextSequence, importArchivedMessage, writeMemberCursor, writeDmMemberCursor } from "../../data/repositories/message-repository.js";
@@ -165,11 +165,11 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();
  const check=(e:LegacySourceEntry)=>{if(!ctx.sourceFiles.includes(e.path))throw new Error(`Unsnapshotted conversation source: ${e.path}`);};
  const read=(e:LegacySourceEntry)=>{check(e);return readLegacyJson(ctx.sourceRoot,e);};
- const conversations=new ConversationsRepository(ctx.db);
+ const conversations=ctx.db;
  for(const e of entries.filter(e=>e.kind==="room-metadata")){
   const room=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`) as Room;
   if(room.id!==e.scopeId)throw new Error(`Room source ownership mismatch: ${e.path}`);
-  conversations.upsertRoom(room);consumed.add(e.path);
+  storeRoom(room, conversations);consumed.add(e.path);
  }
  let completed=0;const provenSources:ImportEventSource[]=[];
  for(const e of entries){

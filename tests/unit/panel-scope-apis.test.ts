@@ -1,4 +1,4 @@
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 /**
  * 0.20 flagship ② — unified member panel scope plumbing (backend half).
@@ -20,8 +20,8 @@ let dir: string;
 
 
 async function seedMember(name: string, flags?: { unifiedModel?: boolean; unifiedExtensions?: boolean }) {
-  const reg = await import("../../src/member/member-registry.js");
-  const member = reg.createMember({ name, agentTemplate: name });
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+  const member = __reg_app_member_actions.createMember({ name, agentTemplate: name });
   if (flags) reg.updateMember(member.id, flags);
   return { reg, member: reg.getMember(member.id)! };
 }
@@ -36,7 +36,7 @@ describe("applyMemberConfigPatch — unified write authority", () => {
 
   it("unifiedModel member: model/thinking go global, no scope override written", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: true });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "anthropic/claude-x", thinkingLevel: "high" });
+    reg.applyMemberConfigPatch(member.id, { model: "anthropic/claude-x", thinkingLevel: "high" });
     const rec = reg.getMember(member.id)!;
     expect(rec.global.model).toBe("anthropic/claude-x");
     expect(rec.global.thinkingLevel).toBe("high");
@@ -46,7 +46,7 @@ describe("applyMemberConfigPatch — unified write authority", () => {
   it("batch-5b: scoped member writes land global (flags ignored)", async () => {
     const { reg, member } = await seedMember("scopedflow", { unifiedModel: false });
     const memberId = member.id;
-    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: "openai/gpt-x", thinkingLevel: "high" });
+    reg.applyMemberConfigPatch(memberId, { model: "openai/gpt-x", thinkingLevel: "high" });
     const rec = reg.getMember(memberId)!;
     expect(rec.global.model).toBe("openai/gpt-x");
     expect(rec.global.thinkingLevel).toBe("high");
@@ -56,8 +56,8 @@ describe("applyMemberConfigPatch — unified write authority", () => {
   it("batch-5b: mixed-flag member writes everything global", async () => {
     const { reg, member } = await seedMember("mixedflow", { unifiedModel: true, unifiedExtensions: false });
     const memberId = member.id;
-    new ConversationsRepository(fixture.db).upsertRoom({ id: "room-1", name: "Room", members: [member.name], globalMemberIds: [memberId], createdAt: 1 });
-    reg.applyMemberConfigPatch(memberId, "room:room-1", { model: "m1", mcpServers: ["web"] });
+    storeRoom({ id: "room-1", name: "Room", members: [member.name], globalMemberIds: [memberId], createdAt: 1 }, fixture.db);
+    reg.applyMemberConfigPatch(memberId, { model: "m1", mcpServers: ["web"] });
     const rec = reg.getMember(memberId)!;
     expect(rec.global.model).toBe("m1");
     expect(rec.global.mcpServers).toEqual(["web"]);
@@ -67,8 +67,8 @@ describe("applyMemberConfigPatch — unified write authority", () => {
   it("batch-5b: null clears the global field (scope overrides gone)", async () => {
     const { reg, member } = await seedMember("clearflow", { unifiedModel: false });
     const memberId = member.id;
-    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: "m1" });
-    reg.applyMemberConfigPatch(memberId, `dm:${memberId}`, { model: null });
+    reg.applyMemberConfigPatch(memberId, { model: "m1" });
+    reg.applyMemberConfigPatch(memberId, { model: null });
     const rec = reg.getMember(memberId)!;
     expect(rec.global.model).toBeNull();
     expect(rec.scopeOverrides[`dm:${memberId}`]).toBeUndefined();
@@ -76,18 +76,18 @@ describe("applyMemberConfigPatch — unified write authority", () => {
 
   it("batch-5b: null clear never creates a scope entry", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: false });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "m1" });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: null });
+    reg.applyMemberConfigPatch(member.id, { model: "m1" });
+    reg.applyMemberConfigPatch(member.id, { model: null });
     expect(reg.getMember(member.id)!.scopeOverrides[`dm:${member.id}`]).toBeUndefined();
   });
 
   it("batch-5b: effective config reads the global config (flags ignored)", async () => {
     const { reg, member } = await seedMember("dev", { unifiedModel: false });
     reg.updateMember(member.id, { global: { model: "global-model" } });
-    reg.applyMemberConfigPatch(member.id, `dm:${member.id}`, { model: "dm-model" });
-    const eff = reg.getEffectiveConfig(member.id, `dm:${member.id}`);
+    reg.applyMemberConfigPatch(member.id, { model: "dm-model" });
+    const eff = reg.getMemberConfiguration(member.id);
     expect(eff.model).toBe("dm-model");
-    expect(eff.sources.model).toBe("global");
+    expect(eff).not.toHaveProperty("sources");
   });
 });
 

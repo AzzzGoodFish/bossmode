@@ -1,26 +1,16 @@
 import { readConfig } from "../config/settings.js";
 
 import { postMessage } from "../chat/message-bus.js";
-import { archiveMember } from "../member/archive/member-archive-service.js";
-import { updateProfileForMember, InvalidProfileError } from "../member/profile/member-profile-update.js";
+import { archiveMember } from "../app/member-actions.js";
+import { updateProfileForMember, InvalidProfileError } from "../member/profile.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
 import { addRoute, sendJson, parseBody } from "./index.js";
 import { logger } from "../kernel/logger.js";
-import {
-  listMembers,
-  listMemberIdentities,
-  getMember,
-  createMember,
-  updateMember,
-  resolveMemberRef,
-  getEffectiveConfig,
-  MemberNameTakenError,
-  MemberNotFoundError,
-  type MemberRecord,
-} from "../member/member-registry.js";
+import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
+import { createMember } from "../app/member-actions.js";
 import { readMemoryLayer, readMemoryLayerInfo } from "../member/memory/member-memory-store.js";
 import * as mainlineStore from "../chat/mainline-store.js";
 import * as principlesStore from "../member/memory/principles-store.js";
@@ -28,19 +18,19 @@ import {
   readAllDmMessages,
   getLatestDmSeq,
 } from "../chat/dm-message-store.js";
-import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp/mcp-settings.js";
-import { listMemberExtensions } from "../member/assets/member-extensions.js";
-import { listMemberSkills } from "../member/skills/skill-catalog.js";
-import { activeWorkspaceRoot, listWorkspaces } from "../member/workspaces/workspace-registry.js";
-import { readMemberSshPublicKey } from "../member/workspaces/ssh-keygen.js";
-import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversation-ref.js";
+import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
+import { listMemberExtensions } from "../member/extensions.js";
+import { listMemberSkills } from "../member/skills.js";
+import { activeWorkspaceRoot, readWorkspaces } from "../member/workspaces.js";
+import { readMemberSshPublicKey } from "../member/workspaces.js";
+import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/orchestrator/agent-manager.js";
-import * as roomStore from "../chat/room-store.js";
+import * as roomStore from "../chat/conversations.js";
 import * as messageStore from "../chat/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
 
 import type { RoomMessage } from "../kernel/types.js";
-import { readMemberProfile } from "../member/profile/member-profile.js";
+import { readMemberProfile } from "../member/profile.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -350,14 +340,14 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       return;
     }
 
-    const { compileMemberPrompt } = await import("../agent/prompt/prompt-compiler.js");
-    const { getRoom, resolveRoomMemberRef } = await import("../chat/room-store.js");
+    const { previewMemberPrompt } = await import("../app/member-actions.js");
+    const { getRoom, resolveRoomMemberRef } = await import("../chat/conversations.js");
     const { getBossmodeDir } = await import("../files/layout.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../agent/prompt/system-prompt-final.js");
     const { memberRecordToConfig, resolveSkills } = await import("../agent/orchestrator/agent-manager.js");
     const { resolveRoomMember } = await import("../member/room-member-resolver.js");
-    const { resolveGlobalSkillPaths } = await import("../member/skills/skill-store.js");
+    const { resolveGlobalSkillPaths } = await import("../member/skills.js");
 
     const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
       cwd: string;
@@ -391,7 +381,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
         sendJson(res, 404, { error: "not_found", message: "Member not found" });
         return;
       }
-      const compiled = compileMemberPrompt({ memberId: m.id, memberName: member.name, description: m.title });
+      const compiled = previewMemberPrompt(m.id);
       respond(compiled, {
         cwd: activeWorkspaceRoot(m.id),
         member,
@@ -414,7 +404,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       ...resolveGlobalSkillPaths(skills),
     ];
 
-    const compiled = compileMemberPrompt({ memberId: member.id, memberName: member.name, description: m.title });
+    const compiled = previewMemberPrompt(member.id);
     respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
   } catch (err) {
     const e = errCode(err);
@@ -450,13 +440,13 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const beforeModel = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id })).model;
+    const beforeModel = getMemberConfiguration(m.id).model;
 
     // Model/credential: the one public switch method — validates, applies to
     // every live instance (room+DM) via the SDK, saves config once.
     let modelSwitch: Awaited<ReturnType<typeof switchMemberModel>> | undefined;
     if (body.model !== undefined || body.credentialId !== undefined) {
-      const eff = getEffectiveConfig(m.id, scopeIdOf({ kind: "dm", memberId: m.id }));
+      const eff = getMemberConfiguration(m.id);
       const targetModel = body.model !== undefined ? String(body.model) : eff.model;
       const targetCred = body.credentialId !== undefined ? (body.credentialId as string | null) : eff.credentialId;
       if (!targetModel || !targetCred) {
@@ -578,7 +568,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { readMemberProfile } = await import("../member/profile/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+    const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -622,7 +612,7 @@ addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
     .filter((s) => !s.platform)
     .map((s) => ({ name: s.name, path: s.path, description: s.description }));
 
-  const wsRegistry = listWorkspaces(m.id);
+  const wsRegistry = readWorkspaces(m.id);
   const active = wsRegistry.active;
   const workspaces = wsRegistry.workspaces.map((w) => ({
     id: w.id,
@@ -645,7 +635,7 @@ addRoute("GET", "/api/members/:id/skills", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { listMemberSkills } = await import("../member/skills/skill-catalog.js");
+    const { listMemberSkills } = await import("../member/skills.js");
     sendJson(res, 200, { skills: listMemberSkills(m.id) });
   } catch (err) {
     const e = errCode(err);
@@ -669,7 +659,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
       return;
     }
     if (layer === "profile") {
-      const { readMemberProfile } = await import("../member/profile/member-profile.js"); const { memberProfilePath } = await import("../files/layout.js");
+      const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
       const profile = readMemberProfile(m.id);
       sendJson(res, 200, {
         layer: "profile",
@@ -703,25 +693,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
   }
 });
 
-addRoute("GET", "/api/members/:id/effective-config", async (req, res, params) => {
-  try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const url = new URL(req.url || "", "http://localhost");
-    const scope = url.searchParams.get("scope") || scopeIdOf({ kind: "dm", memberId: m.id });
-    if (!parseScopeId(scope)) {
-      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
-      return;
-    }
-    sendJson(res, 200, getEffectiveConfig(m.id, scope));
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
-});
+
 
 // ── DM messages ──
 

@@ -6,10 +6,10 @@ let tmpDir = "";
 
 let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
 async function ensureRoom(roomId: string, extra: Record<string, unknown> = {}) {
-  const { ConversationsRepository } = await import("../../src/data/repositories/conversations.js");
-  new ConversationsRepository(fixture.db).upsertRoom({
+  const { storeRoom } = await import("../../src/chat/conversations.js");
+  storeRoom({
     id: roomId, name: `Room ${roomId}`, members: [], createdAt: 1, ...extra,
-  });
+  }, fixture.db);
 }
 
 function writeDoc(relPath: string, content: string): string {

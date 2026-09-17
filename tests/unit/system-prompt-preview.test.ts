@@ -33,15 +33,15 @@ describe("member system-prompt preview", () => {
     expect(body.charCount).toBe(body.text.length);
 
     // Same-process compile with the exact member-level arguments (② batch 2).
-    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
-    const { getMember } = await import("../../src/member/member-registry.js");
+    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
+    const { getMember } = await import("../../src/member/identity.js");
     const m = getMember(memberId)!;
-    const compiled = compileMemberPrompt({ memberId: m.id, memberName: m.name, description: m.title });
+    const compiled = previewMemberPrompt(m.id);
     // Final text = compiled segments + pi's trailing cwd line (byte-exact;
     // contract test in system-prompt-final.test.ts locks the full assembly).
     expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);
     // Batch 7 P1: session cwd = active workspace root (original → member dir).
-    const { activeWorkspaceRoot } = await import("../../src/member/workspaces/workspace-registry.js");
+    const { activeWorkspaceRoot } = await import("../../src/member/workspaces.js");
     const sessionCwd = activeWorkspaceRoot(memberId);
     expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}\n`)).toBe(true);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);

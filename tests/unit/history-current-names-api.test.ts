@@ -1,11 +1,11 @@
 import { it, expect, vi } from "vitest";
 import { setupTestWorkspace, createTestServer, closeTestServer, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
-import { createMemberWithPersona } from "../../src/member/member-registry.js";
-import { updateProfileForMember } from "../../src/member/profile/member-profile-update.js";
-import { createRoom } from "../../src/chat/room-store.js";
+import { createMemberWithPersona } from "../../src/app/member-actions.js";
+import { updateProfileForMember } from "../../src/member/profile.js";
+import { createRoom } from "../../src/chat/conversations.js";
 import { appendMessage, readMessages } from "../../src/data/repositories/message-repository.js";
 import { getDatabase } from "../../src/data/database.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
+import { retireMemberIdentity, getMember, getRetainedMember } from "../../src/member/identity.js";
 setupTestWorkspace();
 
 it("serves only canonical ID/name pairs, including retained archives, without reading their config/bodies", async () => {
@@ -14,9 +14,9 @@ it("serves only canonical ID/name pairs, including retained archives, without re
     const token = await loginAndGetToken(server.port);
     const live = createMemberWithPersona({name: "identity-live"}, "Literal persona");
     const retired = createMemberWithPersona({name: "identity-retired"}, "Retained persona");
-    const repo = new MembersRepository(getDatabase());
+    const repo = getDatabase();
     updateProfileForMember(retired.id, {name: "archive final name"});
-    repo.archive(retired.id, "backups/identity-retired", 5);
+    retireMemberIdentity(retired.id, "backups/identity-retired", 5, repo);
     const fresh = createMemberWithPersona({name: "identity-retired"}, "A different identity");
     expect((await jsonRequest(server.port,"GET","/api/members/identities")).status).toBe(401);
     const actualFetch = globalThis.fetch;
@@ -30,8 +30,8 @@ it("serves only canonical ID/name pairs, including retained archives, without re
       ]));
       expect(identities.every(identity => Object.keys(identity).sort().join() === "id,name")).toBe(true);
     } finally { vi.unstubAllGlobals(); }
-    expect(repo.get(retired.id)).toBeNull();
-    expect(repo.getRetained(retired.id)?.name).toBe("archive final name");
+    expect(getMember(retired.id, repo)).toBeNull();
+    expect(getRetainedMember(retired.id, repo)?.name).toBe("archive final name");
   } finally { await closeTestServer(server); }
 });
 

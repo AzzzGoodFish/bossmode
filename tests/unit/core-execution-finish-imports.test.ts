@@ -7,10 +7,10 @@ import { importLegacyMembers } from "../../src/app/upgrade/records.js";
 import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
 import { importLegacyDocuments } from "../../src/app/upgrade/assets.js";
 import { importLegacyExecution } from "../../src/app/upgrade/records.js";
-import { getDocument } from "../../src/data/repositories/document-repository.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import { getDocument } from "../../src/member/assets.js";
+import { insertMemberIdentity, getMember } from "../../src/member/identity.js";
+import { readStoredRoom, readMemberCursors } from "../../src/chat/conversations.js";
+import {  } from "../../src/member/sessions.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
@@ -35,7 +35,7 @@ function source(files: Record<string, unknown>) {
     stageAsset(path, bytes) { staged.set(path, Buffer.from(bytes)); }};
   return {ctx, entries, staged};
 }
-function seedMember() { new MembersRepository(fixture.db).insert(member); }
+function seedMember() { insertMemberIdentity(member, fixture.db); }
 const conversationSources = {
   "rooms/r/room.json": {id: "r", name: "Historical room", members: [], createdAt: 1},
   "rooms/r/topics/t/topic.json": {id: "t", roomId: "r", title: "Historical topic", anchorMessageId: "anchor",
@@ -51,11 +51,11 @@ describe("explicit historical identity import, not recurring name/marker repair"
       "rooms/r/room.json": room});
     const imported = importLegacyMembers(ctx, entries, "files");
     await importLegacyConversations(ctx, entries);
-    expect(new MembersRepository(fixture.db).get(member.id)).toMatchObject(member);
+    expect(getMember(member.id, fixture.db)).toMatchObject(member);
     expect(staged.get("members/mem_one/persona.md")?.toString()).toBe("## Persona\nLead well.\n");
     expect(imported.personas[0].updatedAt).toBe(22);
     fixture.reopen();
-    expect(new ConversationsRepository(fixture.db).getRoom("r")).toMatchObject(room);
+    expect(readStoredRoom("r", fixture.db)).toMatchObject(room);
     expect(fixture.db.get("SELECT member_id FROM scopes WHERE id='dm:mem_one'")).toEqual({member_id: member.id});
     // Reimporting identical conversation metadata is idempotent and emits no live work.
     await importLegacyConversations({...ctx, db: fixture.db}, entries);
@@ -69,11 +69,11 @@ describe("explicit historical identity import, not recurring name/marker repair"
     const {ctx, entries} = source({"rooms/r/room.json": room,
       ".migrations/member-global-v1.json": {done: true, at: 1}});
     await importLegacyConversations(ctx, entries);
-    const repo = new ConversationsRepository(fixture.db);
-    expect(repo.getRoom("r")).toEqual(room);
-    expect(repo.getRoom("r")?.globalMemberIds).toBeUndefined();
+    const repo = fixture.db;
+    expect(readStoredRoom("r", repo)).toEqual(room);
+    expect(readStoredRoom("r", repo)?.globalMemberIds).toBeUndefined();
     await importLegacyConversations(ctx, entries);
-    expect(repo.getRoom("r")).toEqual(room);
+    expect(readStoredRoom("r", repo)).toEqual(room);
     expect(fixture.db.all("SELECT * FROM room_members")).toEqual([]);
   });
 
@@ -83,7 +83,7 @@ describe("explicit historical identity import, not recurring name/marker repair"
       roomMembers: ["pm", "ghost"].map(name => ({id: `rm_${name}`, roomId: "r", name, sourceAgent: name, createdAt: 2, updatedAt: 3}))};
     const {ctx, entries} = source({"rooms/r/room.json": room});
     await importLegacyConversations(ctx, entries);
-    expect(new ConversationsRepository(fixture.db).getRoom("r")).toEqual(room);
+    expect(readStoredRoom("r", fixture.db)).toEqual(room);
     expect(fixture.db.all("SELECT * FROM room_members")).toEqual([]);
   });
 
@@ -167,7 +167,7 @@ describe("historical execution metadata uses stable IDs, explicit imports and so
       "user-read-cursors.json": {"room:r": user, "dm:mem_one": {...user, seq: null}, "topic:t": {...user, seq: 9}}});
     await importLegacyConversations(ctx, entries);
     fixture.reopen();
-    expect(new ConversationsRepository(fixture.db).getCursors("r")).toEqual({pm: "label-position", mem_one: "id-position"});
+    expect(readMemberCursors("r", fixture.db)).toEqual({pm: "label-position", mem_one: "id-position"});
     // Retired topic cursor keys are consumed by the retire flow, never imported.
     expect(new UserCursorRepository(fixture.db).list()).toEqual({"room:r": user, "dm:mem_one": {...user, seq: null}});
     expect(fixture.db.get("SELECT 1 FROM read_cursors WHERE scope_id LIKE 'topic:%'")).toBeUndefined();

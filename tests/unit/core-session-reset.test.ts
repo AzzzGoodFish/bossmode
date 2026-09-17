@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { setupTestWorkspace,createTestServer,closeTestServer,loginAndGetToken,createMockRoom } from "../helpers/test-server.js";
 import { getDatabase } from "../../src/data/database.js";
 import { resetAgentSession } from "../../src/agent/orchestrator/agent-manager.js";
-import * as sessions from "../../src/member/session-store.js";
-import * as rooms from "../../src/chat/room-store.js";
+import * as sessions from "../../src/member/sessions.js";
+import * as rooms from "../../src/chat/conversations.js";
 import * as runtime from "../../src/member/runtime-state.js";
-import { updateMemberIdentity } from "../../src/member/member-registry.js";
+import { updateMemberIdentity } from "../../src/member/identity.js";
 setupTestWorkspace();
 
 it.each(["checkpoint","cursor","event"])("reset is atomic through %s failure and never treats a display name as another session owner",async(fault)=>{

@@ -1,4 +1,5 @@
-import { createMember, findMemberByName } from "../../src/member/member-registry.js";
+import { createMember } from "../../src/app/member-actions.js";
+import { findMemberByName } from "../../src/member/identity.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   closeTestServer,
@@ -19,7 +20,7 @@ describe("member active tools", () => {
   });
 
   it("returns empty session when member has no running instance", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const agentManager = await import("../../src/agent/orchestrator/agent-manager.js");
     const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
     const result = agentManager.getMemberActiveTools(room.id, "pm");
@@ -33,7 +34,7 @@ describe("member active tools", () => {
     servers.push(ts);
     const token = await loginAndGetToken(ts.port);
 
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("API Tools", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
 
     const missRoom = await jsonRequest(ts.port, "GET", "/api/rooms/nope/members/pm/tools", { token });

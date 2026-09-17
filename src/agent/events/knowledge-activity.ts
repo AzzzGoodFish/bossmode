@@ -12,7 +12,7 @@ import { resolve, sep, relative, isAbsolute, join } from "node:path";
 
 import { postMessage } from "../../chat/message-bus.js";
 import { logger } from "../../kernel/logger.js";
-import * as roomStore from "../../chat/room-store.js";
+import * as roomStore from "../../chat/conversations.js";
 import type { KnowledgeEventMeta } from "../../kernel/types.js";
 
 function docsRoot(): string {

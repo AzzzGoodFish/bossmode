@@ -8,8 +8,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
 let fixture: ReturnType<typeof coreFixture>;
 let tools: typeof import("../../src/agent/tools/tools.js");
-let roomStore: typeof import("../../src/chat/room-store.js");
-let registryMod: typeof import("../../src/member/member-registry.js");
+let roomStore: typeof import("../../src/chat/conversations.js");
+let registryMod: typeof import("../../src/member/identity.js"), __registryMod_app_member_actions: typeof import("../../src/app/member-actions.js");
 let bus: typeof import("../../src/chat/message-bus.js");
 let memberId = "";
 let roomId = "";
@@ -17,11 +17,12 @@ let roomId = "";
 beforeEach(async () => {
   fixture = coreFixture();
   tools = await import("../../src/agent/tools/tools.js");
-  roomStore = await import("../../src/chat/room-store.js");
-  registryMod = await import("../../src/member/member-registry.js");
+  roomStore = await import("../../src/chat/conversations.js");
+  registryMod = await import("../../src/member/identity.js");
+__registryMod_app_member_actions = await import("../../src/app/member-actions.js");
   bus = await import("../../src/chat/message-bus.js");
 
-  const member = registryMod.createMember({ name: "cursorbot", agentTemplate: "general", model: "anthropic/model-x", credentialId: "cred-a" });
+  const member = __registryMod_app_member_actions.createMember({ name: "cursorbot", agentTemplate: "general", model: "anthropic/model-x", credentialId: "cred-a" });
   memberId = member.id;
   const room = roomStore.createRoom("cursor room", undefined, []);
   roomStore.stampGlobalMemberIds(room.id, [memberId], memberId);

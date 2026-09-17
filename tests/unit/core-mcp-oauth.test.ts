@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 const mcpOauthMigration = getMigration("core-mcp-oauth-v1");
-import { createMcpOauthStorage, decodeLegacyMcpOauthEntry, McpOauthRepository, mcpOauthServerKey, type McpOauthEntry } from "../../src/data/repositories/mcp-oauth.js";
+import { createMcpOauthStorage, decodeLegacyMcpOauthEntry, mcpOauthServerKey, type McpOauthEntry, type McpCredentialStore, writeMcpOauthEntry, importHashedMcpOauthEntry } from "../../src/member/mcp.js";
 import { createMcpAuth, type McpAuthStorage } from "../../vendor/pi-mcp-adapter/mcp-auth.ts";
 import { McpOAuthProvider } from "../../vendor/pi-mcp-adapter/mcp-oauth-provider.ts";
 import { createMcpAuthFlow } from "../../vendor/pi-mcp-adapter/mcp-auth-flow.ts";
 
 let root: string;
 let db: Database;
-let repository: McpOauthRepository;
+let repository: McpCredentialStore;
 let connections: Database[];
 const url = "https://mock.invalid/mcp";
 const entry: McpOauthEntry = {
@@ -24,7 +24,7 @@ const entry: McpOauthEntry = {
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "bm-mcp-oauth-"));
   db = openDatabase(join(root, "oauth.sqlite")); connections = [db];
-  applyStorageMigrations(db, [mcpOauthMigration]); repository = new McpOauthRepository(db);
+  applyStorageMigrations(db, [mcpOauthMigration]); repository = createMcpOauthStorage(db);
   vi.stubEnv("MCP_OAUTH_DIR", join(root, "forbidden-file-backend"));
 });
 afterEach(() => { connections.forEach((connection) => connection.close()); rmSync(root, { recursive: true, force: true }); vi.unstubAllEnvs(); });
@@ -60,13 +60,13 @@ describe("MCP OAuth SQLite authority", () => {
   });
 
   it("imports all fields, uses normalized tables, reopens and returns detached values", () => {
-    repository.importAuthEntry("сервер / ../", entry);
+    writeMcpOauthEntry("сервер / ../", entry, db);
     const read = repository.read("сервер / ../")!;
     expect(read).toEqual(entry); read.tokens!.accessToken = "not-saved";
     expect(repository.read("сервер / ../")).toEqual(entry);
     expect(db.all("SELECT * FROM mcp_oauth_redirect_uris")).toHaveLength(2);
     db.close(); db = openDatabase(join(root, "oauth.sqlite")); connections.push(db);
-    repository = new McpOauthRepository(db);
+    repository = createMcpOauthStorage(db);
     expect(repository.read("сервер / ../")).toEqual(entry);
     expect(repository.read("missing")).toBeUndefined();
     expect(existsSync(process.env.MCP_OAUTH_DIR!)).toBe(false);
@@ -74,11 +74,11 @@ describe("MCP OAuth SQLite authority", () => {
 
   it("imports hashed orphan keys without guessing owner identities and upserts idempotently", () => {
     const key = mcpOauthServerKey("");
-    repository.importHashedAuthEntry(key, decodeLegacyMcpOauthEntry(JSON.parse(JSON.stringify(entry))));
-    repository.importHashedAuthEntry(key, entry);
+    importHashedMcpOauthEntry(key, decodeLegacyMcpOauthEntry(JSON.parse(JSON.stringify(entry))), db);
+    importHashedMcpOauthEntry(key, entry, db);
     expect(repository.read("")).toEqual(entry);
     expect(db.all("SELECT * FROM mcp_oauth_entries")).toHaveLength(1);
-    repository.importHashedAuthEntry(key, {});
+    importHashedMcpOauthEntry(key, {}, db);
     expect(repository.read("")).toEqual({});
     expect(db.all("SELECT * FROM mcp_oauth_redirect_uris")).toHaveLength(0);
   });
@@ -93,10 +93,10 @@ describe("MCP OAuth SQLite authority", () => {
   it("rejects malformed imports without exposing supplied secrets or changing rows", () => {
     repository.write("server", entry);
     for (const value of [null, [], { tokens: { accessToken: { secret: "do-not-leak" } } }, { clientInfo: { clientId: "x", redirectUris: [123] } }, { tokens: { accessToken: "x", expiresAt: Infinity } }, { access_token: "do-not-leak" }]) {
-      expect(() => repository.importAuthEntry("server", value as any)).toThrow(/MCP OAuth/);
+      expect(() => writeMcpOauthEntry("server", value as any, db)).toThrow(/MCP OAuth/);
       try { decodeLegacyMcpOauthEntry(value); } catch (error) { expect(String(error)).not.toContain("do-not-leak"); }
     }
-    expect(() => repository.importHashedAuthEntry("../tokens.json", entry)).toThrow("storage key");
+    expect(() => importHashedMcpOauthEntry("../tokens.json", entry, db)).toThrow("storage key");
     expect(repository.read("server")).toEqual(entry);
   });
 
@@ -122,14 +122,14 @@ describe("MCP OAuth SQLite authority", () => {
     expect(() => auth.resetRegistration("server")).toThrow("injected second clear");
     expect(repository.read("server")).toEqual(entry);
     const other = openDatabase(join(root, "oauth.sqlite")); connections.push(other);
-    expect(new McpOauthRepository(other).read("server")).toEqual(entry);
+    expect(createMcpOauthStorage(other).read("server")).toEqual(entry);
     db.exec("DROP TRIGGER fail_second_clear");
     const write = vi.spyOn(repository, "write");
     auth.resetRegistration("server");
     expect(write).toHaveBeenCalledTimes(1);
     write.mockRestore();
     expect(repository.read("server")).toEqual({ serverUrl: url });
-    expect(new McpOauthRepository(other).read("server")).toEqual({ serverUrl: url });
+    expect(createMcpOauthStorage(other).read("server")).toEqual({ serverUrl: url });
   });
 
   it("propagates closed and read-only storage failures with no file fallback", async () => {
@@ -145,7 +145,7 @@ describe("MCP OAuth SQLite authority", () => {
 
   it("uses current DB rows across connections without overwriting other OAuth fields", () => {
     const otherDb = openDatabase(db.path); connections.push(otherDb);
-    const other = createMcpAuth(new McpOauthRepository(otherDb));
+    const other = createMcpAuth(createMcpOauthStorage(otherDb));
     const auth = createMcpAuth(repository);
     auth.updateTokens("shared", { accessToken: "first" }, url);
     other.updateClientInfo("shared", { clientId: "client" }, url);

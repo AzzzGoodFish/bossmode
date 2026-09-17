@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 
-import { MembersRepository } from "../../src/data/repositories/members.js";
+import { listMembers, getMember } from "../../src/member/identity.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 import type { Database } from "../../src/data/database.js";
 
@@ -27,7 +27,7 @@ function oldDatabase(marked = true, withTable = true) {
 describe("ordinary startup member authority", () => {
   it("initializes and reopens fresh SQL authority without a manual command", async () => {
     const first = await start(); expect(first.migrated).toBe(true);
-    expect(new MembersRepository(db!).list()).toEqual([]); db!.close();
+    expect(listMembers(db!)).toEqual([]); db!.close();
     expect((await start()).migrated).toBe(false);
   });
   it("imports legacy IDs, metadata and body at normal startup, then ignores poisoned leftovers", async () => {
@@ -35,19 +35,19 @@ describe("ordinary startup member authority", () => {
     file("members/mem_old/member.md","---\nname: wrong-label\ntitle: Engineer\n---\n\n literal body \n");
     const first = await start();
     const mid=migratedMemberId(db!,"mem_old");
-    expect(new MembersRepository(db!).get(mid)).toMatchObject({...member,id:mid,title:"Engineer"});
+    expect(getMember(mid, db!)).toMatchObject({...member,id:mid,title:"Engineer"});
     expect(readFileSync(join(root,`members/${mid}/persona.md`),"utf8")).toBe("\n literal body \n");
     expect(db!.get("SELECT member_id FROM memory_documents WHERE path=?",`members/${mid}/persona.md`)).toEqual({member_id:mid});
     expect(readFileSync(join(first.backupDirectory!,"files/members/mem_old/member.json"),"utf8")).toBe(JSON.stringify(member));
     expect(existsSync(join(root,`members/${mid}/member.json`))).toBe(false);
     db!.close(); file(`members/${mid}/member.json`,"poison");
     expect((await start()).migrated).toBe(false);
-    expect(new MembersRepository(db!).get(mid)?.name).toBe("old");
+    expect(getMember(mid, db!)?.name).toBe("old");
   });
   it("retains an empty prior SQL registry as authority, ignoring invalid retired identities", async () => {
     oldDatabase().close();
     file("members/mem_old/member.json","invalid retired JSON"); file("members/mem_old/member.md","---\nbroken");
-    await start(); expect(new MembersRepository(db!).list()).toEqual([]);
+    await start(); expect(listMembers(db!)).toEqual([]);
     expect(db!.all("SELECT * FROM memory_documents")).toEqual([]);
   });
   it.each([[false,true],[true,false]])("rejects inconsistent old authority marker=%s table=%s", async (marked, table) => {
@@ -69,13 +69,13 @@ describe("ordinary startup member authority", () => {
     expect(existsSync(join(root,"bossmode.db"))).toBe(false);
     file("members/mem_old/member.json",JSON.stringify(member));
     await start(); const mid=migratedMemberId(db!,"mem_old");
-    expect(new MembersRepository(db!).get(mid)?.name).toBe(member.name);
+    expect(getMember(mid, db!)?.name).toBe(member.name);
   });
   it.each(["not sqlite", ""]) ("propagates unreadable or unrecognized existing authority %j", async bytes => {
     file("bossmode.db",bytes);
     if (bytes) await expect(start()).rejects.toThrow();
     else { // An empty file has no member authority; ordinary startup may initialize it.
-      await start(); expect(new MembersRepository(db!).list()).toEqual([]);
+      await start(); expect(listMembers(db!)).toEqual([]);
     }
   });
 });

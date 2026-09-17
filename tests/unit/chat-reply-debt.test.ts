@@ -1,11 +1,12 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 // Reply-debt turns without a chat call: nothing is delivered, the silence is
 // made visible as a system note. The final-text fallback (autoDelivered) was
 // retired 2026-09-11 (fish #19368/#19381; plan-retire-chat-fallback-v1).
 import { coreFixture } from "../helpers/core-fixture.js";
 import { getDatabase } from "../../src/data/database.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom } from "../../src/chat/conversations.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -72,7 +73,7 @@ async function setup() {
   };
   const registry = new RuntimeRegistry();
   registry.register(runtime as any);
-  initAgentManager(registry);
+  initAgentManager(registry, loadMemberPromptSource);
 }
 
 /** Messages posted as the member itself — must stay empty when chat was not called. */
@@ -90,19 +91,19 @@ beforeEach(async () => {
   compactionRefreshPending = false;
   fixture = coreFixture();
   (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });
-  const members = new MembersRepository(fixture.db);
-  const conversations = new ConversationsRepository(fixture.db);
+  const members = fixture.db;
+  const conversations = fixture.db;
   for (const name of ["developer", "qa"]) {
     const id = `mem_${name}`;
-    members.insert({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
-      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    conversations.ensureDmScope(id);
+    insertMemberIdentity({ id, name, agentTemplate: name, global: { model: "anthropic/claude-a", credentialId: "cred-a" },
+      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, members);
+    ensureDmScope(id, conversations);
     const memberPath = join(fixture.root, "members", id);
     mkdirSync(memberPath, { recursive: true });
     writeFileSync(join(memberPath, "persona.md"), `You are ${name}.`);
   }
   for (const id of ["room1", "room2", "room3"]) {
-    conversations.upsertRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 });
+    storeRoom({ id, name: id, cwd: fixture.root, members: ["developer", "qa"], globalMemberIds: ["mem_developer", "mem_qa"], createdAt: 1 }, conversations);
   }
   bus.postMessage("room1", "user", "@developer hi", ["developer"]);
   vi.mocked(bus.postMessage).mockClear();

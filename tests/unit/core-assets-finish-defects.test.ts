@@ -4,8 +4,8 @@ import { readFileSync, rmSync } from "node:fs";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 
-import { createMember } from "../../src/member/member-registry.js";
-import { createRoom, inviteGlobalMember } from "../../src/chat/room-store.js";
+import { createMember } from "../../src/app/member-actions.js";
+import { createRoom, inviteGlobalMember } from "../../src/chat/conversations.js";
 import { addMessage } from "../../src/chat/message-store.js";
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
 import { renderQueryRowsForMember, type QueryRow } from "../../src/agent/tools/query-render.js";

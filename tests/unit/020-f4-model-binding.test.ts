@@ -1,3 +1,4 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 
 /**
  * F4 (2026-08-04, fish live report): model switch must persist to the 0.20
@@ -55,7 +56,7 @@ async function seedCredential() {
 }
 
 async function makeStampedRoom(memberId: string) {
-  const roomStore = await import("../../src/chat/room-store.js");
+  const roomStore = await import("../../src/chat/conversations.js");
   const room = roomStore.createRoom("R", dir, [memberId], undefined, { promptLeaderMemberId: memberId });
   return room;
 }
@@ -78,9 +79,9 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("unifiedModel=true: switch writes the global binding; memberOverrides untouched; read side agrees", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
@@ -89,7 +90,7 @@ describe("F4 model binding persists to the registry", () => {
     // New authority updated.
     expect(reg.getMember(member.id)!.global.model).toBe("testprov/claude-b");
     // Old authority NOT written.
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     expect(roomStore.getRoom(room.id)!.memberOverrides).toBeUndefined();
     // Read side (display / heal) resolves the new model.
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
@@ -97,9 +98,9 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("batch-5b: switch always writes global even when the disk flag says scoped", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const member = reg.createMember({
+    const member = __reg_app_member_actions.createMember({
       name: "pm",
       agentTemplate: "pm",
       model: "testprov/claude-a",
@@ -114,17 +115,17 @@ describe("F4 model binding persists to the registry", () => {
     const rec = reg.getMember(member.id)!;
     expect(rec.global.model).toBe("testprov/claude-b");
     expect(rec.scopeOverrides[`room:${room.id}`]).toBeUndefined();
-    expect(reg.getEffectiveConfig(member.id, `room:${room.id}`).model).toBe("testprov/claude-b");
-    expect(reg.getEffectiveConfig(member.id, "room:other").model).toBe("testprov/claude-b");
+    expect(reg.getMemberConfiguration(member.id).model).toBe("testprov/claude-b");
+    expect(reg.getMemberConfiguration(member.id).model).toBe("testprov/claude-b");
   });
 
   it("MCP asset patches remain global and do not write room overrides", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
 
     // Fully unified member: everything goes global.
-    const unified = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const unified = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room1 = await makeStampedRoom(unified.id);
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     manager.persistRoomMemberConfigPatch(room1.id, unified.id, { mcpServers: ["playwright"] });
@@ -137,7 +138,7 @@ describe("F4 model binding persists to the registry", () => {
     expect(resolveRoomMember(room1.id, unified.id)?.mcpServers).toEqual(["playwright"]);
 
     // Batch-5b: scoped/mixed members also write global (flags ignored).
-    const scoped = reg.createMember({
+    const scoped = __reg_app_member_actions.createMember({
       name: "dev",
       agentTemplate: "pm",
       model: "testprov/claude-a",
@@ -153,9 +154,9 @@ describe("F4 model binding persists to the registry", () => {
   });
 
   it("clearing a model binding is retired: the module exports no clear path", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
     expect((manager as any).clearMemberModelBinding).toBeUndefined();
@@ -219,13 +220,13 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   });
 
   it("room: switch with live instance → persisted → re-activation does NOT roll the session back", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
+    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource);
 
     (await import("../../src/chat/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
@@ -246,12 +247,12 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   });
 
   it("§10: a direct config write does NOT touch a live DM instance — only switchMemberModel does", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const cred = await seedCredential();
-    const member = reg.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
+    const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
     const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any);
+    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource);
 
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(1);
@@ -263,7 +264,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     await manager.activateDmMember(member.id);
     expect(setModelCalls).toEqual([]);
     expect(createAgentCalls).toBe(1);
-    expect(reg.getEffectiveConfig(member.id, `dm:${member.id}`).model).toBe("testprov/claude-b");
+    expect(reg.getMemberConfiguration(member.id).model).toBe("testprov/claude-b");
 
     // The sanctioned path switches the live instance without recreating it.
     await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });

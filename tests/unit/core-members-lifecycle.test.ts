@@ -1,3 +1,5 @@
+import { formatMemberPromptSegment } from "../../src/agent/prompt.js";
+import { detachMemberFromConversations } from "../../src/chat/conversations.js";
 import { getMigration } from "../helpers/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -15,15 +17,16 @@ const assetsMigration = getMigration("core-assets-v1");
 const memberSessionsMigration = getMigration("core-member-session-v1");
 const memberRuntimeStateMigration = getMigration("core-member-runtime-state-v1");
 const roomDescriptionMigration = getMigration("core-room-description-v1");
-import * as registry from "../../src/member/member-registry.js";
-import * as profile from "../../src/member/profile/member-profile.js";
+import * as registry from "../../src/member/identity.js";
+import * as __registry_app_member_actions from "../../src/app/member-actions.js";
+import * as profile from "../../src/member/profile.js";
 import * as wizard from "../../src/app/upgrade/assets.js";
-import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/archive/member-archive-lifecycle.js";
-import { MemberArchivesRepository } from "../../src/data/repositories/member-archives.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { SessionRepository } from "../../src/data/repositories/session-repository.js";
-import { SshCredentialsRepository, WorkspacesRepository } from "../../src/data/repositories/workspace-settings.js";
+import { MemberArchiveService, resolveMemberArtifactPath, resolveMemberDocumentPath } from "../../src/member/archive.js";
+import { importMemberArchiveCatalog, listMemberArchiveCatalog } from "../../src/member/archive.js";
+import { importArchivedMember, getRetainedMember } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
+import { importSessionAssociation, readSessionAssociation } from "../../src/member/sessions.js";
+import { readWorkspaceRegistry, readSshCredential } from "../../src/member/workspaces.js";
 
 let root: string;
 let db: Database;
@@ -64,7 +67,7 @@ function file(path: string, content: string): string {
   mkdirSync(dirname(path), {recursive:true}); writeFileSync(path, content); return path;
 }
 function service(quiesce: (id:string) => Promise<void> = async () => {}): MemberArchiveService {
-  return new MemberArchiveService(db, root, {quiesce});
+  return new MemberArchiveService(db, root, { detachFromConversations: detachMemberFromConversations, quiesce});
 }
 function record(id = "mem_import", name = "Imported"): registry.MemberRecord {
   return {id,name,title:"Engineer",agentTemplate:"general",global:{model:"p/m",credentialId:"chosen",skills:["one"]},
@@ -89,26 +92,26 @@ describe("explicit member authority and birth", () => {
   });
   it("prepares literal persona and atomically commits identity, DM, workspace and SSH", () => {
     const persona = "\ufeff  ---\r\nname: Not identity\r\n---\r\n内 文  \r\n\n";
-    const member = registry.createMemberWithPersona({name:"  言 实  ",title:" Engineer ",credentialId:"account",model:"p/m",skills:["a"],mcpServers:["b"]},persona);
+    const member = __registry_app_member_actions.createMemberWithPersona({name:"  言 实  ",title:" Engineer ",credentialId:"account",model:"p/m",skills:["a"],mcpServers:["b"]},persona);
     expect(member).toMatchObject({name:"言 实",title:"Engineer",global:{credentialId:"account",model:"p/m",skills:["a"],mcpServers:["b"]}});
     expect(db.get("SELECT kind,member_id FROM scopes WHERE id=?",`dm:${member.id}`)).toEqual({kind:"dm",member_id:member.id});
-    expect(new WorkspacesRepository(db).read(member.id)?.active).toBe("original");
-    expect(new SshCredentialsRepository(db).read(member.id)?.publicKey).toMatch(/^ssh-ed25519 /);
+    expect(readWorkspaceRegistry(member.id, db)?.active).toBe("original");
+    expect(readSshCredential(member.id, db)?.publicKey).toMatch(/^ssh-ed25519 /);
     expect(profile.readMemberProfile(member.id).body).toBe(persona);
-    expect(profile.formatMemberPromptSegment(profile.readMemberProfile(member.id),member.name)).toBe(`# Persona\n\nI am 言 实, an AI teammate in Bossmode.\n\n${persona.trim()}`);
+    expect(formatMemberPromptSegment(profile.readMemberProfile(member.id),member.name)).toBe(`# Persona\n\nI am 言 实, an AI teammate in Bossmode.\n\n${persona.trim()}`);
     expect(existsSync(join(memberDir(member.id),"member.json"))).toBe(false);
     reopen(); expect(registry.getMember(member.id)).toEqual(member);
   });
   it.each(["all"," USER ","SyStEm"])("reserves creation, rename and import names: %s", name => {
-    expect(() => registry.createMember({name})).toThrow("reserved_member_name");
-    const m = registry.createMember({name:"Allowed"});
+    expect(() => __registry_app_member_actions.createMember({name})).toThrow("reserved_member_name");
+    const m = __registry_app_member_actions.createMember({name:"Allowed"});
     expect(() => registry.updateMemberIdentity(m.id,{name})).toThrow("reserved_member_name");
-    expect(() => registry.importMemberRecord(record("mem_rejected",name.trim()))).toThrow("reserved_member_name");
+    expect(() => __registry_app_member_actions.importMemberRecord(record("mem_rejected",name.trim()))).toThrow("reserved_member_name");
   });
   it("preserves Unicode lower-case collision and title/name atomicity", () => {
-    const a = registry.createMember({name:"Älice",title:"First"});
-    registry.createMember({name:"Bob"});
-    expect(() => registry.createMember({name:"äLICE"})).toThrow(registry.MemberNameTakenError);
+    const a = __registry_app_member_actions.createMember({name:"Älice",title:"First"});
+    __registry_app_member_actions.createMember({name:"Bob"});
+    expect(() => __registry_app_member_actions.createMember({name:"äLICE"})).toThrow(registry.MemberNameTakenError);
     expect(() => registry.updateMemberIdentity(a.id,{name:"bob",title:"Changed"})).toThrow(registry.MemberNameTakenError);
     expect(registry.getMember(a.id)).toEqual(a);
     expect(registry.updateMemberIdentity(a.id,{name:"Älice",title:"First"}).updatedAt).toBe(a.updatedAt);
@@ -117,40 +120,40 @@ describe("explicit member authority and birth", () => {
     registry.renameMember(a.id,"新 名"); expect(readFileSync(memberProfilePath(a.id))).toEqual(before);
   });
   it("keeps accepted global config and rolls back its stale bookkeeping on SQL failure", () => {
-    const m = registry.createMember({name:"Global",model:"p/old",skills:["skill"]});
+    const m = __registry_app_member_actions.createMember({name:"Global",model:"p/old",skills:["skill"]});
     const dm = `dm:${m.id}` as const;
-    registry.applyMemberConfigPatch(m.id,dm,{model:"p/new",credentialId:null,mcpServers:["server"]});
-    expect(registry.getEffectiveConfig(m.id,dm)).toMatchObject({model:"p/new",credentialId:null,mcpServers:["server"],skills:["skill"],sources:{model:"global",mcpServers:"global"}});
+    registry.applyMemberConfigPatch(m.id,{model:"p/new",credentialId:null,mcpServers:["server"]});
+    expect(registry.getMemberConfiguration(m.id)).toMatchObject({model:"p/new",credentialId:null,mcpServers:["server"],skills:["skill"]});
     const before = registry.getMember(m.id);
     db.exec("CREATE TRIGGER fail_stale BEFORE INSERT ON runtime_checkpoints BEGIN SELECT RAISE(ABORT,'stale failure'); END;");
-    expect(() => registry.applyMemberConfigPatch(m.id,dm,{model:"p/fail",mcpServers:[]})).toThrow("stale failure");
+    expect(() => registry.applyMemberConfigPatch(m.id,{model:"p/fail",mcpServers:[]})).toThrow("stale failure");
     expect(registry.getMember(m.id)).toEqual(before);
   });
   it("imports an explicitly identified tombstone even when its old label is already reused", () => {
-    const live = registry.createMember({name:"Old Name"});
-    const archived = record("mem_old","Old Name"); const members = new MembersRepository(db);
+    const live = __registry_app_member_actions.createMember({name:"Old Name"});
+    const archived = record("mem_old","Old Name"); const members = db;
     db.transaction(() => {
-      members.importArchived(archived,"backups/old-explicit",123);
-      new ConversationsRepository(db).ensureDmScope(archived.id);
+      importArchivedMember(archived,"backups/old-explicit",123, members);
+      ensureDmScope(archived.id, db);
     });
     const source = wizard.catalogFromFiredExport({archivePath:"backups/old-explicit",member:archived});
-    new MemberArchivesRepository(db).importCatalog({...source,memberId:archived.id});
+    importMemberArchiveCatalog({...source,memberId:archived.id}, db);
     expect(registry.findMemberByName("old name")?.id).toBe(live.id);
-    expect(members.getRetained(archived.id)).toEqual(archived);
-    expect(() => members.importArchived(archived,"backups/another",123)).toThrow(/UNIQUE/);
+    expect(getRetainedMember(archived.id, members)).toEqual(archived);
+    expect(() => importArchivedMember(archived,"backups/another",123, members)).toThrow(/UNIQUE/);
   });
   it("strict ID import and DM creation roll back together on conflicting scope owner", () => {
     db.run("INSERT INTO scopes VALUES('dm:mem_import','dm',NULL,'mem_other')");
-    expect(() => registry.importMemberRecord(record())).toThrow("Scope ownership cannot change");
+    expect(() => __registry_app_member_actions.importMemberRecord(record())).toThrow("Scope ownership cannot change");
     expect(registry.getMember("mem_import")).toBeNull();
     db.run("DELETE FROM scopes");
-    registry.importMemberRecord(record());
-    expect(() => registry.importMemberRecord(record("mem_import","Other"))).toThrow(/UNIQUE/);
+    __registry_app_member_actions.importMemberRecord(record());
+    expect(() => __registry_app_member_actions.importMemberRecord(record("mem_import","Other"))).toThrow(/UNIQUE/);
     expect(registry.getMember("mem_import")?.name).toBe("Imported");
   });
   it.each(["memory_documents","workspace_registries","ssh_credentials"])("does not swallow %s DB birth failures or leave a partial member", table => {
     db.exec(`CREATE TRIGGER fail_birth BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT,'injected birth failure'); END;`);
-    expect(() => registry.createMember({name:"Failure"})).toThrow("injected birth failure");
+    expect(() => __registry_app_member_actions.createMember({name:"Failure"})).toThrow("injected birth failure");
     expect(registry.listMembers()).toEqual([]);
     expect(db.all("SELECT * FROM scopes")).toEqual([]);
     expect(db.all("SELECT * FROM workspace_registries")).toEqual([]);
@@ -162,15 +165,15 @@ describe("explicit member authority and birth", () => {
   it("never clobbers a preexisting newly allocated path", () => {
     forcedIdDraw = 0; // every draw yields `mem_0000000000`; the bounded retry still fails loudly
     file(join(root,"members/mem_0000000000/persona.md"),"owned by someone else");
-    expect(() => registry.createMember({name:"Collision"})).toThrow(/EEXIST/);
+    expect(() => __registry_app_member_actions.createMember({name:"Collision"})).toThrow(/EEXIST/);
     expect(readFileSync(join(root,"members/mem_0000000000/persona.md"),"utf8")).toBe("owned by someone else");
     expect(registry.listMembers()).toEqual([]);
   });
   it("rejects file/async operations under ambient transactions, including raw BEGIN", () => {
-    expect(() => db.transaction(() => registry.createMember({name:"bad"}))).toThrow(/enclosing/);
+    expect(() => db.transaction(() => __registry_app_member_actions.createMember({name:"bad"}))).toThrow(/enclosing/);
     expect(() => db.transaction(() => service().archive("mem_any",{confirm:true}))).toThrow(/enclosing/);
     db.exec("BEGIN");
-    expect(() => registry.createMemberWithPersona({name:"bad"},"x")).toThrow(/enclosing/);
+    expect(() => __registry_app_member_actions.createMemberWithPersona({name:"bad"},"x")).toThrow(/enclosing/);
     expect(() => profile.readMemberProfile("mem_any")).toThrow(/enclosing/);
     db.exec("ROLLBACK"); expect(registry.listMembers()).toEqual([]);
   });
@@ -178,7 +181,7 @@ describe("explicit member authority and birth", () => {
 
 describe("durable quiescent archive and recovery", () => {
   it("persists pending admission before awaiting quiescence; duplicate callers share one operation", async () => {
-    const m = registry.createMember({name:"Active"});
+    const m = __registry_app_member_actions.createMember({name:"Active"});
     let release!: () => void;
     const quiesce = vi.fn(async () => new Promise<void>(r => {release=r;}));
     const s = service(quiesce);
@@ -198,72 +201,72 @@ describe("durable quiescent archive and recovery", () => {
     expect(await s.archive(m.id,{confirm:true})).toEqual(result);
   });
   it("keeps identity, SDK bytes and B historical snapshots while allowing name reuse", async () => {
-    const m = registry.createMemberWithPersona({name:"Archive Me",title:"Engineer"}," \r\nPersona  \r\n");
-    const other = registry.createMember({name:"Other"});
-    const conversations = new ConversationsRepository(db);
+    const m = __registry_app_member_actions.createMemberWithPersona({name:"Archive Me",title:"Engineer"}," \r\nPersona  \r\n");
+    const other = __registry_app_member_actions.createMember({name:"Other"});
+    const conversations = db;
     const historical = {id:"old-local",roomId:"r",name:"old label",sourceAgent:"general",sourceMemberId:m.id,createdAt:1,updatedAt:2};
-    conversations.upsertRoom({id:"r",name:"Room",createdAt:1,members:["historical label"],globalMemberIds:[m.id,other.id],
-      roomMembers:[historical],promptLeaderMemberId:m.id,promptLeaderGlobalMemberId:m.id});
+    storeRoom({id:"r",name:"Room",createdAt:1,members:["historical label"],globalMemberIds:[m.id,other.id],
+      roomMembers:[historical],promptLeaderMemberId:m.id,promptLeaderGlobalMemberId:m.id}, conversations);
     const session = "sessions/2026-09-09/main/sdk.jsonl";
     file(join(memberDir(m.id),session),'{"type":"session","id":"unchanged"}\r\n');
-    new SessionRepository(db).importAssociation({memberId:m.id,referenceKind:"member-relative",createdAt:1,updatedAt:2,
-      session:{runtime:"pi-sdk",sessionId:"unchanged",sessionFile:session}});
+    importSessionAssociation({memberId:m.id,referenceKind:"member-relative",createdAt:1,updatedAt:2,
+      session:{runtime:"pi-sdk",sessionId:"unchanged",sessionFile:session}}, db);
     const logicalSnapshot = `members/${m.id}/history/persona/hash.md`; file(join(root,logicalSnapshot),"historical E bytes");
     const result = await service().archive(m.id,{confirm:true});
     expect(registry.getMember(m.id)).toBeNull();
-    expect(new MembersRepository(db).getRetained(m.id)).toEqual(m);
+    expect(getRetainedMember(m.id, db)).toEqual(m);
     expect(() => db.run("DELETE FROM members WHERE id=?",m.id)).toThrow(/FOREIGN KEY/);
-    expect(new SessionRepository(db).get(m.id)?.session.sessionFile).toBe(session);
+    expect(readSessionAssociation(m.id, db)?.session.sessionFile).toBe(session);
     expect(readFileSync(resolveMemberArtifactPath(db,root,m.id,session),"utf8")).toContain("unchanged");
     expect(readFileSync(resolveMemberDocumentPath(db,root,m.id,logicalSnapshot),"utf8")).toBe("historical E bytes");
-    expect(conversations.getRoom("r")).toMatchObject({globalMemberIds:[other.id],roomMembers:[historical],members:["historical label"]});
-    expect(conversations.getRoom("r")?.promptLeaderMemberId).toBeUndefined();
-    expect(registry.createMember({name:m.name}).id).not.toBe(m.id);
-    expect(new MemberArchivesRepository(db).list()).toMatchObject([{name:m.name,archivePath:result.archived,kind:"fired",hasPersona:true}]);
-    reopen(); expect(new MemberArchivesRepository(db).list()).toHaveLength(1);
+    expect(readStoredRoom("r", conversations)).toMatchObject({globalMemberIds:[other.id],roomMembers:[historical],members:["historical label"]});
+    expect(readStoredRoom("r", conversations)?.promptLeaderMemberId).toBeUndefined();
+    expect(__registry_app_member_actions.createMember({name:m.name}).id).not.toBe(m.id);
+    expect(listMemberArchiveCatalog(db)).toMatchObject([{name:m.name,archivePath:result.archived,kind:"fired",hasPersona:true}]);
+    reopen(); expect(listMemberArchiveCatalog(db)).toHaveLength(1);
     expect(readFileSync(resolveMemberArtifactPath(db,root,m.id,join(root,"members",m.id,"persona.md")),"utf8")).toBe(" \r\nPersona  \r\n");
   });
   it("detaches proven local-roster IDs but preserves unrelated same-label records and global historical shadows", async () => {
-    const m = registry.createMember({name:"Shared label"});
-    const conversations = new ConversationsRepository(db);
+    const m = __registry_app_member_actions.createMember({name:"Shared label"});
+    const conversations = db;
     const target = {id:"local-target",roomId:"local",name:m.name,sourceAgent:"general",sourceMemberId:m.id,createdAt:1,updatedAt:2};
     const unrelated = {...target,id:"local-unrelated",sourceMemberId:"mem_someone_else"};
-    conversations.upsertRoom({id:"local",name:"Local roster",createdAt:1,members:[m.name],roomMembers:[target,unrelated],promptLeaderMemberId:target.id});
+    storeRoom({id:"local",name:"Local roster",createdAt:1,members:[m.name],roomMembers:[target,unrelated],promptLeaderMemberId:target.id}, conversations);
     await service().archive(m.id,{confirm:true});
-    expect(conversations.getRoom("local")?.roomMembers).toEqual([unrelated]);
-    expect(conversations.getRoom("local")?.promptLeaderMemberId).toBeUndefined();
+    expect(readStoredRoom("local", conversations)?.roomMembers).toEqual([unrelated]);
+    expect(readStoredRoom("local", conversations)?.promptLeaderMemberId).toBeUndefined();
   });
   it("quiesce failure leaves assets in place and the persisted admission block survives reopen", async () => {
-    const m = registry.createMember({name:"Quiesce"});
+    const m = __registry_app_member_actions.createMember({name:"Quiesce"});
     await expect(service(async () => {throw new Error("still running");}).archive(m.id,{confirm:true})).rejects.toThrow("still running");
     expect(existsSync(memberDir(m.id))).toBe(true);
     reopen(); expect(service().admission(m.id)).toBe("pending");
     await service().recoverPending(); expect(registry.getMember(m.id)).toBeNull();
   });
   it("intent SQL failure performs neither quiescence nor movement", async () => {
-    const m = registry.createMember({name:"Intent"}); const quiesce = vi.fn(async () => {});
+    const m = __registry_app_member_actions.createMember({name:"Intent"}); const quiesce = vi.fn(async () => {});
     db.exec("CREATE TRIGGER fail_intent BEFORE INSERT ON member_archive_intents BEGIN SELECT RAISE(ABORT,'intent failure'); END;");
     await expect(service(quiesce).archive(m.id,{confirm:true})).rejects.toThrow("intent failure");
     expect(quiesce).not.toHaveBeenCalled(); expect(existsSync(memberDir(m.id))).toBe(true);
     expect(service().admission(m.id)).toBe("active");
   });
   it.each(["rename","sync","SQL"])("recovers after %s failure without claiming success or rewriting retained files", async phase => {
-    const m = registry.createMemberWithPersona({name:"Crash"},"unchanged\r\n");
+    const m = __registry_app_member_actions.createMemberWithPersona({name:"Crash"},"unchanged\r\n");
     if (phase === "rename") failRename = true;
     if (phase === "sync") failSyncAfterRename = true;
     if (phase === "SQL") db.exec("CREATE TRIGGER fail_archive BEFORE INSERT ON member_archives BEGIN SELECT RAISE(ABORT,'catalog failure'); END;");
     await expect(service().archive(m.id,{confirm:true})).rejects.toThrow();
-    expect(registry.getMember(m.id)).toEqual(m); expect(new MemberArchivesRepository(db).list()).toEqual([]);
+    expect(registry.getMember(m.id)).toEqual(m); expect(listMemberArchiveCatalog(db)).toEqual([]);
     const intent = service().pending()[0];
     expect(existsSync(memberDir(m.id))).toBe(phase === "rename");
     failRename = false; failSyncAfterRename = false;
     if (phase === "SQL") db.exec("DROP TRIGGER fail_archive");
     reopen(); await service().recoverPending();
     expect(readFileSync(join(root,intent.archivePath,"persona.md"),"utf8")).toBe("unchanged\r\n");
-    expect(new MemberArchivesRepository(db).list()).toHaveLength(1);
+    expect(listMemberArchiveCatalog(db)).toHaveLength(1);
   });
   it.each(["both","neither","replaced","symlink"])("fails closed on %s path conflict", async conflict => {
-    const m = registry.createMember({name:"Conflict"});
+    const m = __registry_app_member_actions.createMember({name:"Conflict"});
     await expect(service(async () => {throw new Error("stop");}).archive(m.id,{confirm:true})).rejects.toThrow("stop");
     const intent = service().pending()[0];
     const dest = join(root,intent.archivePath); const source = memberDir(m.id);
@@ -290,24 +293,48 @@ describe("DB archive catalog", () => {
       {name:"Old",sourceAgent:"writer",credentialId:"hint",personaPath:`${path}/rooms/r/principles.md`,rooms:[{room:"r",hasPrinciples:true}],conflicts:["first"]},
       {name:"Old",rooms:[{room:"s",hasMainline:true}],conflicts:["second"]}, {name:"Another"},
     ]});
-    for (const source of sources) new MemberArchivesRepository(db).importCatalog(source);
-    registry.importMemberRecord(record("mem_live","Old"));
-    expect(new MemberArchivesRepository(db).list().every(s => !s.memberId)).toBe(true);
-    expect(new MemberArchivesRepository(db).list().find(s => s.name === "Old")).toMatchObject({roomScopes:[{room:"r",hasPrinciples:true},{room:"s",hasMainline:true}],conflicts:["first","second"]});
+    for (const source of sources) importMemberArchiveCatalog(source, db);
+    __registry_app_member_actions.importMemberRecord(record("mem_live","Old"));
+    expect(listMemberArchiveCatalog(db).every(s => !s.memberId)).toBe(true);
+    expect(listMemberArchiveCatalog(db).find(s => s.name === "Old")).toMatchObject({roomScopes:[{room:"r",hasPrinciples:true},{room:"s",hasMainline:true}],conflicts:["first","second"]});
   });
   it("rejects invalid catalog paths", () => {
     const path = "backups/import";
     const source = wizard.catalogFromFiredExport({archivePath:path,member:record(),persona:{path:`${path}/persona.md`,format:"plain",hasContent:true}});
-    const repo = new MemberArchivesRepository(db);
-    expect(() => repo.importCatalog({...source,archivePath:"backups/../escape"})).toThrow(/invalid_archive_path/);
-    expect(() => repo.importCatalog({...source,name:"Other",personaPath:"backups/outside/p.md"})).toThrow(/outside_root/);
+    const repo = db;
+    expect(() => importMemberArchiveCatalog({...source,archivePath:"backups/../escape"}, repo)).toThrow(/invalid_archive_path/);
+    expect(() => importMemberArchiveCatalog({...source,name:"Other",personaPath:"backups/outside/p.md"}, repo)).toThrow(/outside_root/);
   });
   it("catalog SQL import rolls back rooms/conflicts and refuses a current-ID association", () => {
-    registry.importMemberRecord(record()); const repo = new MemberArchivesRepository(db);
+    __registry_app_member_actions.importMemberRecord(record()); const repo = db;
     const source = wizard.catalogFromFiredExport({archivePath:"backups/a",member:record()});
-    expect(() => repo.importCatalog({...source,memberId:"mem_import"})).toThrow("archive_identity_not_retained");
+    expect(() => importMemberArchiveCatalog({...source,memberId:"mem_import"}, repo)).toThrow("archive_identity_not_retained");
     db.exec("CREATE TRIGGER fail_conflict BEFORE INSERT ON member_archive_conflicts BEGIN SELECT RAISE(ABORT,'conflict failure'); END;");
-    expect(() => repo.importCatalog({...source,conflicts:["x"],roomScopes:[{room:"r",hasPrinciples:true,hasMainline:false}]})).toThrow("conflict failure");
-    expect(repo.list()).toEqual([]); expect(db.all("SELECT * FROM member_archive_rooms")).toEqual([]);
+    expect(() => importMemberArchiveCatalog({...source,conflicts:["x"],roomScopes:[{room:"r",hasPrinciples:true,hasMainline:false}]}, repo)).toThrow("conflict failure");
+    expect(listMemberArchiveCatalog(repo)).toEqual([]); expect(db.all("SELECT * FROM member_archive_rooms")).toEqual([]);
   });
+});
+
+it("rolls back conversation detachment with archive completion and recovers the retained files", async () => {
+  const member = __registry_app_member_actions.createMemberWithPersona({ name: "Archive atomicity" }, "keep this persona");
+  const rooms = db;
+  storeRoom({ id: "archive-room", name: "Archive room", members: [member.name], globalMemberIds: [member.id], createdAt: 1 }, rooms);
+  const failing = new MemberArchiveService(db, root, {
+    quiesce: async () => {},
+    detachFromConversations: (id, tx) => {
+      detachMemberFromConversations(id, tx);
+      throw new Error("injected membership completion failure");
+    },
+  });
+  await expect(failing.archive(member.id, { confirm: true })).rejects.toThrow("injected membership completion failure");
+  expect(registry.getMember(member.id)).not.toBeNull();
+  expect(readStoredRoom("archive-room", rooms)?.globalMemberIds).toEqual([member.id]);
+  const pending = service().pending()[0];
+  expect(pending.memberId).toBe(member.id);
+  expect(readFileSync(join(root, pending.archivePath, "persona.md"), "utf8")).toBe("keep this persona");
+  reopen();
+  await service().recoverPending();
+  expect(registry.getMember(member.id)).toBeNull();
+  expect(readStoredRoom("archive-room", db)?.globalMemberIds).toEqual([]);
+  expect(readFileSync(join(root, pending.archivePath, "persona.md"), "utf8")).toBe("keep this persona");
 });

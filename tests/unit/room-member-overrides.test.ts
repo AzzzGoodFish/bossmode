@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { createMember, updateMember } from "../../src/member/member-registry.js";
+import { storeRoom } from "../../src/chat/conversations.js";
+import { createMember } from "../../src/app/member-actions.js";
+import { updateMember } from "../../src/member/identity.js";
 
 import { coreFixture } from "../helpers/core-fixture.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
@@ -18,13 +19,13 @@ function historicalRoom(id: string, name: string, sourceAgent: string) {
   const room = { id, name: id, createdAt: 1, members: [name], roomMembers: [
     { id: `rm_${id}`, roomId: id, name, sourceAgent, createdAt: 1, updatedAt: 1 },
   ] };
-  new ConversationsRepository(fixture.db).upsertRoom(room);
+  storeRoom(room, fixture.db);
   return room;
 }
 
 describe("room member overrides", () => {
   it("retains historical model and thinking overrides scoped to one room without runtime admission", async () => {
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
 
     const roomA = historicalRoom("A", "pm", "pm");
@@ -48,7 +49,7 @@ describe("room member overrides", () => {
 
   it("does not resolve an unlinked historical snapshot through same-named contacts, legacy files or template metadata", async () => {
     writeAgent("developer");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
 
     writeFileSync(join(dir, "members.json"), JSON.stringify([
@@ -63,7 +64,7 @@ describe("room member overrides", () => {
 });
 
 it("current contact settings apply globally and never become room-local overrides", async () => {
-  const rooms = await import("../../src/chat/room-store.js");
+  const rooms = await import("../../src/chat/conversations.js");
   const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
   const member = createMember({ name: "current" });
   const a = rooms.createRoom("A", undefined, [member.id]);

@@ -6,8 +6,8 @@
 // marked `[stale]`, never silently deleted.
 import { roomDir } from "../files/layout.js";
 import { existsSync, readFileSync } from "node:fs";
-import { documentContentMeta } from "../data/repositories/document-repository.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "../member/assets/document-assets.js";
+import { documentContentMeta } from "../member/assets.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "../member/assets.js";
 import { join } from "node:path";
 
 import { getMemoryBudget } from "../member/memory/memory-budgets.js";

@@ -3,15 +3,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 let fixture: ReturnType<typeof coreFixture>;
 const roomId = "runtime-room";
 beforeEach(() => {
   fixture = coreFixture();
-  new MembersRepository(fixture.db).insert({id: "mem_test", name: "test", agentTemplate: "general", global: {},
-    createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}});
-  new ConversationsRepository(fixture.db).upsertRoom({id: roomId, name: "Runtime", members: [], createdAt: 1});
+  insertMemberIdentity({id: "mem_test", name: "test", agentTemplate: "general", global: {},
+    createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}}, fixture.db);
+  storeRoom({id: roomId, name: "Runtime", members: [], createdAt: 1}, fixture.db);
 });
 afterEach(() => fixture.close());
 

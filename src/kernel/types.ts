@@ -62,13 +62,7 @@ export interface AgentDefinition {
 
 // -- Skill Definition --
 
-export interface SkillDefinition {
-  name: string;
-  description: string;
-  tags: string[];
-  content: string;
-  source?: string; // directory this skill was loaded from
-}
+
 
 // -- Model Credentials --
 

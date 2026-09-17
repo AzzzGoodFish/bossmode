@@ -1,21 +1,7 @@
-/**
- * Member prompt compiler — prompt v2 (① batch 2): one compile per member,
- * no chat scope. Chapters: Persona → How to work (Environment / Communication /
- * Memory / Workspace / Assets).
- * Text source: memory/projects/bossmode/architecture/prompt-v2-english-20260915.md (v2.3.0).
- */
-import { memberArchiveDir, memberDir, memberExtensionsDir, memberProfilePath, memberSkillsDir } from "../../files/layout.js";
+import { memberArchiveDir, memberDir, memberExtensionsDir, memberProfilePath, memberSkillsDir } from "../files/layout.js";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { logger } from "../../kernel/logger.js";
-
-import {
-  formatMemberPromptSegment,
-  readMemberProfile,
-} from "../../member/profile/member-profile.js";
-
-import { buildSkillCatalog } from "../../member/skills/skill-catalog.js";
+import { logger } from "../kernel/logger.js";
 
 export type PromptSectionId = "persona" | "environment" | "communication" | "memory" | "workspace" | "assets";
 
@@ -134,23 +120,7 @@ const ASSETS_TEMPLATE = `## Assets
 /** Static text the contract fingerprint covers (no identity, no paths, no lists). */
 const CONTRACT_STATIC_TEXT = [ENVIRONMENT_TEMPLATE, COMMUNICATION_SEGMENT, MEMORY_SEGMENT, WORKSPACE_SEGMENT, ASSETS_TEMPLATE].join("\n\n");
 
-function archiveNonEmpty(dir: string): boolean {
-  if (!existsSync(dir)) return false;
-  try {
-    const names = readdirSync(dir);
-    return names.some((n) => {
-      try {
-        return statSync(join(dir, n)).isFile() || statSync(join(dir, n)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
-  } catch {
-    return false;
-  }
-}
-
-function renderAssetsSegment(args: { memberId: string; skillsEnabled: string; platformGuideDir: string | null }): string {
+function renderAssetsSegment(args: { memberId: string; skillsEnabled: string; platformGuideDir: string | null; archiveAvailable: boolean }): string {
   const skillNames = args.skillsEnabled.trim() ? args.skillsEnabled : "(none)";
   let text = ASSETS_TEMPLATE
     .replace("{personaPath}", memberProfilePath(args.memberId))
@@ -165,7 +135,7 @@ function renderAssetsSegment(args: { memberId: string; skillsEnabled: string; pl
     text = text.split("\n").filter((line) => !line.startsWith("- guide:")).join("\n");
   }
   const archivePath = memberArchiveDir(args.memberId);
-  if (!archiveNonEmpty(archivePath)) {
+  if (!args.archiveAvailable) {
     text = text.split("\n").filter((line) => !line.startsWith("- archive:")).join("\n");
   } else {
     text = text.replace("{archivePath}", archivePath);
@@ -178,28 +148,26 @@ function renderAssetsSegment(args: { memberId: string; skillsEnabled: string; pl
  * chat being served. Environment carries the live identity line; everything
  * else is code-owned static text plus the member's own paths/lists.
  */
-export function compileMemberPrompt(args: {
+export interface MemberPromptSource {
   memberId: string;
   memberName: string;
   description?: string;
-  contextWindowTokens?: number;
-}): CompiledMemberPrompt {
-  const profile = readMemberProfile(args.memberId);
+  persona: string;
+  profileOverBudget: boolean;
+  skillsEnabled: string;
+  platformSkillsDir: string | null;
+  archiveAvailable: boolean;
+}
 
+export function compileMemberPrompt(args: MemberPromptSource): CompiledMemberPrompt {
   const identityLine = `- You are ${args.memberName} (${args.memberId}).`;
   const environmentSeg = ENVIRONMENT_TEMPLATE.replace("{identityLine}", identityLine);
 
-  const catalog = buildSkillCatalog(args.memberId, args.contextWindowTokens ?? 128_000);
-  const skillsEnabled = catalog.entries
-    .map((entry) => entry.relPath.replace(/\/SKILL\.md$/, ""))
-    .join(", ");
   const assetsSeg = renderAssetsSegment({
-    memberId: args.memberId,
-    skillsEnabled,
-    platformGuideDir: catalog.platformSkillsDir,
+    memberId: args.memberId, skillsEnabled: args.skillsEnabled,
+    platformGuideDir: args.platformSkillsDir, archiveAvailable: args.archiveAvailable,
   });
-
-  const personaSeg = formatMemberPromptSegment(profile, args.memberName, args.description);
+  const personaSeg = formatMemberPromptSegment({ body: args.persona }, args.memberName, args.description);
 
   const sections = [
     section({ id: "persona", title: "Persona", source: `member:${args.memberId}`, content: personaSeg, included: true }),
@@ -219,7 +187,7 @@ export function compileMemberPrompt(args: {
   );
 
   // Contract = code-owned static platform text only (identity, paths and lists excluded).
-  const contractFingerprint = createHash("sha1").update(CONTRACT_STATIC_TEXT).digest("hex");
+  const contractFingerprint = currentContractFingerprint();
 
   logger.info("agent", "compilePrompt", {
     member: args.memberName,
@@ -228,7 +196,7 @@ export function compileMemberPrompt(args: {
     totalChars: fullPrompt.length,
     totalBytes: Buffer.byteLength(fullPrompt, "utf8"),
     totalTokens: `~${estimateTokens(fullPrompt)}`,
-    profileOverBudget: profile.overBudget || undefined,
+    profileOverBudget: args.profileOverBudget || undefined,
   });
 
   return {
@@ -239,6 +207,16 @@ export function compileMemberPrompt(args: {
     sections,
     manifestHash,
     contractFingerprint,
-    ...(profile.overBudget ? { profileOverBudget: true } : {}),
+    ...(args.profileOverBudget ? { profileOverBudget: true } : {}),
   };
+}
+
+export function currentContractFingerprint(): string { return createHash("sha1").update(CONTRACT_STATIC_TEXT).digest("hex"); }
+
+export function formatMemberPromptSegment(profile: { body: string }, currentName: string, description?: string): string {
+  const identity = `# Persona\n\nI am ${currentName}${description ? ` (${description})` : ""}, an AI teammate in Bossmode.`;
+  // Match the previous prompt boundary without changing stored Markdown or
+  // interpreting any of its content as metadata.
+  const body = profile.body.trim();
+  return body ? `${identity}\n\n${body}` : identity;
 }

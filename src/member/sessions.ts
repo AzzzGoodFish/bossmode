@@ -1,20 +1,19 @@
 import { memberDir, getBossmodeDir } from "../files/layout.js";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-
-
-import { getDatabase } from "../data/database.js";
-import { SessionRepository } from "../data/repositories/session-repository.js";
+import { getDatabase, type Database } from "../data/database.js";
+import { assertExecutionMember } from "../data/repositories/execution-identity.js";
 import type { AgentSession } from "../kernel/types.js";
 
-function repository(): SessionRepository { return new SessionRepository(getDatabase()); }
 const SAFE_ID = /^[^/:\\]+$/;
+
 /** Member session files live under `sessions/<day>/main/` (① A2). */
 const MEMBER_SESSION_PATTERN = /^sessions\/\d{4}-\d{2}-\d{2}\/main\/[^/]+\.jsonl$/;
 
 function validateMemberId(memberId: string): void {
   if (!SAFE_ID.test(memberId) || memberId === "." || memberId === "..") throw new Error(`Invalid member ID: ${memberId}`);
 }
+
 function validateSession(memberId: string, value: unknown): AgentSession {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid session entry for member ${memberId}`);
   const session = value as AgentSession;
@@ -25,6 +24,7 @@ function validateSession(memberId: string, value: unknown): AgentSession {
   }
   return session;
 }
+
 function existingRealPath(path: string): string {
   let current = path;
   while (!existsSync(current)) {
@@ -34,6 +34,7 @@ function existingRealPath(path: string): string {
   }
   return realpathSync(current);
 }
+
 function archiveRelativePath(memberId: string, file: string): string {
   const root = realpathSync(memberDir(memberId));
   const absolute = resolve(file);
@@ -50,12 +51,10 @@ function archiveRelativePath(memberId: string, file: string): string {
   return rel;
 }
 
-
-
 /** The member's one session across every chat (① A1: key is the member alone). */
 export function getCurrentSession(memberId: string): AgentSession | undefined {
   validateMemberId(memberId);
-  const association = repository().get(memberId);
+  const association = readSessionAssociation(memberId, getDatabase());
   const session = association?.session;
   if (!session?.sessionFile) return session;
   const absolute = association!.referenceKind === "legacy-absolute"
@@ -78,7 +77,7 @@ export function saveCurrentSession(memberId: string, sessionValue: AgentSession)
   const session = { ...validateSession(memberId, { ...sessionValue, sessionFile: undefined }) };
   let referenceKind: "member-relative" | "legacy-absolute" = "member-relative";
   if (sessionValue.sessionFile) {
-    const previous = repository().get(memberId);
+    const previous = readSessionAssociation(memberId, getDatabase());
     if (previous?.referenceKind === "legacy-absolute" && previous.session.sessionFile === sessionValue.sessionFile) {
       getCurrentSession(memberId); // Revalidate the imported file before keeping its reference.
       session.sessionFile = sessionValue.sessionFile;
@@ -86,10 +85,58 @@ export function saveCurrentSession(memberId: string, sessionValue: AgentSession)
     } else session.sessionFile = archiveRelativePath(memberId, sessionValue.sessionFile);
   }
   const now = Date.now();
-  repository().importAssociation({memberId, session, referenceKind, createdAt: now, updatedAt: now});
+  importSessionAssociation({memberId, session, referenceKind, createdAt: now, updatedAt: now}, getDatabase());
 }
 
 export function clearCurrentSession(memberId: string): void {
   validateMemberId(memberId);
-  repository().clear(memberId);
+  deleteSessionAssociation(memberId, getDatabase());
 }
+
+/** One session row per member (① A1): the member key alone identifies it. */
+export interface SessionAssociation {
+  memberId: string;
+  session: AgentSession;
+  referenceKind: "member-relative" | "legacy-absolute";
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface Row {
+  member_id: string; runtime: string; sdk_session_id: string | null;
+  file_reference: string | null; reference_kind: SessionAssociation["referenceKind"]; created_at: number; updated_at: number;
+}
+
+export function readSessionAssociation(memberId: string, db: Database = getDatabase()): SessionAssociation | undefined {
+    const r = db.get<Row>("SELECT * FROM current_sessions WHERE member_id=?", memberId);
+    if (!r) return;
+    return { memberId: r.member_id, session: { runtime: r.runtime,
+      ...(r.sdk_session_id === null ? {} : {sessionId: r.sdk_session_id}),
+      ...(r.file_reference === null ? {} : {sessionFile: r.file_reference}) },
+    referenceKind: r.reference_kind, createdAt: r.created_at, updatedAt: r.updated_at };
+  }
+
+export function importSessionAssociation(a: SessionAssociation, db: Database = getDatabase()): void {
+    assertExecutionMember(db, a.memberId);
+    const file = a.session.sessionFile;
+    if (!a.session.runtime || typeof a.session.runtime !== "string") throw new Error("Invalid session runtime");
+    if (a.session.sessionId !== undefined && typeof a.session.sessionId !== "string") throw new Error("Invalid SDK session ID");
+    if (file !== undefined && (typeof file !== "string" || !file || file.includes("\0") ||
+      (a.referenceKind === "member-relative" ? isAbsolute(file) || file.split(/[/\\]/).includes("..") : !isAbsolute(file)))) {
+      throw new Error("Invalid session file reference");
+    }
+    if (file !== undefined && a.referenceKind === "member-relative") {
+      if (!MEMBER_SESSION_PATTERN.test(file)) {
+        throw new Error("Session file reference does not match the member session archive");
+      }
+    }
+    db.run(`INSERT INTO current_sessions(member_id,runtime,sdk_session_id,file_reference,reference_kind,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET runtime=excluded.runtime,
+      sdk_session_id=excluded.sdk_session_id, file_reference=excluded.file_reference, reference_kind=excluded.reference_kind,
+      updated_at=excluded.updated_at`, a.memberId, a.session.runtime, a.session.sessionId ?? null,
+    file ?? null, a.referenceKind, a.createdAt, a.updatedAt);
+  }
+
+export function deleteSessionAssociation(memberId: string, db: Database = getDatabase()): void {
+    db.run("DELETE FROM current_sessions WHERE member_id=?", memberId);
+  }

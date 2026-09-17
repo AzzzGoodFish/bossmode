@@ -13,9 +13,9 @@ import {
   readMcpStatusCache,
   readRedactedMcpConfigText,
   writeMcpStatusCache,
-} from "../member/mcp/mcp-settings.js";
+} from "../member/mcp.js";
 import { checkMcpServerAvailability } from "../agent/tools/mcp-availability.js";
-import { getRoomMembers, listRooms } from "../chat/room-store.js";
+import { getRoomMembers, listRooms } from "../chat/conversations.js";
 
 class SettingsValidationError extends Error {}
 function updateMcpSettings(body: {enabled?: boolean; configText?: string}): {enabled: boolean; savedServerCount?: number} {

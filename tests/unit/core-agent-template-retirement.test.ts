@@ -1,16 +1,21 @@
 import { getMigration } from "../helpers/schema.js";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 const templatesMigration = getMigration("core-templates-v1");
-import { TemplateRepository } from "../../src/data/repositories/templates.js";
+import { listTemplateMetadata, readTemplateMetadata } from "../../src/member/templates.js";
 import * as historical from "../../src/app/upgrade/records.js";
-import { seedBuiltinAssets } from "../../src/member/assets/team-updates.js";
+import { seedBuiltinAssets } from "../../src/member/templates.js";
+
+const installation = vi.hoisted(() => ({ root: "" }));
+vi.mock("../../src/files/layout.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../src/files/layout.js")>(),
+  get installationRoot() { return installation.root; },
+}));
 
 const originalCwd = process.cwd();
-const originalDir = process.env.BOSSMODE_DIR;
 let root: string;
 let packageRoot: string;
 let db: Database;
@@ -19,9 +24,10 @@ function write(path: string, text: string): void {
   writeFileSync(path, text);
 }
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "bossmode-template-retirement-"));
-  process.env.BOSSMODE_DIR = root;
+  root = process.env.BOSSMODE_DIR!;
+  if (!process.env.BOSSMODE_TEST_ROOT || !root.startsWith(process.env.BOSSMODE_TEST_ROOT + "/")) throw new Error("Use isolated test launcher");
   packageRoot = join(root, "package");
+  installation.root = packageRoot;
   write(join(packageRoot, "package.json"), '{"version":"test-version"}');
   // A stale package directory must not resurrect agents, even when its YAML is invalid.
   write(join(packageRoot, "templates/agents/general.md"), "---\nname: [\n---\nretired factory");
@@ -34,7 +40,6 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
   process.chdir(originalCwd);
-  process.env.BOSSMODE_DIR = originalDir;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -54,7 +59,7 @@ it("removes live modules, factory agent assets and live template-file exports, n
 
 it("fresh seeding ignores all agents, needs no bound DB, and retains skill/rule file seeding", () => {
   seedBuiltinAssets();
-  expect(new TemplateRepository(db).list()).toEqual([]);
+  expect(listTemplateMetadata(db)).toEqual([]);
   expect(existsSync(join(root, "agents"))).toBe(false);
   expect(readFileSync(join(root, "skills/demo/SKILL.md"), "utf8")).toContain("allowed skill");
   expect(readFileSync(join(root, "memory/projects/rules/team-dev-protocol.md"), "utf8")).toContain("allowed rule");
@@ -67,17 +72,17 @@ it("repeated seeding never changes installed legacy data, historical labels/body
     mkdirSync(join(root, path, ".."), { recursive: true });
     writeFileSync(join(root, path), bytes);
   } }, [{ slug: "general", path: "agents/general.md", markdown: legacy }]);
-  const repository = new TemplateRepository(db);
-  const metadata = repository.get("general")!;
+  const repository = db;
+  const metadata = readTemplateMetadata("general", repository)!;
   expect(metadata.extensions).toEqual({ source: "builtin", version: 0.19, unknown: ["z", "a", "z"] });
   expect(metadata.tags).toEqual([]);
   expect(metadata.skills).toBeUndefined();
   seedBuiltinAssets();
-  expect(repository.get("general")).toEqual(metadata);
+  expect(readTemplateMetadata("general", repository)).toEqual(metadata);
   expect(historical.readTemplateBody(root, metadata)).toBe("\r\n kept body  \n");
   rmSync(join(root, metadata.personaPath));
   seedBuiltinAssets();
-  expect(repository.get("general")).toEqual(metadata);
+  expect(readTemplateMetadata("general", repository)).toEqual(metadata);
   expect(() => historical.readTemplateBody(root, metadata)).toThrow();
   expect(readFileSync(join(root, "agents/general.md"), "utf8")).toBe(legacy);
   expect(readFileSync(join(packageRoot, "templates/agents/general.md"), "utf8")).toContain("retired factory");

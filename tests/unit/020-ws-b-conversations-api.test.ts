@@ -47,26 +47,26 @@ describe("020 conversations / scope surface", () => {
     expect(roomLeader.families).toContain("chat_edit");
   });
 
-  it("effective-config binds into memberRecordToConfig path via getEffectiveConfig", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({
+  it("effective-config binds into memberRecordToConfig path via getMemberConfiguration", async () => {
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({
       name: "pm",
       agentTemplate: "pm",
       model: "provider/model-a",
       credentialId: "cred-a",
       unifiedModel: true,
     });
-    const eff = reg.getEffectiveConfig(m.id, `dm:${m.id}`);
+    const eff = reg.getMemberConfiguration(m.id);
     expect(eff.model).toBe("provider/model-a");
     expect(eff.credentialId).toBe("cred-a");
-    expect(eff.sources.model).toBe("global");
+    expect(eff).not.toHaveProperty("sources");
   });
 
-  it("member-level compile via compileMemberPrompt (② batch 2)", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const m = reg.createMember({ name: "architect", agentTemplate: "architect" });
-    const { compileMemberPrompt } = await import("../../src/agent/prompt/prompt-compiler.js");
-    const compiled = compileMemberPrompt({ memberId: m.id, memberName: "architect" });
+  it("member-level compile via previewMemberPrompt (② batch 2)", async () => {
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const m = __reg_app_member_actions.createMember({ name: "architect", agentTemplate: "architect" });
+    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
+    const compiled = previewMemberPrompt(m.id);
     expect(compiled.manifestHash).toBeTruthy();
     // One prompt for every chat: no scope marker, no private-chat line.
     expect(compiled.envPrompt).toContain(`- You are architect (${m.id}).`);

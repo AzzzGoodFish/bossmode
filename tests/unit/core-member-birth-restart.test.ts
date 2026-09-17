@@ -4,10 +4,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import { bindDatabase, type Database } from "../../src/data/database.js";
-import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/data/repositories/document-repository.js";
+import { commitDocumentRevision, documentContentMeta, getDocument, listDocumentHistory } from "../../src/member/assets.js";
 
-import { createMember, createMemberWithPersona, getMember, updateMemberIdentity } from "../../src/member/member-registry.js";
-import { readMemberProfile } from "../../src/member/profile/member-profile.js";
+import { createMember, createMemberWithPersona } from "../../src/app/member-actions.js";
+import { getMember, updateMemberIdentity } from "../../src/member/identity.js";
+import { readMemberProfile } from "../../src/member/profile.js";
 import { writeMemoryLayer } from "../../src/member/memory/member-memory-store.js";
 
 const root = process.env.BOSSMODE_DIR!;

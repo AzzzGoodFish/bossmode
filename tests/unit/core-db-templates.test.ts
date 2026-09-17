@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyStorageMigrations, openDatabase, type Database } from "../../src/data/database.js";
 const templatesMigration = getMigration("core-templates-v1");
-import { TemplateRepository } from "../../src/data/repositories/templates.js";
+import { readTemplateMetadata, listTemplateMetadata, hasTemplateMetadata, importTemplateMetadata, deleteTemplateMetadata } from "../../src/member/templates.js";
 import { importAgentTemplates, legacyAgentTemplateSources, parseAgentDefinitionMarkdown, readTemplateBody, type TemplateSource } from "../../src/app/upgrade/records.js";
 
 let root: string;
 let db: Database;
-let repository: TemplateRepository;
+let repository: Database;
 const source = (slug: string, markdown: string): TemplateSource => ({ slug, markdown, path: `agents/${slug}.md` });
 const mixed = '---\nname: Display Name\ndescription: Description\navatar: ""\ntags: [a, a, z]\nmodel: provider/model\nskills: []\nsource: custom\nversion: 9\nextra:\n  nested: [true, 2, null]\n---\n\n  Persona preserved.  \n\n';
 
@@ -18,7 +18,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "bossmode-template-unit-"));
   db = openDatabase(join(root, "test.sqlite"));
   applyStorageMigrations(db, [templatesMigration]);
-  repository = new TemplateRepository(db);
+  repository = db;
 });
 afterEach(() => { db.close(); rmSync(root, { recursive: true, force: true }); });
 
@@ -30,14 +30,14 @@ function stageAsset(path: string, bytes: Uint8Array): void {
 function importSource(slug: string, markdown: string): void {
   importAgentTemplates({ db, stageAsset }, [source(slug, markdown)]);
 }
-function body(slug: string): string { return readTemplateBody(root, repository.get(slug)!); }
+function body(slug: string): string { return readTemplateBody(root, readTemplateMetadata(slug, repository)!); }
 
 describe("historical agent-template catalog", () => {
   it("normalizes metadata and ordered duplicate arrays, keeps slug separate and body only in files", () => {
     importSource("lookup", mixed);
-    const metadata = repository.get("lookup")!;
+    const metadata = readTemplateMetadata("lookup", repository)!;
     expect(metadata).toMatchObject({ name: "Display Name", description: "Description", tags: ["a", "a", "z"], skills: [], avatar: "", model: "provider/model" });
-    expect(repository.get("Display Name")).toBeNull();
+    expect(readTemplateMetadata("Display Name", repository)).toBeNull();
     expect(body("lookup")).toBe("\n  Persona preserved.  \n\n");
     expect(existsSync(join(root, "agents/lookup.md"))).toBe(false);
     expect(metadata.extensions).toEqual({ source: "custom", version: 9, extra: { nested: [true, 2, null] } });
@@ -45,20 +45,20 @@ describe("historical agent-template catalog", () => {
     expect(JSON.stringify(row)).not.toContain("Persona preserved");
     expect(JSON.parse(row.extensions_json as string)).not.toHaveProperty("name");
     expect(db.all("SELECT value FROM agent_template_tags ORDER BY position")).toEqual([{value: "a"}, {value: "a"}, {value: "z"}]);
-    expect(repository.list()[0].slug).toBe("lookup");
+    expect(listTemplateMetadata(repository)[0].slug).toBe("lookup");
     importSource("skills", "---\nskills: [z, a, z]\n---\nbody");
-    expect(repository.get("skills")!.skills).toEqual(["z", "a", "z"]);
+    expect(readTemplateMetadata("skills", repository)!.skills).toEqual(["z", "a", "z"]);
     expect(db.all("SELECT value FROM agent_template_skills ORDER BY position")).toEqual([{value: "z"}, {value: "a"}, {value: "z"}]);
   });
 
   it("preserves absent versus empty arrays and blank/no-frontmatter bodies", () => {
     importSource("absent", "no envelope\n");
-    expect(repository.get("absent")!.tags).toBeUndefined();
-    expect(repository.get("absent")!.skills).toBeUndefined();
+    expect(readTemplateMetadata("absent", repository)!.tags).toBeUndefined();
+    expect(readTemplateMetadata("absent", repository)!.skills).toBeUndefined();
     expect(body("absent")).toBe("no envelope\n");
     importSource("empty", "---\nname: empty\ntags: []\nskills: []\n---\n");
-    expect(repository.get("empty")!.tags).toEqual([]);
-    expect(repository.get("empty")!.skills).toEqual([]);
+    expect(readTemplateMetadata("empty", repository)!.tags).toEqual([]);
+    expect(readTemplateMetadata("empty", repository)!.skills).toEqual([]);
     expect(body("empty")).toBe("");
   });
 
@@ -72,7 +72,7 @@ describe("historical agent-template catalog", () => {
           avatar: undefined, model: undefined, tags: undefined, skills: undefined, extensions: {},
         }, body });
         importSource("empty-envelope", markdown);
-        const { personaPath, ...metadata } = repository.get("empty-envelope")!;
+        const { personaPath, ...metadata } = readTemplateMetadata("empty-envelope", repository)!;
         expect(metadata).toEqual(parsed.metadata);
         expect(readFileSync(join(root, personaPath))).toEqual(Buffer.from(body));
       }
@@ -82,31 +82,31 @@ describe("historical agent-template catalog", () => {
   it.each(["\n", "\r\n"])("preserves nonempty frontmatter and exact empty/nonempty bodies with %j delimiters", newline => {
     for (const body of ["", "\r\n  Persona.  \n\r\n"]) {
       importSource("envelope", ["---", "name: Display", "extra: keep", "---", body].join(newline));
-      expect(repository.get("envelope")!.name).toBe("Display");
-      expect(repository.get("envelope")!.extensions).toEqual({ extra: "keep" });
-      expect(readFileSync(join(root, repository.get("envelope")!.personaPath))).toEqual(Buffer.from(body));
+      expect(readTemplateMetadata("envelope", repository)!.name).toBe("Display");
+      expect(readTemplateMetadata("envelope", repository)!.extensions).toEqual({ extra: "keep" });
+      expect(readFileSync(join(root, readTemplateMetadata("envelope", repository)!.personaPath))).toEqual(Buffer.from(body));
     }
   });
 
   it("never discovers legacy .md or uses it to rescue a missing historical body", () => {
     mkdirSync(join(root, "agents"));
     writeFileSync(join(root, "agents/retired.md"), mixed);
-    expect(repository.list()).toEqual([]);
+    expect(listTemplateMetadata(repository)).toEqual([]);
     importAgentTemplates({ db, stageAsset }, []);
-    expect(repository.get("retired")).toBeNull();
+    expect(readTemplateMetadata("retired", repository)).toBeNull();
     importSource("broken", "broken");
-    unlinkSync(join(root, repository.get("broken")!.personaPath));
+    unlinkSync(join(root, readTemplateMetadata("broken", repository)!.personaPath));
     writeFileSync(join(root, "agents/broken.md"), "must not rescue missing body");
     expect(() => body("broken")).toThrow();
-    expect(repository.has("broken")).toBe(true);
+    expect(hasTemplateMetadata("broken", repository)).toBe(true);
   });
 
   it("keeps the previously imported body and catalog on SQL failure or outer rollback", () => {
     importSource("stable", "old body");
-    const previous = repository.get("stable")!;
+    const previous = readTemplateMetadata("stable", repository)!;
     db.exec("CREATE TRIGGER reject_template BEFORE UPDATE ON agent_templates BEGIN SELECT RAISE(ABORT,'injected SQL failure'); END");
     expect(() => importSource("stable", "new body")).toThrow("injected SQL failure");
-    expect(repository.get("stable")).toEqual(previous);
+    expect(readTemplateMetadata("stable", repository)).toEqual(previous);
     expect(readTemplateBody(root, previous)).toBe("old body");
     db.exec("DROP TRIGGER reject_template");
     // Stage outside SQL, then exercise rollback of the unchanged historical repository.
@@ -117,18 +117,18 @@ describe("historical agent-template catalog", () => {
       importAgentTemplates({ db: candidate, stageAsset: (path, bytes) => { prepared.set(path, bytes); } }, [source("stable", "rolled back body")]);
       for (const [path, bytes] of prepared) stageAsset(path, bytes);
       expect(() => db.transaction(() => {
-        repository.upsert(new TemplateRepository(candidate).get("stable")!);
+        importTemplateMetadata(readTemplateMetadata("stable", candidate)!, repository);
         throw new Error("outer failure");
       })).toThrow("outer failure");
     } finally { candidate.close(); }
-    expect(repository.get("stable")).toEqual(previous);
+    expect(readTemplateMetadata("stable", repository)).toEqual(previous);
     expect(body("stable")).toBe("old body");
   });
 
   it("does not publish metadata on a file write failure and rejects unsafe slugs before staging", () => {
     writeFileSync(join(root, "agents"), "not a directory");
     expect(() => importSource("new", "body")).toThrow();
-    expect(repository.list()).toEqual([]);
+    expect(listTemplateMetadata(repository)).toEqual([]);
     const stage = vi.fn();
     for (const slug of ["../escape", "bad\\slug", "", ".", "..", "bad\0slug"]) {
       expect(() => importAgentTemplates({ db, stageAsset: stage }, [source(slug, "body")])).toThrow("Invalid agent template slug");
@@ -138,7 +138,7 @@ describe("historical agent-template catalog", () => {
 
   it.each(["", "agents", "agents/safe", "body"])("rejects symlinks at historical read boundary %j", target => {
     importSource("safe", "body");
-    const metadata = repository.get("safe")!;
+    const metadata = readTemplateMetadata("safe", repository)!;
     const linked = target === "body" ? metadata.personaPath : target;
     const outside = mkdtempSync(join(tmpdir(), "bossmode-template-link-"));
     try {
@@ -157,10 +157,10 @@ describe("historical agent-template catalog", () => {
 
   it("rejects nonregular bodies, relative roots, traversal and cross-slug references", () => {
     importSource("safe", "body");
-    const metadata = repository.get("safe")!;
+    const metadata = readTemplateMetadata("safe", repository)!;
     for (const personaPath of ["agents/other/persona.md", "agents/safe/../persona.md", "/agents/safe/persona.md", "agents/safe//persona.md", "agents/safe/bad\\dir/persona.md"]) {
       expect(() => readTemplateBody(root, { ...metadata, personaPath })).toThrow("Invalid agent persona path");
-      expect(() => repository.upsert({ ...metadata, personaPath })).toThrow("Invalid agent persona path");
+      expect(() => importTemplateMetadata({ ...metadata, personaPath }, repository)).toThrow("Invalid agent persona path");
     }
     expect(() => readTemplateBody("relative", metadata)).toThrow("absolute");
     unlinkSync(join(root, metadata.personaPath));
@@ -170,15 +170,15 @@ describe("historical agent-template catalog", () => {
 
   it("preserves historical repository delete rollback, relation cleanup and unreferenced bodies", () => {
     importSource("lookup", mixed);
-    const metadata = repository.get("lookup")!;
+    const metadata = readTemplateMetadata("lookup", repository)!;
     expect(() => db.transaction(() => {
-      expect(repository.delete("lookup")).toBe(true);
+      expect(deleteTemplateMetadata("lookup", repository)).toBe(true);
       throw new Error("rollback delete");
     })).toThrow("rollback delete");
-    expect(repository.get("lookup")).toEqual(metadata);
-    expect(repository.delete("lookup")).toBe(true);
-    expect(repository.delete("lookup")).toBe(false);
-    expect(repository.get("lookup")).toBeNull();
+    expect(readTemplateMetadata("lookup", repository)).toEqual(metadata);
+    expect(deleteTemplateMetadata("lookup", repository)).toBe(true);
+    expect(deleteTemplateMetadata("lookup", repository)).toBe(false);
+    expect(readTemplateMetadata("lookup", repository)).toBeNull();
     expect(db.all("SELECT * FROM agent_template_tags")).toEqual([]);
     expect(readTemplateBody(root, metadata)).toBe("\n  Persona preserved.  \n\n");
   });
@@ -186,7 +186,7 @@ describe("historical agent-template catalog", () => {
   it("does not initialize schema or database from the historical repository", () => {
     const empty = openDatabase(join(root, "empty.sqlite"));
     try {
-      expect(() => new TemplateRepository(empty).list()).toThrow("no such table");
+      expect(() => listTemplateMetadata(empty)).toThrow("no such table");
       expect(empty.all("SELECT name FROM sqlite_master WHERE type='table'")).toEqual([]);
     } finally { empty.close(); }
   });
@@ -197,7 +197,7 @@ describe("historical agent-template catalog", () => {
     expect(() => importSource("invalid", "---\nname: x")).toThrow("Unterminated");
     expect(existsSync(join(root, "agents"))).toBe(false);
     importSource("valid", "body");
-    expect(() => repository.upsert({ ...repository.get("valid")!, extensions: { tags: ["bad"] } })).toThrow("duplicated");
+    expect(() => importTemplateMetadata({ ...readTemplateMetadata("valid", repository)!, extensions: { tags: ["bad"] } }, repository)).toThrow("duplicated");
   });
 });
 
@@ -206,22 +206,22 @@ describe("explicit historical import", () => {
     expect(legacyAgentTemplateSources(["agents/a.md", "agents/a/persona.md", "skills/a/SKILL.md", "backup/agents/b.md", "agents/a\\b.md"])).toEqual([{path: "agents/a.md", retire: true}]);
     const staged = new Map<string, Uint8Array>();
     importAgentTemplates({ db, stageAsset: (path, bytes) => {
-      expect(repository.has("lookup")).toBe(false);
+      expect(hasTemplateMetadata("lookup", repository)).toBe(false);
       staged.set(path, bytes);
     } }, [source("lookup", mixed)]);
-    const metadata = repository.get("lookup")!;
+    const metadata = readTemplateMetadata("lookup", repository)!;
     expect(Buffer.from(staged.get(metadata.personaPath)!)).toEqual(Buffer.from("\n  Persona preserved.  \n\n"));
     expect(existsSync(join(root, "agents"))).toBe(false);
     importSource("lookup", mixed);
-    expect(repository.list()).toHaveLength(1);
-    expect(repository.get("lookup")).toEqual(metadata);
+    expect(listTemplateMetadata(repository)).toHaveLength(1);
+    expect(readTemplateMetadata("lookup", repository)).toEqual(metadata);
     expect(body("lookup")).toBe("\n  Persona preserved.  \n\n");
   });
 
   it("publishes no metadata on stage failure, validates all sources first, and rolls back a bad SQL batch", () => {
     let calls = 0;
     expect(() => importAgentTemplates({db, stageAsset: () => { if (++calls === 2) throw new Error("stage failed"); }}, [source("a", "a"), source("b", "b")])).toThrow("stage failed");
-    expect(repository.list()).toEqual([]);
+    expect(listTemplateMetadata(repository)).toEqual([]);
     calls = 0;
     expect(() => importAgentTemplates({db, stageAsset: () => { calls++; }}, [source("a", "a"), source("a", "b")])).toThrow("Duplicate");
     expect(calls).toBe(0);
@@ -229,6 +229,6 @@ describe("explicit historical import", () => {
     expect(calls).toBe(0);
     db.exec("CREATE TRIGGER reject_b BEFORE INSERT ON agent_templates WHEN NEW.slug='b' BEGIN SELECT RAISE(ABORT,'batch failure'); END");
     expect(() => importAgentTemplates({db, stageAsset}, [source("a", "a"), source("b", "b")])).toThrow("batch failure");
-    expect(repository.list()).toEqual([]);
+    expect(listTemplateMetadata(repository)).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@ it("serves SQL-owned MCP definitions, member file assets and the generated publi
   const created = await jsonRequest(server.port, "POST", "/api/members", { token, body: { name: "Assets" } });
   expect(created.status, created.body).toBe(200);
   const id = JSON.parse(created.body).member.memberId;
-  const { writeMemberMcpConfig } = await import("../../src/member/mcp/mcp-settings.js");
+  const { writeMemberMcpConfig } = await import("../../src/member/mcp.js");
   writeMemberMcpConfig(id, { mcpServers: { one: { command: "fixture-unused" }, two: { url: "https://example.test/mcp" } } });
   const { memberExtensionsDir, memberSkillsDir } = await import("../../src/files/layout.js");
   const extension = join(memberExtensionsDir(id), "member-extension");

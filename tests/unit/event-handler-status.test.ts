@@ -1,8 +1,8 @@
 import { coreFixture } from "../helpers/core-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
+import { storeRoom } from "../../src/chat/conversations.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
 import { importAgentEvent, readAgentEvents } from "../../src/data/repositories/event-repository.js";
 
 let fixture: ReturnType<typeof coreFixture>;
@@ -27,9 +27,9 @@ import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
 describe("event-handler status authority", () => {
   beforeEach(() => {
     fixture = coreFixture();
-    new MembersRepository(fixture.db).insert({ id: "mem_dev", name: "developer", agentTemplate: "developer",
-      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 });
-    new ConversationsRepository(fixture.db).upsertRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 });
+    insertMemberIdentity({ id: "mem_dev", name: "developer", agentTemplate: "developer",
+      global: {}, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}, createdAt: 1, updatedAt: 1 }, fixture.db);
+    storeRoom({ id: "room1", name: "Room", members: ["developer"], globalMemberIds: ["mem_dev"], createdAt: 1 }, fixture.db);
     agentManagerMocks.refreshContextUsage.mockReset();
     vi.mocked(broadcastToAgentSubscribers).mockClear();
   });

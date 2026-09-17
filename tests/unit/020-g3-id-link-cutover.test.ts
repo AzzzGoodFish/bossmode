@@ -4,13 +4,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coreFixture } from "../helpers/core-fixture.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 let fixture: ReturnType<typeof coreFixture>;
 function historicalRoom(names: string[]) {
   // Explicit historical import, never inferred from today's names or template files.
   const room = {id: "imported-room", name: "R", members: names, createdAt: 1,
     roomMembers: names.map(name => ({id: `rm_${name}`, roomId: "imported-room", name, sourceAgent: name, createdAt: 1, updatedAt: 2}))};
-  new ConversationsRepository(fixture.db).upsertRoom(room);
+  storeRoom(room, fixture.db);
   return room;
 }
 describe("G3 ID-link SQL cutover", () => {
@@ -18,10 +18,10 @@ describe("G3 ID-link SQL cutover", () => {
   afterEach(() => fixture.close());
 
   it("stampGlobalMemberIds synthesizes members from globalMemberIds without discarding historical roomMembers", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm", model: "m/a", credentialId: "c1" });
-    const dev = reg.createMember({ name: "developer", agentTemplate: "developer", model: "m/b", credentialId: "c2" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "m/a", credentialId: "c1" });
+    const dev = __reg_app_member_actions.createMember({ name: "developer", agentTemplate: "developer", model: "m/b", credentialId: "c2" });
 
     const room = historicalRoom(["pm", "developer"]);
 
@@ -38,9 +38,9 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("resolveGlobalMemberId prefers sourceMemberId; rename does not break ID link", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
     const room = historicalRoom(["pm"]);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
 
@@ -55,10 +55,10 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("inviteGlobalMember adds mem_* membership without activating historical roomMembers", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
-    const dev = reg.createMember({ name: "developer", agentTemplate: "developer" });
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
+    const dev = __reg_app_member_actions.createMember({ name: "developer", agentTemplate: "developer" });
     const room = historicalRoom(["pm"]);
     roomStore.stampGlobalMemberIds(room.id, [pm.id], pm.id);
 
@@ -79,10 +79,10 @@ describe("G3 ID-link SQL cutover", () => {
   });
 
   it("does not resolve a same-named global member outside globalMemberIds", async () => {
-    const reg = await import("../../src/member/member-registry.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     // Two globals cannot share name — so create room-local "shadow" without stamp
-    const pm = reg.createMember({ name: "pm", agentTemplate: "pm" });
+    const pm = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm" });
     const room = historicalRoom(["pm"]);
     // No stampGlobalMemberIds — empty globalMemberIds
     const local = roomStore.getRoomMembers(room.id)[0];

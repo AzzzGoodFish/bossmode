@@ -1,4 +1,4 @@
-import { mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, renameSync } from "node:fs";
+import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, parse, join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 
@@ -115,4 +115,14 @@ export function moveDurably(source: string, destination: string): void {
   renameSync(source, destination);
   syncPath(dirname(source));
   if (dirname(source) !== dirname(destination)) syncPath(dirname(destination));
+}
+
+/** Presence hint only; inaccessible entries do not become readable through this inspection. */
+export function directoryHasReadableEntries(directory: string): boolean {
+  try {
+    return readdirSync(directory).some(name => {
+      try { const entry = statSync(join(directory, name)); return entry.isFile() || entry.isDirectory(); }
+      catch { return false; }
+    });
+  } catch { return false; }
 }

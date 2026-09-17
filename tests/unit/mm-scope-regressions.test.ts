@@ -1,3 +1,4 @@
+import { loadMemberPromptSource } from "../../src/app/member-actions.js";
 import { it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { setupTestWorkspace } from "../helpers/test-server.js";
@@ -14,11 +15,11 @@ setupTestWorkspace();
 //      `.kind` off a null parse of the `mm:` scope (agent-manager).
 
 it("regression: a pair member's tools work while the caller's own chat is the member chat", async () => {
-  const reg = await import("../../src/member/member-registry.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-  const ref = await import("../../src/chat/conversation-ref.js");
-  const alice = reg.createMember({ name: "alice" });
-  const bob = reg.createMember({ name: "bob" });
+  const ref = await import("../../src/chat/conversations.js");
+  const alice = __reg_app_member_actions.createMember({ name: "alice" });
+  const bob = __reg_app_member_actions.createMember({ name: "bob" });
   const scope = ref.mmScopeIdOf(alice.id, bob.id);
 
   // Open the chat (alice → bob), then act from *inside* it: the runtime passes
@@ -34,7 +35,7 @@ it("regression: a pair member's tools work while the caller's own chat is the me
   expect(sent).toMatchObject({ ok: true, chat: { id: scope } });
 
   // Outsiders stay denied — the fix must not weaken the pair check.
-  const carol = reg.createMember({ name: "carol" });
+  const carol = __reg_app_member_actions.createMember({ name: "carol" });
   const denied = await handleToolCallback("chat_list", scope, carol.id, {}, { memberId: carol.id }) as any;
   expect(denied.ok).toBe(false);
 });
@@ -42,16 +43,16 @@ it("regression: a pair member's tools work while the caller's own chat is the me
 it("regression: a rename does not crash the next batch of an instance born in a pair chat", async () => {
   resetMocks();
   const suffix = randomUUID().slice(0, 6);
-  const reg = await import("../../src/member/member-registry.js");
+  const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const manager = await import("../../src/agent/orchestrator/agent-manager.js");
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
-  const { mmScopeIdOf } = await import("../../src/chat/conversation-ref.js");
-  const { updateProfileForMember } = await import("../../src/member/profile/member-profile-update.js");
+  const { mmScopeIdOf } = await import("../../src/chat/conversations.js");
+  const { updateProfileForMember } = await import("../../src/member/profile.js");
   const { getDatabase } = await import("../../src/data/database.js");
 
-  const alice = reg.createMember({ name: `alice-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
-  const bob = reg.createMember({ name: `bob-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
+  const alice = __reg_app_member_actions.createMember({ name: `alice-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
+  const bob = __reg_app_member_actions.createMember({ name: `bob-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const scope = mmScopeIdOf(alice.id, bob.id);
   const handles: any[] = [];
   const runtime = {
@@ -67,7 +68,7 @@ it("regression: a rename does not crash the next batch of an instance born in a 
   };
   const runtimes = new RuntimeRegistry();
   runtimes.register(runtime as any);
-  manager.initAgentManager(runtimes);
+  manager.initAgentManager(runtimes, loadMemberPromptSource);
   const stopRouter = manager.wireMentionRouter();
   try {
     // First message: bob is activated and his instance is born in the pair scope.

@@ -4,11 +4,11 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { checkPath, type PathPolicy } from "../../kernel/path.js";
 import { copyToAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
-import * as roomStore from "../../chat/room-store.js";
+import * as roomStore from "../../chat/conversations.js";
 
-import { readWorkspaces } from "../../member/workspaces/workspace-registry.js";
-import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/room-store.js";
-import { chatScopeRoomId } from "../../chat/conversation-ref.js";
+import { readWorkspaces } from "../../member/workspaces.js";
+import { getRoomMembersFromRoom, roomMemberAssetRoots } from "../../chat/conversations.js";
+import { chatScopeRoomId } from "../../chat/conversations.js";
 
 import { logger } from "../../kernel/logger.js";
 

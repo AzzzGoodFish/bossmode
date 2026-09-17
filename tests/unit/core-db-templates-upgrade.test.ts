@@ -8,7 +8,7 @@ import type { Database } from "../../src/data/database.js";
 const baseStorageMigration = getMigration("core-base-v1");
 import { prepareStorageUpgrade, type UpgradeOptions } from "../../src/app/upgrade/run.js";
 const templatesMigration = getMigration("core-templates-v1");
-import { TemplateRepository } from "../../src/data/repositories/templates.js";
+import { listTemplateMetadata, readTemplateMetadata } from "../../src/member/templates.js";
 import { importAgentTemplates, legacyAgentTemplateSources, readTemplateBody } from "../../src/app/upgrade/records.js";
 
 const ioFailure = vi.hoisted(() => ({
@@ -63,7 +63,7 @@ function options(overrides: Partial<UpgradeOptions> = {}): UpgradeOptions {
       })));
     },
     validate: async ctx => {
-      const rows = new TemplateRepository(ctx.db).list();
+      const rows = listTemplateMetadata(ctx.db);
       expect(rows.map(row => row.slug)).toEqual(["lookup"]);
       expect(rows[0].extensions).toEqual({source: "user", version: "v1", custom: ["keep"]});
       // Bodies are still staged during validation; parent verifies/publishes the stageAsset manifest.
@@ -80,7 +80,7 @@ async function run(overrides: Partial<UpgradeOptions> = {}) {
 
 it("imports through real parent stageAsset, preserves body bytes, retires mixed files, and restarts without discovery", async () => {
   const first = await run();
-  const metadata = new TemplateRepository(first.db).get("lookup")!;
+  const metadata = readTemplateMetadata("lookup", first.db)!;
   expect(readTemplateBody(root, metadata)).toBe("\r\n literal body  \r\n\n");
   expect(existsSync(join(root, "agents/lookup.md"))).toBe(false);
   expect(readFileSync(join(first.backupDirectory!, "files/agents/lookup.md"), "utf8")).toBe(markdown);
@@ -90,7 +90,7 @@ it("imports through real parent stageAsset, preserves body bytes, retires mixed 
     importData: async () => { throw new Error("must not import again"); },
   });
   expect(second.migrated).toBe(false);
-  expect(new TemplateRepository(second.db).get("lookup")).toEqual(metadata);
+  expect(readTemplateMetadata("lookup", second.db)).toEqual(metadata);
   expect(readTemplateBody(root, metadata)).toBe("\r\n literal body  \r\n\n");
 });
 
@@ -99,8 +99,8 @@ it("retries an interrupted staging import without publishing partial SQL or reti
   expect(readFileSync(join(root, "agents/lookup.md"), "utf8")).toBe(markdown);
   expect(existsSync(join(root, "bossmode.db"))).toBe(false);
   const recovered = await run();
-  expect(new TemplateRepository(recovered.db).list()).toHaveLength(1);
-  expect(readTemplateBody(root, new TemplateRepository(recovered.db).get("lookup")!)).toBe("\r\n literal body  \r\n\n");
+  expect(listTemplateMetadata(recovered.db)).toHaveLength(1);
+  expect(readTemplateBody(root, readTemplateMetadata("lookup", recovered.db)!)).toBe("\r\n literal body  \r\n\n");
 });
 
 const exactBody = "\r\n literal body  \r\n\n";
@@ -156,7 +156,7 @@ it.each(["", "agents", "agents/lookup"])("blocks cutover on renewed %j fsync fai
     expect(readFileSync(join(root, personaPath()))).toEqual(Buffer.from(exactBody));
   }
   const recovered = await run({ validate: async () => {} });
-  expect(readTemplateBody(root, new TemplateRepository(recovered.db).get("lookup")!)).toBe(exactBody);
+  expect(readTemplateBody(root, readTemplateMetadata("lookup", recovered.db)!)).toBe(exactBody);
 });
 
 it("rejects a conflicting historical body without overwriting it or retiring its source", async () => {
@@ -188,7 +188,7 @@ it("does not retire changed legacy data after cutover, keeps catalog authority a
     if (phase === "activated") writeFileSync(join(root, "agents/lookup.md"), "changed user data");
   } });
   expect(first.warnings).toContain("Legacy source retirement pending: agents/lookup.md");
-  const metadata = new TemplateRepository(first.db).get("lookup")!;
+  const metadata = readTemplateMetadata("lookup", first.db)!;
   expect(readTemplateBody(root, metadata)).toBe(exactBody);
   expect(readFileSync(join(root, "agents/lookup.md"), "utf8")).toBe("changed user data");
   expect(readFileSync(join(first.backupDirectory!, "files/agents/lookup.md"), "utf8")).toBe(markdown);
@@ -198,7 +198,7 @@ it("does not retire changed legacy data after cutover, keeps catalog authority a
   expect(second.migrated).toBe(false);
   expect(second.warnings).toEqual([]);
   expect(existsSync(join(root, "agents/lookup.md"))).toBe(false);
-  expect(new TemplateRepository(second.db).get("lookup")).toEqual(metadata);
+  expect(readTemplateMetadata("lookup", second.db)).toEqual(metadata);
 });
 
 it("requires the verified backup for retirement on restart", async () => {
@@ -212,7 +212,7 @@ it("requires the verified backup for retirement on restart", async () => {
   const pending = await run();
   expect(pending.warnings).toContain("Legacy source retirement pending: agents/lookup.md");
   expect(readFileSync(join(root, "agents/lookup.md"), "utf8")).toBe(markdown);
-  expect(readTemplateBody(root, new TemplateRepository(pending.db).get("lookup")!)).toBe(exactBody);
+  expect(readTemplateBody(root, readTemplateMetadata("lookup", pending.db)!)).toBe(exactBody);
   pending.db.close();
   writeFileSync(join(root, backup), markdown);
   const recovered = await run();

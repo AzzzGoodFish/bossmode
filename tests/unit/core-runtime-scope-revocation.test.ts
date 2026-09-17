@@ -3,7 +3,7 @@ import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, 
 import { resetMocks, mockPromptFn, MockRuntime, MockAgentHandle } from "../helpers/mock-runtime.js";
 import { getDatabase } from "../../src/data/database.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
-import { resolveRoomMemberRef } from "../../src/chat/room-store.js";
+import { resolveRoomMemberRef } from "../../src/chat/conversations.js";
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
 import { getAgentInstanceForScope } from "../../src/agent/orchestrator/agent-manager.js";
 setupTestWorkspace();

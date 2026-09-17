@@ -28,7 +28,7 @@ describe("buildMemberAgentSession + reload (batch 6 §2/§3)", () => {
     let reloading: Promise<unknown> | undefined;
     try {
       const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-      const { saveCurrentSession, getCurrentSession } = await import("../../src/member/session-store.js");
+      const { saveCurrentSession, getCurrentSession } = await import("../../src/member/sessions.js");
       saveCurrentSession(memberId, { runtime: "pi-cli", sessionId: "retained-session" });
       // An empty room builds an idle instance, not an invented human instruction.
       await manager.activateAgent(roomId, memberId);

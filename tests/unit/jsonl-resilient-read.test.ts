@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { bindDatabase, openDatabase } from "../../src/data/database.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { importMessage, readMessages } from "../../src/data/repositories/message-repository.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
 import { discoverLegacyInventory, type LegacySourceEntry } from "../../src/app/upgrade/inventory.js";
@@ -58,7 +58,7 @@ function assertOriginalUntouched(path: string, body: string) {
 
 beforeEach(() => {
   fixture = coreFixture();
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "existing-room", name: "Existing", members: [], createdAt: 1 });
+  storeRoom({ id: "existing-room", name: "Existing", members: [], createdAt: 1 }, fixture.db);
   importMessage(fixture.db, "existing-room", retainedMessage);
 });
 afterEach(() => { upgraded?.db.close(); upgraded = undefined; fixture.close(); });
@@ -142,7 +142,7 @@ describe("historical JSONL import and SQL queries", () => {
   });
 
   it("valid event history retains order under an unresolved owner, never the current same-name member", async () => {
-    const { importMemberRecord } = await import("../../src/member/member-registry.js");
+    const { importMemberRecord } = await import("../../src/app/member-actions.js");
     importMemberRecord({ id: "mem_pm", name: "pm", agentTemplate: "general", unifiedModel: true, unifiedExtensions: true,
       global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
       scopeOverrides: {}, createdAt: 1, updatedAt: 1 });

@@ -1,27 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { MembersRepository } from "../../src/data/repositories/members.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
-import { SessionRepository } from "../../src/data/repositories/session-repository.js";
+import { insertMemberIdentity } from "../../src/member/identity.js";
+import { ensureDmScope, storeRoom, storeMemberCursor, readMemberCursors, deleteMemberCursor } from "../../src/chat/conversations.js";
+import { importSessionAssociation, readSessionAssociation } from "../../src/member/sessions.js";
 import { RuntimeRepository } from "../../src/data/repositories/runtime-repository.js";
 import { UserCursorRepository } from "../../src/data/repositories/user-cursor-repository.js";
 import * as runtime from "../../src/member/runtime-state.js";
-import * as sessions from "../../src/member/session-store.js";
+import * as sessions from "../../src/member/sessions.js";
 import * as cursors from "../../src/chat/user-read-cursors.js";
-import { stampGlobalMemberIds, getCursors } from "../../src/chat/room-store.js";
+import { stampGlobalMemberIds, getCursors } from "../../src/chat/conversations.js";
 
 let fixture: ReturnType<typeof coreFixture>;
 const owners = ["mem_one", "mem_two"];
 const scopes = ["room:r", "dm:mem_one", "dm:mem_two"];
 beforeEach(() => {
   fixture = coreFixture();
-  const conversations = new ConversationsRepository(fixture.db);
+  const conversations = fixture.db;
   for (const [i, id] of owners.entries()) {
-    new MembersRepository(fixture.db).insert({id, name: `member${i}`, agentTemplate: "general", global: {},
-      createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}});
-    conversations.ensureDmScope(id);
+    insertMemberIdentity({id, name: `member${i}`, agentTemplate: "general", global: {},
+      createdAt: 1, updatedAt: 2, unifiedModel: true, unifiedExtensions: true, scopeOverrides: {}}, fixture.db);
+    ensureDmScope(id, conversations);
   }
-  conversations.upsertRoom({id: "r", name: "Room", members: [], globalMemberIds: owners, createdAt: 1});
+  storeRoom({id: "r", name: "Room", members: [], globalMemberIds: owners, createdAt: 1}, conversations);
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
@@ -62,14 +62,14 @@ describe("execution metadata isolation and transactional failures", () => {
   });
 
   it("preserves session creation time and atomically rolls back a clear", () => {
-    const repo = new SessionRepository(fixture.db);
+    const repo = fixture.db;
     for (const id of owners) {
-      repo.importAssociation({memberId: id, session: {runtime: "pi-sdk", sessionId: id},
-        referenceKind: "member-relative", createdAt: 10, updatedAt: 20});
+      importSessionAssociation({memberId: id, session: {runtime: "pi-sdk", sessionId: id},
+        referenceKind: "member-relative", createdAt: 10, updatedAt: 20}, repo);
     }
     vi.spyOn(Date, "now").mockReturnValue(30);
     sessions.saveCurrentSession(owners[0], {runtime: "pi-sdk", sessionId: "replacement"});
-    expect(repo.get(owners[0])).toMatchObject({createdAt: 10, updatedAt: 30});
+    expect(readSessionAssociation(owners[0], repo)).toMatchObject({createdAt: 10, updatedAt: 30});
     fixture.db.exec(`CREATE TRIGGER reject_clear BEFORE DELETE ON current_sessions WHEN OLD.member_id='${owners[0]}' BEGIN SELECT RAISE(ABORT,'clear blocked'); END`);
     expect(() => sessions.clearCurrentSession(owners[0])).toThrow("clear blocked");
     expect(sessions.getCurrentSession(owners[0])?.sessionId).toBe("replacement");
@@ -80,9 +80,9 @@ describe("execution metadata isolation and transactional failures", () => {
   });
 
   it("keeps member and user positions independent across room and both DMs, including null/zero and backward patches", () => {
-    const repo = new ConversationsRepository(fixture.db);
+    const repo = fixture.db;
     for (const [i, scope] of scopes.entries()) {
-      repo.setCursor(scope.startsWith("room:") ? scope.slice(5) : scope, owners[0], `member-${i}`);
+      storeMemberCursor(scope.startsWith("room:") ? scope.slice(5) : scope, owners[0], `member-${i}`, undefined, repo);
       new UserCursorRepository(fixture.db).importCursor(scope, {messageId: `user-${i}`, seq: i + 10, updatedAt: i});
     }
     vi.spyOn(Date, "now").mockReturnValue(50);
@@ -95,7 +95,7 @@ describe("execution metadata isolation and transactional failures", () => {
       "dm:mem_two": {messageId: "user-2", seq: 12, updatedAt: 2},
     });
     for (const [i, scope] of scopes.entries()) {
-      expect(new ConversationsRepository(fixture.db).getCursors(scope.startsWith("room:") ? scope.slice(5) : scope)).toEqual({mem_one: `member-${i}`});
+      expect(readMemberCursors(scope.startsWith("room:") ? scope.slice(5) : scope, fixture.db)).toEqual({mem_one: `member-${i}`});
     }
   });
 
@@ -111,23 +111,23 @@ describe("execution metadata isolation and transactional failures", () => {
   });
 
   it("moves only proven historical cursor links and never overwrites an existing stable-ID position", () => {
-    const repo = new ConversationsRepository(fixture.db);
-    repo.upsertRoom({id: "r", name: "Room", members: ["member0", "member1"], createdAt: 1,
+    const repo = fixture.db;
+    storeRoom({id: "r", name: "Room", members: ["member0", "member1"], createdAt: 1,
       roomMembers: [
         {id: "rm_one", roomId: "r", name: "member0", sourceAgent: "general", sourceMemberId: owners[0], createdAt: 1, updatedAt: 1},
         {id: "rm_two", roomId: "r", name: "member1", sourceAgent: "general", createdAt: 1, updatedAt: 1},
-      ]});
-    repo.setCursor("r", "rm_one", "proven-old");
-    repo.setCursor("r", "rm_two", "unresolved-old");
-    repo.setCursor("r", owners[0], "newer-position");
+      ]}, repo);
+    storeMemberCursor("r", "rm_one", "proven-old", undefined, repo);
+    storeMemberCursor("r", "rm_two", "unresolved-old", undefined, repo);
+    storeMemberCursor("r", owners[0], "newer-position", undefined, repo);
     stampGlobalMemberIds("r", owners);
     expect(getCursors("r")).toEqual({mem_one: "newer-position", rm_two: "unresolved-old"});
-    repo.deleteCursor("r", owners[0]);
-    repo.setCursor("r", "rm_one", "proven-old");
+    deleteMemberCursor("r", owners[0], repo);
+    storeMemberCursor("r", "rm_one", "proven-old", undefined, repo);
     stampGlobalMemberIds("r", owners);
     fixture.reopen();
     expect(getCursors("r")).toEqual({mem_one: "proven-old", rm_two: "unresolved-old"});
-    expect(new ConversationsRepository(fixture.db).getCursors("dm:mem_two")).toEqual({});
+    expect(readMemberCursors("dm:mem_two", fixture.db)).toEqual({});
   });
 
   it("propagates closed storage errors from session/runtime/cursor reads and writes instead of returning empty success", () => {

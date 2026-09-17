@@ -4,33 +4,33 @@ import {recoverRuntimeInputState,acceptRuntimeInput,acceptControlInput,pendingRu
 import {InputQueueRepository,type QueuedInput} from "../../data/repositories/input-queue-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../../data/repositories/reply-obligation-repository.js";
 import type {CapturedMessage} from "../../data/repositories/delivery-repository.js";
-import {readMemberProfile,isBlankPersona} from "../../member/profile/member-profile.js";
+import {readMemberProfile,isBlankPersona} from "../../member/profile.js";
 import type {MentionActivationCtx} from "../../chat/router.js";
 import { getDatabase } from "../../data/database.js";
 import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runtimeIsStopping } from "./runtime-admission.js";
 // Agent Manager — agent lifecycle management (slimmed down)
-// Prompt assembly → agent/prompt/prompt-assembler.ts
+// Prompt compilation → agent/prompt/prompt-compiler.ts
 // Event handling → agent/events/event-handler.ts
 // Tool callbacks → agent/tools/tools.ts
 
 import { join } from "node:path";
 import { logger } from "../../kernel/logger.js";
-import { resolveGlobalSkillPaths } from "../../member/skills/skill-store.js";
-import { activeWorkspaceRoot } from "../../member/workspaces/workspace-registry.js";
+import { resolveGlobalSkillPaths } from "../../member/skills.js";
+import { activeWorkspaceRoot } from "../../member/workspaces.js";
 import { resolveRoomMember } from "../../member/room-member-resolver.js";
 
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
-import * as roomStore from "../../chat/room-store.js";
-import * as sessionStore from "../../member/session-store.js";
+import * as roomStore from "../../chat/conversations.js";
+import * as sessionStore from "../../member/sessions.js";
 
 import * as attachmentStore from "../../files/attachment-store.js";
 import { postMessage, getMessagesSince, getLatestMessageId } from "../../chat/message-bus.js";
 import { initRouter } from "../../chat/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../../app/server/ws.js";
-import { compileMemberPrompt } from "../prompt/prompt-compiler.js";
-import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversation-ref.js";
-import { listRoomsForMember } from "../../member/scope-access.js";
-import { getMember, getEffectiveConfig, applyMemberConfigPatch, type MemberRecord } from "../../member/member-registry.js";
+import { compileMemberPrompt, currentContractFingerprint, type MemberPromptSource } from "../prompt.js";
+import { instanceKey, isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../../chat/conversations.js";
+import { listRoomsForMember } from "../../chat/conversations.js";
+import { getMember, getMemberConfiguration, applyMemberConfigPatch, type MemberRecord } from "../../member/identity.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events/event-handler.js";
 import { loadScopeMessages } from "../tools/tools.js";
@@ -59,15 +59,21 @@ import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/
 // -- Registry injection --
 
 let registry: RuntimeRegistry | null = null;
+let promptSource: ((memberId: string) => MemberPromptSource) | null = null;
+function compileForMember(memberId: string) {
+  if (!promptSource) throw new Error("Member prompt source is not connected");
+  return compileMemberPrompt(promptSource(memberId));
+}
 let shutdownSettlement: Promise<void> | null = null;
 let shutdownRunning = false;
 
-export function initAgentManager(reg: RuntimeRegistry): void {
+export function initAgentManager(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
   if(registry&&(instances.size||pendingCreations.size||inputPumps.size))throw new Error("Runtime initialization requires completed teardown");
   recoverRuntimeInputState();
   shutdownSettlement = null; openRuntimeAdmission();
   registry = reg;
+  promptSource = loadPrompt;
 }
 
 /** Called only after HTTP/PID publication, never during historical import. */
@@ -555,7 +561,7 @@ function refreshProfileSources(instance: AgentInstance): void {
   const parentId = ref?.kind === "room" ? ref.roomId : undefined;
   const room = parentId ? roomStore.getRoom(parentId) : null;
   // ① batch 2: one prompt per member — the compiler takes no scope.
-  const compiled = compileMemberPrompt({ memberId: member.id, memberName: member.name, description: member.title });
+  const compiled = compileForMember(member.id);
   instance.agentName = member.name;
   instance.sessionSources.member.name = member.name;
   instance.sessionSources.member.title = member.title;
@@ -994,170 +1000,51 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       return null;
     }
 
-    let member: AgentMemberConfig;
-    let room: Room | null;
-    let cwd = "";
-    let roomMembers: string[];
-    let keyRoomId: string;          // instance key room part + error-post target
-    let logLabel: string;
-    let errLabel: string;
-    let compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string };
-    let skills: string[];
-    let skillPaths: string[] = [];
-    let resumeSession: { sessionId?: string; sessionFile?: string } | undefined;
-    let sessionDir: string | undefined;
-    let forkSessionManager: unknown;
-    let onSessionChanged: ((session: { sessionId?: string; sessionFile?: string }) => void) | undefined;
-    let callbacks: Parameters<typeof runtime.createAgent>[0]["callbacks"];
-
-    // ① B1: the chat whose turn is being processed right now. Callbacks and the
-    // instance share this holder; runInputBatch rewrites it for every batch, so
-    // one member instance serves whichever chat activated it.
-    const activeChat: { scopeId: string } = { scopeId };
-    /** postMessage/transition take bare room ids or dm:<id>; normalize room scopes. */
-    const chatTarget = () => chatTargetOf(activeChat.scopeId);
-
-    if (ref?.kind === "dm" || mmScope) {
-      // ── DM scope: global member config, daemon cwd, roster-labeled activeScopes ──
-      const m = memberRecordToConfig(memberId);
-      if (!m) {
-        logger.error("agent", "dm member not found", { memberId });
-        return null;
-      }
-      member = m;
-      room = null;
-      if (!isMemberConfigured(member)) {
-        logger.error("agent", "dm member unconfigured", { member: member.name, memberId });
-        return null;
-      }
-      const runtime0 = registry.get(member.runtime);
-      if (!runtime0) {
-        logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
-        return null;
-      }
-      const dmScopeId = scopeId;
-      compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      clearStaleMounts(memberId);
-      skills = resolveSkills(member);
-      cwd = activeWorkspaceRoot(memberId);
-      roomMembers = [member.name];
-      keyRoomId = dmScopeId; // "dm:<memberId>" | "mm:<a>-<b>" — tools/chat branch on the prefix
-      sessionDir = mainSessionDirectory(memberId);
-      const savedSession = sessionStore.getCurrentSession(memberId);
-      resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
-      onSessionChanged = (session) => { if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session }); };
-      logLabel = mmScope ? "mmAgentCreated" : "dmAgentCreated";
-      errLabel = mmScope ? "mm" : "dm";
-      const dmKey = key;
-      const dmMemberName = () => currentRuntimeName(memberId, member.name);
-      callbacks = {
-        onChat: async (message: string) => {
-          // Single egress: scope-routed postMessage writes the member-owned DM
-          // store, broadcasts to subscribers, and notifies listeners. The chat
-          // follows the live turn (① B1), not the scope this instance was built for.
-          postMessage(chatTarget(), dmMemberName(), message, [], { senderMemberId: memberId });
-        },
-        onMention: async (_target: string, message: string) => {
-          // DM has no @ routing — treat as normal chat.
-          postMessage(chatTarget(), dmMemberName(), message, [], { senderMemberId: memberId });
-        },
-      };
-      var runtime = runtime0;
-    } else if (ref) {
-      // ── Room scope: roster member + global effective-config overlay ──
-      const r = roomStore.getRoom(ref.roomId);
-      if (!r) {
-        logger.error("agent", "room not found", { roomId: ref.roomId });
-        return null;
-      }
-      room = r;
-      let m = resolveRoomMember(ref.roomId, memberId);
-      if (!m) {
-        logger.error("agent", "no member or agent definition found", { memberId, roomId: ref.roomId });
-        return null;
-      }
-      // 0.20 G3 cutover: overlay global effective-config via ID link.
-      try {
-        const globalId = roomStore.resolveGlobalMemberId(r, m);
-        if (globalId) {
-          const eff = getEffectiveConfig(globalId, roomScopeId(ref.roomId));
-          m = {
-            ...m,
-            model: eff.model || m.model,
-            credentialId: eff.credentialId || m.credentialId,
-            thinkingLevel: (eff.thinkingLevel as string) || m.thinkingLevel,
-            skills: eff.skills?.length ? eff.skills : m.skills,
-            mcpServers: eff.mcpServers?.length ? eff.mcpServers : m.mcpServers,
-          };
-        }
-      } catch (err) {
-        logger.warn("agent", "effective-config overlay skipped", { member: m.name, error: String(err) });
-      }
-      member = m;
-      if (!isMemberConfigured(member)) {
-        logger.error("agent", "member unconfigured", { member: member.name, memberId });
-        return null;
-      }
-      logger.info("agent", "loadMember", { member: member.name, memberId, source: "room-effective", agent: member.agent, runtime: member.runtime, model: member.model, thinkingLevel: member.thinkingLevel });
-      var runtime1 = registry.get(member.runtime);
-      if (!runtime1) {
-        logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
-        return null;
-      }
-      compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-      clearStaleMounts(memberId);
-      skills = resolveSkills(member);
-      skillPaths = [
-        ...resolveGlobalSkillPaths(skills),
-      ];
-      // Session resume is fixed on (runtime settings retired 2026-09-16).
-      const savedSession = sessionStore.getCurrentSession(memberId);
-      resumeSession = savedSession
-        ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
-        : undefined;
-      if (resumeSession) {
-        logger.info("agent", "resumeSession", { member: member.name, runtime: member.runtime, sessionId: resumeSession.sessionId, sessionFile: resumeSession.sessionFile });
-      }
-      cwd = activeWorkspaceRoot(memberId);
-      sessionDir = mainSessionDirectory(memberId);
-      roomMembers = r.members;
-      keyRoomId = ref.roomId;
-      logLabel = "agentCreated";
-      errLabel = "room";
-      const roomKey = key;
-      const roomMemberName = () => currentRuntimeName(memberId, member.name);
-      onSessionChanged = (session) => {
-        if (!canPublishSession()) return;
-        sessionStore.saveCurrentSession(memberId, {
-          runtime: member.runtime,
-          sessionId: session.sessionId,
-          sessionFile: session.sessionFile,
-        });
-        logger.info("agent", "sessionSaved", { member: roomMemberName(), memberId, sessionId: session.sessionId, sessionFile: session.sessionFile });
-      };
-      callbacks = {
-        onChat: async (message: string) => {
-          postMessage(chatTarget(), roomMemberName(), message, [], { senderMemberId: memberId });
-        },
-        onMention: async (targetMember: string, message: string) => {
-          // Mention activation is handled by router listener via message-bus.
-          // Resolve the target in the chat being served (① B1); a reused
-          // instance may be serving a DM, where @ routing does not exist.
-          if (!activeChat.scopeId.startsWith("room:")) {
-            postMessage(chatTarget(), roomMemberName(), message, [], { senderMemberId: memberId });
-            return;
-          }
-          const roomId = activeChat.scopeId.slice("room:".length);
-          const target = roomStore.resolveRoomMemberRef(roomId, targetMember);
-          postMessage(roomId, roomMemberName(), message, [targetMember], { senderMemberId: memberId, mentionMemberIds: target ? [target.id] : [] });
-        },
-      };
-      var runtime = runtime1;
-    } else {
-      return null; // unreachable: invalid scopes returned above
+    const member = memberRecordToConfig(memberId);
+    if (!member) {
+      logger.error("agent", "member not found", { memberId });
+      return null;
     }
+    if (!isMemberConfigured(member)) {
+      logger.error("agent", "member unconfigured", { member: member.name, memberId });
+      return null;
+    }
+    const runtime = registry.get(member.runtime);
+    if (!runtime) {
+      logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
+      return null;
+    }
+    const compiled = compileForMember(memberId);
+    setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+    clearStaleMounts(memberId);
+    const skills = resolveSkills(member);
+    const skillPaths = resolveGlobalSkillPaths(skills);
+    const cwd = activeWorkspaceRoot(memberId);
+    const sessionDir = mainSessionDirectory(memberId);
+    const savedSession = sessionStore.getCurrentSession(memberId);
+    const resumeSession = savedSession ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile } : undefined;
+    const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
+      if (canPublishSession()) sessionStore.saveCurrentSession(memberId, { runtime: member.runtime, ...session });
+    };
+
+    // Conversation routing is turn-local; it never selects member assets or a session directory.
+    const activeChat = { scopeId };
+    const chatTarget = () => chatTargetOf(activeChat.scopeId);
+    const memberName = () => currentRuntimeName(memberId, member.name);
+    const keyRoomId = chatTargetOf(scopeId);
+    const roomMembers = ref?.kind === "room" ? roomStore.getRoom(ref.roomId)?.members ?? [] : [member.name];
+    const callbacks = {
+      onChat: async (message: string) => {
+        postMessage(chatTarget(), memberName(), message, [], { senderMemberId: memberId });
+      },
+      onMention: async (targetMember: string, message: string) => {
+        const current = parseScopeId(activeChat.scopeId);
+        const target = current?.kind === "room" ? roomStore.resolveRoomMemberRef(current.roomId, targetMember) : null;
+        postMessage(chatTarget(), memberName(), message, current?.kind === "room" ? [targetMember] : [], {
+          senderMemberId: memberId, ...(current?.kind === "room" ? { mentionMemberIds: target ? [target.id] : [] } : {}),
+        });
+      },
+    };
 
     try {
       const handle = await runtime.createAgent({
@@ -1173,7 +1060,6 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         roomMembers,
         resumeSession,
         sessionDir,
-        sessionManager: forkSessionManager,
         onSessionChanged,
         callbacks,
       });
@@ -1183,7 +1069,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
         await handle.destroyAndWait();
         return null;
       }
-      logger.info("agent", logLabel, { member: member.name, agent: member.agent, runtime: member.runtime, scopeId });
+      logger.info("agent", "memberAgentCreated", { member: member.name, agent: member.agent, runtime: member.runtime, scopeId });
 
       const instance: AgentInstance = {
         handle,
@@ -1233,7 +1119,7 @@ export async function buildMemberAgentSession(memberId: string, scopeId: string,
       instances.set(key, instance);
       return instance;
     } catch (err: any) {
-      logger.error("agent", `failed to create ${errLabel} agent`, { member: member.name, agent: member.agent, runtime: member.runtime, error: formatRuntimeErrorMessage(err) });
+      logger.error("agent", "failed to create member agent", { member: member.name, agent: member.agent, runtime: member.runtime, error: formatRuntimeErrorMessage(err) });
       postMessage(keyRoomId, "system", `Failed to create member "${member.name}": ${formatRuntimeErrorMessage(err)}`);
       return null;
     }
@@ -1481,7 +1367,7 @@ export interface RoomMemberConfigPatch {
 function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
   if (memberId.startsWith("mem_")) {
     try {
-      applyMemberConfigPatch(memberId, scopeIdOf({ kind: "room", roomId }), patch as Record<string, unknown>);
+      applyMemberConfigPatch(memberId, patch as Record<string, unknown>);
     } catch (err) {
       logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId, error: String(err) });
     }
@@ -1631,7 +1517,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
 
     // Commit the global config exactly once, after every instance accepted.
     try {
-      const { updateMember } = await import("../../member/member-registry.js");
+      const { updateMember } = await import("../../member/identity.js");
       updateMember(memberId, { global: { model: normalizedModel, credentialId: binding.credentialId } });
     } catch (saveErr) {
       const reason = String((saveErr as Error)?.message || saveErr);
@@ -2128,8 +2014,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
     // fingerprint+version and clear stale markers so the UI doesn't show
     // a false "needs reload" badge for a member that will auto-pick-up.
     try {
-      const compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
-      setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
+      setContractFingerprint(memberId, currentContractFingerprint(), MEMBER_CONTRACT_VERSION);
     } catch { /* compile failed — best effort */ }
     clearStaleMounts(memberId);
     return { ok: true, reloaded: false, message: "Member is not running — marked up to date; latest prompt, skills and tools apply on next activation." };
@@ -2139,7 +2024,7 @@ export async function reloadMemberResources(roomId: string, memberRef: string): 
   }
   if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
 
-  const compiled = compileMemberPrompt({ memberId, memberName: member.name, description: getMember(memberId)?.title });
+  const compiled = compileForMember(memberId);
   const skills = resolveSkills(member);
   const skillPaths = [
     ...resolveGlobalSkillPaths(skills),
@@ -2303,7 +2188,7 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
   const rec = getMember(memberId);
   if (!rec) return null;
   const scopeId = scopeIdOf({ kind: "dm", memberId });
-  const eff = getEffectiveConfig(memberId, scopeId);
+  const eff = getMemberConfiguration(memberId);
   return {
     id: rec.id,
     name: rec.name,

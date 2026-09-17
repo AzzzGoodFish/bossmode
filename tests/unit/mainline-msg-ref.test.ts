@@ -7,7 +7,7 @@ import { getDefaultConfig, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
 
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import { storeRoom } from "../../src/chat/conversations.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dir = process.env.BOSSMODE_DIR!;
@@ -15,14 +15,14 @@ let fixture: ReturnType<typeof coreFixture>;
 beforeEach(() => {
   fixture = coreFixture();
   writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture-only" } }, fixture.db);
-  new ConversationsRepository(fixture.db).upsertRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] });
+  storeRoom({ id: "room-a", name: "Asset tests", createdAt: 1, members: [], roomMembers: [] }, fixture.db);
 });
 afterEach(() => { vi.restoreAllMocks(); fixture.close(); });
 
 describe("mainline msg ref enrichment (room + DM scope)", () => {
   it("room scope: msg entries get msgId + summary; stale entries stay bare", async () => {
     const { addMessage } = await import("../../src/chat/message-store.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("r", dir, [], undefined);
     // SQL appends allocate the next scope-local sequence.
     const m42 = addMessage(room.id, { sender: "architect", content: "We decided to ship the unified panel", mentions: [] });
@@ -50,9 +50,9 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
   });
 
   it("DM scope: msg refs resolve against the member-owned DM stream", async () => {
-    const reg = await import("../../src/member/member-registry.js");
+    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const dm = await import("../../src/chat/dm-message-store.js");
-    const arch = reg.createMember({ name: "architect", agentTemplate: "general" });
+    const arch = __reg_app_member_actions.createMember({ name: "architect", agentTemplate: "general" });
     const msg = dm.addDmMessage(arch.id, { sender: "user", content: "remember this DM decision", mentions: [] });
 
     const ml = await import("../../src/chat/mainline-store.js");
@@ -71,7 +71,7 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
 
   it("loose msg forms resolve: No.n / #n / msg:n all map to seq; non-ref prose stays 'other'", async () => {
     const { addMessage } = await import("../../src/chat/message-store.js");
-    const roomStore = await import("../../src/chat/room-store.js");
+    const roomStore = await import("../../src/chat/conversations.js");
     const room = roomStore.createRoom("r2", dir, [], undefined);
     const m1 = addMessage(room.id, { sender: "architect", content: "loose ref message", mentions: [] });
     const m2 = addMessage(room.id, { sender: "user", content: "another one", mentions: [] });
@@ -112,7 +112,7 @@ describe("mainline msg ref enrichment (room + DM scope)", () => {
 
   it("isolates SQL message IDs and sequences across room and DM references", async () => {
     const { addMessage } = await import("../../src/chat/message-store.js");
-    const { createMember } = await import("../../src/member/member-registry.js");
+    const { createMember } = await import("../../src/app/member-actions.js");
     const { loadScopeMessages, buildMsgLookup, parseMainline, resolveMainlineRefs } = await import("../../src/chat/mainline-store.js");
     const member = createMember({ name: "scope-owner" });
     const roomMessage = addMessage("room-a", { sender: "user", content: "room only", mentions: [] });

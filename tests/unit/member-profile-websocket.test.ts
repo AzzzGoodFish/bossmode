@@ -6,10 +6,10 @@ import { WebSocket } from "ws";
 
 const identity = vi.hoisted(() => ({ name: "before", id: "mem_one" }));
 vi.mock("../../src/api/auth.js", () => ({ validateToken: (token: string) => token === "valid" }));
-vi.mock("../../src/member/member-registry.js", () => ({
+vi.mock("../../src/member/identity.js", () => ({
   findMemberByName: vi.fn((name: string) => name === identity.name ? { ...identity } : null),
 }));
-import { findMemberByName } from "../../src/member/member-registry.js";
+import { findMemberByName } from "../../src/member/identity.js";
 import {
   broadcastMemberProfileChanged, broadcastToAgentSubscribers, createWebSocketServer,
   getConnectedClientCount, shutdownWebSocket,

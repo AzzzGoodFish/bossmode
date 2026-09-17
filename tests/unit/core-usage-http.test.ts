@@ -3,9 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { closeTestServer, createTestServer, createMockRoom, getTestBossmodeDir, jsonRequest, setupTestWorkspace } from "../helpers/test-server.js";
 import { appendAgentEvent } from "../../src/data/repositories/event-repository.js";
-import { ConversationsRepository } from "../../src/data/repositories/conversations.js";
+import {  } from "../../src/chat/conversations.js";
 import { getDatabase } from "../../src/data/database.js";
-import { stampGlobalMemberIds } from "../../src/chat/room-store.js";
+import { stampGlobalMemberIds } from "../../src/chat/conversations.js";
 setupTestWorkspace();
 
 it("reports SQL room/DM usage, retains stable identity after rename/removal, and fails rather than returning false zeros", async () => {

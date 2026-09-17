@@ -1,9 +1,9 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "../../src/member/skills/skill-store.js";
-import { seedBuiltinAssets } from "../../src/member/assets/team-updates.js";
-import { buildSkillCatalog, listMemberSkills } from "../../src/member/skills/skill-catalog.js";
+import { loadSkillTemplates, loadSkillDefinitionsStrict, getSkillsDir } from "../../src/member/skills.js";
+import { seedBuiltinAssets } from "../../src/member/templates.js";
+import { buildSkillCatalog, listMemberSkills } from "../../src/member/skills.js";
 import { memberSkillsDir } from "../../src/files/layout.js";
 
 const memberId = "impeccable-skill-fixture";

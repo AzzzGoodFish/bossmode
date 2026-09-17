@@ -7,9 +7,9 @@ import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/
 import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { decodeLegacyConfig, importLegacySettings } from "../../src/app/upgrade/records.js";
-import {McpOauthRepository,mcpOauthServerKey} from "../../src/data/repositories/mcp-oauth.js";
+import { mcpOauthServerKey, createMcpOauthStorage } from "../../src/member/mcp.js";
 
-import {McpSettingsRepository} from "../../src/data/repositories/mcp-settings.js";
+import { readMcpConfiguration } from "../../src/member/mcp.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
 afterEach(()=>{db?.close();db=undefined;if(root)rmSync(root,{recursive:true,force:true});root=undefined;});
@@ -37,7 +37,7 @@ it("imports orphaned hashed MCP OAuth data without guessing URL or resuming auth
  const key=mcpOauthServerKey("removed-server");const path=`mcp/runtime/oauth/sha256-${key}/tokens.json`;
  const value={tokens:{accessToken:"fixture-token",expiresAt:0},clientInfo:{clientId:"fixture-client",redirectUris:[]},codeVerifier:"retained-verifier",oauthState:"retained-state"};
  const {ctx,entries}=setup({[path]:value});expect(importLegacySettings(ctx,entries,[]).has(path)).toBe(true);
- expect(new McpOauthRepository(ctx.db).read("removed-server")).toEqual(value);
+ expect(createMcpOauthStorage(ctx.db).read("removed-server")).toEqual(value);
 });
 it("refuses the unsupported flat OAuth format instead of importing an empty entry",()=>{
  const path=`mcp/runtime/oauth/sha256-${mcpOauthServerKey("old")}/tokens.json`;
@@ -63,5 +63,5 @@ it("rejects file-backed source conversion inside an ambient transaction",()=>{
 it("imports empty MCP definitions as empty, not global file fallback",()=>{
  const {ctx,entries}=setup({"mcp/mcp.json":{mcpServers:{}}});
  const consumed=importLegacySettings(ctx,entries,[]);expect(consumed.has("mcp/mcp.json")).toBe(true);
- expect(new McpSettingsRepository(ctx.db).read()).toEqual({mcpServers:{}});
+ expect(readMcpConfiguration("global", ctx.db)).toEqual({mcpServers:{}});
 });

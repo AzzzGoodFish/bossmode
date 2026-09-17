@@ -6,8 +6,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { memberDir } from "../../files/layout.js";
-import { scopeDirName, parseScopeId, type ScopeId } from "../../chat/conversation-ref.js";
-import { documentIdentity, readDocumentMeta, saveDocument } from "../assets/document-assets.js";
+import { scopeDirName, parseScopeId, type ScopeId } from "../../chat/conversations.js";
+import { documentIdentity, readDocumentMeta, saveDocument } from "../assets.js";
 import {
   AssetBudgetError,
   PRINCIPLES_TEMPLATE,

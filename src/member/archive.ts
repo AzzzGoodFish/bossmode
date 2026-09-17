@@ -1,12 +1,11 @@
-/** Async archive orchestration. Bootstrap and runtime admission/cancellation are caller-owned. */
-import { syncPath } from "../../files/io.js";
+import { syncPath } from "../files/io.js";
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Database } from "../../data/database.js";
-import { MembersRepository } from "../../data/repositories/members.js";
-import { MemberArchivesRepository, validateArchivePath, type MemberArchiveIntent } from "../../data/repositories/member-archives.js";
-import { ConversationsRepository } from "../../data/repositories/conversations.js";
+import { type Database, getDatabase } from "../data/database.js";
+import { memberArchivePath, getMember, retireMemberIdentity } from "./identity.js";
+import { validateArchivePath } from "../files/layout.js";
+import { type MemberGlobalConfig } from "../data/types.js";
 
 /** Resolve a logical relative or old absolute member-owned reference, including immutable D/E snapshots.
  * External references stay external; this is relocation, NOT authorization for arbitrary file reads. */
@@ -17,9 +16,9 @@ export function resolveMemberArtifactPath(db: Database, root: string, memberId: 
   const rel = relative(source, path);
   const owned = rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
   if (!isAbsolute(reference) && !owned) throw new Error("member_artifact_outside_root");
-  const archive = new MembersRepository(db).archivedPath(memberId);
+  const archive = memberArchivePath(memberId, db);
   if (archive) validateArchivePath(archive);
-  else if (new MemberArchivesRepository(db).intent(memberId)?.state === "pending") throw new Error("member_archive_pending");
+  else if (readMemberArchiveIntent(memberId, db)?.state === "pending") throw new Error("member_archive_pending");
   return owned && archive ? resolve(root, archive, rel) : path;
 }
 
@@ -32,6 +31,7 @@ export function resolveMemberDocumentPath(db: Database, root: string, memberId: 
 function statIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try { return lstatSync(path); } catch (err: any) { if (err.code === "ENOENT") return null; throw err; }
 }
+
 /** Caller-selected data root; reject symlinks on path segments instead of following archive metadata. */
 export function checkedAssetPath(root: string, relativePath: string): string {
   const base = resolve(root);
@@ -46,6 +46,7 @@ export function checkedAssetPath(root: string, relativePath: string): string {
   }
   return full;
 }
+
 function syncTree(path: string): void {
   const stat = lstatSync(path);
   // Retain symlink assets without following them into unrelated workspaces.
@@ -53,24 +54,25 @@ function syncTree(path: string): void {
   if (stat.isDirectory()) for (const child of readdirSync(path)) syncTree(join(path, child));
   if (stat.isDirectory() || stat.isFile()) syncPath(path);
 }
+
 export interface ArchiveLifecycleHooks {
   /** Must stop live room/DM executions, builders, shells and private tasks, and await release of assets. */
   quiesce(memberId: string): Promise<void>;
+  /** Synchronous membership changes share the identity completion transaction. */
+  detachFromConversations(memberId: string, db: Database): void;
 }
+
 const inFlight = new WeakMap<Database, Map<string, Promise<{archived:string}>>>();
+
 export class MemberArchiveService {
-  private readonly members: MembersRepository;
-  private readonly archives: MemberArchivesRepository;
   constructor(private readonly db: Database, private readonly root: string, private readonly hooks: ArchiveLifecycleHooks) {
     if (!isAbsolute(root)) throw new Error("Archive data root must be absolute");
-    this.members = new MembersRepository(db);
-    this.archives = new MemberArchivesRepository(db);
   }
-  pending(): MemberArchiveIntent[] { return this.archives.pending(); }
+  pending(): MemberArchiveIntent[] { return pendingMemberArchives(this.db); }
   admission(memberId: string): "active" | "pending" | "archived" | "missing" {
-    if (this.members.archivedPath(memberId)) return "archived";
-    if (this.archives.intent(memberId)?.state === "pending") return "pending";
-    return this.members.get(memberId) ? "active" : "missing";
+    if (memberArchivePath(memberId, this.db)) return "archived";
+    if (readMemberArchiveIntent(memberId, this.db)?.state === "pending") return "pending";
+    return getMember(memberId, this.db) ? "active" : "missing";
   }
   assertAdmission(memberId: string): void {
     const state = this.admission(memberId);
@@ -94,13 +96,13 @@ export class MemberArchiveService {
   }
   private async perform(memberId: string): Promise<{archived:string}> {
     this.db.assertOutsideTransaction();
-    let intent = this.archives.intent(memberId);
+    let intent = readMemberArchiveIntent(memberId, this.db);
     if (intent?.state === "completed") {
-      if (this.members.archivedPath(memberId) !== intent.archivePath) throw new Error("archive_identity_conflict");
+      if (memberArchivePath(memberId, this.db) !== intent.archivePath) throw new Error("archive_identity_conflict");
       this.checkLocation(intent, true);
       return {archived:intent.archivePath};
     }
-    const member = this.members.get(memberId);
+    const member = getMember(memberId, this.db);
     if (!member) throw new Error("member_not_found");
     if (!intent) {
       const sourcePath = `members/${memberId}`;
@@ -110,7 +112,7 @@ export class MemberArchiveService {
       intent = {memberId, sourcePath, archivePath:`backups/fired-${memberId}-${randomUUID()}`,
         sourceDevice:String(stat.dev), sourceInode:String(stat.ino), state:"pending", createdAt:Date.now(), completedAt:null};
       // Admission closes durably before the first await. No fs or await in this transaction.
-      this.db.transaction(() => this.archives.begin(intent!));
+      this.db.transaction(() => beginMemberArchive(intent!, this.db));
     }
     await this.hooks.quiesce(memberId);
     this.db.assertOutsideTransaction();
@@ -134,30 +136,15 @@ export class MemberArchiveService {
     syncPath(dirname(source));
     syncPath(this.root);
     this.db.transaction(() => {
-      const current = this.members.get(memberId);
+      const current = getMember(memberId, this.db);
       if (!current) throw new Error("archive_identity_conflict");
       const timestamp = Date.now();
-      this.members.archive(memberId, intent!.archivePath, timestamp);
-      this.archives.importCatalog({archivePath:intent!.archivePath, memberId, name:current.name, template:current.agentTemplate,
+      retireMemberIdentity(memberId, intent!.archivePath, timestamp, this.db);
+      importMemberArchiveCatalog({archivePath:intent!.archivePath, memberId, name:current.name, template:current.agentTemplate,
         title:current.title, global:current.global, personaPath:`${intent!.archivePath}/persona.md`, personaFormat:"plain",
-        hasPersona:!!persona.trim(), roomScopes:[], kind:"fired"});
-      // B owns room persistence. Preserve all labels/local historical records and unrelated room fields.
-      const conversations = new ConversationsRepository(this.db);
-      for (const room of conversations.listRooms()) {
-        // Global rosters treat local records as historical shadows. In a still-local roster,
-        // detach only records explicitly linked by ID, never a matching display label.
-        const localIds = new Set(room.globalMemberIds === undefined
-          ? (room.roomMembers ?? []).filter(m => m.id === memberId || m.sourceMemberId === memberId).map(m => m.id)
-          : []);
-        const isLeader = room.promptLeaderMemberId === memberId || (room.promptLeaderMemberId !== undefined && localIds.has(room.promptLeaderMemberId));
-        if (!room.globalMemberIds?.includes(memberId) && !localIds.size && !isLeader && room.promptLeaderGlobalMemberId !== memberId) continue;
-        if (room.globalMemberIds) room.globalMemberIds = room.globalMemberIds.filter(id => id !== memberId);
-        else if (localIds.size) room.roomMembers = room.roomMembers!.filter(m => !localIds.has(m.id));
-        if (isLeader) delete room.promptLeaderMemberId;
-        if (room.promptLeaderGlobalMemberId === memberId) delete room.promptLeaderGlobalMemberId;
-        conversations.upsertRoom(room);
-      }
-      this.archives.complete(memberId, timestamp);
+        hasPersona:!!persona.trim(), roomScopes:[], kind:"fired"}, this.db);
+      this.db.transaction(tx => this.hooks.detachFromConversations(memberId, tx));
+      completeMemberArchive(memberId, timestamp, this.db);
     });
     return {archived:intent.archivePath};
   }
@@ -172,3 +159,85 @@ export class MemberArchiveService {
     return source ? "source" : "destination";
   }
 }
+
+export interface ArchiveCatalogSource {
+  archivePath: string;
+  name: string;
+  /** Only explicit, verified retained SQL identity. Name-only sources must omit this. */
+  memberId?: string;
+  kind: "legacy" | "fired";
+  template: string;
+  title?: string;
+  global: MemberGlobalConfig;
+  /** Relative to data root, inside archivePath; no filename search at runtime. */
+  personaPath?: string;
+  personaFormat: "plain" | "frontmatter";
+  hasPersona: boolean;
+  roomScopes: Array<{ room: string; hasPrinciples: boolean; hasMainline: boolean }>;
+  conflicts?: string[];
+}
+
+export interface MemberArchiveIntent {
+  memberId: string; sourcePath: string; archivePath: string;
+  sourceDevice: string; sourceInode: string;
+  state: "pending" | "completed"; createdAt: number; completedAt: number | null;
+}
+
+export function readMemberArchiveIntent(memberId: string, db: Database = getDatabase()): MemberArchiveIntent | null {
+    return db.get<MemberArchiveIntent>(`SELECT member_id AS memberId,source_path AS sourcePath,archive_path AS archivePath,
+      source_device AS sourceDevice,source_inode AS sourceInode,state,created_at AS createdAt,completed_at AS completedAt
+      FROM member_archive_intents WHERE member_id=?`, memberId) ?? null;
+  }
+
+export function pendingMemberArchives(db: Database = getDatabase()): MemberArchiveIntent[] {
+    return db.all<{member_id:string}>("SELECT member_id FROM member_archive_intents WHERE state='pending' ORDER BY created_at,member_id")
+      .map(r => readMemberArchiveIntent(r.member_id, db)!);
+  }
+
+export function beginMemberArchive(intent: Omit<MemberArchiveIntent, "state" | "completedAt">, db: Database = getDatabase()): void {
+    validateArchivePath(intent.archivePath);
+    if (!/^mem_[a-zA-Z0-9_-]+$/.test(intent.memberId) || intent.sourcePath !== `members/${intent.memberId}` ||
+      !/^\d+$/.test(intent.sourceDevice) || !/^\d+$/.test(intent.sourceInode)) throw new Error("invalid_archive_intent");
+    db.run(`INSERT INTO member_archive_intents VALUES(?,?,?,?,?,'pending',?,NULL)`,
+      intent.memberId, intent.sourcePath, intent.archivePath, intent.sourceDevice, intent.sourceInode, intent.createdAt);
+  }
+
+export function completeMemberArchive(memberId: string, timestamp: number, db: Database = getDatabase()): void {
+    db.run("UPDATE member_archive_intents SET state='completed',completed_at=? WHERE member_id=? AND state='pending'", timestamp, memberId);
+  }
+
+export function importMemberArchiveCatalog(source: ArchiveCatalogSource, db: Database = getDatabase()): void {
+    validateArchivePath(source.archivePath);
+    if (!source.name || !source.template || !source.global || typeof source.global !== "object" || Array.isArray(source.global)) throw new Error("invalid_archive_catalog");
+    if (source.personaPath) {
+      validateArchivePath(source.personaPath);
+      if (!source.personaPath.startsWith(`${source.archivePath}/`)) throw new Error("archive_persona_outside_root");
+    }
+    db.transaction(tx => {
+      if (source.memberId && !tx.get("SELECT id FROM members WHERE id=? AND archived_at IS NOT NULL AND archive_path=?", source.memberId, source.archivePath)) {
+        throw new Error("archive_identity_not_retained");
+      }
+      tx.run("INSERT INTO member_archives VALUES(?,?,?,?,?,?,?,?,?,?)", source.archivePath, source.name, source.memberId ?? null,
+        source.kind, source.template, source.title ?? null, JSON.stringify(source.global), source.personaPath ?? null,
+        source.personaFormat, Number(source.hasPersona));
+      source.roomScopes.forEach((r,i) => tx.run("INSERT INTO member_archive_rooms VALUES(?,?,?,?,?,?)", source.archivePath, source.name, i, r.room, Number(r.hasPrinciples), Number(r.hasMainline)));
+      source.conflicts?.forEach((c,i) => tx.run("INSERT INTO member_archive_conflicts VALUES(?,?,?,?)", source.archivePath, source.name, i, c));
+    });
+  }
+
+export function readMemberArchiveCatalog(archivePath: string, name: string, db: Database = getDatabase()): ArchiveCatalogSource | null {
+    const r = db.get<any>("SELECT * FROM member_archives WHERE archive_path=? AND source_name=?", archivePath, name);
+    if (!r) return null;
+    const conflicts = db.all<{conflict:string}>("SELECT conflict FROM member_archive_conflicts WHERE archive_path=? AND source_name=? ORDER BY position", archivePath, name).map(r => r.conflict);
+    return {archivePath, name, ...(r.member_id ? {memberId:r.member_id} : {}), kind:r.kind, template:r.template,
+      ...(r.title !== null ? {title:r.title} : {}), global:JSON.parse(r.global_json),
+      ...(r.persona_path !== null ? {personaPath:r.persona_path} : {}), personaFormat:r.persona_format, hasPersona:!!r.has_persona,
+      roomScopes:db.all<any>("SELECT * FROM member_archive_rooms WHERE archive_path=? AND source_name=? ORDER BY position", archivePath, name)
+        .map(r => ({room:r.room, hasPrinciples:!!r.has_principles, hasMainline:!!r.has_mainline})),
+      ...(conflicts.length ? {conflicts} : {})};
+  }
+
+export function listMemberArchiveCatalog(db: Database = getDatabase()): ArchiveCatalogSource[] {
+    return db.all<{archive_path:string;source_name:string}>("SELECT archive_path,source_name FROM member_archives ORDER BY source_name,archive_path")
+      .map(r => readMemberArchiveCatalog(r.archive_path, r.source_name, db)!);
+  }

@@ -3,6 +3,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const installation = vi.hoisted(() => ({ root: "" }));
+vi.mock("../../src/files/layout.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../src/files/layout.js")>(),
+  get installationRoot() { return installation.root; },
+}));
+
 function makeTmpRoot(): string {
   return mkdtempSync(join(tmpdir(), "bossmode-team-updates-"));
 }
@@ -25,7 +31,6 @@ function seedTemplateProject(root: string, version = "9.9.9"): void {
 }
 
 describe("team-updates service (fresh-install seed only — update-check/apply removed)", () => {
-  const originalDir = process.env.BOSSMODE_DIR;
   let cwdBefore = "";
   let bossmodeDir = "";
   let projectDir = "";
@@ -33,8 +38,9 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
   beforeEach(async () => {
     cwdBefore = process.cwd();
     projectDir = makeTmpRoot();
-    bossmodeDir = makeTmpRoot();
-    process.env.BOSSMODE_DIR = bossmodeDir;
+    bossmodeDir = process.env.BOSSMODE_DIR!;
+    if (!process.env.BOSSMODE_TEST_ROOT || !bossmodeDir.startsWith(process.env.BOSSMODE_TEST_ROOT + "/")) throw new Error("Use isolated test launcher");
+    installation.root = projectDir;
     seedTemplateProject(projectDir, "1.2.3");
     process.chdir(projectDir);
     vi.resetModules();
@@ -42,22 +48,13 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
 
   afterEach(() => {
     process.chdir(cwdBefore);
-    process.env.BOSSMODE_DIR = originalDir;
     rmSync(bossmodeDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
   });
 
   async function mod() {
-    return import("../../src/member/assets/team-updates.js");
+    return import("../../src/member/templates.js");
   }
-
-  it("contentHash returns stable 16-char hex", async () => {
-    const m = await mod();
-    const h1 = m.contentHash("abc");
-    const h2 = m.contentHash("abc");
-    expect(h1).toBe(h2);
-    expect(h1).toMatch(/^[a-f0-9]{16}$/);
-  });
 
   it("seedBuiltinAssets seeds missing files without any meta file", async () => {
     const m = await mod();
@@ -78,6 +75,29 @@ describe("team-updates service (fresh-install seed only — update-check/apply r
     expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"), "utf-8")).toContain("source: builtin");
     expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "NOTICE.md"), "utf-8")).toBe("notice\n");
     expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "reference", "guide.md"), "utf-8")).toBe("# Guide\n");
+  });
+
+  it("uses installation templates/version rather than cwd or a later data-root environment change", async () => {
+    const m = await mod();
+    const other = makeTmpRoot();
+    const previous = process.env.BOSSMODE_DIR;
+    try {
+      seedTemplateProject(other, "99.99.99");
+      write(join(other, "templates", "skills", "cwd-only", "SKILL.md"), "cwd must not become an installed skill");
+      process.chdir(other);
+      process.env.BOSSMODE_DIR = join(other, "wrong-data");
+      m.seedBuiltinAssets();
+      expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "SKILL.md"), "utf8")).toContain("version: 1.2.3");
+      expect(existsSync(join(bossmodeDir, "skills", "cwd-only"))).toBe(false);
+      expect(existsSync(join(other, "wrong-data"))).toBe(false);
+    } finally { process.env.BOSSMODE_DIR = previous; process.chdir(projectDir); rmSync(other, { recursive: true, force: true }); }
+  });
+
+  it("copies non-Markdown skill assets byte-for-byte", async () => {
+    const bytes = Buffer.from([0, 255, 254, 13, 10, 128, 1]);
+    writeFileSync(join(projectDir, "templates", "skills", "skill-a", "binary.dat"), bytes);
+    (await mod()).seedBuiltinAssets();
+    expect(readFileSync(join(bossmodeDir, "skills", "skill-a", "binary.dat"))).toEqual(bytes);
   });
 
   it("seedBuiltinAssets is idempotent for existing files", async () => {

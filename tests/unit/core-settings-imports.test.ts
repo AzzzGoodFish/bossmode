@@ -8,12 +8,12 @@ import { join } from "node:path";
 import { getDatabase } from "../../src/data/database.js";
 
 import { readPidFile } from "../../src/app/pid.js";
-import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp/mcp-settings.js";
+import { readMcpConfigText, readMemberMcpConfig } from "../../src/member/mcp.js";
 import { getCatalog } from "../../src/config/catalog.js";
 import { loadModelCredentialProfiles } from "../../src/config/models.js";
 
-import { readWorkspaces } from "../../src/member/workspaces/workspace-registry.js";
-import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/workspaces/ssh-keygen.js";
+import { readWorkspaces } from "../../src/member/workspaces.js";
+import { readMemberSshPublicKey, memberSshKeyPath } from "../../src/member/workspaces.js";
 
 it("imports every settings consumer without initializing storage; only path/PID helpers work before boot",()=>{
   expect(()=>getDatabase()).toThrow("bootstrap");

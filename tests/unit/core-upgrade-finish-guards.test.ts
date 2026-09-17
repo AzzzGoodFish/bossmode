@@ -1,3 +1,4 @@
+import { detachMemberFromConversations } from "../../src/chat/conversations.js";
 import { getDefaultConfig } from "../../src/config/settings.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -6,9 +7,9 @@ import { DatabaseSync } from "node:sqlite";
 import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import { inspectStartupSettings } from "../../src/app/upgrade/inventory.js";
 
-import { MembersRepository } from "../../src/data/repositories/members.js";
+import { listMembers, retireMemberIdentity, insertMemberIdentity, getRetainedMember, getMember } from "../../src/member/identity.js";
 import type { Database } from "../../src/data/database.js";
-import { MemberArchiveService } from "../../src/member/archive/member-archive-lifecycle.js";
+import { MemberArchiveService } from "../../src/member/archive.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 
 let root: string;
@@ -41,7 +42,7 @@ it("does not reinterpret a historical journal when a verified current DB exists"
   seed(); await start(); db!.close(); file(journal,"{old broken journal");
   expect(inspectStartupSettings(root).source).toBe("database");
   expect((await start()).migrated).toBe(false);
-  expect(new MembersRepository(db!).list()).toHaveLength(1);
+  expect(listMembers(db!)).toHaveLength(1);
   expect(readFileSync(join(root,journal),"utf8")).toBe("{old broken journal");
 });
 
@@ -95,16 +96,16 @@ it("checks current persona ownership even when the body exists", async () => {
 
 it("does not require a live directory for archived SQL identity or reconstruct one from its reused name", async () => {
   seed(); await start(); syncIds();
-  new MembersRepository(db!).archive(mid,"backups/fired-one",3);
+  retireMemberIdentity(mid,"backups/fired-one",3, db!);
   renameSync(join(root,`members/${mid}`),join(root,"backups/fired-one"));
   // Explicit current tombstone fixture: a same-named active identity owns different assets.
-  new MembersRepository(db!).insert({...member,id:"mem_two"});
+  insertMemberIdentity({...member,id:"mem_two"}, db!);
   file("members/mem_two/persona.md","current body");
   db!.run("UPDATE memory_documents SET member_id='mem_two',path='members/mem_two/persona.md' WHERE path=?",persona);
   db!.close();
   expect((await start()).migrated).toBe(false);
-  expect(new MembersRepository(db!).list().map(m=>m.id)).toEqual(["mem_two"]);
-  expect(new MembersRepository(db!).getRetained(mid)?.name).toBe(member.name);
+  expect(listMembers(db!).map(m=>m.id)).toEqual(["mem_two"]);
+  expect(getRetainedMember(mid, db!)?.name).toBe(member.name);
   expect(existsSync(join(root,`members/${mid}`))).toBe(false);
   expect(readFileSync(join(root,"backups/fired-one/persona.md"),"utf8")).toBe("original body");
   db!.close(); rmSync(join(root,"members/mem_two/persona.md"));
@@ -114,22 +115,22 @@ it("does not require a live directory for archived SQL identity or reconstruct o
 it.each(["before-move","after-move"]) ("preserves automatic recovery of a pending archive rather than treating it as an active missing directory: %s", async phase => {
   seed(); await start(); syncIds();
   if(phase==="after-move")db!.exec("CREATE TRIGGER fail_archive BEFORE INSERT ON member_archives BEGIN SELECT RAISE(ABORT,'archive failure'); END");
-  const archive=new MemberArchiveService(db!,root,{quiesce:async()=>{if(phase==="before-move")throw new Error("quiesce failure");}});
+  const archive=new MemberArchiveService(db!,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{if(phase==="before-move")throw new Error("quiesce failure");}});
   await expect(archive.archive(mid,{confirm:true})).rejects.toThrow(/failure/);
   expect(archive.admission(mid)).toBe("pending");
   const intent=archive.pending()[0];
   if(phase==="after-move")db!.exec("DROP TRIGGER fail_archive");
   db!.close();
-  const result=await start(async ready=>{await new MemberArchiveService(ready,root,{quiesce:async()=>{}}).recoverPending();});
+  const result=await start(async ready=>{await new MemberArchiveService(ready,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{}}).recoverPending();});
   expect(result.migrated).toBe(false);
-  expect(new MembersRepository(db!).get(mid)).toBeNull();
+  expect(getMember(mid, db!)).toBeNull();
   expect(readFileSync(join(root,intent.archivePath,"persona.md"),"utf8")).toBe("original body");
   expect(existsSync(join(root,`members/${mid}`))).toBe(false);
 });
 
 it.each(["both","neither","replaced","symlink","missing-persona"]) ("does not let a pending archive intent bypass asset safety: %s", async conflict => {
   seed(); await start(); syncIds();
-  const archive=new MemberArchiveService(db!,root,{quiesce:async()=>{throw new Error("stop");}});
+  const archive=new MemberArchiveService(db!,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{throw new Error("stop");}});
   await expect(archive.archive(mid,{confirm:true})).rejects.toThrow("stop");
   const intent=archive.pending()[0];
   if(conflict==="both")file(`${intent.archivePath}/sentinel`,"unknown bytes");

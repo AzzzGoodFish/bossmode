@@ -1,8 +1,9 @@
+import { loadMemberPromptSource } from "../member-actions.js";
 import { readConfig, writeConfig } from "../../config/settings.js";
 import { ensureDirectory } from "../../files/io.js";
 import { getBossmodeDir } from "../../files/layout.js";
 
-import { recoverMemberArchives } from "../../member/archive/member-archive-service.js";
+import { recoverMemberArchives } from "../member-actions.js";
 import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
 import { prepareCoreStorage } from "../upgrade/run.js";
 import { type UpgradeProgress } from "../upgrade/inventory.js";
@@ -21,8 +22,8 @@ import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount
 import { RuntimeRegistry } from "../../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
 import { logger } from "../../kernel/logger.js";
-import { seedBuiltinAssets } from "../../member/assets/team-updates.js";
-import { wireConfiguration } from "../wire.js";
+import { seedBuiltinAssets } from "../../member/templates.js";
+import { wireConfiguration, wireMemberProfiles, wireConversationMembers } from "../wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -65,8 +66,10 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
-  initAgentManager(registry);
+  initAgentManager(registry, loadMemberPromptSource);
   const unsubscribeConfiguration = wireConfiguration();
+  const unsubscribeProfiles = wireMemberProfiles();
+  const unsubscribeMembers = wireConversationMembers();
 
   // Initialize communication router (room + DM activation).
   const unsubscribeRouter = wireMentionRouter();
@@ -120,13 +123,14 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     accepting = false;
     unsubscribeRouter();
     unsubscribeConfiguration();
+    unsubscribeProfiles();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);
     cleanupSettlement = (async () => {
       const results = await Promise.allSettled([closingHttp,closingWebSocket,shutdownAgents(),...requests]);
       const failures = results.filter((result): result is PromiseRejectedResult=>result.status==="rejected").map(result=>result.reason);
       if (failures.length) throw new AggregateError(failures,"Server cleanup incomplete");
-    })();
+    })().finally(unsubscribeMembers);
     return cleanupSettlement;
   }
 
