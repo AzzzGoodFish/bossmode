@@ -41,6 +41,7 @@ vi.mock("../../src/app/server/ws.js", () => ({
 }));
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { setStatusSink } from "../../src/agent/instance.js";
 import { activateAgent, buildMemberAgentSession, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
 
 beforeEach(async () => {
@@ -77,6 +78,7 @@ describe("agent-manager pending creation dedup", () => {
     mocks.destroy.mockReset();
     mocks.subscribeCb = undefined;
     mocks.broadcastToRoom.mockReset();
+    setStatusSink((target, payload) => mocks.broadcastToRoom(target, payload));
 
     const handle = {
       prompt: (message: string, options?: PromptOptions) => { dispatch(message, options); return mocks.prompt(message); },

@@ -22,7 +22,8 @@ export function wireConversationMembers(): () => void {
 }
 
 import { setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
-import { broadcastToAgentSubscribers } from "./server/ws.js";
+import { setStatusSink } from "../agent/instance.js";
+import { broadcastToAgentSubscribers, broadcastToRoom } from "./server/ws.js";
 import { refreshContextUsage } from "../agent/orchestrator/agent-manager.js";
 
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
@@ -123,7 +124,8 @@ export function _resetDedup(): void {
 /** Connect agent event facts to transports and chat ownership; the agent core stays subscriber-free. */
 export function wireAgentEvents(): () => void {
   setAgentEventSink((scopeId, agentName, payload) => broadcastToAgentSubscribers(scopeId, agentName, payload));
+  setStatusSink((target, payload) => broadcastToRoom(target, payload));
   setToolActivityHook(({ scopeId, agentName, toolName, args, isError }) => maybeEmitKnowledgeActivity(scopeId, agentName, toolName, args, isError));
   setContextUsageRefreshHook(refreshContextUsage);
-  return () => { setAgentEventSink(undefined); setToolActivityHook(undefined); setContextUsageRefreshHook(undefined); };
+  return () => { setAgentEventSink(undefined); setStatusSink(undefined); setToolActivityHook(undefined); setContextUsageRefreshHook(undefined); };
 }

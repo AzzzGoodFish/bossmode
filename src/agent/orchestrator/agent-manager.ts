@@ -57,6 +57,7 @@ import { settleMemberShellWaits } from "../terminal/shell-manager.js";
 import type { AgentStatus, RoomMessage, ContextUsage, Room } from "../../kernel/types.js";
 import {
   cancelledCreations,
+  chatTargetOf,
   contextCompactionWarningCache,
   contextUsageCache,
   getMemberLiveStatus,
@@ -64,12 +65,14 @@ import {
   instances,
   isCompactUsageDrop,
   memberSwitchGates,
+  memberIdentityMeta,
   pendingCreations,
   pendingCreationsFor,
   sessionPublishOwners,
   settleMemberOperations,
   shouldKeepCompactedMarker,
   trackMemberOperation,
+  transition,
   updateDispatchState,
   type AgentInstance,
   type DispatchState,
@@ -272,33 +275,6 @@ export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
     if (gid === globalMemberId) push(scopeIdOf({ kind: "room", roomId: r.id }));
   }
   return Array.from(out);
-}
-
-function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
-  return memberId && memberId !== agentName ? { memberId } : {};
-}
-
-function transition(
-  instance: AgentInstance,
-  roomId: string,
-  memberName: string,
-  newStatus: AgentStatus,
-  trigger: string,
-): void {
-  if (instance.status === newStatus) return;
-  const prev = instance.status;
-  instance.status = newStatus;
-  // ① B1: status follows the chat the member is serving right now; callers pass
-  // the build-time room only as a fallback.
-  const chat = instance.activeChat?.scopeId || roomId;
-  const publishTo = chatTargetOf(chat);
-  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger, chat });
-  broadcastToRoom(publishTo, { type: "agent:status", roomId: publishTo, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
-}
-
-/** ① B1: postMessage/transition target for a scope id — bare room id or dm:<id>. */
-function chatTargetOf(scopeId: string): string {
-  return scopeId.startsWith("room:") ? scopeId.slice("room:".length) : scopeId;
 }
 
 function queueDepth(instance:AgentInstance):number{return memberPendingInputCount(instance.memberId);}

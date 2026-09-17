@@ -16,6 +16,7 @@ import { createRoom, stampGlobalMemberIds, getCursors, setCursor } from "../src/
 import { addMessage } from "../src/chat/message-store.js";
 import * as sessionStore from "../src/member/sessions.js";
 import { loadEventsFromDisk, setAgentEventSink } from "../src/agent/events.js";
+import { setStatusSink } from "../src/agent/instance.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/server/ws.js";
 
 vi.mock("../src/app/server/ws.js", () => ({
@@ -58,6 +59,7 @@ beforeEach(() => {
   initAgentManager(registry, loadMemberPromptSource);
   // The composition root connects agent event facts to the websocket transport.
   setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));
+  setStatusSink((target, payload) => vi.mocked(broadcastToRoom)(target, payload));
 });
 
 afterEach(async () => {

@@ -8,6 +8,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as bus from "../../src/chat/message-bus.js";
+import * as ws from "../../src/app/server/ws.js";
+import { setStatusSink } from "../../src/agent/instance.js";
 import { loadEventsFromDisk } from "../../src/agent/events.js";
 import { getMember, updateMember } from "../../src/member/identity.js";
 
@@ -181,6 +183,7 @@ const registry = {
 };
 
 beforeEach(async () => {
+  setStatusSink((target, payload) => vi.mocked(ws.broadcastToRoom)(target, payload));
   compactionRefreshPending = false;
   fixture = coreFixture();
   (await import("../../src/config/settings.js")).writeConfig({ auth: { username: "test", passwordHash: "fixture" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, runtime: { sessionResume: false } });

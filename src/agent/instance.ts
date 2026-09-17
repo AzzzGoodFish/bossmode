@@ -142,6 +142,40 @@ export function getMemberLiveStatus(memberId: string): AgentStatus {
   return instance ? instance.status : "inactive";
 }
 
+// -- Status publication (output port; connected by app/wire) --
+/** Same shape as the websocket `agent:status` payload; the app owns the transport. */
+export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }
+export type AgentStatusSink = (target: string, payload: AgentStatusBroadcast) => void;
+let statusSink: AgentStatusSink | undefined;
+export function setStatusSink(sink: AgentStatusSink | undefined): void { statusSink = sink; }
+
+export function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
+  return memberId && memberId !== agentName ? { memberId } : {};
+}
+
+/** ① B1: postMessage/transition target for a scope id — bare room id or dm:<id>. */
+export function chatTargetOf(scopeId: string): string {
+  return scopeId.startsWith("room:") ? scopeId.slice("room:".length) : scopeId;
+}
+
+export function transition(
+  instance: AgentInstance,
+  roomId: string,
+  memberName: string,
+  newStatus: AgentStatus,
+  trigger: string,
+): void {
+  if (instance.status === newStatus) return;
+  const prev = instance.status;
+  instance.status = newStatus;
+  // ① B1: status follows the chat the member is serving right now; callers pass
+  // the build-time room only as a fallback.
+  const chat = instance.activeChat?.scopeId || roomId;
+  const publishTo = chatTargetOf(chat);
+  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger, chat });
+  statusSink?.(publishTo, { type: "agent:status", roomId: publishTo, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
+}
+
 // -- Context usage (cache-only API + idle refresh push) --
 export const contextUsageCache = new Map<string, ContextUsage>();
 export const contextCompactionWarningCache = new Set<string>();
