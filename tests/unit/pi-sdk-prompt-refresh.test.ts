@@ -7,31 +7,6 @@ import { BossmodeResourceLoader, PiSdkAgentHandle, resolvePiSystemPromptSources 
 
 // Real installed SDK, local in-memory session only. No provider calls or credentials.
 describe("real SDK prompt refresh", () => {
-  it("reloads changed member paths through the public loader while retaining inline factories", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "bossmode-resource-paths-"));
-    try {
-      const a = join(dir, "a.ts"), b = join(dir, "b.ts");
-      for (const [path, name] of [[a, "first-member-command"], [b, "second-member-command"]]) {
-        writeFileSync(path, `export default function(pi) { pi.registerCommand(${JSON.stringify(name)}, {description:'fixture',handler:async()=>{}}); }`);
-      }
-      const loader = new BossmodeResourceLoader({
-        cwd: dir, agentDir: dir, settingsManager: SettingsManager.inMemory(),
-        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-        additionalExtensionPaths: [a],
-        extensionFactories: [{name: "fixture-inline", factory: pi => { pi.registerCommand("retained-command", {description:"fixture", handler:async()=>{}}); }}],
-      }, {systemPrompt:"initial",appendSystemPrompt:[]});
-      await loader.reload();
-      expect(loader.getExtensions().errors).toEqual([]);
-      expect(loader.getExtensions().extensions.flatMap(e => [...e.commands.keys()]).sort()).toEqual(["first-member-command", "retained-command"]);
-      loader.setResourcePaths([], [b]);
-      loader.setPromptSources({systemPrompt:"updated",appendSystemPrompt:["current roster"]});
-      await loader.reload();
-      expect(loader.getExtensions().errors).toEqual([]);
-      expect(loader.getExtensions().extensions.flatMap(e => [...e.commands.keys()]).sort()).toEqual(["retained-command", "second-member-command"]);
-      expect(loader.getSystemPrompt()).toBe("updated");
-      expect(loader.getAppendSystemPrompt()).toEqual(["current roster"]);
-    } finally { rmSync(dir, {recursive:true,force:true}); }
-  });
 
   it("rebuilds the SDK base prompt while preserving active tools and existing messages", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bossmode-prompt-refresh-"));
@@ -59,7 +34,7 @@ describe("real SDK prompt refresh", () => {
       const abort = vi.spyOn(session, "abort");
       const reset = vi.spyOn(manager, "resetLeaf");
       const handle = new PiSdkAgentHandle(
-        session, {} as any, {} as any, loader, settings, [], activeTools,
+        session, {} as any, {} as any, loader,
         { model: "test/model", thinkingLevel: "off", systemPrompt: "old identity", skills: [], extensions: [] },
         [], { roomId: "room-local", agentName: "old-name", roomMembers: ["old-name"], memberId: "mem-stable" },
       );

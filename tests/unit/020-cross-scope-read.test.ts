@@ -146,15 +146,6 @@ describe("cross-scope reads (flagship ①)", () => {
     expect(names).toEqual(expect.arrayContaining(["alpha", "beta"]));
   });
 
-  it("DM prompt scope injection lists real rooms (was [scopeId] only — room-blind)", async () => {
-    const { dev, roomA, roomB } = await seedWorld();
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    const labels = manager.buildDmScopeLabels(dev.id, `dm:${dev.id}`);
-    expect(labels.some((l) => l.includes("alpha") && l.includes(`room:${roomA.id}`))).toBe(true);
-    expect(labels.some((l) => l.includes("beta") && l.includes(`room:${roomB.id}`))).toBe(true);
-    expect(labels.some((l) => l.includes("this DM"))).toBe(true);
-  });
-
   it("members config PATCH write path: batch-5b writes global on any scope", async () => {
     const { dev, roomA } = await seedWorld();
     const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");

@@ -10,7 +10,7 @@ import { postMessage } from "../../src/chat/message-bus.js";
 import {
   activateDmMember, activateAgent, buildMemberAgentSession,
   getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
-  reloadMemberResources, reloadMemberSession, resolveSkills,
+  reloadMemberSession, resolveSkills,
 } from "../../src/agent/orchestrator/agent-manager.js";
 import { getMember, updateMember } from "../../src/member/identity.js";
 import { memberProfilePath } from "../../src/files/layout.js";
@@ -72,10 +72,6 @@ describe("current runtime does not depend on historical agent templates", () => 
         expect(publicResponse.status, publicResponse.body).toBe(200);
         expect(JSON.parse(publicResponse.body).member).not.toHaveProperty("templateWarning");
 
-        // Even an inactive room member gets its prompt contract refreshed.
-        expect(await reloadMemberResources(room.id, id)).toMatchObject({ reloaded: false });
-        expect(getRuntimeStateEntry(id).contractFingerprint).toEqual(expect.any(String));
-
         for (const scope of scopes) {
           const instance = await buildMemberAgentSession(id, scope);
           expect(instance).not.toBeNull();
@@ -113,15 +109,6 @@ describe("current runtime does not depend on historical agent templates", () => 
           // The reload replaced the live instance — refresh the reuse anchor.
           liveInstance = await buildMemberAgentSession(id, scope);
         }
-
-        // In-place resource reload also uses only member-owned persona/config.
-        const roomInstance = getAgentInstanceForScope(scopes[0], id)!;
-        const resources = vi.fn().mockResolvedValue(undefined);
-        roomInstance.handle.reloadResources = resources;
-        expect(await reloadMemberResources(room.id, id)).toMatchObject({ reloaded: true });
-        expect(resources).toHaveBeenCalledWith(expect.objectContaining({
-          agentPrompt: roomInstance.sessionSources.compiled.agentPrompt, skillNames: [], skillPaths: [],
-        }));
 
         // A cleared persona is literal empty content, never a template default.
         writeFileSync(memberProfilePath(id), "");

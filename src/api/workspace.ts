@@ -9,7 +9,7 @@ import * as messageStore from "../chat/message-store.js";
 import { postMessage } from "../chat/message-bus.js";
 import { broadcastToRoom } from "../app/server/ws.js";
 import { parseMentionMemberIds, parseMentions } from "../chat/router.js";
-import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getRoomAgentStale, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, reloadMemberResources, compactMember, persistRoomMemberConfigPatch, computeContractDrift, broadcastMemberStatus } from "../agent/orchestrator/agent-manager.js";
+import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, compactMember, persistRoomMemberConfigPatch, broadcastMemberStatus } from "../agent/orchestrator/agent-manager.js";
 import { loadEventsPaginated } from "../agent/events.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
@@ -52,7 +52,7 @@ addRoute("GET", "/api/rooms", async (_req, res) => {
     const rooms = roomStore.listRooms().map((room) => ({
       ...room,
       agentStatuses: getRoomAgentStatuses(room.id),
-      agentStale: getRoomAgentStale(room.id),
+      agentStale: {},
     }));
     sendJson(res, 200, rooms);
   } catch (err) {
@@ -105,7 +105,7 @@ addRoute("GET", "/api/rooms/:id", async (_req, res, params) => {
     return;
   }
   const agentStatuses = getRoomAgentStatuses(params.id);
-  const agentStale = getRoomAgentStale(params.id);
+  const agentStale = {};
   sendJson(res, 200, { ...room, agentStatuses, agentStale });
 });
 

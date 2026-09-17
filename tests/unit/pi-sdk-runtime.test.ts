@@ -435,11 +435,6 @@ describe("PiSdkRuntime", () => {
     expect(createAgentSession).toHaveBeenCalledTimes(1);
     expect(toolsFactory).toHaveBeenCalledWith(expect.objectContaining({ memberId: "mem-stable" }));
 
-    // A subsequent explicit resource reload must replace the prompt override too.
-    await handle.reloadResources!({ roomId: opts.roomId, member: { ...opts.member, name: "new-name" }, agentPrompt: "reloaded identity", appendSystemPrompt: [], skillPaths: [] });
-    expect(loader.getSystemPrompt()).toBe("reloaded identity");
-    expect(loader.getAppendSystemPrompt()).toEqual([]);
-    expect(toolsFactory).toHaveBeenLastCalledWith(expect.objectContaining({ memberId: "mem-stable" }));
   });
 
   it.each(["isStreaming", "isCompacting"])("rejects prompt refresh while SDK %s without changing prompt sources", async (flag) => {
@@ -470,60 +465,6 @@ describe("PiSdkRuntime", () => {
     expect(handle.runtimeParams!.systemPrompt).toBe("safe");
   });
 
-  it("activates newly assigned MCP on reload without replacing the session", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const runtime = new PiSdkRuntime();
-    const handle = await runtime.createAgent(baseOpts());
-    const sessionId = (handle as any).session.sessionId;
-
-    const { writeMemberMcpConfig } = await import("../../src/member/mcp.js");
-    writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
-    // Simulate registry after reload including extension + mcp tools
-    activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
-    await handle.reloadResources!({
-      roomId: "room-a",
-      member: { ...baseOpts().member, mcpServers: ["playwright"] },
-      agentPrompt: "updated prompt",
-      appendSystemPrompt: ["room supplement"],
-      skillPaths: [],
-      skillNames: [],
-    });
-
-    expect((handle as any).session.sessionId).toBe(sessionId);
-    expect(activeToolNames).toContain("mcp");
-    expect(activeToolNames).toContain("web_search");
-    const scopedPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
-    expect(Object.keys(JSON.parse(readFileSync(scopedPath, "utf8")).mcpServers)).toEqual(["playwright"]);
-    expect((handle.runtimeParams as any).systemPrompt).toContain("updated prompt");
-  });
-
-  it("replaces the derived config before reload start and releases each config after shutdown", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const { writeMemberMcpConfig } = await import("../../src/member/mcp.js");
-    const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    const oldPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
-    writeMemberMcpConfig("pm", { mcpServers: { added: { url: "http://127.0.0.1:1/mcp" } } });
-    activeToolNames = ["mcp"];
-    const session = (handle as any).session;
-    session.reload.mockImplementationOnce(async (options: any) => {
-      expect(existsSync(oldPath)).toBe(true);
-      await options.beforeSessionStart();
-      const newPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
-      expect(newPath).not.toBe(oldPath);
-      expect(Object.keys(JSON.parse(readFileSync(newPath, "utf8")).mcpServers)).toEqual(["added"]);
-    });
-    await handle.reloadResources!({roomId: "room-a", member: baseOpts().member, agentPrompt: "updated", appendSystemPrompt: [], skillPaths: []});
-    const newPath = sessionExtensionSetFlagValue.mock.calls.at(-1)![1];
-    expect(existsSync(oldPath)).toBe(false);
-    expect(existsSync(newPath)).toBe(true);
-    expect(sessionBindExtensions).toHaveBeenCalledTimes(1);
-    await handle.destroyAndWait!();
-    expect(existsSync(newPath)).toBe(false);
-  });
-
   it("shuts down an obtained session and removes derived config when binding fails", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     sessionBindExtensions.mockRejectedValueOnce(new Error("bind failed"));
@@ -548,19 +489,6 @@ describe("PiSdkRuntime", () => {
     await expect(runtime.shutdownMember("mem_other")).resolves.toBeUndefined();
   });
 
-  it("teardown waits for a blocked reload and prevents its late session start",async()=>{
-    exportedConfig={agentDir:join(dir,"profile-agent-dir"),extensionPaths:[],profile:{id:"test-profile",providerSlug:"anthropic"}};
-    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi-sdk.js");
-    const handle=await new PiSdkRuntime().createAgent(baseOpts());const session=(handle as any).session;
-    let release!:()=>void;let entered=false;const gate=new Promise<void>(resolve=>release=resolve);
-    session.reload.mockImplementationOnce(async(options:any)=>{entered=true;await gate;await options.beforeSessionStart();});
-    const reload=handle.reloadResources!({roomId:"room-a",member:baseOpts().member,agentPrompt:"x",appendSystemPrompt:[],skillPaths:[]});
-    const rejected=expect(reload).rejects.toThrow("destroyed");
-    await vi.waitFor(()=>expect(entered).toBe(true));const teardown=handle.destroyAndWait!();
-    await Promise.resolve();expect(session.dispose).not.toHaveBeenCalled();
-    release();await rejected;await teardown;expect(session.dispose).toHaveBeenCalledOnce();
-  });
-
   it("does not create an apparently healthy session when the SDK suppresses a hosted factory error", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     hostedMcpLoaded = false;
@@ -582,65 +510,6 @@ describe("PiSdkRuntime", () => {
     await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("factory failed");
     expect(path).not.toBe(""); expect(existsSync(path)).toBe(false);
     expect(createAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("retains uncertain config generations after reload failure until session teardown", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const settings = await import("../../src/member/mcp.js");
-    const materialize = settings.writeMemberScopedMcpConfig;
-    const paths: string[] = [];
-    vi.spyOn(settings, "writeMemberScopedMcpConfig").mockImplementation(args => {
-      const config = materialize(args); paths.push(config.configPath); return config;
-    });
-    const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    (handle as any).session.reload.mockRejectedValueOnce(new Error("reload failed"));
-    await expect(handle.reloadResources!({roomId:"room-a",member:baseOpts().member,agentPrompt:"x",appendSystemPrompt:[],skillPaths:[]})).rejects.toThrow("reload failed");
-    expect(paths).toHaveLength(2); expect(paths.every(existsSync)).toBe(true);
-    await handle.destroyAndWait!(); expect(paths.some(existsSync)).toBe(false);
-  });
-
-  it("keeps the mcp tool after a reload even with no member SQL MCP configuration (adapter is platform infrastructure)", async () => {
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    activeToolNames = ["read", "bash", "edit", "write", "mcp", "web_search"];
-
-    await handle.reloadResources!({
-      roomId: "room-a",
-      member: baseOpts().member,
-      agentPrompt: "agent prompt",
-      appendSystemPrompt: [],
-      skillPaths: [],
-      skillNames: [],
-    });
-
-    // Batch 6 §1.4: no member mcp.json → empty scoped config, adapter still bound.
-    expect(activeToolNames).toContain("mcp");
-    const scopedPath = sessionExtensionSetFlagValue.mock.calls.at(-1)?.[1];
-    expect(JSON.parse(readFileSync(scopedPath, "utf-8"))).toEqual({ mcpServers: {} });
-  });
-
-  it("rejects reload instead of reporting success when active MCP tools cannot be applied", async () => {
-    const { writeMemberMcpConfig } = await import("../../src/member/mcp.js");
-    writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" } } });
-    exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
-    const handle = await new PiSdkRuntime().createAgent(baseOpts());
-    const previousPrompt = (handle.runtimeParams as any).systemPrompt;
-    ignoreActiveToolChanges = true;
-
-    await expect(handle.reloadResources!({
-      roomId: "room-a",
-      member: { ...baseOpts().member, mcpServers: ["playwright"] },
-      agentPrompt: "updated prompt",
-      appendSystemPrompt: [],
-      skillPaths: [],
-      skillNames: [],
-    })).rejects.toThrow("Reload could not apply MCP access");
-    expect((handle.runtimeParams as any).systemPrompt).toBe(previousPrompt);
   });
 
   it("resumes saved session and appends configured model change when saved model differs", async () => {

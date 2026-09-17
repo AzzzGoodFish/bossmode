@@ -87,9 +87,7 @@ function makeSession() {
 }
 function handle(scopeId = "r", memberId = owner) {
   const h = new PiSdkAgentHandle(session as any, {} as any, {} as any,
-    { setPromptSources: vi.fn(), setResourcePaths: vi.fn() } as any,
-    { applyOverrides() {}, getTransport: () => "auto", getWebSocketConnectTimeoutMs: () => 15000, getHttpIdleTimeoutMs: () => undefined } as any,
-    [], ["read"], {}, [], { roomId: scopeId, memberId, agentName: "SDK owner", roomMembers: [] });
+    { setPromptSources: vi.fn(), setResourcePaths: vi.fn() } as any, {}, [], { roomId: scopeId, memberId, agentName: "SDK owner", roomMembers: [] });
   handles.push(h);
   return h;
 }
@@ -316,8 +314,8 @@ describe("compaction and cleanup boundaries", () => {
     expect(rows().map(r => r.status)).toEqual(["interrupted", "interrupted", "acknowledged"]);
   });
 
-  it("teardown waits for prompt and reload resource quiescence and retains failed cleanup", async () => {
-    const h = handle(); const pending = deferred(); const reloadPending = deferred();
+  it("teardown waits for prompt quiescence and retains failed cleanup", async () => {
+    const h = handle(); const pending = deferred();
     session.prompt.mockImplementationOnce(() => pending.promise);
     const run = h.prompt("work");
     let disposed = false; session.dispose.mockImplementation(() => { disposed = true; throw new Error("cleanup failed"); });
@@ -327,12 +325,6 @@ describe("compaction and cleanup boundaries", () => {
     await expect(h.destroyAndWait()).rejects.toThrow(/cleanup failed/);
     expect(session.dispose).toHaveBeenCalledTimes(1);
     await expect(h.prompt("later")).rejects.toThrow(/destroyed/);
-    // Separate live handle: reload resource settlement must also precede dispose.
-    session = makeSession(); const live = handle(); session.reload.mockImplementationOnce(() => reloadPending.promise);
-    const reload = live.reloadResources!({ roomId: "r", member: opts().member, agentPrompt: "new", skillPaths: [] });
-    await Promise.resolve();
-    const stop = live.destroyAndWait(); await Promise.resolve(); expect(session.dispose).not.toHaveBeenCalled();
-    reloadPending.resolve(); await reload; await stop; expect(session.dispose).toHaveBeenCalledTimes(1);
   });
 });
 

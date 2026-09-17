@@ -38,8 +38,6 @@ class TestHandle implements AgentHandle {
   promptCalls: string[] = [];
   setModelCalls: string[] = [];
   refreshCalls = 0;
-  reloadCalls: any[] = [];
-  failReload = false;
   destroyed = false;
   failRefresh = false;
   failSetModel = false;
@@ -113,12 +111,6 @@ class TestHandle implements AgentHandle {
   async refreshModelRegistry(): Promise<void> {
     if (this.failRefresh) throw new Error("refresh failed");
     this.refreshCalls += 1;
-  }
-  async reloadResources(opts: any): Promise<void> {
-    this.reloadCalls.push(opts);
-    if (this.failReload) throw new Error("Reload could not apply MCP access.");
-    this.runtimeParams.systemPrompt = [opts.agentPrompt, ...(opts.appendSystemPrompt || [])].filter(Boolean).join("\n\n");
-    this.runtimeParams.skills = opts.skillNames;
   }
 }
 
@@ -774,35 +766,6 @@ describe("agent-manager model hot switch", () => {
     expect(handles[0].promptCalls[0]).not.toContain("context_length_exceeded");
     expect(handles[0].promptCalls[0]).not.toContain("model credential is no longer available");
     expect(handles[0].promptCalls[0]).not.toContain("setModel failed");
-  });
-
-  it("reloads active member resources in place without destroying the instance", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    updateMember("mem_pm", { global: { skills: ["review"] } });
-    await manager.activateAgent("room", "pm");
-    const first = handles[0];
-
-    const result = await manager.reloadMemberResources("room", "pm");
-
-    expect(result).toEqual({ ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." });
-    expect(handles).toHaveLength(1);
-    expect(first.destroyed).toBe(false);
-    expect(first.reloadCalls[0]).toMatchObject({ roomId: "room", member: expect.objectContaining({ id: "mem_pm" }), skillNames: ["review"] });
-    expect(first.reloadCalls[0].agentPrompt).toContain("I am pm, an AI teammate in Bossmode.");
-    expect(first.reloadCalls[0].skillPaths[0]).toContain("skills/review");
-  });
-
-  it("surfaces reload failure and reports no success when the runtime cannot apply MCP access", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    await manager.activateAgent("room", "pm");
-    const first = handles[0];
-    first.failReload = true;
-
-    await expect(manager.reloadMemberResources("room", "pm")).rejects.toThrow("Reload could not apply MCP access.");
-
-    expect(first.runtimeParams.systemPrompt).toBeUndefined();
-    expect(loadEventsFromDisk("room", "mem_pm")).not.toContainEqual(expect.objectContaining({ text: "Reloaded member resources in place." }));
-    expect(first.destroyed).toBe(false);
   });
 
   it("blocks activation for an Unconfigured member without creating a runtime or guessing a credential", async () => {

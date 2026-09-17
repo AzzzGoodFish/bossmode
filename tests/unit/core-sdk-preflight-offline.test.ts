@@ -90,8 +90,7 @@ async function create(wrapped = true) {
   sessions.push(session);
   await session.bindExtensions({ mode: "print", onError: error => extensionErrors.push(error) });
   if (!wrapped) return { session, handle: undefined! as PiSdkAgentHandle };
-  const handle = new PiSdkAgentHandle(session, new ModelRegistry(modelRuntime), {} as any, loader, settings,
-    [], [], { model: `${provider}/fake` }, [], { memberId: owner, roomId: "r", agentName: "Preflight", roomMembers: [] });
+  const handle = new PiSdkAgentHandle(session, new ModelRegistry(modelRuntime), {} as any, loader, { model: `${provider}/fake` }, [], { memberId: owner, roomId: "r", agentName: "Preflight", roomMembers: [] });
   handles.push(handle);
   return { session, handle };
 }

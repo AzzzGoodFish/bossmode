@@ -25,7 +25,7 @@ import { loadDatabaseMcpFactory } from "./mcp-factory.js";
 import { ModelCredentialBinding } from "./model-credential-binding.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, ReloadAgentResourcesOpts, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
@@ -52,27 +52,18 @@ export function resolvePiSystemPromptSources(args: {
 /** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
 export class BossmodeResourceLoader implements ResourceLoader {
   private delegate: DefaultResourceLoader;
-  private pathsChanged = false;
   private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
 
   constructor(
-    private options: ConstructorParameters<typeof DefaultResourceLoader>[0],
+    options: ConstructorParameters<typeof DefaultResourceLoader>[0],
     sources: ReturnType<typeof resolvePiSystemPromptSources>,
   ) {
     this.delegate = new DefaultResourceLoader(options);
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
 
-  /** The SDK has no public path setters. Replace the delegate at reload, not its private fields. */
-  setResourcePaths(skillPaths: string[], extensionPaths: string[]): void {
-    this.options = { ...this.options, additionalSkillPaths: [...skillPaths], additionalExtensionPaths: [...extensionPaths] };
-    this.pathsChanged = true;
-  }
-
   async reload(options?: Parameters<ResourceLoader["reload"]>[0]): Promise<void> {
-    if (this.pathsChanged) this.delegate = new DefaultResourceLoader(this.options);
     await this.delegate.reload(options);
-    this.pathsChanged = false;
   }
 
   getExtensions() { return this.delegate.getExtensions(); }
@@ -402,9 +393,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     private modelRegistry: ModelRegistry,
     private credentials: ModelCredentialBinding,
     private resourceLoader: BossmodeResourceLoader,
-    private settingsManager: SettingsManager,
-    private baseExtensionPaths: string[],
-    private baseToolNames: string[],
     runtimeParams: AgentRuntimeParams,
     bossmodeToolNames: Iterable<string>,
     toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
@@ -877,101 +865,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     return pending.finally(() => this.resourceOperations.delete(pending));
   }
 
-  reloadResources(opts: ReloadAgentResourcesOpts): Promise<void> {
-    return this.trackResourceOperation(() => this.reloadResourcesInternal(opts));
-  }
-  private async reloadResourcesInternal(opts: ReloadAgentResourcesOpts): Promise<void> {
-    if (this.destroyed) throw new Error("Runtime instance is destroyed");
-    await this.waitForIdle();
-    if (this.destroyed) throw new Error("Runtime instance is destroyed");
-    const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
-    // A failed reload can leave either generation active; retain both until teardown.
-    this.mcpConfigs.add(mcpSettings);
-    // Batch 6 §1: member dir assets re-resolved on every reload.
-    const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
-    // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
-    // member-owned extensions/ dir entries are the only managed extensions.
-    const managedExtensions = [...memberAssets.extensions];
-    const activeExtensionPaths = [
-      ...managedExtensions,
-      ...this.baseExtensionPaths.filter((p) => !managedExtensions.includes(p)),
-    ];
-    const appendBase = (opts.appendSystemPrompt || []).filter((v) => v && v.trim().length > 0);
-    const promptSources = resolvePiSystemPromptSources({
-      agentPrompt: opts.agentPrompt,
-      appendSystemPrompt: appendBase,
-    });
-    this.resourceLoader.setPromptSources(promptSources);
-    this.resourceLoader.setResourcePaths(
-      [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills], activeExtensionPaths,
-    );
-
-    await this.session.reload({
-      beforeSessionStart: async () => {
-        if (this.destroyed) throw new Error("Runtime instance is destroyed");
-        assertHostedMcpLoaded(this.resourceLoader);
-        this.session.extensionRunner.setFlagValue("mcp-config", mcpSettings.configPath);
-      },
-    });
-    // Agent/session reload re-reads settings and clears in-memory overrides.
-    // Reapply runtime transport only after it completes so explicit Codex SSE/WS
-    // and timeout configuration remains effective for the next provider call.
-    const transportSettings = applyRuntimeTransportSettings(this.settingsManager);
-    logger.info("runtime:pi-sdk", "reloadResources transport", {
-      agent: opts.member.name,
-      transport: transportSettings.transport,
-      websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
-      httpIdleTimeoutMs: transportSettings.httpIdleTimeoutMs,
-    });
-    // Refresh bossmode tool name set from the same factory that builds customTools (leader gate, new tools).
-    this.toolAssembly = {
-      roomId: opts.roomId,
-      agentName: opts.member.name,
-      roomMembers: this.toolAssembly.roomMembers,
-      memberId: this.toolAssembly.memberId ?? opts.member.id,
-    };
-    const customTools = createBossmodeSdkTools({
-    roomId: opts.roomId,
-    memberId: opts.member.id,
-    scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-    ...(opts.resolveChatId ? { resolveChatId: opts.resolveChatId } : {}),
-});
-    this.bossmodeToolNames = new Set(customTools.map((t) => t.name));
-    if (typeof (this.session as any).setActiveToolsByName !== "function" || typeof (this.session as any).getActiveToolNames !== "function") {
-      throw new Error("Runtime cannot verify active tools after reload.");
-    }
-    // Keep extension tools enabled after reload (pi reload uses includeAllExtensionTools).
-    // Do NOT reset active tools to base+mcp only — that stripped web_search/fetch_content.
-    const registeredNames: string[] = typeof (this.session as any).getAllTools === "function"
-      ? (this.session as any).getAllTools().map((t: { name: string }) => t.name)
-      : [];
-    let activeTools = registeredNames.length > 0
-      ? registeredNames
-      : [...this.baseToolNames, ...(mcpSettings.enabled ? ["mcp"] : [])];
-    if (!mcpSettings.enabled) {
-      activeTools = activeTools.filter((n) => n !== "mcp");
-    } else if (!activeTools.includes("mcp")) {
-      activeTools = [...activeTools, "mcp"];
-    }
-    (this.session as any).setActiveToolsByName(activeTools);
-    const activeToolNames = await (this.session as any).getActiveToolNames();
-    const mcpIsActive = Array.isArray(activeToolNames) && activeToolNames.includes("mcp");
-    if (mcpIsActive !== mcpSettings.enabled) {
-      throw new Error("Reload could not apply MCP access.");
-    }
-
-    // Panel metadata: bossmode segments only (role + original appends), not pi built-in.
-    this.runtimeParams.systemPrompt = [opts.agentPrompt.trim(), ...appendBase].filter(Boolean).join("\n\n");
-    this.runtimeParams.skills = opts.skillNames ?? opts.skillPaths;
-    this.runtimeParams.extensions = ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"];
-    for (const config of this.mcpConfigs) {
-      if (config === mcpSettings) continue;
-      config.dispose();
-      this.mcpConfigs.delete(config);
-    }
-    logger.info("runtime:pi-sdk", "reloaded resources", { agent: opts.member.name, skills: opts.skillPaths.length, mcpEnabled: mcpSettings.enabled, mcpServers: mcpSettings.serverNames });
-  }
-
   compact(): Promise<{ aborted: boolean }> {
     return this.trackResourceOperation(() => this.compactInternal());
   }
@@ -1144,8 +1037,7 @@ export class PiSdkRuntime implements AgentRuntime {
       // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
       // member-owned extensions/ dir entries are the only managed extensions.
       const managedExtensions = [...memberAssets.extensions];
-      const extensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
-      const activeExtensionPaths = extensionPaths;
+      const activeExtensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
       const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
       const resourceLoader = new BossmodeResourceLoader({
         cwd: opts.cwd,
@@ -1172,7 +1064,6 @@ export class PiSdkRuntime implements AgentRuntime {
       scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
       ...(opts.resolveChatId ? { resolveChatId: opts.resolveChatId } : {}),
   });
-      const baseTools = ["read", "edit", "write", ...customTools.map((t) => t.name)];
       // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
       // when tools is provided it becomes a lifetime allowlist and strips extension
       // tools like web_search/fetch_content). MCP is loaded once through its
@@ -1217,9 +1108,6 @@ export class PiSdkRuntime implements AgentRuntime {
         modelRegistry,
         authStorageCredentials,
         resourceLoader,
-        settingsManager,
-        extensionPaths,
-        baseTools,
         runtimeParams,
         customTools.map((t) => t.name),
         { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },

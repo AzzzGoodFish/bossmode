@@ -13,7 +13,7 @@ import { closeRuntimeAdmission, openRuntimeAdmission, memberRuntimeAllowed, runt
 
 import { join } from "node:path";
 import { logger } from "../../kernel/logger.js";
-import { resolveGlobalSkillPaths } from "../../member/skills.js";
+
 import { resolveRoomMember } from "../../member/room-member-resolver.js";
 
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
@@ -24,7 +24,7 @@ import * as attachmentStore from "../../files/attachment-store.js";
 import { postMessage, getMessagesSince } from "../../chat/message-bus.js";
 import { initRouter } from "../../chat/router.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../../app/server/ws.js";
-import { currentContractFingerprint, type MemberPromptSource } from "../prompt.js";
+import { type MemberPromptSource } from "../prompt.js";
 import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, getRegistry, configureAssembly } from "../assembly.js";
 export { buildMemberAgentSession, reloadMemberSession, getRegistry } from "../assembly.js";
 export { notifyMemberProfileChanged } from "../instance.js";
@@ -34,8 +34,8 @@ import { getMember, getMemberConfiguration, applyMemberConfigPatch } from "../..
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../events.js";
 import { loadScopeMessages } from "../tools/tools.js";
-import { MEMBER_CONTRACT_VERSION } from "../../kernel/contract-version.js";
-import { setContractFingerprint, clearStaleMounts, clearRuntimeStateEntry, formatRuntimeErrorMessage } from "../instance.js";
+
+import { clearRuntimeStateEntry, formatRuntimeErrorMessage } from "../instance.js";
 import {
   wrapRoomContextMessage,
   wrapRoomMessagesTranscript,
@@ -745,20 +745,6 @@ export function persistRoomMemberConfigPatch(roomId: string, memberRef: string, 
   persistConfigPatch(roomId, memberId, patch);
 }
 
-/** Clear a member's model binding on the same authority as persistConfigPatch. */
-/**
- * Scope labels for the DM Core prompt's "Scopes you exist in" line (flagship
- * ①): rooms the member belongs to + this DM. Previously the DM compile call
- * passed [scopeId] only — the line showed just the DM itself, leaving DM
- * members room-blind (fish 2026-08-05).
- */
-export function buildDmScopeLabels(memberId: string, dmScopeId: string): string[] {
-  return [
-    ...listRoomsForMember(memberId).map((r) => `${r.name} (room:${r.id})`),
-    `this DM (${dmScopeId})`,
-  ];
-}
-
 /** §10: in-flight model switches per memberId — ONE map with the creation
  * gate (memberSwitchGates). Acquired synchronously before the first await; a
  * second concurrent request gets MemberModelSwitchConflictError (HTTP 409). */
@@ -958,108 +944,6 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
   return result;
 }
 
-/** Stale info for all room members (for initial GET /api/rooms/:id load). */
-export function getRoomAgentStale(roomId: string): Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }> {
-  const result: Record<string, { mounts?: { since: number; fields: string[] }; contract?: boolean }> = {};
-  const scopeId = `room:${roomId}`;
-  for (const member of roomStore.getRoomMembers(roomId)) {
-    const stale = getMemberStale(scopeId, member.id);
-    if (stale) result[member.name] = stale;
-  }
-  return result;
-}
-
-// -- Member status report (member_info tool) --
-
-export interface MemberStatusEntry {
-  name: string;
-  memberId: string;
-  /** Aggregated across live instances: working > idle > inactive (no live instance). */
-  status: AgentStatus;
-  /** Room-instance status in this room (inactive if none). */
-  room: AgentStatus;
-  /** Live instances only: which scopes this member is active in, with per-scope status. */
-  activeScopes: Array<{ scope: string; status: AgentStatus }>;
-  /** Mount/contract stale markers for badges (auto-reload prompt). */
-  stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean };
-}
-
-/**
- * Live status report for room members — same source as the member panel
- * status lamp (the runtime instance registry). Read-only.
- */
-export function getRoomMemberStatusReport(roomId: string, memberRef?: string): MemberStatusEntry[] | null {
-  const members = memberRef
-    ? (() => { const m = resolveRoomMember(roomId, memberRef); return m ? [m] : null; })()
-    : roomStore.getRoomMembers(roomId);
-  if (!members) return null;
-  const thisRoom = roomStore.getRoom(roomId);
-  if (!thisRoom) return null;
-  return members.map((m) => {
-    const gid = (thisRoom ? roomStore.resolveGlobalMemberId(thisRoom, m) : null) || m.id;
-    const activeScopes: Array<{ scope: string; status: AgentStatus }> = [];
-    let roomStatus: AgentStatus = "inactive";
-    let status: AgentStatus = "inactive";
-    const bump = (st: AgentStatus) => {
-      if (st === "working") status = "working";
-      else if (status === "inactive") status = "idle";
-    };
-    for (const inst of instances.values()) {
-      if (inst.scopeId.startsWith("dm:")) {
-        const match = inst.memberId === m.id || inst.memberId === gid || inst.scopeId === `dm:${gid}`;
-        if (!match) continue;
-        activeScopes.push({ scope: "dm", status: inst.status });
-        bump(inst.status);
-        continue;
-      }
-      const r = roomStore.getRoom(inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId);
-      if (!r) continue;
-      const local = roomStore.getRoomMembers(r.id).find((rm) => rm.id === inst.memberId || rm.name === inst.agentName);
-      if (!local) continue;
-      const match = roomStore.resolveGlobalMemberId(r, local) === gid || inst.memberId === m.id;
-      if (!match) continue;
-      activeScopes.push({ scope: r.id === roomId && thisRoom ? `room: ${thisRoom.name}` : `room: ${r.name}`, status: inst.status });
-      if (r.id === roomId) roomStatus = inst.status === "working" ? "working" : (roomStatus === "working" ? "working" : inst.status);
-      bump(inst.status);
-    }
-    return { name: m.name, memberId: m.id, status, room: roomStatus, activeScopes, stale: getMemberStale(`room:${roomId}`, m.id) ?? undefined };
-  });
-}
-
-// -- Contract drift + mount stale (auto-reload prompt, fish 2026-08-07) --
-
-export interface ContractDriftEntry {
-  memberName: string;
-  memberId: string;
-  scopeId: string;
-  scopeLabel: string;
-  /** Current build's contract version. */
-  currentVersion: number;
-  /** True if the user already dismissed a notification for this exact version. */
-  alreadyNotified: boolean;
-}
-
-/**
- * Detect contract drift for a room's members: compare the stored fingerprint
- * (from the build that last compiled each member's prompt) against the
- * *current* build's fingerprint. A mismatch means bossmode was updated (core
- * tools/prompt changed) while the member's session was running with the old
- * contract. Called at daemon boot to populate the startup drift dialog.
- */
-export function computeContractDrift(_roomId: string): ContractDriftEntry[] {
-  // Identity batch-2: contract drift / Reload dialog retired.
-  return [];
-}
-
-
-/** Mount-stale info for a member in a scope (for status badges + WS).
- * Suppresses staleMounts for members with no live instance (activation = fresh mounts).
- */
-export function getMemberStale(_scopeId: string, _memberId: string): { mounts?: { since: number; fields: string[] }; contract?: boolean } | null {
-  // Identity batch-2: Reload/stale retired — activation recompiles; no badges.
-  return null;
-}
-
 
 export function broadcastMemberStatus(roomId: string, memberRef: string): void {
   const member = resolveRoomMember(roomId, memberRef);
@@ -1067,14 +951,12 @@ export function broadcastMemberStatus(roomId: string, memberRef: string): void {
   const key = instanceKey(member.id);
   const instance = instances.get(key);
   const status = instance?.status ?? "inactive";
-  const stale = getMemberStale(`room:${roomId}`, member.id) ?? undefined;
   broadcastToRoom(roomId, {
     type: "agent:status",
     roomId,
     agent: member.name,
     ...memberIdentityMeta(member.name, member.id),
     status,
-    ...(stale ? { stale } : {}),
   });
 }
 
@@ -1341,53 +1223,6 @@ export function getMemberInstances(memberName: string): Array<{
     }
   }
   return result;
-}
-
-export async function reloadMemberResources(roomId: string, memberRef: string): Promise<{ ok: true; reloaded: boolean; message: string }> {
-  const room = roomStore.getRoom(roomId);
-  if (!room) throw new Error("Room not found");
-  const member = resolveRoomMember(roomId, memberRef);
-  if (!member) throw new Error(`Member not found: ${memberRef}`);
-  const memberId = member.id;
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  if (!instance) {
-    // No running instance: reload is a no-op semantically (activation creates
-    // fresh with current code/config), but we still refresh the contract
-    // fingerprint+version and clear stale markers so the UI doesn't show
-    // a false "needs reload" badge for a member that will auto-pick-up.
-    try {
-      setContractFingerprint(memberId, currentContractFingerprint(), MEMBER_CONTRACT_VERSION);
-    } catch { /* compile failed — best effort */ }
-    clearStaleMounts(memberId);
-    return { ok: true, reloaded: false, message: "Member is not running — marked up to date; latest prompt, skills and tools apply on next activation." };
-  }
-  if (instance.status === "working" || instance.dispatchState !== "idle" || instance.promptInFlight) {
-    throw new Error("Member is busy. Reload when the current turn is idle.");
-  }
-  if (!instance.handle.reloadResources) throw new Error("Runtime does not support in-place reload.");
-
-  const compiled = compileForMember(memberId);
-  const skills = resolveSkills(member);
-  const skillPaths = [
-    ...resolveGlobalSkillPaths(skills),
-  ];
-
-  await instance.handle.reloadResources({
-    roomId,
-    resolveChatId: () => instance.activeChat.scopeId,
-    member,
-    agentPrompt: compiled.agentPrompt,
-    appendSystemPrompt: compiled.appendSystemPrompt,
-    skillPaths,
-    skillNames: skills,
-  });
-  // Reload picked up new contract + mounts: refresh fingerprint, clear stale.
-  setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-  clearStaleMounts(memberId);
-  emitAgentLocalEvent(roomId, memberId, { type: "system", text: "Reloaded member resources in place." });
-  logger.info("agent", "member resources reloaded", { roomId, member: member.name, memberId, skills: skills.length });
-  return { ok: true, reloaded: true, message: "Reloaded latest prompt, skills and tools in place." };
 }
 
 export function resetAgentSession(roomId: string, memberRef: string): { ok: true; message: string } {

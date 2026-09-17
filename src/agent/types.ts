@@ -92,19 +92,6 @@ export interface AgentCallbacks {
   onMention: (target: string, message: string) => Promise<void>;
 }
 
-// -- Agent handle --
-
-export interface ReloadAgentResourcesOpts {
-  roomId: string;
-  /** ① B1: same resolver as creation — reload rebuilds the tool surface. */
-  resolveChatId?: () => string;
-  member: AgentMemberConfig;
-  agentPrompt: string;
-  appendSystemPrompt?: string[];
-  skillPaths: string[];
-  skillNames?: string[];
-}
-
 export interface AgentRuntimeParams {
   model?: string;
   thinkingLevel?: string;
@@ -154,7 +141,6 @@ export interface AgentHandle {
   refreshModelRegistry?(opts?: { allowNetwork?: boolean }): void | Promise<void>;
   setThinkingLevel?(level: string): void;
   getContextUsage?(): Promise<ContextUsage | null>;
-  reloadResources?(opts: ReloadAgentResourcesOpts): Promise<void>;
   /** Refresh only prompt metadata at the next safe pre-prompt boundary. */
   refreshPrompt?(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void;
   /** Active tools currently exposed to the model (session-live). */

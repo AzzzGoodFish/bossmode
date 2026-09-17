@@ -15,7 +15,6 @@ import {
   getAgentContextUsage,
   getAgentStatus,
   getMemberActiveTools,
-  reloadMemberResources,
   resetAgentSession,
   compactMember,
   getMemberBusyState,

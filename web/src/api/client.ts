@@ -856,17 +856,6 @@ export async function sendMessage(
   });
 }
 
-// -- Private Chat / Steer --
-
-export async function reloadMemberResources(
-  roomId: string,
-  agentName: string,
-): Promise<{ ok: true; reloaded: boolean; message: string }> {
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/reload`, {
-    method: "POST",
-  });
-}
-
 export async function resetAgentSession(
   roomId: string,
   agentName: string,
