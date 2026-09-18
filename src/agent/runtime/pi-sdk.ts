@@ -22,7 +22,7 @@ import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";
-import { ModelCredentialBinding } from "./model-credential-binding.js";
+import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";

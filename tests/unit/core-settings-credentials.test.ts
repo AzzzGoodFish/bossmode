@@ -11,7 +11,7 @@ import { importRemoteCatalog } from "../../src/config/catalog.js";
 import type { ModelCredentialProfile } from "../../src/kernel/types.js";
 import { saveModelCredentialProfile, getModelCredentialProfile, listPublicModelCredentialProfiles, loadModelCredentialProfiles, normalizeLegacyCredentialImport } from "../../src/config/models.js";
 import { createCredentialStore, exportPiConfigForMember, createDatabaseModelRuntime, refreshDatabaseModelRuntime } from "../../src/config/pi-adapt/credentials.js";
-import { ModelCredentialBinding } from "../../src/agent/runtime/model-credential-binding.js";
+import { ModelCredentialBinding } from "../../src/config/pi-adapt/credentials.js";
 import { getCatalog, commitRemoteCatalog, commitProviderOverlays, getProviderOverlays, createDatabaseModelsStore, clearRemoteCatalogMemoryForTests, setPiCatalogModelsForTests } from "../../src/config/catalog.js";
 
 let root:string,db:Database,repo:Database;

@@ -57,7 +57,8 @@ vi.mock("../../src/config/models.js", () => ({
   loadModelCredentialProfiles: () => [{ id: "cred", providerSlug: "anthropic", enabled: true, name: "Test account" }],
 }));
 
-vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
+vi.mock("../../src/config/pi-adapt/credentials.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/config/pi-adapt/credentials.js")>()),
   getBossmodePiRuntimeRoot: () => join(dir, "pi-agent", "runtime"),
   createDatabaseModelRuntime: async (credentials: unknown, profileId: string) => { modelRegistryCreate(credentials, profileId); return modelRuntime; },
   refreshDatabaseModelRuntime: databaseRuntimeRefresh,

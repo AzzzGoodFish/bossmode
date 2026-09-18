@@ -36,10 +36,10 @@ vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
   normalizeModelRef: (ref: string) => ref, resolvePiAgentDir: () => mock.root,
   exportPiConfigForMember: () => ({ agentDir: mock.root, profile: { id: "offline", providerSlug: "offline", authType: "api-key" } }),
   createDatabaseModelRuntime: async () => mock.modelRuntime, refreshDatabaseModelRuntime: async () => {},
+  ModelCredentialBinding: class {
+    attach() {} bind(model: unknown) { return model; } followSession() {}
+  },
 }));
-vi.mock("../../src/agent/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
-  attach() {} bind(model: unknown) { return model; } followSession() {}
-} }));
 let fixture: ReturnType<typeof coreFixture>;
 let runtime: PiSdkRuntime;
 let stream: ReturnType<typeof vi.fn>;

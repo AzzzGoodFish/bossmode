@@ -12,7 +12,7 @@ function gate() {
 
 async function setup() {
   const credentials = await import("../../src/config/models.js"); const credentialsBridge = await import("../../src/config/pi-adapt/credentials.js");
-  const { ModelCredentialBinding } = await import("../../src/agent/runtime/model-credential-binding.js");
+  const { ModelCredentialBinding } = await import("../../src/config/pi-adapt/credentials.js");
   const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
   const profiles = ["A", "B"].map((id) => ({
     id, name: id, enabled: true, isDefault: false, providerSlug: "test-auth", profileKind: "custom_endpoint",

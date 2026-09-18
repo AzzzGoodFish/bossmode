@@ -34,10 +34,10 @@ vi.mock("../../src/config/pi-adapt/credentials.js", () => ({
   exportPiConfigForMember: () => { mock.stage("credentials"); return { agentDir: mock.root, profile: { id: "p", providerSlug: "mock", authType: "api-key" } }; },
   createDatabaseModelRuntime: async () => { mock.stage("model runtime"); return {}; },
   refreshDatabaseModelRuntime: async () => {},
+  ModelCredentialBinding: class {
+    attach() {} bind(model: unknown) { return model; } followSession() {}
+  },
 }));
-vi.mock("../../src/agent/runtime/model-credential-binding.js", () => ({ ModelCredentialBinding: class {
-  attach() {} bind(model: unknown) { return model; } followSession() {}
-} }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   VERSION: "mock-sdk",
   DefaultResourceLoader: class {
