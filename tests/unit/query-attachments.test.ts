@@ -144,7 +144,7 @@ describe("chat_read attachments", () => {
 
 describe("envelope attachment rendering (lock)", () => {
   it("activation-context message content carries Attachment lines with absolute paths", async () => {
-    const am = await import("../../src/agent/orchestrator/agent-manager.js");
+    const am = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     // renderMessageForAgent is module-private; assert through exported surface is
     // heavier than needed — instead lock the format string used by the envelope
     // through the shared fixture: this test pins the exact line format contract.

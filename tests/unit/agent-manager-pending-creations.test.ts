@@ -42,7 +42,9 @@ vi.mock("../../src/app/server/ws.js", () => ({
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
 import { setStatusSink } from "../../src/agent/instance.js";
-import { activateAgent, buildMemberAgentSession, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, initializeMemberRuntime } from "../../src/app/member-actions.js";
+import { buildMemberAgentSession } from "../../src/agent/assembly.js";
+import { shutdownAll } from "../../src/agent/controls.js";
 
 beforeEach(async () => {
   fixture = coreFixture();
@@ -65,7 +67,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+  await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
   fixture.close();
 });
 
@@ -119,7 +121,7 @@ describe("agent-manager pending creation dedup", () => {
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
     await shutdownAll();
-    initAgentManager(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
+    initializeMemberRuntime(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   it.each(["room:room1", "dm:mem_developer", "mm:mem_developer-mem_qa"])("assembles the same global member assets from %s", async scope => {
@@ -218,7 +220,7 @@ describe("agent-manager pending creation dedup", () => {
   });
 
   it.each(["destroy", "reset"])("cancels a pending creation on %s and destroys its late handle without prompting", async (action) => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     const create = mocks.createAgent.getMockImplementation()!;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

@@ -4,7 +4,7 @@ import { mkdirSync,writeFileSync,readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace,createTestServer,closeTestServer,loginAndGetToken,createMockRoom } from "../helpers/test-server.js";
 import { getDatabase } from "../../src/data/database.js";
-import { resetAgentSession } from "../../src/agent/orchestrator/agent-manager.js";
+import { resetAgentSession } from "../../src/app/member-actions.js";
 import * as sessions from "../../src/member/sessions.js";
 import * as rooms from "../../src/chat/conversations.js";
 import * as runtime from "../../src/agent/instance.js";

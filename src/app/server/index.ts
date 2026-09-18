@@ -17,7 +17,9 @@ import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
 import { removePidFile, writePidFile } from "../pid.js";
 import { ensurePiCatalogWarm } from "../../config/catalog.js";
 import { startCatalogAutoRefreshScheduler } from "../../config/models.js";
-import { initAgentManager, shutdownAll as shutdownAgents, getActiveInstanceCount, wireMentionRouter, resumePendingRuntimeInputs } from "../../agent/orchestrator/agent-manager.js";
+import { initializeMemberRuntime, getActiveInstanceCount, wireMentionRouter } from "../member-actions.js";
+import { shutdownAll as shutdownAgents } from "../../agent/controls.js";
+import { resumePendingRuntimeInputs } from "../../agent/scheduler.js";
 
 import { RuntimeRegistry } from "../../agent/runtime/registry.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
@@ -66,7 +68,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeConfigPatches = wireMemberConfigPatches();

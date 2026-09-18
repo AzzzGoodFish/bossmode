@@ -114,7 +114,7 @@ describe("DM instance unified event wiring (G1)", () => {
   });
 
   afterEach(async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.shutdownAll();
     fixture.close();
   });
@@ -127,8 +127,8 @@ describe("DM instance unified event wiring (G1)", () => {
       model: "anthropic/claude-sonnet",
       credentialId: "cred-1",
     });
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
+    manager.initializeMemberRuntime({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
     return { reg, member, manager };
   }
 
@@ -182,8 +182,8 @@ describe("DM instance unified event wiring (G1)", () => {
   it("unconfigured DM member posts a user-visible notice instead of silent return", async () => {
     const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
     const member = __reg_app_member_actions.createMember({ name: "architect", agentTemplate: "architect" }); // no model/credential
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
+    manager.initializeMemberRuntime({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(0);
@@ -202,7 +202,7 @@ describe("DM instance unified event wiring (G1)", () => {
       }),
     };
     await manager.shutdownAll();
-    (manager as any).initAgentManager({ get: () => failing, getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    (manager as any).initializeMemberRuntime({ get: () => failing, getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     await manager.activateDmMember(member.id);
     const store = await import("../../src/chat/dm-message-store.js");
@@ -237,7 +237,7 @@ describe("DM instance unified event wiring (G1)", () => {
     };
     const managerAny = manager as any;
     await manager.shutdownAll();
-    managerAny.initAgentManager({ get: () => runtime, getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    managerAny.initializeMemberRuntime({ get: () => runtime, getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     await manager.activateDmMember(member.id);
     await capturedCallbacks.onChat("hello from dm");

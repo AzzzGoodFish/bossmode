@@ -59,7 +59,8 @@ vi.mock("../../src/app/server/ws.js", () => ({
 }));
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, initializeMemberRuntime } from "../../src/app/member-actions.js";
+import { shutdownAll } from "../../src/agent/controls.js";
 
 async function setup() {
   await shutdownAll();
@@ -73,7 +74,7 @@ async function setup() {
   };
   const registry = new RuntimeRegistry();
   registry.register(runtime as any);
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 }
 
 /** Messages posted as the member itself — must stay empty when chat was not called. */
@@ -109,7 +110,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+  await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();
@@ -221,7 +222,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
 
   it("abort (dispatchState aborting) delivers nothing", async () => {
     state.promptImpl = vi.fn(async () => {
-      const { abortAgent } = await import("../../src/agent/orchestrator/agent-manager.js");
+      const { abortAgent } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
       void abortAgent("room1", "developer");
       handle.emit({ type: "message_end", text: "I'll get right on it", stopReason: "stop" });
       handle.emit({ type: "agent_end", messages: [] });
@@ -278,7 +279,7 @@ describe("reply debt turns without chat (final-text fallback retired)", () => {
   });
 
   it("DM: a debt turn without chat delivers nothing — the silence note lands in the DM scope", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     bus.postMessage("dm:mem_developer", "user", "@developer scoped question", ["developer"]);
     state.promptImpl = vi.fn(async () => {
       handle.emit({ type: "message_end", text: "Scoped answer", stopReason: "stop" });

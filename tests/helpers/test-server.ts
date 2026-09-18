@@ -35,7 +35,7 @@ export function setupTestWorkspace(): void {
     stopConfigPatches?.();
     const errors: unknown[] = [];
     for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
-    try { const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js"); await shutdownAll(); } catch (error) { errors.push(error); }
+    try { const { shutdownAll } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") }); await shutdownAll(); } catch (error) { errors.push(error); }
     try { storage?.close(); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, "HTTP fixture cleanup failed");
   });
@@ -106,7 +106,7 @@ export async function createTestServer(): Promise<TestServer> {
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/app/server/ws.js");
-  const { initAgentManager, wireMentionRouter } = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { initializeMemberRuntime, wireMentionRouter } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
@@ -114,7 +114,7 @@ export async function createTestServer(): Promise<TestServer> {
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime());
   registry.register(new MockRuntime("pi-cli"));
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 
   // Same mention-router as production — scope routing stays on one code path.
   const stopRouter = wireMentionRouter();
@@ -149,7 +149,7 @@ export async function closeTestServer(ts: TestServer): Promise<void> {
   ts.stopAgentEvents();
   const { shutdownWebSocket } = await import("../../src/app/server/ws.js");
   await shutdownWebSocket();
-  const { shutdownAll } = await import("../../src/agent/orchestrator/agent-manager.js");
+  const { shutdownAll } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   await shutdownAll();
   ts.server.closeAllConnections();
   if (ts.server.listening) await new Promise<void>((resolve, reject) => ts.server.close(error => error ? reject(error) : resolve()));

@@ -15,7 +15,7 @@ describe("member runtime comes from the supported runtime, not retired JSON", ()
     const room = join(dir, "rooms", "room-a"); mkdirSync(room, { recursive: true });
     storeRoom({ id: "room-a", name: "room-a", members: [], globalMemberIds: [member.id], createdAt: 1 }, fixture.db);
     writeFileSync(join(room, "room.json"), "poison retired room");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember("room-a", member.id)).toMatchObject({ id: member.id, runtime: "pi-cli" });
     expect(resolveRoomMember("room-a", member.id)?.model).not.toBe("stale");
     expect(existsSync(join(dir, "members.json"))).toBe(withOldStore);

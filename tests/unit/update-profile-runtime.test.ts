@@ -10,7 +10,7 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 it("renames a running member across room/DM without abort; next prompt refreshes self and peers", async () => {
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const roomStore = await import("../../src/chat/conversations.js");
-  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const suffix = randomUUID().slice(0, 6);
   const own = __reg_app_member_actions.createMember({ name: `Before-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
@@ -35,7 +35,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
       return handle;
     }),
   };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initializeMemberRuntime(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
   try {
     const scopes = [`room:${room.id}`, `dm:${own.id}`];
     for (const scope of scopes) expect(await manager.buildMemberAgentSession(own.id, scope)).toBeTruthy();
@@ -74,13 +74,13 @@ it("renames a running member across room/DM without abort; next prompt refreshes
 
 it("reconciles a rename while handle construction is awaiting", async () => {
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
-  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const member = __reg_app_member_actions.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any; handle.refreshPrompt = vi.fn();
   const runtime = { name: "pi-cli", capabilities: {}, shutdownAll: async () => {}, createAgent: async () => { entered.resolve(); await release.promise; return handle; } };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initializeMemberRuntime(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
   const scope = `dm:${member.id}`;
   try {
     const building = manager.buildMemberAgentSession(member.id, scope);
@@ -98,7 +98,7 @@ it("reconciles a rename while handle construction is awaiting", async () => {
 it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name is reused during construction", async (kind) => {
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const rooms = await import("../../src/chat/conversations.js");
-  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { postMessage } = await import("../../src/chat/message-bus.js");
   const { updateProfileForMember } = await import("../../src/member/profile.js");
@@ -112,7 +112,7 @@ it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name i
   const handle = new MockAgentHandle() as any;
   handle.refreshPrompt = vi.fn(); handle.prompt = vi.fn(async () => {});
   const runtime = { name: "pi-cli", capabilities: {}, shutdownAll: async () => {}, createAgent: async () => { entered.resolve(); await release.promise; return handle; } };
-  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initAgentManager(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
+  const runtimes = new RuntimeRegistry(); runtimes.register(runtime as any); manager.initializeMemberRuntime(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
   try {
     const first = postMessage(scope, "user", `@${own.name} ORIGINAL_REQUEST`, [own.name], { mentionMemberIds: [own.id] });
     const ctx = { senderName: "user", needResponseMemberIds: [] };

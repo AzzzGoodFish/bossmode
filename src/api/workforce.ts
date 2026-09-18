@@ -5,7 +5,8 @@ import {
   loadSkillDefinitions, loadSkillDefinitionsStrict, loadSkillDefinition, saveSkillDefinition,
   deleteSkillDefinition, loadSkillTemplates,
 } from "../member/skills.js";
-import { getMemberInstances, abortMember, compactMemberById, resetMemberSession, restartMember } from "../agent/orchestrator/agent-manager.js";
+import { getMemberInstances } from "../app/member-actions.js";
+import { abortMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { getLatestMessageId } from "../chat/message-bus.js";
 import * as roomStore from "../chat/conversations.js";
 import { getMemberTokenUsage, getRoomMemberTokenUsage } from "../member/stats/token-usage-store.js";

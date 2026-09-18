@@ -1,9 +1,7 @@
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./index.js";
-import {
-  getRegistry,
-  invalidateModelCredentialProfile,
-} from "../agent/orchestrator/agent-manager.js";
+import { getRuntimeCapabilities } from "../app/member-actions.js";
+import { invalidateModelCredentialProfile } from "../agent/controls.js";
 import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
 import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile } from "../config/models.js";
 import { listBuiltinModelProviders, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
@@ -11,14 +9,7 @@ import { listAvailableModels } from "../config/models.js";
 
 // GET /api/capabilities — runtime capabilities
 addRoute("GET", "/api/capabilities", async (_req, res) => {
-  const reg = getRegistry();
-  if (!reg) {
-    sendJson(res, 200, { runtimes: {} });
-    return;
-  }
-  sendJson(res, 200, {
-    runtimes: reg.getCapabilities(),
-  });
+  sendJson(res, 200, { runtimes: getRuntimeCapabilities() });
 });
 
 // GET /api/model-provider-catalog — built-in provider catalog for Connect Provider flow

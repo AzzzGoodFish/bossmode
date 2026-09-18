@@ -60,7 +60,8 @@ vi.mock("../../src/app/server/ws.js", () => ({
 }));
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
-import { activateAgent, getAgentStatus, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, getAgentStatus, initializeMemberRuntime } from "../../src/app/member-actions.js";
+import { shutdownAll } from "../../src/agent/controls.js";
 import { mapPiAgentEvent } from "../../src/agent/runtime/events.js";
 import { handleAgentEvent as processEvent } from "../../src/agent/events.js";
 
@@ -76,7 +77,7 @@ async function setup() {
   };
   const registry = new RuntimeRegistry();
   registry.register(runtime as any);
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 }
 
 beforeEach(async () => {
@@ -101,7 +102,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+  await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();

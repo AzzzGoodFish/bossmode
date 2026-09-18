@@ -21,7 +21,7 @@ import { listMemberSkills } from "../member/skills.js";
 import { activeWorkspaceRoot, readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
-import { switchMemberModel, switchMemberThinkingLevel } from "../agent/orchestrator/agent-manager.js";
+import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
 import * as messageStore from "../chat/message-store.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
@@ -123,7 +123,7 @@ addRoute("GET", "/api/chats", async (_req, res) => {
 
     let getScopeLiveStatus: ((scopeId: string) => string) | null = null;
     try {
-      const am = await import("../agent/orchestrator/agent-manager.js");
+      const am = await import("../app/member-actions.js");
       getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
     } catch {
       getScopeLiveStatus = () => "idle";
@@ -226,10 +226,10 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
     let getScopeLiveStatus: ((sid: string) => string) | null = null;
     let getMemberLiveStatus: ((id: string) => string) | null = null;
     try {
-      const am = await import("../agent/orchestrator/agent-manager.js");
+      const am = await import("../app/member-actions.js");
       getMemberActiveScopes = (id) => am.getMemberActiveScopes(id);
       getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
-      getMemberLiveStatus = (id) => am.getMemberLiveStatus(id);
+      getMemberLiveStatus = (id) => am.getScopeLiveStatus(`dm:${id}`);
     } catch { /* runtime cold */ }
 
     const contacts = listMembers().map((m) => {
@@ -342,8 +342,8 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
     const { getBossmodeDir } = await import("../files/layout.js");
     const { join } = await import("node:path");
     const { buildFinalMemberSystemPrompt } = await import("../agent/prompt/system-prompt-final.js");
-    const { memberRecordToConfig, resolveSkills } = await import("../agent/orchestrator/agent-manager.js");
-    const { resolveRoomMember } = await import("../member/room-member-resolver.js");
+    const { memberRecordToConfig, resolveSkills } = await import("../app/member-actions.js");
+    const { resolveRoomMember } = await import("../app/member-actions.js");
     const { resolveGlobalSkillPaths } = await import("../member/skills.js");
 
     const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
@@ -496,7 +496,7 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     const afterModel = modelSwitch?.model || beforeModel;
     if (!beforeModel && afterModel) {
       try {
-        const { activateDmMember } = await import("../agent/orchestrator/agent-manager.js");
+        const { activateDmMember } = await import("../app/member-actions.js");
         void activateDmMember(m.id).catch((err) => {
           logger.error("members", "post-config DM activate failed", {
             memberId: m.id,
@@ -757,7 +757,7 @@ addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
   let status: string = "idle";
   let contextPct: number | null = null;
   try {
-    const { getAgentStatus, getAgentContextUsage } = await import("../agent/orchestrator/agent-manager.js");
+    const { getAgentStatus, getAgentContextUsage } = await import("../app/member-actions.js");
     status = getAgentStatus(scopeId, m.id) || "idle";
     const usage = getAgentContextUsage(scopeId, m.id);
     if (usage && typeof (usage as any).percentage === "number") contextPct = (usage as any).percentage;

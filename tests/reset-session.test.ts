@@ -8,7 +8,9 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
-import { initAgentManager, activateAgent, buildMemberAgentSession, resetAgentSession, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
+import { initializeMemberRuntime, activateAgent, resetAgentSession } from "../src/app/member-actions.js";
+import { buildMemberAgentSession } from "../src/agent/assembly.js";
+import { shutdownAll } from "../src/agent/controls.js";
 
 import { createMember } from "../src/app/member-actions.js";
 import { updateMemberIdentity } from "../src/member/identity.js";
@@ -17,6 +19,7 @@ import { addMessage } from "../src/chat/message-store.js";
 import * as sessionStore from "../src/member/sessions.js";
 import { loadEventsFromDisk, setAgentEventSink } from "../src/agent/events.js";
 import { setStatusSink } from "../src/agent/instance.js";
+import { setRuntimeViewSink } from "../src/app/member-actions.js";
 import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/server/ws.js";
 
 vi.mock("../src/app/server/ws.js", () => ({
@@ -56,10 +59,11 @@ beforeEach(() => {
   runtime = new MockRuntime("pi-cli");
   const registry = new RuntimeRegistry();
   registry.register(runtime);
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
   // The composition root connects agent event facts to the websocket transport.
   setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));
   setStatusSink((target, payload) => vi.mocked(broadcastToRoom)(target, payload));
+  setRuntimeViewSink((scope, event, memberName) => { if (memberName === undefined) broadcastToRoom(scope, event); else broadcastToAgentSubscribers(scope, memberName, event); });
 });
 
 afterEach(async () => {

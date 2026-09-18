@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDefaultConfig, getUserDisplayName, writeConfig } from "../../src/config/settings.js";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { wrapRoomContextMessage } from "../../src/agent/orchestrator/message-envelope.js";
+import { wrapRoomContextMessage } from "../../src/agent/prompt.js";
 import type { RoomMessage } from "../../src/kernel/types.js";
 
 let fixture: ReturnType<typeof coreFixture>;

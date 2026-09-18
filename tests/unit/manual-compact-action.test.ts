@@ -167,7 +167,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const handle of handles) { handle.holdPrompt = false; handle.resolvePendingPrompt(); handle.resolvePendingCompact(); }
-  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+  await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
   // The real event consumer schedules post-compaction refreshes up to 1500ms.
   if (compactionRefreshPending) await new Promise((resolve) => setTimeout(resolve, 1600));
   fixture.close();
@@ -177,13 +177,13 @@ describe("manual compaction conversation action", () => {
   beforeEach(async () => {
     handles.splice(0);
     vi.clearAllMocks();
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.shutdownAll();
-    manager.initAgentManager(registry as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    manager.initializeMemberRuntime(registry as any, loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   it("compacts an idle instance via its real scopeId and settles the lifecycle", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
 
@@ -195,7 +195,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("no live instance → builds the session for a configured member; unresolvable member fails honestly", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
 
     // The room /compact command can precede activation — the session is built
     // (never prompted), then compacted.
@@ -209,7 +209,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("busy is marked BEFORE the first await: a message during a held compact queues and never cancels", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdCompact = true;
@@ -235,7 +235,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("working turn settles first: abort + waitForIdle happen BEFORE compact starts", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdPrompt = true;
@@ -266,7 +266,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("Stop in the gap (old prompt settled, compact not started) cancels the request — no compact after Stop", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.activateAgent("room", "pm");
     const first = handles[0];
     first.holdPrompt = true;
@@ -296,7 +296,7 @@ describe("manual compaction conversation action", () => {
   });
 
   it("the member's single runtime serves the DM compaction too (① B1)", async () => {
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.activateAgent("room", "pm");
     const handle = handles[0];
 

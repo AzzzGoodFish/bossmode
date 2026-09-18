@@ -573,7 +573,7 @@ export async function handleToolCallback(
       // ① B4: member-level live status — one runtime per member, one status.
       let status = "idle";
       try {
-        const am = await import("../orchestrator/agent-manager.js");
+        const am = await import("../instance.js");
         status = am.getMemberLiveStatus(member.id) === "working" ? "working" : "idle";
       } catch { /* runtime cold — idle */ }
       return { ok: true, member: { id: member.id, name: member.name, description: member.title ?? "", status } };
@@ -681,7 +681,7 @@ export async function handleToolCallback(
     case "reload": {
       // Batch 6 §3: rebuild own session in the current scope, history kept.
       // roomId arrives scope-shaped ("dm:<id>" / room id).
-      const { reloadMemberSession } = await import("../orchestrator/agent-manager.js");
+      const { reloadMemberSession } = await import("../assembly.js");
       const reloadMemberId = resolveCallerMemberId(roomId, actorRef);
       const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
       return {

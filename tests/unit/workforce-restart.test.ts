@@ -27,7 +27,7 @@ vi.mock("../../src/member/skills.js", () => ({
 }));
 
 
-vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
+vi.mock("../../src/agent/controls.js", () => ({
   getMemberInstances: vi.fn(() => []),
   abortMember: (...args: any[]) => abortMemberMock(...args),
   compactMemberById: (...args: any[]) => compactMemberByIdMock(...args),

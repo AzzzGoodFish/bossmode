@@ -26,7 +26,7 @@ function historicalRoom(id: string, name: string, sourceAgent: string) {
 describe("room member overrides", () => {
   it("retains historical model and thinking overrides scoped to one room without runtime admission", async () => {
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
 
     const roomA = historicalRoom("A", "pm", "pm");
     const roomB = historicalRoom("B", "pm", "pm");
@@ -50,7 +50,7 @@ describe("room member overrides", () => {
   it("does not resolve an unlinked historical snapshot through same-named contacts, legacy files or template metadata", async () => {
     writeAgent("developer");
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
 
     writeFileSync(join(dir, "members.json"), JSON.stringify([
       { id: "legacy-dev", name: "dev-a", agent: "qa", runtime: "pi-cli", model: "anthropic/legacy", thinkingLevel: "high" },
@@ -65,7 +65,7 @@ describe("room member overrides", () => {
 
 it("current contact settings apply globally and never become room-local overrides", async () => {
   const rooms = await import("../../src/chat/conversations.js");
-  const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+  const { resolveRoomMember } = await import("../../src/app/member-actions.js");
   const member = createMember({ name: "current" });
   const a = rooms.createRoom("A", undefined, [member.id]);
   const b = rooms.createRoom("B", undefined, [member.id]);

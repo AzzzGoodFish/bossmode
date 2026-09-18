@@ -10,15 +10,8 @@ import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js"
 import * as roomStore from "../chat/conversations.js";
 import { findMemberByName, getMember } from "../member/identity.js";
 import { toolSurfaceForScope } from "../agent/tools/scope-tool-surface.js";
-import {
-  abortAgent,
-  getAgentContextUsage,
-  getAgentStatus,
-  getMemberActiveTools,
-  resetAgentSession,
-  compactMember,
-  getMemberBusyState,
-} from "../agent/orchestrator/agent-manager.js";
+import { abortAgent, compactMember } from "../agent/controls.js";
+import { getAgentContextUsage, getAgentStatus, getMemberActiveTools, resetAgentSession, getMemberBusyState } from "../app/member-actions.js";
 import { loadEventsPaginated } from "../agent/events.js";
 import { logger } from "../kernel/logger.js";
 

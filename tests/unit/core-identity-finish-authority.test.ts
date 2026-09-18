@@ -8,7 +8,7 @@ import { prepareCoreStorage } from "../../src/app/upgrade/run.js";
 import * as registry from "../../src/member/identity.js";
 import * as __registry_app_member_actions from "../../src/app/member-actions.js";
 import { storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
-import { resolveRoomMember } from "../../src/member/room-member-resolver.js";
+import { resolveRoomMember } from "../../src/app/member-actions.js";
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";
 import { readTemplateMetadata } from "../../src/member/templates.js";
 import { readTemplateBody } from "../../src/app/upgrade/records.js";

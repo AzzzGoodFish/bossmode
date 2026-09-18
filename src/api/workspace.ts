@@ -9,12 +9,13 @@ import * as messageStore from "../chat/message-store.js";
 import { postMessage } from "../chat/message-bus.js";
 import { broadcastToRoom } from "../app/server/ws.js";
 import { parseMentionMemberIds, parseMentions } from "../chat/router.js";
-import { destroyInstance, getAgentEventHistory, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, abortAgent, resetAgentSession, compactMember, persistRoomMemberConfigPatch, broadcastMemberStatus } from "../agent/orchestrator/agent-manager.js";
+import { destroyInstance, abortAgent, compactMember } from "../agent/controls.js";
+import { getAgentEventHistory, getRoomAgentStatuses, getAgentContextUsage, getMemberActiveTools, resetAgentSession, persistRoomMemberConfigPatch, broadcastMemberStatus } from "../app/member-actions.js";
 import { loadEventsPaginated } from "../agent/events.js";
 import { pageActivity as queryActivityPage } from "../data/repositories/event-repository.js";
 
 
-import { resolveRoomMembers, resolveRoomMember } from "../member/room-member-resolver.js";
+import { resolveRoomMembers, resolveRoomMember } from "../app/member-actions.js";
 import { getModelCredentialProfile } from "../config/models.js";
 import { normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import * as attachmentStore from "../files/attachment-store.js";

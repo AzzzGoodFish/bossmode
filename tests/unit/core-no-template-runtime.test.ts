@@ -7,18 +7,16 @@ import {
 } from "../helpers/test-server.js";
 import { mockPromptFn, resetMocks } from "../helpers/mock-runtime.js";
 import { postMessage } from "../../src/chat/message-bus.js";
-import {
-  activateDmMember, activateAgent, buildMemberAgentSession,
-  getAgentInstanceForScope, getRegistry, notifyMemberProfileChanged,
-  reloadMemberSession, resolveSkills,
-} from "../../src/agent/orchestrator/agent-manager.js";
+import { activateDmMember, activateAgent, getAgentInstanceForScope, resolveSkills } from "../../src/app/member-actions.js";
+import { buildMemberAgentSession, getRegistry, reloadMemberSession } from "../../src/agent/assembly.js";
+import { notifyMemberProfileChanged } from "../../src/agent/instance.js";
 import { getMember, updateMember } from "../../src/member/identity.js";
 import { memberProfilePath } from "../../src/files/layout.js";
 import { getRuntimeStateEntry } from "../../src/agent/instance.js";
 import { getCurrentSession } from "../../src/member/sessions.js";
 import { storeRoom, readStoredRoom } from "../../src/chat/conversations.js";
 import { readTemplateMetadata, deleteTemplateMetadata, importTemplateMetadata } from "../../src/member/templates.js";
-import { resolveRoomMember, resolveRoomMembers } from "../../src/member/room-member-resolver.js";
+import { resolveRoomMember, resolveRoomMembers } from "../../src/app/member-actions.js";
 import type { AgentMemberConfig } from "../../src/kernel/types.js";
 
 import { importHistoricalAgentTemplate } from "../helpers/historical-agent-template.js";

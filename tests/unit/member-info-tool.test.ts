@@ -33,7 +33,7 @@ const getMemberActiveScopes = vi.fn((id: string) => (id === "mem_pm" ? ["room:r1
 const getScopeLiveStatus = vi.fn((sid: string) => (sid === "dm:mem_qa" ? "working" : "inactive"));
 const getMemberLiveStatus = vi.fn((id: string) => (id === "mem_pm" || id === "mem_qa" ? "working" : "idle"));
 
-vi.mock("../../src/agent/orchestrator/agent-manager.js", () => ({
+vi.mock("../../src/agent/instance.js", () => ({
   getMemberActiveScopes: (...args: unknown[]) => getMemberActiveScopes(...(args as [string])),
   getScopeLiveStatus: (...args: unknown[]) => getScopeLiveStatus(...(args as [string])),
   getMemberLiveStatus: (...args: unknown[]) => getMemberLiveStatus(...(args as [string])),

@@ -20,7 +20,7 @@ describe("room-member-resolver — no implicit model default", () => {
   it("leaves a freshly created current contact Unconfigured (no model, no credentialId)", async () => {
     const member = createMember({ name: "architect" });
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
     const resolved = resolveRoomMember(room.id, "architect");
@@ -34,7 +34,7 @@ describe("room-member-resolver — no implicit model default", () => {
     writeAgent("pm", "model: claude-sonnet-4-6\n");
     const member = createMember({ name: "pm", agentTemplate: "pm" });
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
     const resolved = resolveRoomMember(room.id, "pm");
@@ -45,7 +45,7 @@ describe("room-member-resolver — no implicit model default", () => {
 
   it("retains imported legacy model history without making an unlinked snapshot executable", async () => {
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
     // The retired historical converter's SQL DTO, constructed directly: a retained
     // legacy model history (never executable) that resolution must not activate.
     const room = {
@@ -72,7 +72,7 @@ describe("room-member-resolver — no implicit model default", () => {
   it("resolves an explicitly configured member's model and credentialId together", async () => {
     const member = createMember({ name: "qa" });
     const roomStore = await import("../../src/chat/conversations.js");
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
 
     const room = roomStore.createRoom("A", dir, [member.id]);
     updateMember(member.id, { global: { model: "anthropic/claude-opus-4-6", credentialId: "cred-x" } });
@@ -111,7 +111,7 @@ async function currentMemberFixture() {
 describe("room-member-resolver — database authority", () => {
   it("uses DB identity and config for a linked current member, including cleared settings", async () => {
     const { registry, member, roomStore, room } = await currentMemberFixture();
-    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember(room.id, "rm_shadow")).toMatchObject({
       id: member.id, name: member.name, title: "Engineer", agent: "developer",
       model: "db-model", credentialId: "db-credential", thinkingLevel: "high",
@@ -132,7 +132,7 @@ describe("room-member-resolver — database authority", () => {
     const { member, room, path, shadow } = await currentMemberFixture();
     writeFileSync(join(dir, "members.json"), "invalid retired data");
     storeRoom({ ...room, globalMemberIds: [member.id], roomMembers: [shadow] }, fixture.db);
-    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember(room.id, member.id)).toMatchObject({ id: member.id, name: "current-name", model: "db-model" });
     expect(resolveRoomMembers(room.id)).toHaveLength(1);
   });
@@ -140,7 +140,7 @@ describe("room-member-resolver — database authority", () => {
   it("propagates effective-config read failures instead of using shadow config", async () => {
     const { registry, room } = await currentMemberFixture();
     vi.spyOn(registry, "getMemberConfiguration").mockImplementation(() => { throw new Error("DB config read failed"); });
-    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/app/member-actions.js");
     expect(() => resolveRoomMember(room.id, "rm_shadow")).toThrow("DB config read failed");
     expect(() => resolveRoomMembers(room.id)).toThrow("DB config read failed");
   });
@@ -148,7 +148,7 @@ describe("room-member-resolver — database authority", () => {
   it("does not revive a linked member missing from the DB", async () => {
     const { registry, member, room } = await currentMemberFixture();
     deleteMemberForTests(member.id);
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
     expect(() => resolveRoomMember(room.id, "rm_shadow")).toThrow("Member not found");
   });
 
@@ -157,7 +157,7 @@ describe("room-member-resolver — database authority", () => {
     writeAgent(member.name);
     storeRoom({ ...room, globalMemberIds: [member.id], memberOverrides: { [member.name]: { model: "stale-model" } } }, fixture.db);
     deleteMemberForTests(member.id);
-    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember(room.id, member.name)).toBeNull();
     expect(resolveRoomMembers(room.id, [member.name])).toEqual([]);
   });
@@ -173,7 +173,7 @@ describe("room-member-resolver — database authority", () => {
       const row = get(sql, ...params);
       return row && sql.includes("SELECT * FROM members") ? {...row, global_json:"invalid JSON"} : row;
     });
-    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember, resolveRoomMembers } = await import("../../src/app/member-actions.js");
     expect(() => resolveRoomMember(room.id, member.id)).toThrow();
     expect(() => resolveRoomMembers(room.id)).toThrow();
   });

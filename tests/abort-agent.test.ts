@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn } from "./helpers/mock-runtime.js";
 import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
-import { abortAgent, activateAgent, buildMemberAgentSession, getAgentInstanceForScope, initAgentManager, shutdownAll } from "../src/agent/orchestrator/agent-manager.js";
+import { abortAgent, shutdownAll } from "../src/agent/controls.js";
+import { activateAgent, getAgentInstanceForScope, initializeMemberRuntime } from "../src/app/member-actions.js";
+import { buildMemberAgentSession } from "../src/agent/assembly.js";
 
 import { createMember } from "../src/app/member-actions.js";
 import { createRoom, stampGlobalMemberIds } from "../src/chat/conversations.js";
@@ -27,7 +29,7 @@ beforeEach(() => {
   stampGlobalMemberIds(roomId, [memberId], memberId);
   const registry = new RuntimeRegistry();
   registry.register(new MockRuntime("pi-cli"));
-  initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 });
 
 afterEach(async () => {

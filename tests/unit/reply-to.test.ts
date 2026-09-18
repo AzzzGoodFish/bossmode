@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { excerptForReply } from "../../src/agent/tools/tools.js";
-import { formatReplyQuoteBlock, wrapRoomContextMessage } from "../../src/agent/orchestrator/message-envelope.js";
+import { formatReplyQuoteBlock, wrapRoomContextMessage } from "../../src/agent/prompt.js";
 import type { RoomMessage } from "../../src/kernel/types.js";
 
 function msg(partial: Partial<RoomMessage> & { id: string; seq: number; content: string }): RoomMessage {

@@ -53,14 +53,8 @@ vi.mock("../../src/app/server/ws.js", () => ({
 }));
 
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
-import {
-  activateAgent,
-  destroyInstance,
-  getAgentContextUsage,
-  initAgentManager,
-  refreshContextUsage,
-  shutdownAll,
-} from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, getAgentContextUsage, initializeMemberRuntime, refreshContextUsage, setRuntimeViewSink } from "../../src/app/member-actions.js";
+import { destroyInstance, shutdownAll } from "../../src/agent/controls.js";
 
 beforeEach(async () => {
   fixture = coreFixture();
@@ -83,7 +77,7 @@ beforeEach(async () => {
   vi.mocked(bus.postMessage).mockClear();
 });
 afterEach(async () => {
-  await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+  await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
   fixture.close();
 });
 
@@ -94,6 +88,7 @@ describe("agent-manager context usage cache", () => {
     mockHandle.getContextUsage.mockClear();
     mockHandle.subscribe.mockReturnValue(() => {});
     mocks.broadcastToRoom.mockReset();
+    setRuntimeViewSink((scope, event) => { mocks.broadcastToRoom(scope, event); });
 
     const runtime = {
       name: "pi-cli",
@@ -116,7 +111,7 @@ describe("agent-manager context usage cache", () => {
     const reg = new RuntimeRegistry();
     reg.register(runtime as any);
     await shutdownAll();
-    initAgentManager(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
+    initializeMemberRuntime(reg, loadMemberPromptSource, loadAgentMemberSnapshot);
     await activateAgent("room1", "developer");
   });
 

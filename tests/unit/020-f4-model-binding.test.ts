@@ -71,11 +71,11 @@ describe("F4 model binding persists to the registry", () => {
     mkdirSync(join(dir, "memory", "projects"), { recursive: true });
     broadcastToRoom.mockClear();
     const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
-    (await import("../../src/agent/orchestrator/agent-manager.js")).initAgentManager(new RuntimeRegistry(), loadMemberPromptSource, loadAgentMemberSnapshot);
+    (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).initializeMemberRuntime(new RuntimeRegistry(), loadMemberPromptSource, loadAgentMemberSnapshot);
   });
 
   afterEach(async () => {
-    await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+    await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
     fixture.close();
   });
 
@@ -85,7 +85,7 @@ describe("F4 model binding persists to the registry", () => {
     const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
 
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
 
     // New authority updated.
@@ -94,7 +94,7 @@ describe("F4 model binding persists to the registry", () => {
     const roomStore = await import("../../src/chat/conversations.js");
     expect(roomStore.getRoom(room.id)!.memberOverrides).toBeUndefined();
     // Read side (display / heal) resolves the new model.
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember(room.id, member.id)?.model).toBe("testprov/claude-b");
   });
 
@@ -110,7 +110,7 @@ describe("F4 model binding persists to the registry", () => {
     });
     const room = await makeStampedRoom(member.id);
 
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     await manager.switchMemberModel(member.id, { model: "testprov/claude-b", credentialId: cred.id });
 
     const rec = reg.getMember(member.id)!;
@@ -128,14 +128,14 @@ describe("F4 model binding persists to the registry", () => {
     // Fully unified member: everything goes global.
     const unified = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room1 = await makeStampedRoom(unified.id);
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     manager.persistRoomMemberConfigPatch(room1.id, unified.id, { mcpServers: ["playwright"] });
     let rec = reg.getMember(unified.id)!;
     expect(rec.global.mcpServers).toEqual(["playwright"]);
     expect(rec.scopeOverrides[`room:${room1.id}`]).toBeUndefined();
     expect(roomStore.getRoom(room1.id)!.memberOverrides).toBeUndefined();
     // Read side agrees (this was the invisible-write bug).
-    const { resolveRoomMember } = await import("../../src/member/room-member-resolver.js");
+    const { resolveRoomMember } = await import("../../src/app/member-actions.js");
     expect(resolveRoomMember(room1.id, unified.id)?.mcpServers).toEqual(["playwright"]);
 
     // Batch-5b: scoped/mixed members also write global (flags ignored).
@@ -159,7 +159,7 @@ describe("F4 model binding persists to the registry", () => {
     const cred = await seedCredential();
     const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
     expect((manager as any).clearMemberModelBinding).toBeUndefined();
 
     // A switch to the same binding is a no-op-safe full switch (still valid).
@@ -216,7 +216,7 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
   });
 
   afterEach(async () => {
-    await (await import("../../src/agent/orchestrator/agent-manager.js")).shutdownAll();
+    await (await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") })).shutdownAll();
     fixture.close();
   });
 
@@ -226,8 +226,8 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
     const room = await makeStampedRoom(member.id);
 
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
+    manager.initializeMemberRuntime({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     (await import("../../src/chat/message-bus.js")).postMessage(room.id, "user", "@pm check model", ["pm"]);
     await manager.activateAgent(room.id, member.id);
@@ -252,8 +252,8 @@ describe("F4 heal consistency (no silent rollback after switch)", () => {
     const cred = await seedCredential();
     const member = __reg_app_member_actions.createMember({ name: "pm", agentTemplate: "pm", model: "testprov/claude-a", credentialId: cred.id });
 
-    const manager = await import("../../src/agent/orchestrator/agent-manager.js");
-    manager.initAgentManager({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
+    const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
+    manager.initializeMemberRuntime({ get: () => fakeRuntime(), getAll: () => [] } as any, loadMemberPromptSource, loadAgentMemberSnapshot);
 
     await manager.activateDmMember(member.id);
     expect(createAgentCalls).toBe(1);

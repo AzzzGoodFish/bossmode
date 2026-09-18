@@ -44,7 +44,7 @@ it("regression: a rename does not crash the next batch of an instance born in a 
   resetMocks();
   const suffix = randomUUID().slice(0, 6);
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
-  const manager = await import("../../src/agent/orchestrator/agent-manager.js");
+  const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
   const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
   const { mmScopeIdOf } = await import("../../src/chat/conversations.js");
@@ -68,7 +68,7 @@ it("regression: a rename does not crash the next batch of an instance born in a 
   };
   const runtimes = new RuntimeRegistry();
   runtimes.register(runtime as any);
-  manager.initAgentManager(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
+  manager.initializeMemberRuntime(runtimes, loadMemberPromptSource, loadAgentMemberSnapshot);
   const stopRouter = manager.wireMentionRouter();
   try {
     // First message: bob is activated and his instance is born in the pair scope.

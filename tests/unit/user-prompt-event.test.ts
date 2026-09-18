@@ -6,7 +6,8 @@ import { MockRuntime, resetMocks, setMockPromptFn, mockPromptFn } from "../helpe
 import { insertMemberIdentity } from "../../src/member/identity.js";
 import { storeRoom } from "../../src/chat/conversations.js";
 import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
-import { activateAgent, initAgentManager, shutdownAll } from "../../src/agent/orchestrator/agent-manager.js";
+import { activateAgent, initializeMemberRuntime } from "../../src/app/member-actions.js";
+import { shutdownAll } from "../../src/agent/controls.js";
 import { postMessage } from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk, setAgentEventSink } from "../../src/agent/events.js";
 import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
@@ -31,7 +32,7 @@ describe("user_prompt activity event", () => {
     postMessage("room1", "user", "@developer hi", ["developer"]);
     const registry = new RuntimeRegistry();
     registry.register(new MockRuntime("pi-cli"));
-    initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
+    initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
     setMockPromptFn(vi.fn(async () => {}));
     // The composition root connects agent event facts to the websocket transport.
     setAgentEventSink((scopeId, agentName, payload) => vi.mocked(broadcastToAgentSubscribers)(scopeId, agentName, payload));

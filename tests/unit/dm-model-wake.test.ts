@@ -9,9 +9,9 @@ setupTestWorkspace();
 
 const activateDmMember = vi.fn(async () => {});
 
-vi.mock("../../src/agent/orchestrator/agent-manager.js", async () => {
-  const actual = await vi.importActual<typeof import("../../src/agent/orchestrator/agent-manager.js")>(
-    "../../src/agent/orchestrator/agent-manager.js",
+vi.mock("../../src/app/member-actions.js", async () => {
+  const actual = await vi.importActual<typeof import("../../src/app/member-actions.js")>(
+    "../../src/app/member-actions.js",
   );
   return {
     ...actual,

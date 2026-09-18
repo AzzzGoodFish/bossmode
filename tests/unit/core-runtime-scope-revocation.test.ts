@@ -5,7 +5,7 @@ import { getDatabase } from "../../src/data/database.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
 import { resolveRoomMemberRef } from "../../src/chat/conversations.js";
 import { handleToolCallback } from "../../src/agent/tools/tools.js";
-import { getAgentInstanceForScope } from "../../src/agent/orchestrator/agent-manager.js";
+import { getAgentInstanceForScope } from "../../src/app/member-actions.js";
 setupTestWorkspace();
 const barrier = () => { let release!: () => void; const promise = new Promise<void>(r => release = r); return { promise, release }; };
 async function fixture(label: string) {

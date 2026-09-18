@@ -2,7 +2,10 @@ import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/m
 import {it,expect,vi} from "vitest";
 import {setupTestWorkspace,createTestServer,closeTestServer,createMockRoom,loginAndGetToken,jsonRequest} from "../helpers/test-server.js";
 import {resetMocks,mockPromptFn,mockAbortFn,MockRuntime,emitMockEvent} from "../helpers/mock-runtime.js";
-import {resetAgentSession,reloadMemberSession,shutdownAll,initAgentManager,resumePendingRuntimeInputs} from "../../src/agent/orchestrator/agent-manager.js";
+import { resetAgentSession, initializeMemberRuntime } from "../../src/app/member-actions.js";
+import { reloadMemberSession } from "../../src/agent/assembly.js";
+import { shutdownAll } from "../../src/agent/controls.js";
+import { resumePendingRuntimeInputs } from "../../src/agent/scheduler.js";
 import {RuntimeRegistry} from "../../src/agent/runtime/registry.js";
 import {getDatabase} from "../../src/data/database.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
@@ -39,7 +42,7 @@ it("shutdown during creation preserves a safe pending input and restart can exec
     await f.post("survives shutdown");await vi.waitFor(()=>expect(spy).toHaveBeenCalledTimes(1));
     const stop=shutdownAll();gate.release();await stop;
     expect(getDatabase().get<{n:number}>("SELECT COUNT(*) n FROM queued_inputs WHERE scope_id=? AND status='pending'",f.room.id)?.n).toBe(1);expect(debts(f.room.id,f.id)).toHaveLength(1);expect(mockPromptFn).not.toHaveBeenCalled();
-    const registry=new RuntimeRegistry();registry.register(new MockRuntime("pi-cli"));initAgentManager(registry, loadMemberPromptSource, loadAgentMemberSnapshot);resumePendingRuntimeInputs();
+    const registry=new RuntimeRegistry();registry.register(new MockRuntime("pi-cli"));initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);resumePendingRuntimeInputs();
     await vi.waitFor(()=>expect(mockPromptFn).toHaveBeenCalledTimes(1));expect(String(mockPromptFn.mock.calls[0][0])).toContain("survives shutdown");
   }finally{gate.release();spy.mockRestore();await closeTestServer(f.server);}
 });

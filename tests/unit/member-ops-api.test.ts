@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupTestWorkspace, createTestServer, closeTestServer, createMockRoom, loginAndGetToken, jsonRequest } from "../helpers/test-server.js";
 import { resetMocks, mockPromptFn } from "../helpers/mock-runtime.js";
-import { getMemberInstances } from "../../src/agent/orchestrator/agent-manager.js";
+import { getMemberInstances } from "../../src/app/member-actions.js";
 import * as sessions from "../../src/member/sessions.js";
 setupTestWorkspace();
 

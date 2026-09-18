@@ -1,5 +1,6 @@
 import { onCatalogChanged } from "../config/catalog.js";
-import { refreshAllInstanceModelRegistries, notifyMemberProfileChanged } from "../agent/orchestrator/agent-manager.js";
+import { refreshAllInstanceModelRegistries } from "../agent/controls.js";
+import { notifyMemberProfileChanged } from "../agent/instance.js";
 
 /** Configuration reports changes; only the composition root connects them to execution. */
 export function wireConfiguration(): () => void {
@@ -32,7 +33,7 @@ export function wireConversationMembers(): () => void {
 import { setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
 import { setStatusSink } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./server/ws.js";
-import { refreshContextUsage } from "../agent/orchestrator/agent-manager.js";
+import { refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
 
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
@@ -131,9 +132,13 @@ export function _resetDedup(): void {
 
 /** Connect agent event facts to transports and chat ownership; the agent core stays subscriber-free. */
 export function wireAgentEvents(): () => void {
+  setRuntimeViewSink((scopeId, event, memberName) => {
+    if (memberName === undefined) broadcastToRoom(scopeId, event);
+    else broadcastToAgentSubscribers(scopeId, memberName, event);
+  });
   setAgentEventSink((scopeId, agentName, payload) => broadcastToAgentSubscribers(scopeId, agentName, payload));
   setStatusSink((target, payload) => broadcastToRoom(target, payload));
   setToolActivityHook(({ scopeId, agentName, toolName, args, isError }) => maybeEmitKnowledgeActivity(scopeId, agentName, toolName, args, isError));
   setContextUsageRefreshHook(refreshContextUsage);
-  return () => { setAgentEventSink(undefined); setStatusSink(undefined); setToolActivityHook(undefined); setContextUsageRefreshHook(undefined); };
+  return () => { setRuntimeViewSink(undefined); setAgentEventSink(undefined); setStatusSink(undefined); setToolActivityHook(undefined); setContextUsageRefreshHook(undefined); };
 }
