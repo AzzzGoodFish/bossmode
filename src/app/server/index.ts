@@ -22,7 +22,7 @@ import { shutdownAll as shutdownAgents } from "../../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../../agent/scheduler.js";
 
 import { RuntimeRegistry } from "../../agent/runtime/registry.js";
-import { PiSdkRuntime } from "../../agent/runtime/pi-sdk.js";
+import { PiSdkRuntime } from "../../agent/runtime/pi.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/templates.js";
 import { wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireAgentEvents } from "../wire.js";

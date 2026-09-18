@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { coreFixture } from "../helpers/core-fixture.js";
 import { openDatabase } from "../../src/data/database.js";
-import { PiSdkAgentHandle, PiSdkRuntime } from "../../src/agent/runtime/pi-sdk.js";
+import { PiSdkAgentHandle, PiSdkRuntime } from "../../src/agent/runtime/pi.js";
 import type { CreateAgentOpts, RuntimePromptDispatch } from "../../src/agent/types.js";
 
 const mock = vi.hoisted(() => ({

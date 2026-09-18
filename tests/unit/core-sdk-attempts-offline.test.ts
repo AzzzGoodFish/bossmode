@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { coreFixture } from "../helpers/core-fixture.js";
-import { PiSdkRuntime } from "../../src/agent/runtime/pi-sdk.js";
+import { PiSdkRuntime } from "../../src/agent/runtime/pi.js";
 import type { RuntimePromptDispatch } from "../../src/agent/types.js";
 
 // Real installed SDK, real SQL, and an explicitly injected in-process model runtime.

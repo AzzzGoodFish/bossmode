@@ -1,3 +1,4 @@
+// Environment for spawning CLI subprocesses (moved from runtime/env.ts).
 // Pi SDK Runtime — in-process pi Agent SDK integration behind the legacy pi-cli storage key
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -932,4 +933,12 @@ export class PiSdkRuntime implements AgentRuntime {
     });
     return this.shutdownSettlement;
   }
+}
+// Environment helpers for spawning CLI subprocesses
+
+export function getPiSpawnEnv(piAgentDir?: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...(piAgentDir ? { PI_CODING_AGENT_DIR: piAgentDir } : {}),
+  };
 }

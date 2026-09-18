@@ -167,7 +167,7 @@ beforeEach(async () => {
   modelRuntime.checkAuth = vi.fn();
   fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('pm','pm','pm','general','{}',0,0)");
   fixture.db.run("INSERT INTO scopes(id,kind,room_id) VALUES('room-a','room','room-a')");
-  const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+  const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
   const create = PiSdkRuntime.prototype.createAgent;
   vi.spyOn(PiSdkRuntime.prototype, "createAgent").mockImplementation(async function(opts) {
     const handle = await create.call(this, opts); createdHandles.push(handle); return handle;
@@ -226,7 +226,7 @@ describe("PiSdkRuntime", () => {
 
 
   it("throws setup guidance instead of falling back to SDK default auth when no Bossmode credential profile exists", async () => {
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("Go to Settings → Model Credentials");
 
@@ -236,7 +236,7 @@ describe("PiSdkRuntime", () => {
   it("creates the runtime from the database adapter with the selected profile", async () => {
     const agentDir = join(dir, "profile-agent-dir");
     exportedConfig = { agentDir, extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
@@ -278,7 +278,7 @@ describe("PiSdkRuntime", () => {
       },
     });
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     await handle.prompt("hello");
@@ -309,7 +309,7 @@ describe("PiSdkRuntime", () => {
       },
     });
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     await handle.prompt("hello");
@@ -319,7 +319,7 @@ describe("PiSdkRuntime", () => {
 
   it("applies Bossmode default pi transport overrides without persisting settings", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
@@ -331,7 +331,7 @@ describe("PiSdkRuntime", () => {
 
   it("always loads the MCP adapter (platform infrastructure) even with MCP flag off and no member config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
@@ -356,7 +356,7 @@ describe("PiSdkRuntime", () => {
     mkdirSync(join(extDir, "pkg"));
     writeFileSync(join(extDir, "pkg", "package.json"), JSON.stringify({ pi: { extensions: ["main.js"] } }));
     writeFileSync(join(extDir, "pkg", "main.js"), "export default () => {};\n", "utf-8");
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
@@ -372,7 +372,7 @@ describe("PiSdkRuntime", () => {
   it("no member SQL MCP configuration → adapter bound with empty scoped config", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     bossmodeConfig = { runtime: { sessionResume: true }, mcp: { enabled: true } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts());
 
@@ -389,7 +389,7 @@ describe("PiSdkRuntime", () => {
     // Member-owned SQL configuration; the registry enable list is retired.
     const { writeMemberMcpConfig } = await import("../../src/member/mcp.js");
     writeMemberMcpConfig("pm", { mcpServers: { playwright: { url: "http://127.0.0.1:8931/mcp" }, github: { url: "http://127.0.0.1:8932/mcp" } } });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({ member: { ...baseOpts().member, mcpServers: ["playwright"] } }));
 
@@ -411,7 +411,7 @@ describe("PiSdkRuntime", () => {
 
   it("refreshes prompt sources with the supported API without reloading resources or resetting the session", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem-stable','old-name','old-name','general','{}',0,0)");
     const opts = baseOpts({ member: { ...baseOpts().member, id: "mem-stable", name: "old-name" } });
     const handle = await new PiSdkRuntime().createAgent(opts);
@@ -440,7 +440,7 @@ describe("PiSdkRuntime", () => {
 
   it.each(["isStreaming", "isCompacting"])("rejects prompt refresh while SDK %s without changing prompt sources", async (flag) => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const session = (handle as any).session;
     const loader = createAgentSession.mock.calls[0][0].resourceLoader;
@@ -453,7 +453,7 @@ describe("PiSdkRuntime", () => {
 
   it("rejects prompt refresh during a handle run and permits it after settlement", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const session = (handle as any).session;
     let finish!: () => void;
@@ -469,7 +469,7 @@ describe("PiSdkRuntime", () => {
   it("shuts down an obtained session and removes derived config when binding fails", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     sessionBindExtensions.mockRejectedValueOnce(new Error("bind failed"));
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("bind failed");
     const session = (await createAgentSession.mock.results.at(-1)!.value).session;
     expect(session.abort).toHaveBeenCalled();
@@ -482,7 +482,7 @@ describe("PiSdkRuntime", () => {
     const session=(await createAgentSession.getMockImplementation()!()).session;
     session.dispose.mockImplementationOnce(()=>{throw new Error("dispose failed");});
     sessionBindExtensions.mockRejectedValueOnce(new Error("bind failed"));
-    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi-sdk.js");const runtime=new PiSdkRuntime();
+    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi.js");const runtime=new PiSdkRuntime();
     await expect(runtime.createAgent(baseOpts())).rejects.toThrow("Runtime creation and cleanup failed");
     await expect(runtime.shutdownMember(baseOpts().member.id)).rejects.toThrow("incomplete");
     await expect(runtime.shutdownAll()).rejects.toThrow("incomplete");
@@ -493,7 +493,7 @@ describe("PiSdkRuntime", () => {
   it("does not create an apparently healthy session when the SDK suppresses a hosted factory error", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     hostedMcpLoaded = false;
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("Hosted MCP extension failed to load");
     expect(createAgentSession).not.toHaveBeenCalled();
   });
@@ -507,7 +507,7 @@ describe("PiSdkRuntime", () => {
       const config = materialize(args); path = config.configPath; return config;
     });
     loadDatabaseMcpFactory.mockRejectedValueOnce(new Error("factory failed"));
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     await expect(new PiSdkRuntime().createAgent(baseOpts())).rejects.toThrow("factory failed");
     expect(path).not.toBe(""); expect(existsSync(path)).toBe(false);
     expect(createAgentSession).not.toHaveBeenCalled();
@@ -538,7 +538,7 @@ describe("PiSdkRuntime", () => {
         settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
       },
     });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
       member: { ...baseOpts().member, model: "anthropic/claude-fable-5" },
@@ -560,7 +560,7 @@ describe("PiSdkRuntime", () => {
       parentId: "turn-parent",
       message: { role: "assistant", stopReason: "error", errorMessage: "An unknown error occurred" },
     };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
       resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
@@ -581,7 +581,7 @@ describe("PiSdkRuntime", () => {
       parentId: null,
       message: { role: "assistant", stopReason: "error", errorMessage: "boom" },
     };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
       resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
@@ -596,7 +596,7 @@ describe("PiSdkRuntime", () => {
   it("resumes saved session when saved model matches configured model", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     openedSessionModel = { provider: "anthropic", modelId: "claude-sonnet-4-6" };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
       resumeSession: { sessionId: "old-session", sessionFile: savedSessionFile() },
@@ -610,7 +610,7 @@ describe("PiSdkRuntime", () => {
   it("starts fresh when the saved session file was deleted", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
     const missing = join(dir, "missing-session.jsonl");
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     await new PiSdkRuntime().createAgent(baseOpts({
       resumeSession: { sessionId: "old-session", sessionFile: missing },
@@ -634,7 +634,7 @@ describe("PiSdkRuntime", () => {
       return { summary: "summary" };
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const events: any[] = [];
     handle.subscribe((event) => events.push(event));
@@ -659,7 +659,7 @@ describe("PiSdkRuntime", () => {
       if (cancelled) throw new Error("Compaction cancelled");
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const operation = handle.compact();
     handle.abort({ preserveCompaction });
@@ -692,7 +692,7 @@ describe("PiSdkRuntime", () => {
         settingsManager: { getCompactionSettings: settingsGetCompactionSettings },
       },
     });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     await handle.refreshModelRegistry?.();
@@ -706,7 +706,7 @@ describe("PiSdkRuntime", () => {
 
   it("teardown awaits a pending model refresh and blocks late model/history mutation",async()=>{
     exportedConfig={agentDir:join(dir,"profile-agent-dir"),extensionPaths:[],profile:{id:"test-profile",providerSlug:"anthropic"}};
-    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi-sdk.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());const session=(handle as any).session;
+    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());const session=(handle as any).session;
     let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
     databaseRuntimeRefresh.mockImplementationOnce(async()=>{await gate;});
     const changing=handle.setModel!("anthropic/claude-opus-4-6","cred-b");const rejected=expect(changing).rejects.toThrow("destroyed");
@@ -719,7 +719,7 @@ describe("PiSdkRuntime", () => {
 
   it("reports configured skill names separately from SDK-loadable skill paths", async () => {
     exportedConfig = { agentDir: join(dir, "profile-agent-dir"), extensionPaths: [], profile: { id: "test-profile", providerSlug: "anthropic" } };
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
 
     const handle = await new PiSdkRuntime().createAgent(baseOpts({
       skillPaths: [join(dir, "missing-skill")],
@@ -758,7 +758,7 @@ describe("PiSdkRuntime", () => {
         model: { provider: "anthropic", id: "claude-sonnet-4-6", contextWindow: 18000 },
       },
     });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const tools = handle.getActiveTools!();
     const names = tools.map((t) => t.name).sort();
@@ -773,7 +773,7 @@ describe("PiSdkRuntime", () => {
 
   it("classifies tools from createBossmodeSdkTools set — no static whitelist fallback", () => {
     // Guard: static BOSSMODE_TOOL_NAMES must stay deleted.
-    const src = readFileSync(join(process.cwd(), "src/agent/runtime/pi-sdk.ts"), "utf8");
+    const src = readFileSync(join(process.cwd(), "src/agent/runtime/pi.ts"), "utf8");
     expect(src).not.toMatch(/BOSSMODE_TOOL_NAMES/);
     expect(src).toMatch(/bossmodeToolNames/);
   });
@@ -861,7 +861,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     let release!:()=>void;let compacting=false;const gate=new Promise<void>(resolve=>release=resolve);
     mock.session.compact=vi.fn(async()=>{compacting=true;await gate;});
     createAgentSession.mockResolvedValueOnce({session:mock.session});
-    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi-sdk.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());
+    const {PiSdkRuntime}=await import("../../src/agent/runtime/pi.js");const handle=await new PiSdkRuntime().createAgent(baseOpts());
     const prompt=handle.prompt("original");await vi.waitFor(()=>expect(compacting).toBe(true));
     let finished=false;const teardown=handle.destroyAndWait!().then(()=>finished=true);
     await Promise.resolve();expect(finished).toBe(false);expect(mock.session.dispose).not.toHaveBeenCalled();
@@ -886,7 +886,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       },
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await handle.prompt("do work");
@@ -922,7 +922,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       },
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
     const running = handle.prompt("work");
     await started;
@@ -957,7 +957,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       },
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await handle.prompt("do work");
@@ -979,7 +979,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       mock.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: { input: 100, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 100 }, content: [], timestamp: Date.now() } });
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await expect(handle.prompt("do work")).rejects.toThrow(/empty response twice/);
@@ -1002,7 +1002,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       mock.emit({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: { input: 120000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 120000 }, content: [], timestamp: Date.now() } });
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await handle.prompt("do work");
@@ -1026,7 +1026,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
     });
     mock.session.compact = vi.fn(async () => { throw new Error("summary request failed"); });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await expect(handle.prompt("do work")).rejects.toThrow(/Automatic context compaction failed: summary request failed/);
@@ -1051,7 +1051,7 @@ describe("PiSdkAgentHandle compaction watchdog action", () => {
       },
     });
     createAgentSession.mockResolvedValueOnce({ session: mock.session });
-    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { PiSdkRuntime } = await import("../../src/agent/runtime/pi.js");
     const handle = await new PiSdkRuntime().createAgent(baseOpts());
 
     await handle.prompt("do work");

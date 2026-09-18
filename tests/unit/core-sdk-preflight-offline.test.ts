@@ -5,7 +5,7 @@ import {
   type AgentSession, type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, createAssistantMessageEventStream, Type, type AssistantMessage, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { PiSdkAgentHandle } from "../../src/agent/runtime/pi-sdk.js";
+import { PiSdkAgentHandle } from "../../src/agent/runtime/pi.js";
 import { BossmodeResourceLoader } from "../../src/agent/runtime/resources.js";
 import { coreFixture } from "../helpers/core-fixture.js";
 
