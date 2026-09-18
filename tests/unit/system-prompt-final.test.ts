@@ -31,7 +31,7 @@ function findPiSystemPrompt(): string {
 const { buildSystemPrompt: piBuildSystemPrompt } = await import(pathToFileURL(findPiSystemPrompt()).href);
 
 // Plain unit env: no mocked config → readPiBuiltinPromptFlag() is false.
-import { buildFinalMemberSystemPrompt } from "../../src/agent/prompt/system-prompt-final.js";
+import { buildFinalMemberSystemPrompt } from "../../src/agent/runtime/resources.js";
 
 function fakeMember(over: Partial<Parameters<typeof buildFinalMemberSystemPrompt>[0]["member"]> = {}) {
   return {

@@ -52,7 +52,7 @@ describe("platform extensions.json retirement", () => {
 
 describe("self-install recipe (guide): npm package via symlink", () => {
   it("symlinked package with package.json pi.extensions is discovered", async () => {
-    const { discoverMemberExtensionEntries } = await import("../../src/agent/runtime/pi-sdk.js");
+    const { discoverMemberExtensionEntries } = await import("../../src/agent/runtime/resources.js");
     const extDir = join(dir, "members", "mem_y", "extensions");
     const pkgDir = join(extDir, "node_modules", "fake-pkg");
     mkdirSync(pkgDir, { recursive: true });

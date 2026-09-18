@@ -1,7 +1,5 @@
 // Pi SDK Runtime — in-process pi Agent SDK integration behind the legacy pi-cli storage key
 import { existsSync, mkdirSync } from "node:fs";
-import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../../member/extensions.js";
-export { discoverMemberExtensionEntries } from "../../member/extensions.js";
 import { join } from "node:path";
 import {
   createAgentSession,
@@ -15,85 +13,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SdkExecutionService, type SdkExecutionAttempt } from "../scheduler.js";
 import { logger } from "../../kernel/logger.js";
-import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../member/mcp.js";
-import { memberExtensionsDir, memberSkillsDir } from "../../files/layout.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";
+import { BossmodeResourceLoader, resolvePiSystemPromptSources, memberDirLoaderAssetPaths, assertHostedMcpLoaded, bindMcpExtension, resolveMcpRuntimeSettings, type McpRuntimeSettings } from "./resources.js";
 import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
-
-
-/**
- * Resolve systemPrompt vs appendSystemPrompt for pi DefaultResourceLoader.
- * The bossmode-compiled prompt is the only source (fish 2026-09-04: the
- * piBuiltinPrompt flag is retired) — pi's built-in system prompt never loads.
- * Exported for unit tests.
- */
-export function resolvePiSystemPromptSources(args: {
-  agentPrompt: string;
-  appendSystemPrompt: string[];
-}): { systemPrompt: string | undefined; appendSystemPrompt: string[] } {
-  const rolePrompt = args.agentPrompt.trim();
-  const appends = args.appendSystemPrompt.filter((v) => !!v && v.trim().length > 0);
-  return {
-    systemPrompt: rolePrompt || undefined,
-    appendSystemPrompt: appends,
-  };
-}
-
-
-/** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
-export class BossmodeResourceLoader implements ResourceLoader {
-  private delegate: DefaultResourceLoader;
-  private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
-
-  constructor(
-    options: ConstructorParameters<typeof DefaultResourceLoader>[0],
-    sources: ReturnType<typeof resolvePiSystemPromptSources>,
-  ) {
-    this.delegate = new DefaultResourceLoader(options);
-    this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
-  }
-
-  async reload(options?: Parameters<ResourceLoader["reload"]>[0]): Promise<void> {
-    await this.delegate.reload(options);
-  }
-
-  getExtensions() { return this.delegate.getExtensions(); }
-  getSkills() { return this.delegate.getSkills(); }
-  getPrompts() { return this.delegate.getPrompts(); }
-  getThemes() { return this.delegate.getThemes(); }
-  getAgentsFiles() { return this.delegate.getAgentsFiles(); }
-  extendResources(paths: Parameters<ResourceLoader["extendResources"]>[0]): void { this.delegate.extendResources(paths); }
-
-  setPromptSources(sources: ReturnType<typeof resolvePiSystemPromptSources>): void {
-    this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
-  }
-
-  getSystemPrompt(): string | undefined {
-    return this.promptSources.systemPrompt;
-  }
-
-  /** Bossmode prompt sources are in-memory (compiled per scope); there is no file backing. */
-  getSystemPromptSource(): { path: string } | undefined {
-    return undefined;
-  }
-
-  getAppendSystemPrompt(): string[] {
-    return [...this.promptSources.appendSystemPrompt];
-  }
-
-  getAppendSystemPromptSources(): Array<{ path: string }> {
-    return [];
-  }
-}
 
 /** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
 function classifyToolSource(
@@ -158,69 +89,6 @@ function applyRuntimeTransportSettings(settingsManager: SettingsManager): Runtim
     websocketConnectTimeoutMs: settingsManager.getWebSocketConnectTimeoutMs() ?? settings.websocketConnectTimeoutMs,
     httpIdleTimeoutMs: settingsManager.getHttpIdleTimeoutMs(),
   };
-}
-
-interface McpRuntimeSettings {
-  enabled: boolean;
-  adapterPath?: string;
-  configPath: string;
-  runtimeDir: string;
-  serverNames: string[];
-  dispose(): void;
-}
-
-
-/** Batch 6 §1: member-dir assets that join the loader paths (create + reload
- * both call this — skills dir §1.1, extensions dir §1.3 expanded to file
- * entries, present = included). */
-export function memberDirLoaderAssetPaths(memberId: string): { skills: string[]; extensions: string[] } {
-  const skillsDir = memberSkillsDir(memberId);
-  return {
-    skills: existsSync(skillsDir) ? [skillsDir] : [],
-    extensions: discoverMemberExtensionEntries(memberExtensionsDir(memberId)),
-  };
-}
-
-function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
-  // Member configuration is SQL-owned; the temporary file is derived adapter input.
-  // The adapter is platform infrastructure, including for an empty configuration.
-  const runtimeDir = getBossmodeMcpRuntimeDir();
-  const adapterPath = builtinMcpAdapterPath();
-  if (!existsSync(adapterPath)) {
-    throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
-  }
-  ensureBossmodeMcpDirs();
-  const mcpRoomId = args.roomId;
-  const scoped = writeMemberScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id });
-  if (scoped.serverNames.length > 0) {
-    process.env.MCP_DIRECT_TOOLS = "__none__";
-    process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
-    process.env.PI_CODING_AGENT_DIR = runtimeDir;
-  }
-  return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames, dispose: scoped.dispose };
-}
-
-function assertHostedMcpLoaded(loader: ResourceLoader): void {
-  const extension = loader.getExtensions().extensions.find(entry => entry.path === "<inline:pi-mcp-adapter>");
-  if (!extension?.tools.has("mcp")) throw new Error("Hosted MCP extension failed to load");
-}
-
-async function bindMcpExtension(session: AgentSession, opts: { configPath: string; agent: string }): Promise<void> {
-  try {
-    session.extensionRunner.setFlagValue("mcp-config", opts.configPath);
-    await session.bindExtensions({
-      mode: "print",
-      onError: (err) => logger.warn("runtime:pi-sdk", "mcp extension error", {
-        agent: opts.agent,
-        event: err.event,
-        extensionPath: err.extensionPath,
-        error: err.error,
-      }),
-    });
-  } catch (err: any) {
-    logger.warn("runtime:pi-sdk", "mcp extension bind failed", { agent: opts.agent, error: err.message || String(err) });
-    throw err;
-  }
 }
 
 function getSessionContextModel(sessionManager: SessionManager): { provider: string; modelId: string } | null {
