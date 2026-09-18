@@ -59,7 +59,7 @@ vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToAgentSubscribers: state.broadcastToAgentSubscribers,
 }));
 
-import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { RuntimeRegistry } from "../../src/agent/types.js";
 import { activateAgent, getAgentStatus, initializeMemberRuntime } from "../../src/app/member-actions.js";
 import { shutdownAll } from "../../src/agent/controls.js";
 import { mapPiAgentEvent } from "../../src/agent/runtime/events.js";

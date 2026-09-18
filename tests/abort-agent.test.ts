@@ -3,7 +3,7 @@ import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks, setMockPromptFn } from "./helpers/mock-runtime.js";
-import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
+import { RuntimeRegistry } from "src/agent/types.js";
 import { abortAgent, shutdownAll } from "../src/agent/controls.js";
 import { activateAgent, getAgentInstanceForScope, initializeMemberRuntime } from "../src/app/member-actions.js";
 import { buildMemberAgentSession } from "../src/agent/assembly.js";

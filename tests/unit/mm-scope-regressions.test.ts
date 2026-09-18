@@ -45,7 +45,7 @@ it("regression: a rename does not crash the next batch of an instance born in a 
   const suffix = randomUUID().slice(0, 6);
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+  const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const { handleToolCallback } = await import("../../src/agent/tools/tools.js");
   const { mmScopeIdOf } = await import("../../src/chat/conversations.js");
   const { updateProfileForMember } = await import("../../src/member/profile.js");

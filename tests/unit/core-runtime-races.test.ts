@@ -6,7 +6,7 @@ import { resetAgentSession, initializeMemberRuntime } from "../../src/app/member
 import { reloadMemberSession } from "../../src/agent/assembly.js";
 import { shutdownAll } from "../../src/agent/controls.js";
 import { resumePendingRuntimeInputs } from "../../src/agent/scheduler.js";
-import {RuntimeRegistry} from "../../src/agent/runtime/registry.js";
+import {RuntimeRegistry} from "../../src/agent/types.js";
 import {getDatabase} from "../../src/data/database.js";
 import {ReplyObligationRepository} from "../../src/data/repositories/reply-obligation-repository.js";
 import {readMessages} from "../../src/data/repositories/message-repository.js";

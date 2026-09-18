@@ -165,7 +165,7 @@ import {
   type SenderRole,
 } from "../agent/prompt.js";
 import type { AgentHistoryEvent } from "../agent/events.js";
-import type { RuntimeRegistry } from "../agent/runtime/registry.js";
+import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
 import type { AgentStatus, RoomMessage, ContextUsage } from "../kernel/types.js";

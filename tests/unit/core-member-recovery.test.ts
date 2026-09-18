@@ -5,7 +5,7 @@ import { resetMocks, mockPromptFn, MockRuntime } from "../helpers/mock-runtime.j
 import { shutdownAll } from "../../src/agent/controls.js";
 import { initializeMemberRuntime, getActiveInstanceCount } from "../../src/app/member-actions.js";
 import { resumePendingRuntimeInputs } from "../../src/agent/scheduler.js";
-import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { RuntimeRegistry } from "../../src/agent/types.js";
 import { getDatabase } from "../../src/data/database.js";
 setupTestWorkspace();
 

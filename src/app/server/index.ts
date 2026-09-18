@@ -21,7 +21,7 @@ import { initializeMemberRuntime, getActiveInstanceCount, wireMentionRouter } fr
 import { shutdownAll as shutdownAgents } from "../../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../../agent/scheduler.js";
 
-import { RuntimeRegistry } from "../../agent/runtime/registry.js";
+import { RuntimeRegistry } from "../../agent/types.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/templates.js";

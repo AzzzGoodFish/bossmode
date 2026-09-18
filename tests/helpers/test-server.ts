@@ -107,7 +107,7 @@ export async function createTestServer(): Promise<TestServer> {
   const { handleApiRequest } = await import("../../src/api/index.js");
   const { createWebSocketServer } = await import("../../src/app/server/ws.js");
   const { initializeMemberRuntime, wireMentionRouter } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+  const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
   // Initialize mock runtime for tests

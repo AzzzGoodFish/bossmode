@@ -11,7 +11,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const roomStore = await import("../../src/chat/conversations.js");
   const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+  const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const suffix = randomUUID().slice(0, 6);
   const own = __reg_app_member_actions.createMember({ name: `Before-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
   const peer = __reg_app_member_actions.createMember({ name: `Peer-${suffix}`, agentTemplate: "developer", model: "mock-model", credentialId: "cred-test" });
@@ -75,7 +75,7 @@ it("renames a running member across room/DM without abort; next prompt refreshes
 it("reconciles a rename while handle construction is awaiting", async () => {
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+  const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const member = __reg_app_member_actions.createMember({ name: `Construct-${randomUUID()}`, model: "mock", credentialId: "cred" });
   const entered = deferred(), release = deferred();
   const handle = new MockAgentHandle() as any; handle.refreshPrompt = vi.fn();
@@ -99,7 +99,7 @@ it.each(["room"])("keeps queued %s trigger and cursor on IDs when the old name i
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
   const rooms = await import("../../src/chat/conversations.js");
   const manager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-  const { RuntimeRegistry } = await import("../../src/agent/runtime/registry.js");
+  const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const { postMessage } = await import("../../src/chat/message-bus.js");
   const { updateProfileForMember } = await import("../../src/member/profile.js");
   const suffix = randomUUID().slice(0, 6);

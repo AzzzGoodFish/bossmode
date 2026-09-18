@@ -5,7 +5,7 @@ import { logger } from "../kernel/logger.js";
 import { MEMBER_CONTRACT_VERSION } from "../kernel/contract-version.js";
 import { normalizeModelRef } from "../config/models.js";
 import { compileMemberPrompt, type MemberPromptSource } from "./prompt.js";
-import type { RuntimeRegistry } from "./runtime/registry.js";
+import type { RuntimeRegistry } from "./types.js";
 import type { AgentMemberConfig, AgentMemberSnapshot, AgentCallbacks } from "./types.js";
 import { instances, instanceKey, pendingCreations, cancelledCreations, memberSwitchGates, sessionPublishOwners, memberRuntimeAllowed, setContractFingerprint, clearStaleMounts, currentProfileRevision, isMemberConfigured, formatRuntimeErrorMessage, chatTargetOf, updateDispatchState, trackMemberOperation, type AgentInstance } from "./instance.js";
 import { queueDepth, drainQueuedInputsAsPrompt, wireInstanceEvents } from "./scheduler.js";

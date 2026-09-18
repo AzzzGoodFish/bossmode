@@ -52,7 +52,7 @@ vi.mock("../../src/app/server/ws.js", () => ({
   broadcastToAgentSubscribers: vi.fn(),
 }));
 
-import { RuntimeRegistry } from "../../src/agent/runtime/registry.js";
+import { RuntimeRegistry } from "../../src/agent/types.js";
 import { activateAgent, getAgentContextUsage, initializeMemberRuntime, refreshContextUsage, setRuntimeViewSink } from "../../src/app/member-actions.js";
 import { destroyInstance, shutdownAll } from "../../src/agent/controls.js";
 

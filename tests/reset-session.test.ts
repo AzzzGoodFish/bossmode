@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockRuntime, resetMocks } from "./helpers/mock-runtime.js";
-import { RuntimeRegistry } from "../src/agent/runtime/registry.js";
+import { RuntimeRegistry } from "src/agent/types.js";
 import { initializeMemberRuntime, activateAgent, resetAgentSession } from "../src/app/member-actions.js";
 import { buildMemberAgentSession } from "../src/agent/assembly.js";
 import { shutdownAll } from "../src/agent/controls.js";
