@@ -2,7 +2,7 @@ import { it, expect, vi } from "vitest";
 import { setupTestWorkspace } from "../helpers/test-server.js";
 setupTestWorkspace();
 const processAttachments = vi.hoisted(() => vi.fn());
-vi.mock("../../src/agent/orchestrator/agent-attachments.js", () => ({ processAgentAttachments: processAttachments }));
+vi.mock("../../src/chat/attachments.js", () => ({ processAgentAttachments: processAttachments }));
 
 it("captures mention target IDs before attachment IO while refreshing the sender label after IO", async () => {
   const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");

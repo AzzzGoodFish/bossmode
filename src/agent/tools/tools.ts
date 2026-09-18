@@ -15,7 +15,7 @@ import type { RoomMessage } from "../../kernel/types.js";
 import { parseMentions, parseMentionMemberIds } from "../../chat/router.js";
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
 import { logger } from "../../kernel/logger.js";
-import { processAgentAttachments } from "../orchestrator/agent-attachments.js";
+import { processAgentAttachments } from "../../chat/attachments.js";
 import * as attachmentStore from "../../files/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../../files/attachments.js";

@@ -1,14 +1,14 @@
-// Agent attachment processing — validate paths + copy into the chat's own attachment store.
-import { knowledgeRoot } from "../../files/layout.js";
+// Chat attachments (agent tool path) — validate paths + copy into the chat's own attachment store.
+import { knowledgeRoot } from "../files/layout.js";
 import { basename } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { checkPath, type PathPolicy } from "../../kernel/path.js";
-import { copyToAttachment, copyToDmAttachment, copyToMemberChatAttachment, MAX_UPLOAD_SIZE } from "../../files/attachment-store.js";
-import * as roomStore from "../../chat/conversations.js";
-import { chatScopeAssetRoots, parseMmScopeId } from "../../chat/conversations.js";
+import { checkPath, type PathPolicy } from "../kernel/path.js";
+import { copyToAttachment, copyToDmAttachment, copyToMemberChatAttachment, MAX_UPLOAD_SIZE } from "../files/attachment-store.js";
+import * as roomStore from "../chat/conversations.js";
+import { chatScopeAssetRoots, parseMmScopeId } from "../chat/conversations.js";
 
-import { logger } from "../../kernel/logger.js";
+import { logger } from "../kernel/logger.js";
 
 export interface AttachmentSuccess {
   ok: true;

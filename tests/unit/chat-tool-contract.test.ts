@@ -9,7 +9,7 @@ import { initRouter } from "../../src/chat/router.js";
 import { ReplyObligationRepository } from "../../src/data/repositories/reply-obligation-repository.js";
 import { handleToolCallback, loadScopeMessages } from "../../src/agent/tools/tools.js";
 import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
-import * as attachments from "../../src/agent/orchestrator/agent-attachments.js";
+import * as attachments from "../../src/chat/attachments.js";
 
 vi.mock("../../src/kernel/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
