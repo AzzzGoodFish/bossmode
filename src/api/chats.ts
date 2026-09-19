@@ -29,7 +29,6 @@ import {
 } from "../chat/messages.js";
 import { attachmentExists, displayFilename, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
 import { getMember, listMembers } from "../member/identity.js";
-import { logger } from "../kernel/logger.js";
 import { addRoute, HttpError, parseBody, requestUrl, requestValue, sendJson, type RouteHandler } from "./http.js";
 
 export interface ChatHttpActions {
@@ -102,23 +101,18 @@ function chatSummary(sourceRef: string, kind: "room" | "dm" | "mm", title: strin
 }
 
 addRoute("GET", "/api/chats", async (_request, response) => {
-  try {
-    const chats = [
+  const chats = [
       ...listMembers().map((member) => chatSummary(`dm:${member.id}`, "dm" as const, member.name)),
       ...listRooms().map((room) => chatSummary(`room:${room.id}`, "room" as const, room.name)),
       ...listMmScopes().map((scope) => chatSummary(scope, "mm" as const,
         parseMmScopeId(scope)!.map(id => getMember(id)?.name ?? id).join(" ↔ "))),
-    ].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
-    sendJson(response, 200, { chats });
-  } catch (error) {
-    logger.error("api", "chat list failed", { error: String(error) });
-    sendJson(response, 500, { error: "internal", message: String(error) });
-  }
+  ].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
+  sendJson(response, 200, { chats });
 });
 
 addRoute("POST", "/api/conversations/:scope/read", async (request, response, params) => {
-  const sourceRef = decodeURIComponent(params.scope);
-  if (!parseConversation(sourceRef)) return sendJson(response, 400, { error: "scope_not_found" });
+  const sourceRef = conversationSource(params.scope);
+  if (!sourceRef) throw new HttpError(404, "conversation_not_found", "Conversation not found");
   const body = await parseBody(request) as { messageId?: string | null; seq?: number | null };
   const last = body.messageId === undefined && body.seq === undefined ? readMessages(sourceRef).at(-1) : undefined;
   const cursor = setUserReadCursor(sourceRef, {
@@ -129,9 +123,7 @@ addRoute("POST", "/api/conversations/:scope/read", async (request, response, par
 });
 
 interface ConversationTarget { sourceRef: string; memberId: string; memberName: string }
-function conversationTarget(rawScope: string, request: { url?: string }): ConversationTarget | null {
-  let sourceRef: string;
-  try { sourceRef = decodeURIComponent(rawScope); } catch { return null; }
+function conversationTarget(sourceRef: string, request: { url?: string }): ConversationTarget | null {
   const ref = parseConversation(sourceRef);
   if (!ref) return null;
   if (ref.kind === "dm") {
@@ -187,6 +179,11 @@ addTargetRoute("GET", "/api/conversations/:scope/session", async (_request, resp
     scopeId: target.sourceRef, memberId: target.memberId, memberName: target.memberName });
 });
 
+function requireRoom(id: string): Room {
+  const room = getRoom(id);
+  if (!room) throw new HttpError(404, "not_found", "Room not found");
+  return room;
+}
 function roomResponse(room: Room) {
   return { ...room, agentStatuses: actions?.roomStatuses?.(room.id) ?? {}, agentStale: {} };
 }
@@ -202,28 +199,22 @@ addRoute("POST", "/api/rooms", async (request, response) => {
   if (!Array.isArray(body.memberIds) || body.memberIds.some((id) => typeof id !== "string" || !id || id.trim() !== id)) {
     return sendJson(response, 400, { error: "memberIds must contain stable member IDs" });
   }
-  try {
-    const room = createRoom(body.name.trim(), body.memberIds as string[], {
-      promptLeaderMemberId: body.leaderMemberId ?? undefined,
-      docsPath: body.docsPath,
-      description: body.description,
-    });
-    sendJson(response, 200, roomResponse(room));
-  } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
-});
-addRoute("GET", "/api/rooms/:id", async (_request, response, params) => {
-  const room = getRoom(params.id);
-  if (!room) return sendJson(response, 404, { error: "Room not found" });
+  const room = await requestValue(() => createRoom(body.name!.trim(), body.memberIds as string[], {
+    promptLeaderMemberId: body.leaderMemberId ?? undefined,
+    docsPath: body.docsPath,
+    description: body.description,
+  }));
   sendJson(response, 200, roomResponse(room));
 });
+addRoute("GET", "/api/rooms/:id", async (_request, response, params) => {
+  sendJson(response, 200, roomResponse(requireRoom(params.id)));
+});
 addRoute("DELETE", "/api/rooms/:id", async (_request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
-  deleteRoom(params.id);
+  requireRoom(params.id); deleteRoom(params.id);
   sendJson(response, 200, { ok: true });
 });
 addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
-  const room = getRoom(params.id);
-  if (!room) return sendJson(response, 404, { error: "Room not found" });
+  const room = requireRoom(params.id);
   const body = await parseBody(request) as {
     name?: string; description?: string | null;
     promptLeaderMemberId?: string | null; docsPath?: string | null;
@@ -284,20 +275,19 @@ async function postUserMessage(sourceRef: string, request: Parameters<typeof par
   if (!content.trim() && !attachments.length && !artifacts.length) throw new Error("content, attachments, or artifacts is required");
   const ref = parseConversation(sourceRef)!;
   const mentions = ref.kind === "room" ? parseMentions(content, getRoomMembers(ref.roomId)) : { labels: [], memberIds: [] };
+  const replyTo = replyTarget(sourceRef, body.replyTo);
   return await connected().postMessage(sourceRef, {
     sender: "user",
     content,
     mentions: mentions.labels,
     mentionMemberIds: mentions.memberIds,
-    ...(replyTarget(sourceRef, body.replyTo) ? { replyTo: replyTarget(sourceRef, body.replyTo)! } : {}),
+    ...(replyTo ? { replyTo } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(artifacts.length ? { artifacts } : {}),
   });
 }
 
-function conversationSource(raw: string): string | null {
-  let sourceRef: string;
-  try { sourceRef = decodeURIComponent(raw); } catch { return null; }
+function conversationSource(sourceRef: string): string | null {
   const ref = parseConversation(sourceRef);
   if (!ref) return null;
   if (ref.kind === "room" && !getRoom(ref.roomId)) return null;
@@ -338,11 +328,11 @@ addConversationRoute("GET", "/api/conversations/:scope/messages/search", async (
 });
 
 addRoute("GET", "/api/rooms/:id/members", async (_request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
+  requireRoom(params.id);
   sendJson(response, 200, getRoomMembers(params.id));
 });
 addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
+  requireRoom(params.id);
   const body = await parseBody(request) as { memberId?: string };
   const member = body.memberId ? getMember(body.memberId) : null;
   if (!member) return sendJson(response, 404, { error: "Member not found" });
