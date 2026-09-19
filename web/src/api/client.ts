@@ -829,7 +829,7 @@ export async function searchMessages(
   if (opts.before !== undefined) qs.set("before", String(opts.before));
   if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
   if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
-  return apiFetch(`/api/rooms/${roomId}/messages/search?${qs}`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/messages/search?${qs}`);
 }
 
 export async function getMessages(
@@ -841,7 +841,8 @@ export async function getMessages(
   if (opts?.before) params.set("before", opts.before);
   if (opts?.around) params.set("around", opts.around);
   const qs = params.toString();
-  return apiFetch(`/api/rooms/${roomId}/messages${qs ? `?${qs}` : ""}`);
+  const result = await apiFetch<{ messages: RoomMessage[] }>(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/messages${qs ? `?${qs}` : ""}`);
+  return result.messages;
 }
 
 export async function sendMessage(
@@ -850,10 +851,11 @@ export async function sendMessage(
   attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
   replyTo?: { seq: number },
 ): Promise<RoomMessage> {
-  return apiFetch(`/api/rooms/${roomId}/messages`, {
+  const result = await apiFetch<{ message: RoomMessage }>(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/messages`, {
     method: "POST",
     body: JSON.stringify({ content, attachments, ...(replyTo ? { replyTo } : {}) }),
   });
+  return result.message;
 }
 
 export async function resetAgentSession(
@@ -1279,7 +1281,7 @@ export async function getDmMessages(memberId: string, params?: { before?: number
   if (params?.limit) q.set("limit", String(params.limit));
   if (params?.around) q.set("around", params.around);
   const qs = q.toString();
-  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/messages${qs ? `?${qs}` : ""}`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(`dm:${memberId}`)}/messages${qs ? `?${qs}` : ""}`);
 }
 
 export async function sendDmMessage(
@@ -1288,9 +1290,9 @@ export async function sendDmMessage(
   attachments?: Array<{ storedFilename: string; originalFilename: string; size?: number }>,
   replyTo?: { seq: number },
 ): Promise<DmMessage> {
-  const res = await apiFetch<{ message: DmMessage }>(`/api/dm/${encodeURIComponent(memberId)}/messages`, {
+  const res = await apiFetch<{ message: DmMessage }>(`/api/conversations/${encodeURIComponent(`dm:${memberId}`)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, ...(attachments?.length ? { attachments } : {}), ...(replyTo ? { replyTo } : {}) }),
+    body: JSON.stringify({ content: text, ...(attachments?.length ? { attachments } : {}), ...(replyTo ? { replyTo } : {}) }),
   });
   return res.message;
 }
@@ -1307,7 +1309,7 @@ export async function getDmSession(memberId: string): Promise<DmSession> {
 
 export interface ChatEntry {
   scopeId: string;
-  kind: "dm" | "room";
+  kind: "dm" | "room" | "mm";
   title: string;
   memberId?: string;
   roomId?: string;

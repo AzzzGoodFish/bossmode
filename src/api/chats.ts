@@ -107,6 +107,8 @@ addRoute("GET", "/api/chats", async (_request, response) => {
     const chats = [
       ...listMembers().map((member) => chatSummary(`dm:${member.id}`, "dm" as const, member.name)),
       ...listRooms().map((room) => chatSummary(`room:${room.id}`, "room" as const, room.name)),
+      ...listMmScopes().map((scope) => chatSummary(scope, "mm" as const,
+        parseMmScopeId(scope)!.map(id => getMember(id)?.name ?? id).join(" ↔ "))),
     ].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
     sendJson(response, 200, { chats });
   } catch (error) {
@@ -317,34 +319,40 @@ async function postUserMessage(sourceRef: string, request: Parameters<typeof par
   });
 }
 
-function registerMessageRoutes(kind: "rooms" | "dm", source: (params: Record<string, string>) => string, exists: (params: Record<string, string>) => boolean): void {
-  const base = kind === "rooms" ? "/api/rooms/:id/messages" : "/api/dm/:memberId/messages";
-  addRoute("GET", base, async (request, response, params) => {
-    if (!exists(params)) return sendJson(response, 404, { error: kind === "rooms" ? "Room not found" : "Member not found" });
-    const url = requestUrl(request);
-    const messages = pageMessages(source(params), {
-      limit: Number(url.searchParams.get("limit") || 100),
-      before: url.searchParams.get("before") || undefined,
-      around: url.searchParams.get("around") || undefined,
-      fromSeq: url.searchParams.has("from_seq") ? Number(url.searchParams.get("from_seq")) : undefined,
-    });
-    sendJson(response, 200, kind === "dm" ? { messages } : messages);
-  });
-  addRoute("POST", base, async (request, response, params) => {
-    if (!exists(params)) return sendJson(response, 404, { error: kind === "rooms" ? "Room not found" : "Member not found" });
-    try {
-      const message = await postUserMessage(source(params), request);
-      sendJson(response, 200, kind === "dm" ? { message } : message);
-    } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
-  });
+function conversationSource(raw: string): string | null {
+  let sourceRef: string;
+  try { sourceRef = decodeURIComponent(raw); } catch { return null; }
+  const ref = parseConversation(sourceRef);
+  if (!ref) return null;
+  if (ref.kind === "room" && !getRoom(ref.roomId)) return null;
+  if (ref.kind === "dm" && !getMember(ref.memberId)) return null;
+  if (ref.kind === "mm" && ref.memberIds.some(id => !getMember(id))) return null;
+  return ref.scopeId;
 }
-registerMessageRoutes("rooms", (params) => `room:${params.id}`, (params) => Boolean(getRoom(params.id)));
-registerMessageRoutes("dm", (params) => `dm:${params.memberId}`, (params) => Boolean(getMember(params.memberId)));
 
-addRoute("GET", "/api/rooms/:id/messages/search", async (request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
+addRoute("GET", "/api/conversations/:scope/messages", async (request, response, params) => {
+  const sourceRef = conversationSource(params.scope);
+  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
   const url = requestUrl(request);
-  sendJson(response, 200, searchMessages(`room:${params.id}`, {
+  const messages = pageMessages(sourceRef, {
+    limit: Number(url.searchParams.get("limit") || 100),
+    before: url.searchParams.get("before") || undefined,
+    around: url.searchParams.get("around") || undefined,
+    fromSeq: url.searchParams.has("from_seq") ? Number(url.searchParams.get("from_seq")) : undefined,
+  });
+  sendJson(response, 200, { scopeId: sourceRef, messages });
+});
+addRoute("POST", "/api/conversations/:scope/messages", async (request, response, params) => {
+  const sourceRef = conversationSource(params.scope);
+  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
+  try { sendJson(response, 200, { scopeId: sourceRef, message: await postUserMessage(sourceRef, request) }); }
+  catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
+});
+addRoute("GET", "/api/conversations/:scope/messages/search", async (request, response, params) => {
+  const sourceRef = conversationSource(params.scope);
+  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
+  const url = requestUrl(request);
+  sendJson(response, 200, searchMessages(sourceRef, {
     query: url.searchParams.get("query") || undefined,
     from: url.searchParams.get("from") || undefined,
     fromMemberId: url.searchParams.get("fromMemberId") || undefined,
@@ -375,48 +383,3 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (_request, respons
   if (!result.ok) return sendJson(response, 404, { error: result.error });
   sendJson(response, 200, getRoom(params.id));
 });
-
-export interface MemberChatSummary {
-  scopeId: string;
-  members: Array<{ id: string; name: string }>;
-  lastMessage: { id: string; ts: number; sender: string; senderMemberId?: string } | null;
-  messageCount: number;
-}
-export function listMemberChats(): MemberChatSummary[] {
-  return listMmScopes().map((scopeId) => {
-    const pair = parseMmScopeId(scopeId)!;
-    const messages = readMessages(scopeId);
-    const last = messages.at(-1);
-    return {
-      scopeId,
-      members: pair.map((id) => ({ id, name: getMember(id)?.name ?? id })),
-      lastMessage: last ? { id: last.id, ts: last.ts, sender: last.sender, ...(last.senderMemberId ? { senderMemberId: last.senderMemberId } : {}) } : null,
-      messageCount: messages.length,
-    };
-  }).sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
-}
-addRoute("GET", "/api/member-chats", async (_request, response) => sendJson(response, 200, { chats: listMemberChats() }));
-addRoute("GET", "/api/member-chats/messages", async (request, response) => {
-  const url = requestUrl(request);
-  const scopeId = url.searchParams.get("scope") || "";
-  if (!parseMmScopeId(scopeId)) return sendJson(response, 400, { error: "unknown_member_chat" });
-  const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 100), 500));
-  const page = pageMessages(scopeId, { before: url.searchParams.get("before") || undefined, limit: limit + 1 });
-  sendJson(response, 200, { scopeId, messages: page.slice(-limit), hasMore: page.length > limit });
-});
-addRoute("POST", "/api/member-chats/read", async (request, response) => {
-  const body = await parseBody(request) as { scope?: string; messageId?: string | null };
-  const scopeId = String(body.scope || "");
-  if (!parseMmScopeId(scopeId)) return sendJson(response, 400, { error: "unknown_member_chat" });
-  const messages = readMessages(scopeId);
-  const target = body.messageId ? messages.find((message) => message.id === body.messageId) : messages.at(-1);
-  setUserReadCursor(scopeId, { messageId: target?.id ?? null, seq: target?.seq ?? null });
-  sendJson(response, 200, { ok: true });
-});
-
-for (const path of [
-  "/api/rooms/:id/principles",
-  "/api/rooms/:id/members/:memberRef/principles",
-  "/api/rooms/:id/members/:memberRef/mainline",
-  "/api/rooms/:id/contract-drift",
-]) addRoute("GET", path, async (_request, response) => sendJson(response, 410, { error: "gone" }));
