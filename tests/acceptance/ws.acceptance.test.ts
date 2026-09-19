@@ -30,10 +30,10 @@ describe("Acceptance: WebSocket Infrastructure", () => {
   });
 
   async function createAgentScope(name: string) {
-    const registry = await import("../../src/member/identity.js"), __registry_app_member_actions = await import("../../src/app/member-actions.js");
+    const memberActions = await import("../../src/app/member-actions.js");
     const rooms = await import("../../src/chat/conversations.js");
-    const member = __registry_app_member_actions.createMember({ name });
-    const room = rooms.createRoom(name, undefined, [member.id], undefined, { promptLeaderMemberId: member.id });
+    const member = memberActions.createMember({ name });
+    const room = rooms.createRoom(name, [member.id], { promptLeaderMemberId: member.id });
     return { member, room };
   }
 
@@ -146,7 +146,7 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const { broadcastToAgentSubscribers } = await import("../../src/app/ws.js");
-    broadcastToAgentSubscribers(room.id, member.name, {
+    broadcastToAgentSubscribers(room.id, {
       type: "agent:event",
       roomId: room.id,
       agent: member.name,

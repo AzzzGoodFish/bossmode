@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
-import { ensureDmScope, ensureMmScope, storeRoom } from "../src/chat/conversations.js";
+import { ensureDmScope, ensureMmScope, mmScopeIdOf, parseMmScopeId, storeRoom } from "../src/chat/conversations.js";
 import { setUserReadCursor } from "../src/chat/cursors.js";
 import {
   importMessage,
@@ -22,7 +22,7 @@ function setup() {
     "INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
     id, name, name.toLowerCase(), "general", "{}", 1, 1,
   );
-  storeRoom({ id: "rm_query", name: "Query", members: [], globalMemberIds: ["mem_alpha", "mem_beta"], createdAt: 1 }, fixture.db);
+  storeRoom({ id: "rm_query", name: "Query", memberIds: ["mem_alpha", "mem_beta"], createdAt: 1 }, fixture.db);
   const messages: Message[] = [
     { id: "m1", seq: 1, ts: 1_000, sender: "user", content: "first message", mentions: [] },
     { id: "m2", seq: 2, ts: 2_000, sender: "system", content: "hidden runtime notice", mentions: [] },
@@ -78,6 +78,15 @@ describe("canonical member chat queries", () => {
 });
 
 describe("conversation list read model", () => {
+  it("uses one ordered canonical member-private scope and rejects malformed pairs", () => {
+    expect(mmScopeIdOf("mem_beta", "mem_alpha")).toBe("mm:mem_alpha-mem_beta");
+    expect(parseMmScopeId("mm:mem_alpha-mem_beta")).toEqual(["mem_alpha", "mem_beta"]);
+    expect(parseMmScopeId("mm:mem_beta-mem_alpha")).toBeNull();
+    expect(parseMmScopeId("mm:mem_alpha-mem_alpha")).toBeNull();
+    expect(parseMmScopeId("mm:not-a-pair")).toBeNull();
+    expect(() => mmScopeIdOf("mem_alpha", "mem_alpha")).toThrow();
+  });
+
   it("applies the same list semantics to room, DM and member-private scopes", () => {
     const { fixture, scope } = setup();
     const dm = ensureDmScope("mem_alpha", fixture.db);

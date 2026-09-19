@@ -4,8 +4,6 @@ import {
   ROOM_ID_PREFIX,
   SHORT_ID_LENGTH,
   generateShortId,
-  isShortMemberId,
-  isShortRoomId,
   newMemberId,
   newRoomId,
 } from "../../src/kernel/ids.js";
@@ -49,16 +47,6 @@ describe("short member/room ids (batch 5 shapes)", () => {
     expect(seen.size).toBe(2000);
   });
 
-  it("validates shapes via isShortMemberId/isShortRoomId", () => {
-    expect(isShortMemberId(newMemberId())).toBe(true);
-    expect(isShortRoomId(newRoomId())).toBe(true);
-    expect(isShortMemberId("mem_2a510c12-2357-463a-8546-c0f4ecea406f")).toBe(false);
-    expect(isShortMemberId("mem_123456789")).toBe(false);
-    expect(isShortMemberId("mem_12345678901")).toBe(false);
-    expect(isShortMemberId("mem_12345678_9")).toBe(false);
-    expect(isShortMemberId("mem_123456789A")).toBe(false);
-    expect(isShortRoomId("rm_0b5ee480-9212-4aef-8ebc-1711ad951f9f")).toBe(false);
-  });
 
   it("supports a custom short-id length for future uses", () => {
     expect(generateShortId(4)).toMatch(/^[0-9a-z]{4}$/);
