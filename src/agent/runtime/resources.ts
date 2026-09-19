@@ -30,25 +30,15 @@ export function resolvePiSystemPromptSources(args: {
   };
 }
 /** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
-export class BossmodeResourceLoader implements ResourceLoader {
-  private delegate: DefaultResourceLoader;
+export class BossmodeResourceLoader extends DefaultResourceLoader {
   private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
   constructor(
     options: ConstructorParameters<typeof DefaultResourceLoader>[0],
     sources: ReturnType<typeof resolvePiSystemPromptSources>,
   ) {
-    this.delegate = new DefaultResourceLoader(options);
-    this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
+    super(options);
+    this.promptSources={...sources,appendSystemPrompt:[...sources.appendSystemPrompt]};
   }
-  async reload(options?: Parameters<ResourceLoader["reload"]>[0]): Promise<void> {
-    await this.delegate.reload(options);
-  }
-  getExtensions() { return this.delegate.getExtensions(); }
-  getSkills() { return this.delegate.getSkills(); }
-  getPrompts() { return this.delegate.getPrompts(); }
-  getThemes() { return this.delegate.getThemes(); }
-  getAgentsFiles() { return this.delegate.getAgentsFiles(); }
-  extendResources(paths: Parameters<ResourceLoader["extendResources"]>[0]): void { this.delegate.extendResources(paths); }
   setPromptSources(sources: ReturnType<typeof resolvePiSystemPromptSources>): void {
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
