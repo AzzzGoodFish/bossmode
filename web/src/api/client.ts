@@ -821,10 +821,8 @@ export async function getAgentContextUsage(roomId: string, memberId: string): Pr
 // -- Attachments --
 
 export interface UploadResult {
-  filename: string;
+  storedFilename: string;
   originalFilename: string;
-  /** Stored filename, kept as `path` for legacy caller compatibility. Never an absolute path. */
-  path: string;
   size: number;
   url: string;
   previewType?: AttachmentPreviewType;

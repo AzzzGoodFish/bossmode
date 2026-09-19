@@ -60,7 +60,7 @@ async function upload(request: Parameters<typeof requestUrl>[0] & NodeJS.Readabl
     const stored = await storeAttachment(request as import("node:stream").Readable, location, originalFilename);
     if (!stored.size) return sendJson(response, 400, { error: "Empty file" });
     sendJson(response, 200, {
-      filename: stored.storedFilename, originalFilename: stored.originalFilename, path: stored.storedFilename, size: stored.size,
+      storedFilename: stored.storedFilename, originalFilename: stored.originalFilename, size: stored.size,
       url: attachmentUrl(scopeId, stored.storedFilename), previewType: inferAttachmentPreviewType(stored.originalFilename),
     });
   } catch (error) {

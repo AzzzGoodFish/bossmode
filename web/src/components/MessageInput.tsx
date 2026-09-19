@@ -105,7 +105,7 @@ export function MessageInput({ onSend, members, memberHints = {}, disabled, room
       if (upload.hasPending && scope) {
         const results = await upload.uploadAll(scope);
         for (const r of results) {
-          attachments.push({ storedFilename: r.filename, originalFilename: r.originalFilename, size: r.size });
+          attachments.push({ storedFilename: r.storedFilename, originalFilename: r.originalFilename, size: r.size });
         }
         // Only clear successful uploads — keep errored/cancelled items so user can retry.
         upload.clearSuccessful();

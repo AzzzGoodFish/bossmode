@@ -183,7 +183,7 @@ function requireRoom(id: string): Room {
 }
 function roomResponse(room: Room) {
   return { ...room, members: getRoomMembers(room.id).map(member => member.name),
-    agentStatuses: actions?.roomStatuses?.(room.id) ?? {}, agentStale: {} };
+    agentStatuses: actions?.roomStatuses?.(room.id) ?? {} };
 }
 addRoute("GET", "/api/rooms", async (_request, response) => {
   sendJson(response, 200, listRooms().map(roomResponse));
