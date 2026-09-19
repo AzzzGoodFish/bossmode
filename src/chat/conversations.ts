@@ -13,6 +13,7 @@ export interface Room {
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
+import { readRoomIdMigrations } from "../data/id-migrations.js";
 import type { AttachmentLocation } from "../files/attachments.js";
 
 export function slugifyRoomDocsPath(input: string): string {
@@ -429,6 +430,52 @@ export function getRoom(id: string, db: Database = getDatabase()): Room | null {
 
 export function listRooms(db: Database = getDatabase()): Room[] {
   return db.all<{ id: string }>("SELECT id FROM rooms ORDER BY created_at DESC,id").map(row => getRoom(row.id, db)!);
+}
+
+export interface RoomSourceAssociation {
+  roomId: string;
+  roomName: string;
+  sourceRefs: readonly string[];
+  historicalSourceKeys: readonly string[];
+}
+
+/** Current-room-bounded, exact aliases for immutable historical source identity. */
+export function listRoomSourceAssociations(db: Database = getDatabase()): RoomSourceAssociation[] {
+  const rooms = listRooms(db);
+  const candidates = new Map(rooms.map(room => [room.id, {
+    sourceRefs: new Set([`room:${room.id}`]),
+    historicalSourceKeys: new Set([room.id]),
+  }]));
+  for (const mapping of readRoomIdMigrations(db)) {
+    const target = candidates.get(mapping.newId);
+    if (!target) continue;
+    target.sourceRefs.add(`room:${mapping.oldId}`);
+    target.historicalSourceKeys.add(mapping.oldId);
+  }
+  const sourceOwners = new Map<string, Set<string>>();
+  const historicalOwners = new Map<string, Set<string>>();
+  for (const [roomId, candidate] of candidates) {
+    for (const alias of candidate.sourceRefs) {
+      const owners = sourceOwners.get(alias) ?? new Set<string>();
+      owners.add(roomId);
+      sourceOwners.set(alias, owners);
+    }
+    for (const alias of candidate.historicalSourceKeys) {
+      const owners = historicalOwners.get(alias) ?? new Set<string>();
+      owners.add(roomId);
+      historicalOwners.set(alias, owners);
+    }
+  }
+  return rooms.map(room => {
+    const candidate = candidates.get(room.id)!;
+    return {
+      roomId: room.id,
+      roomName: room.name,
+      sourceRefs: [...candidate.sourceRefs].filter(alias => sourceOwners.get(alias)?.size === 1).sort(),
+      historicalSourceKeys: [...candidate.historicalSourceKeys]
+        .filter(alias => historicalOwners.get(alias)?.size === 1).sort(),
+    };
+  });
 }
 
 export function listMmScopes(db: Database = getDatabase()): string[] {
