@@ -18,6 +18,7 @@ export function wireMemberProfiles(): () => void {
 
 import { assertMemberScopeAccess, chatScopeAssetRoots, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, parseMmScopeId } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef } from "../member/identity.js";
+import { activeWorkspaceRoot } from "../member/workspaces.js";
 export function wireConversationMembers(): () => void {
   return connectConversationMembers(readMemberIdentity);
 }
@@ -83,7 +84,7 @@ function extractTitle(absPath: string, relPath: string): string {
  */
 export function maybeEmitKnowledgeActivity(
   roomId: string,
-  agentName: string,
+  memberId:string,
   toolName: string,
   args: unknown,
   isError: boolean,
@@ -94,9 +95,9 @@ export function maybeEmitKnowledgeActivity(
   const rawPath = (args as any)?.path ?? (args as any)?.file_path;
   if (typeof rawPath !== "string" || !rawPath) return;
 
-  const room = roomStore.getRoom(roomId);
+  const room=roomStore.getRoom(roomId),agentName=readMemberIdentity(memberId)?.name??memberId;
   const root = docsRoot();
-  const abs = isAbsolute(rawPath) ? resolve(rawPath) : resolve(room?.cwd || process.cwd(), rawPath);
+  const abs=isAbsolute(rawPath)?resolve(rawPath):resolve(activeWorkspaceRoot(memberId),rawPath);
   if (abs !== root && !abs.startsWith(root + sep)) return;
 
   const relPath = relative(root, abs).split(sep).join("/");
@@ -285,7 +286,7 @@ export function wireAgentEvents(): () => void {
   });
   setToolActivityHook(({ sourceRef, memberId, toolName, args, isError }) => {
     if (!sourceRef.startsWith("room:")) return;
-    maybeEmitKnowledgeActivity(sourceRef.slice(5), readMemberIdentity(memberId)?.name ?? memberId, toolName, args, isError);
+    maybeEmitKnowledgeActivity(sourceRef.slice(5),memberId,toolName,args,isError);
   });
   setContextUsageRefreshHook((sourceRef, memberId, options) => {
     if (sourceRef) refreshContextUsage(sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef, memberId, options);
