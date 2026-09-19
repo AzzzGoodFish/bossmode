@@ -51,7 +51,7 @@ export function initializeMemberRuntime(runtime:AgentRuntime,loadSnapshot:(membe
     dismissReplies:(db,memberId,sourceRef,diagnosis,disposition)=>{if(sourceRef)dismissPendingReplies(sourceRef,memberId,disposition,diagnosis,Date.now(),undefined,db);}});
   repairPendingAgentAdmissions();
 }
-import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
+import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
 import { abortMember,compactMember,compactMemberById,resetMemberSession,restartMember,configureControls,getAgentContextUsage,getAgentStatus,getMemberActiveTools,getMemberBusyState,applyPendingAfterPromptSettlement,interruptAcceptedInput } from "../agent/controls.js";
 import { setStatusSink,openRuntimeAdmission,memberRuntimeAllowed,instances,instanceKey,contextUsageCache,memberIdentityMeta,type AgentInstance } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
@@ -142,7 +142,6 @@ export function maybeEmitKnowledgeActivity(
 /** Connect agent event facts to transports and chat ownership; the agent core stays subscriber-free. */
 import { connectChatHttpActions } from "../api/chats.js";
 import { connectMemberHttpActions } from "../api/members.js";
-import { connectUsageHttpQueries } from "../api/usage.js";
 
 /** Register HTTP route modules once during application startup, never per request. */
 export async function wireApiRoutes(): Promise<void> {
@@ -172,10 +171,6 @@ export function wireMemberHttp(): () => void {
     reset: resetMemberSession,
     restart: restartMember,
   });
-}
-
-export function wireUsageHttp(): () => void {
-  return connectUsageHttpQueries({ readUsageRows });
 }
 
 function resolveToolChat(memberId:string,current:string|null,value:unknown):string{

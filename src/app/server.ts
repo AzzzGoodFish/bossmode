@@ -21,7 +21,7 @@ import { resumePendingRuntimeInputs } from "../agent/scheduler.js";
 import { PiSdkRuntime } from "../agent/runtime/pi.js";
 import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../member/templates.js";
-import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
+import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireConversationMembers, wireMemberHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -60,7 +60,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeMembers = wireConversationMembers();
   const unsubscribeMemberHttp = wireMemberHttp();
-  const unsubscribeUsageHttp = wireUsageHttp();
   const unsubscribeChats = wireChatHttp();
   const unsubscribeAgentEvents = wireAgentEvents();
   const webDistDir = join(import.meta.dirname, "../../web/dist");
@@ -97,7 +96,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     unsubscribeProfiles();
     unsubscribeAgentEvents();
     unsubscribeChats();
-    unsubscribeUsageHttp();
     unsubscribeMemberHttp();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);

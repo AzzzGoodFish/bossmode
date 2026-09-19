@@ -195,6 +195,49 @@ export function readUsageRows(options:{from?:string;to?:string;sourceRef?:string
     GROUP BY e.member_id,e.historical_owner_key,e.source_ref,e.historical_source_key,date,model
     ORDER BY date,model,e.member_id,e.historical_source_key`,...parameters);
 }
+export interface UsageTotals {inputTokens:number;outputTokens:number;cacheRead:number;cacheWrite:number;cost:number;turns:number}
+export interface UsageKpis extends UsageTotals {cacheHitRate:number}
+export interface UsageSeriesPoint {
+  date:string;cost:number;inputTokens:number;outputTokens:number;cacheRead:number;
+  byModel:Record<string,{cost:number;inputTokens:number;outputTokens:number;cacheRead:number}>;
+  byMember:Record<string,number>;
+}
+export interface UsageAggregate {
+  kpis:UsageKpis;series:UsageSeriesPoint[];
+  byMemberModel:Array<UsageTotals&{memberId:string;model:string}>;
+  byMember:Array<UsageTotals&{memberId:string}>;
+}
+function newUsageTotals():UsageTotals{return {inputTokens:0,outputTokens:0,cacheRead:0,cacheWrite:0,cost:0,turns:0};}
+function addUsage(target:UsageTotals,row:UsageRow):void{
+  target.inputTokens+=row.inputTokens;target.outputTokens+=row.outputTokens;
+  target.cacheRead+=row.cacheRead;target.cacheWrite+=row.cacheWrite;
+  target.cost+=row.cost;target.turns+=row.turns;
+}
+export function aggregateUsageRows(rows:UsageRow[]):UsageAggregate{
+  const totals=newUsageTotals(),series=new Map<string,UsageSeriesPoint>();
+  const memberModels=new Map<string,UsageTotals&{memberId:string;model:string}>();
+  const members=new Map<string,UsageTotals&{memberId:string}>();
+  for(const row of rows){
+    addUsage(totals,row);
+    let day=series.get(row.date);
+    if(!day){day={date:row.date,cost:0,inputTokens:0,outputTokens:0,cacheRead:0,byModel:{},byMember:{}};series.set(row.date,day);}
+    day.cost+=row.cost;day.inputTokens+=row.inputTokens;day.outputTokens+=row.outputTokens;day.cacheRead+=row.cacheRead;
+    const model=day.byModel[row.model]??={cost:0,inputTokens:0,outputTokens:0,cacheRead:0};
+    model.cost+=row.cost;model.inputTokens+=row.inputTokens;model.outputTokens+=row.outputTokens;model.cacheRead+=row.cacheRead;
+    if(!row.memberId)continue;
+    day.byMember[row.memberId]=(day.byMember[row.memberId]||0)+row.inputTokens+row.outputTokens+row.cacheRead+row.cacheWrite;
+    const member=members.get(row.memberId)??{...newUsageTotals(),memberId:row.memberId};members.set(row.memberId,member);addUsage(member,row);
+    const key=`${row.memberId}\0${row.model}`,memberModel=memberModels.get(key)??{...newUsageTotals(),memberId:row.memberId,model:row.model};
+    memberModels.set(key,memberModel);addUsage(memberModel,row);
+  }
+  const denominator=totals.inputTokens+totals.cacheRead;
+  return {
+    kpis:{...totals,cacheHitRate:denominator?totals.cacheRead/denominator:0},
+    series:[...series.values()].sort((a,b)=>a.date.localeCompare(b.date)),
+    byMemberModel:[...memberModels.values()].sort((a,b)=>b.inputTokens-a.inputTokens),
+    byMember:[...members.values()].sort((a,b)=>b.inputTokens-a.inputTokens),
+  };
+}
 export function readStats(memberId:string):MemberStats{const row=getDatabase().get<any>("SELECT * FROM member_statistics WHERE member_id=?",memberId);return row?{turns:row.turns,toolCalls:row.tool_calls,activeMs:row.active_ms,tokens:{input:row.input_tokens,output:row.output_tokens,cacheRead:row.cache_read,cacheWrite:row.cache_write},cost:row.cost,...(row.updated_at===null?{}:{updatedAt:row.updated_at})}:{turns:0,toolCalls:0,activeMs:0,tokens:{input:0,output:0,cacheRead:0,cacheWrite:0},cost:0};}
 export function memberTokenTotal(memberId:string,sourceRef?:string):number{const source=sourceRef===undefined?"":" AND e.source_ref=?";return getDatabase().get<{total:number}>(`SELECT COALESCE(SUM(u.total_tokens),0) total FROM event_usage_receipts u JOIN agent_events e ON e.id=u.event_id WHERE e.member_id=?${source}`,memberId,...(sourceRef===undefined?[]:[sourceRef]))!.total;}
 export function pageActivity(memberId:string,options:{sourceRef?:string;beforeSeq?:number;limit?:number;types?:string[]}={}):{events:unknown[];hasMore:boolean;nextBeforeSeq:number|null;indexed:boolean}{const limit=Math.max(1,Math.min(options.limit??50,500)),types=options.types?.length?options.types:["agent_start","agent_end","message_end","tool_start","tool_end","compaction_start","compaction_end","user_prompt","user_steer","system"],source=options.sourceRef?" AND source_ref=?":"";const rows=getDatabase().all<{member_seq:number;payload_json:string}>(`SELECT member_seq,payload_json FROM agent_events WHERE member_id=?${source} AND member_seq<? AND type IN (${types.map(()=>"?").join(",")}) ORDER BY member_seq DESC LIMIT ?`,memberId,...(options.sourceRef?[options.sourceRef]:[]),options.beforeSeq??Number.MAX_SAFE_INTEGER,...types,limit+1),hasMore=rows.length>limit,page=rows.slice(0,limit);return {events:page.map(row=>JSON.parse(row.payload_json)).reverse(),hasMore,nextBeforeSeq:hasMore?page.at(-1)!.member_seq:null,indexed:true};}
