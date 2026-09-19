@@ -425,7 +425,7 @@ async function phaseRestart() {
   const n = mockLog.length;
   mode = { id: "r1", kind: "slow", delayMs: 8000, text: "slow-done" };
   const r1Msg = await postMessage(`@${M1} r1`);
-  assert(r1Msg?.id, "r1 message id missing in POST response");
+  assert(r1Msg?.message?.id, "r1 message id missing in POST response");
   await mockWait(n, (e) => e.id === "r1" && e.toolCount === 0, "r1 in-flight request", 60000);
   const statusInFlight = await memberStatus();
   check("statusInFlight", statusInFlight);
@@ -474,7 +474,7 @@ async function phaseRestart() {
   }, 60000, "queue settle (no pending/dispatched)");
   const dbq = new DatabaseSync(path.join(DIR, "bossmode.db"), { readOnly: true });
   const unavailable = dbq.prepare("SELECT COUNT(*) n FROM queued_inputs WHERE diagnosis LIKE '%member unavailable%'").get().n;
-  const r1Row = dbq.prepare("SELECT status, outcome FROM queued_inputs WHERE EXISTS (SELECT 1 FROM json_each(payload_json,'$.replySources') WHERE value=?)").get(r1Msg.id);
+  const r1Row = dbq.prepare("SELECT status, outcome FROM queued_inputs WHERE EXISTS (SELECT 1 FROM json_each(payload_json,'$.replySources') WHERE value=?)").get(r1Msg.message.id);
   dbq.close();
   check("queueGroups", groups);
   check("queueMemberUnavailable", unavailable);

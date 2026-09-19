@@ -145,7 +145,7 @@ try {
     db.close();
     if (row && row.new_id) activeRoomId = row.new_id;
   } catch {}
-  const messages = await fetch(`http://127.0.0.1:${port}/api/rooms/${activeRoomId}/messages?limit=100`, {headers: H});
+  const messages = await fetch(`http://127.0.0.1:${port}/api/conversations/room%3A${activeRoomId}/messages?limit=100`, {headers: H});
   const listBody = await messages.json();
   const list = listBody.messages ?? listBody;
   if (!list.some((m) => String(m.content).includes('upgrade baseline message'))) {
