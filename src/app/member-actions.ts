@@ -175,14 +175,14 @@ export async function updateMember(memberId:string,patch:MemberUpdatePatch){
   const before=requireMember(memberId),beforeModel=before.global.model??null;
   if(patch.name!==undefined||patch.title!==undefined)validateProfilePatch({...patch.name!==undefined&&{name:patch.name},...patch.title!==undefined&&{title:patch.title??""}});
   if(patch.model!==undefined&&(patch.model===null||!patch.model.trim()))throw new Error("invalid_model");
-  let modelSwitch:Awaited<ReturnType<typeof switchMemberModel>>|undefined;
-  if(patch.model!==undefined||patch.credentialId!==undefined){const current=getMemberConfiguration(memberId),model=patch.model??current.model,credentialId=patch.credentialId===undefined?current.credentialId:patch.credentialId;if(!model||!credentialId)throw new Error("invalid_binding");modelSwitch=await switchMemberModel(memberId,{model,credentialId});}
+  let selectedModel:string|null=null;
+  if(patch.model!==undefined||patch.credentialId!==undefined){const current=getMemberConfiguration(memberId),model=patch.model??current.model,credentialId=patch.credentialId===undefined?current.credentialId:patch.credentialId;if(!model||!credentialId)throw new Error("invalid_binding");await switchMemberModel(memberId,{model,credentialId});selectedModel=model;}
   const global:Record<string,unknown>={};for(const key of ["thinkingLevel","skills","mcpServers"] as const)if(patch[key]!==undefined)global[key]=key==="thinkingLevel"?patch[key]??"off":patch[key];
   const member=persistMember(memberId,{...(patch.name!==undefined&&{name:patch.name}),...(patch.title!==undefined&&{title:patch.title}),...(Object.keys(global).length&&{global})});
-  const thinkingSwitch=patch.thinkingLevel===undefined?undefined:await switchMemberThinkingLevel(memberId,patch.thinkingLevel??"off");
-  const resourceReload=patch.skills!==undefined||patch.mcpServers!==undefined?await reloadMemberSession(memberId,"member resources changed"):undefined;
-  if(!beforeModel&&modelSwitch?.model)void activateDmMember(memberId).catch(error=>logger.error("members","post-config DM activate failed",{memberId,error:String(error)}));
-  return {member,...modelSwitch&&{modelSwitch},...thinkingSwitch&&{thinkingSwitch},...resourceReload&&{resourceReload}};
+  if(patch.thinkingLevel!==undefined)await switchMemberThinkingLevel(memberId,patch.thinkingLevel??"off");
+  if(patch.skills!==undefined||patch.mcpServers!==undefined)await reloadMemberSession(memberId,"member resources changed");
+  if(!beforeModel&&selectedModel)void activateDmMember(memberId).catch(error=>logger.error("members","post-config DM activate failed",{memberId,error:String(error)}));
+  return {member};
 }
 
 export function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
@@ -192,7 +192,6 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
   return {
     id: rec.id,
     name: rec.name,
-    agent: rec.agentTemplate,
     model: eff.model || undefined,
     credentialId: eff.credentialId || undefined,
     thinkingLevel: (eff.thinkingLevel as string) || "off",

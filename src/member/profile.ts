@@ -7,8 +7,6 @@ export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 export interface MemberProfile {
   /** Literal Markdown, with no metadata parsing or required headings. Empty at birth. */
   body: string;
-  /** Raw file text (for diagnostics). */
-  raw: string;
   path: string;
   exists: boolean;
   overBudget: boolean;
@@ -29,7 +27,7 @@ export function readMemberProfile(memberId: string): MemberProfile {
   try { raw = readFileSync(path, "utf-8"); }
   catch (err: any) {
     if (err.code !== "ENOENT") throw err;
-    return { body: "", raw: "", path, exists: false, overBudget: false };
+    return {body:"",path,exists:false,overBudget:false};
   }
   const overBudget = raw.length > MEMBER_PROFILE_BUDGET_CHARS;
   if (overBudget) {
@@ -37,7 +35,7 @@ export function readMemberProfile(memberId: string): MemberProfile {
       memberId, chars: raw.length, budget: MEMBER_PROFILE_BUDGET_CHARS,
     });
   }
-  return { body: raw, raw, path, exists: true, overBudget };
+  return {body:raw,path,exists:true,overBudget};
 }
 /** Identity is supplied by the registry, never parsed from persona text. */
 export function isBlankPersona(profile: MemberProfile): boolean {

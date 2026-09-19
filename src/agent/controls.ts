@@ -110,15 +110,14 @@ export async function refreshAllInstanceModelRegistries():Promise<{refreshed:num
   let refreshed=0,failed=0;await Promise.all([...instances.values()].map(async instance=>{try{await instance.handle.refreshModelRegistry({allowNetwork:false});refreshed++;}catch(error){failed++;logger.warn("agent","catalogRegistryRefreshFailed",{member:instance.agentName,error:String(error)});}}));return {refreshed,failed};
 }
 
-export async function invalidateModelCredentialProfile(profileId:string,providerSlug:string,changeType:PendingCredentialRefresh["changeType"]="profileUpdated"):Promise<Array<{roomId:string;memberName:string;applied:boolean;pending:boolean}>>{
+export async function invalidateModelCredentialProfile(profileId:string,providerSlug:string,changeType:PendingCredentialRefresh["changeType"]="profileUpdated"):Promise<void>{
   const pending={profileId,providerSlug,changeType},targets=[...instances.values()].filter(instance=>instance.appliedCredentialId===profileId);
-  return Promise.all(targets.map(async instance=>{const roomId=activeSource(instance)??instance.memberId;if(instance.status==="working"||instance.dispatchState!=="idle"){instance.pendingCredentialRefresh=pending;return {roomId,memberName:instance.agentName,applied:false,pending:true};}await refreshCredential(instance,pending,"credentialProfileInvalidated");return {roomId,memberName:instance.agentName,applied:true,pending:false};}));
+  await Promise.all(targets.map(async instance=>{if(instance.status==="working"||instance.dispatchState!=="idle")instance.pendingCredentialRefresh=pending;else await refreshCredential(instance,pending,"credentialProfileInvalidated");}));
 }
 
 export class MemberModelSwitchConflictError extends Error{constructor(memberId:string){super(`A model switch is already in progress for this member (${memberId})`);this.name="MemberModelSwitchConflictError";}}
-export interface MemberModelSwitchResult{model:string;credentialId:string;instances:Array<{scopeId:string;applied:boolean}>}
 
-export async function switchMemberModel(memberId:string,binding:{model:string;credentialId:string}):Promise<MemberModelSwitchResult>{
+export async function switchMemberModel(memberId:string,binding:{model:string;credentialId:string}):Promise<void>{
   if(memberSwitchGates.has(memberId))throw new MemberModelSwitchConflictError(memberId);
   let release=()=>{};memberSwitchGates.set(memberId,new Promise<void>(resolve=>{release=resolve;}));
   try{
@@ -126,14 +125,12 @@ export async function switchMemberModel(memberId:string,binding:{model:string;cr
     const instance=instances.get(instanceKey(memberId)),original=instance?{model:instance.appliedModel,credentialId:instance.appliedCredentialId}:null;
     try{if(instance)await applyModel(instance,{model,credentialId:profile.id},"switchMemberModel");controlServices().commitModelBinding(memberId,{model,credentialId:profile.id});}
     catch(error){if(instance&&original?.model&&original.credentialId)try{await applyModel(instance,original,"switchMemberModel-rollback");}catch{destroyInstance(memberId);}throw error;}
-    return {model,credentialId:profile.id,instances:instance?[{scopeId:activeSource(instance)??memberId,applied:true}]:[]};
   }finally{memberSwitchGates.delete(memberId);release();}
 }
 
-export async function switchMemberThinkingLevel(memberId:string,thinkingLevel:string):Promise<{applied:string[];pending:string[]}>{
-  const instance=instances.get(instanceKey(memberId));if(!instance)return {applied:[],pending:[]};const source=activeSource(instance)??memberId;
-  if(instance.status==="working"||instance.dispatchState!=="idle"){instance.pendingThinkingSwitch={thinkingLevel};return {applied:[],pending:[source]};}
-  await applyThinking(instance,{thinkingLevel},"switchMemberThinkingLevel");return {applied:[source],pending:[]};
+export async function switchMemberThinkingLevel(memberId:string,thinkingLevel:string):Promise<void>{
+  const instance=instances.get(instanceKey(memberId));if(!instance)return;
+  if(instance.status==="working"||instance.dispatchState!=="idle")instance.pendingThinkingSwitch={thinkingLevel};else await applyThinking(instance,{thinkingLevel},"switchMemberThinkingLevel");
 }
 
 // -- Manual compaction (conversation action) --

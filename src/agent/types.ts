@@ -1,6 +1,6 @@
 export type AgentStatus="inactive"|"idle"|"working";
 export interface AgentMemberConfig {
-  id:string;name:string;agent:string;title?:string;model?:string;
+  id:string;name:string;model?:string;
   skills?:string[];thinkingLevel:string;credentialId?:string;
 }
 export interface AgentPromptSnapshot {

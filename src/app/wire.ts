@@ -34,7 +34,7 @@ function emitAgentLocalEvent(sourceRef:string|null,memberId:string,event:AgentHi
 }
 function refreshProfileSources(instance:AgentInstance):void{
   if(!instance.profilePromptDirty)return;const member=getMember(instance.memberId);if(!member)throw new Error(`Member no longer exists: ${instance.memberId}`);
-  instance.agentName=member.name;instance.sessionSources.member.name=member.name;instance.sessionSources.member.title=member.title;instance.sessionSources.compiled=compileForMember(member.id);
+  instance.agentName=member.name;instance.sessionSources.compiled=compileForMember(member.id);
 }
 export function initializeMemberRuntime(runtime:AgentRuntime,loadSnapshot:(memberId:string)=>AgentMemberSnapshot|null):void{
   configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);

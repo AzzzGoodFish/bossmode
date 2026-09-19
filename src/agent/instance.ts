@@ -1,6 +1,6 @@
 import { logger } from "../kernel/logger.js";
 import type { AgentHistoryEvent } from "./events.js";
-import type { AgentHandle, AgentMemberConfig, AgentStatus, ContextUsage } from "./types.js";
+import type {AgentHandle,AgentMemberConfig,AgentStatus,ContextUsage} from "./types.js";
 export type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
 export interface PendingThinkingSwitch {
   thinkingLevel: string;
@@ -10,19 +10,12 @@ export interface PendingCredentialRefresh {
   providerSlug: string;
   changeType: "profileUpdated" | "profileDeleted";
 }
-export interface SessionSources {
-  member: AgentMemberConfig;
-  compiled: { agentPrompt: string; appendSystemPrompt: string[] };
-  skills: string[];
-  skillPaths: string[];
-  cwd: string;
-}
+export interface SessionSources {compiled:{agentPrompt:string;appendSystemPrompt:string[]};}
 export interface AgentInstance {
   handle: AgentHandle;
   activeSourceRef: string | null;
   memberId: string;
   agentName: string;
-  sourceAgent: string;
   status: AgentStatus;
   dispatchState: DispatchState;
   promptInFlight: boolean;
@@ -206,8 +199,6 @@ export function notifyMemberProfileChanged(member: { id: string; name: string; t
     if (!instance.memberId.startsWith("mem_")) continue;
     if (instance.memberId === member.id) {
       instance.agentName = member.name;
-      instance.sessionSources.member.name = member.name;
-      instance.sessionSources.member.title = member.title;
     }
     instance.profilePromptDirty = true;
   }

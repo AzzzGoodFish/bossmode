@@ -124,7 +124,6 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
         memberId,
         agentName: member.name,
         profilePromptDirty: memberId.startsWith("mem_") && creationProfileRevision !== currentProfileRevision(),
-        sourceAgent: member.agent,
         status: "idle",
         dispatchState: "idle",
         promptInFlight: false,
@@ -136,16 +135,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
         lengthContinuationAttempted: false,
         compacting: false,
         turnActive: false,
-        sessionSources: {
-          member: { ...member },
-          compiled: {
-            agentPrompt: compiled.agentPrompt,
-                appendSystemPrompt: [...compiled.appendSystemPrompt],
-          },
-          skills: [...snapshot.resources.skillNames],
-          skillPaths: [...snapshot.resources.skillPaths],
-          cwd: snapshot.workspaceRoot,
-        },
+        sessionSources:{compiled},
         unsubscribe: () => {},
         eventBuffer: [],
         appliedModel: member.model ? normalizeModelRef(member.model.trim()) : "",
@@ -159,7 +149,6 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
     } catch (error) {
       logger.error("agent", "failed to create member agent", {
         member: member.name,
-        agent: member.agent,
         runtime: agentRuntime.name,
         error: formatRuntimeErrorMessage(error),
       });
