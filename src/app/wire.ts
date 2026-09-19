@@ -1,7 +1,6 @@
 import { onCatalogChanged } from "../config/catalog.js";
 import { refreshAllInstanceModelRegistries } from "../agent/controls.js";
 import { notifyMemberProfileChanged } from "../agent/instance.js";
-/** Configuration reports changes; only the composition root connects them to execution. */
 export function wireConfiguration(): () => void {
   return onCatalogChanged(async () => { await refreshAllInstanceModelRegistries(); });
 }
@@ -28,7 +27,6 @@ import {listPendingReplies,dismissPendingReplies} from "../chat/delivery.js";
 import {buildMemberAgentSession,maybeFlushPendingReload,compileForMember,configureAssembly} from "../agent/assembly.js";
 import {handleAgentEvent,type AgentHistoryEvent} from "../agent/events.js";
 import type {AgentMemberSnapshot,AgentStreamEvent,RuntimeRegistry} from "../agent/types.js";
-
 const targetOf=(sourceRef:string)=>sourceRef.startsWith("room:")?sourceRef.slice(5):sourceRef;
 function emitAgentLocalEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void{
   const instance=instances.get(instanceKey(memberId)),name=instance?.agentName??getMember(memberId)?.name??memberId;

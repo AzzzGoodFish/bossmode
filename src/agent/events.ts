@@ -1,4 +1,3 @@
-// Member-owned runtime event facts, usage aggregation and source-aware delivery.
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../kernel/json.js";
 import { getDatabase, type Database } from "../data/database.js";

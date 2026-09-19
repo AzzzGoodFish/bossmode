@@ -14,11 +14,9 @@ import { documentContentMeta, importDocument, type DocumentImport, type Document
 import { type Database } from "../../data/database.js";
 export interface FiredArchiveSource {
   archivePath: string;
-  /** Parsed explicit member.json export; its ID is NOT automatically associated with live SQL identity. */
   member: Pick<MemberRecord, "name" | "agentTemplate" | "global"> & Partial<Pick<MemberRecord, "id" | "title">>;
   persona?: {path:string; format:"plain" | "frontmatter"; hasContent:boolean};
 }
-/** Pure DTO conversion. Parent reads/validates sources once, then calls repository.importCatalog(). */
 export function catalogFromFiredExport(source: FiredArchiveSource): ArchiveCatalogSource {
   validateArchivePath(source.archivePath);
   return {archivePath:source.archivePath, name:source.member.name, template:source.member.agentTemplate || "general",
@@ -30,12 +28,10 @@ export interface LegacyArchiveManifestSource {
   members: Array<{
     name:string; sourceAgent?:string; credentialId?:string; conflicts?:string[];
     rooms?:Array<{room:string; hasPrinciples?:boolean; hasMainline?:boolean}>;
-    /** Parent selects a verified body inside this archive, including relocated old principlesPath. */
     personaPath?:string;
     hasPersona?:boolean;
   }>;
 }
-/** Aggregate historical labels only within one manifest. No current member lookup or ID guessing. */
 export function catalogFromLegacyManifest(source: LegacyArchiveManifestSource): ArchiveCatalogSource[] {
   validateArchivePath(source.archivePath);
   const byName = new Map<string, ArchiveCatalogSource>();

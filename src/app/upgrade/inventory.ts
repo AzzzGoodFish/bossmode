@@ -11,18 +11,12 @@ export interface UpgradeImportContext {
   readonly root: string;
   readonly sourceRoot: string;
   readonly previousDatabase: string | undefined;
-  /** Only these snapshotted sources may be read by legacy import adapters. */
   readonly sourceFiles: readonly string[];
   readonly legacy: boolean;
   progress(completed: number, total?: number): void;
-  /** New allowed file bodies only; existing different content is never overwritten. */
   stageAsset(relativePath: string, bytes: Uint8Array): void;
 }
 export interface UpgradeSource { path: string; retire: boolean; }
-/** Startup-only, read-only source discovery. This module has no application imports.
- * Run under exclusive startup ownership, then read the runner's immutable backup/files
- * root, not the live source. Neither inventory order nor mtime chooses authority.
- */
 export type LegacyKind =
   | "config" | "model-credentials" | "catalog-remote" | "catalog-overlays"
   | "mcp-oauth" | "mcp-config" | "mcp-status" | "member-mcp" | "workspaces" | "ssh-private-key" | "ssh-public-key" | "ssh-config"
@@ -35,17 +29,14 @@ export type LegacyKind =
   | "export-snapshot";
 export type LegacyFormat = "json" | "jsonl" | "text";
 export interface LegacySourceEntry {
-  /** Canonical POSIX relative path; structurally compatible with UpgradeSource. */
   path: string;
   retire: boolean;
   kind: LegacyKind;
   format: LegacyFormat;
   mtimeMs: number;
   size: number;
-  /** Path provenance only, NOT a verified historical identity or scope existence. */
   scopeId?: string;
   memberId?: string;
-  /** Literal event basename or sanitized document owner segment. Never name-resolved. */
   ownerKey?: string;
   layer?: "persona" | "principles" | "mainline";
   documentPath?: string;
@@ -55,7 +46,6 @@ export interface LegacySourceEntry {
   slug?: string;
   archiveTimestamp?: string;
   serverKey?: string;
-  /** Export snapshots are retained and routed only to the parent's archive catalog. */
   archivePath?: string;
   snapshotKind?: Exclude<LegacyKind, "export-snapshot"> | "archive-manifest";
 }
@@ -72,7 +62,6 @@ export type LegacySourceErrorCode = "invalid-root" | "invalid-path" | "duplicate
   | "invalid-utf8" | "invalid-json" | "unterminated-jsonl-line";
 export class LegacySourceError extends Error {
   constructor(readonly code: LegacySourceErrorCode, readonly path: string, readonly lineNumber?: number) {
-    // Do not include native IO/JSON errors or causes: they can contain secret bytes.
     super(`Legacy source ${code}: ${JSON.stringify(path)}${lineNumber === undefined ? "" : `, line ${lineNumber}`}`);
     this.name = "LegacySourceError";
   }
@@ -97,8 +86,6 @@ const tokens: Record<string, RegExp> = {
 const rules: Rule[] = [];
 function rule(pattern: string, describe: Rule["describe"]): void { rules.push({ parts: pattern.split("/"), describe }); }
 function description(kind: LegacyKind, format: LegacyFormat = "json", retire = true): Description { return { kind, format, retire }; }
-// Topic paths/dirs remain identifiable here so importers can consume them via the
-// source-retire flow; topic sources are never imported (fish #19358).
 function scope(p: Params): string { return p.topic ? `topic:${p.topic}` : p.room; }
 
 function memberScope(p: Params): string {

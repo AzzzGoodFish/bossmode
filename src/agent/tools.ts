@@ -5,16 +5,6 @@ import { dirname, isAbsolute, join } from "node:path";
 import { awaitResourceClose, memberTerminalWorkspace, createShell, execInShell, readShell, waitShell, listShells, closeShell, type TerminalWorkspace } from "./terminal.js";
 import { memberRuntimeAllowed } from "./instance.js";
 import { logger } from "../kernel/logger.js";
-// Agent tool catalog — the single source of truth for tool names and descriptions.
-//
-// Members reach tools two ways: directly registered tools (MEMBER_DIRECT_TOOL_NAMES)
-// and capabilities behind the `bossmode` gateway (MEMBER_GATEWAY_TOOL_NAMES). The
-// runtime adapter (`agent/runtime/tools.ts`) converts this catalog into SDK tools;
-// it never keeps a second copy of names or descriptions.
-//
-// Description scope: capability + mechanical facts only (no usage guidance —
-// that belongs to the prompt layers).
-// Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
   sshHost: "Remote host (hostname or IP).",
@@ -28,7 +18,6 @@ export const PARAM_DESCRIPTIONS = {
   terminalKeys: "Control key to send instead of a command: ctrl-c, ctrl-z, or ctrl-d.",
   terminalBlockSeconds: "Max seconds to wait before reporting the command as still running. Default 10, 0 = never block — the command backgrounds immediately (use for servers/long builds), collect output later with terminal_read.",
   terminalWaitBlockSeconds: "Max seconds to wait for the exec to finish. Default 30; 0 waits until completion.",
-  // chat_read / chat_search
   query: "Case-insensitive substring to search in message content",
   from: "Filter by sender name (exact match, e.g. 'user' or 'developer')",
   after: "Only messages after this time: ISO timestamp or relative ('today', 'yesterday', '1h', '7d')",
@@ -37,21 +26,17 @@ export const PARAM_DESCRIPTIONS = {
   from_seq: "Return messages strictly after this seq (ascending) — reads the unread backlog the activation hint points at",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
-  // references
   chatRef: "Chat id or name (see chat_list).",
   memberRef: "Member name or id (see member_list).",
-  // chat_list / member_list
   listQuery: "Keyword filter.",
   listLimit: "Max entries to return (default 50).",
   listOffset: "Skip this many entries (for paging).",
-  // chat_create / chat_edit / profile
   chatDescription: "Description text (≤2000 characters); an empty string clears it.",
   createMembers: "Member ids to include; the creator is always included.",
   addMembers: "Member ids to add.",
   removeMembers: "Member ids to remove (history and memory are retained).",
   profileName: "New member name.",
   profileDescription: "New description; an empty string clears it.",
-  // bossmode gateway
   gatewayAction: "One of: list, describe, call.",
   gatewayTool: "Capability name from action \"list\".",
   gatewayArgs: "Arguments object for the capability.",
@@ -64,8 +49,6 @@ function parameterSchema(spec=""):TSchema{
     if(optional)value=Type.Optional(value);return [name,value];}):[]);
   return Type.Object(properties,{additionalProperties:false});
 }
-// Gateway capability specs (name + label + description + parameters + example);
-// the runtime adapter executes them through the same dispatch as direct tools.
 export interface GatewayToolSpec {
   name: string;
   label: string;
@@ -83,8 +66,6 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   gatewaySpec("profile_read","Profile Read",`Read your own profile: name, description and member id.`,parameterSchema(""),{}),
   gatewaySpec("profile_update","Profile Update",`Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`,parameterSchema("name?:s description?:s"),{ description: "<your description>" }),
 ];
-// Direct tool specs (name + label + description + parameters); the runtime
-// adapter binds each spec to its execution path and registers it with the SDK.
 export interface DirectToolSpec {
   name: string;
   label: string;
@@ -128,12 +109,6 @@ search locates; read opens the context — feed a hit's seq to chat_read around_
   directSpec("terminal_close","Terminal Close",`Close a terminal and kill its process. Running commands receive a close signal.`,parameterSchema("terminalId:s")),
   directSpec("reload","Reload",`Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`,parameterSchema("")),
 ];
-/**
- * Member-view rendering for chat_read / chat_search (fish/architect rc.8 read-chain).
- * One renderer for both output modes: inline SDK text and markdown file export.
- * Row shape = the tool's JSON projection (seq/sender/content/ts/replyTo/attachments).
- */
-/** Same mapping as the activation envelope (message-envelope.ts): user → display name. */
 function senderDisplayName(sender: string): string {
   return sender === "user" ? getUserDisplayName() : sender;
 }
@@ -378,7 +353,6 @@ export async function workspaceWriteTool(memberId: string, args: { path?: string
     return toolError(err?.message || String(err));
   }
 }
-
 export async function workspaceEditTool(memberId: string, args: { path?: string; edits?: Array<{ oldText?: string; newText?: string }>; workspace?: string }): Promise<FileToolResult> {
   if (!memberRuntimeAllowed(memberId)) return toolError("member runtime admission is closed");
   const resolution = resolveWorkspacePath(memberId, String(args.path ?? ""), args.workspace);
@@ -393,7 +367,6 @@ export async function workspaceEditTool(memberId: string, args: { path?: string;
   const { workspace, path } = resolution;
   try {
     let text=(await readWorkspaceBytes(memberId,workspace,path,MAX_EDIT_FILE_BYTES)).toString("utf-8");
-
     for (let i = 0; i < edits.length; i++) {
       const { oldText, newText } = edits[i];
       const occurrences = text.split(String(oldText)).length - 1;

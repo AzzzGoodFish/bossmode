@@ -55,17 +55,17 @@ async function promptPassword(question: string): Promise<string> {
       switch (c) {
         case "\n":
         case "\r":
-        case "\u0004": // Ctrl+D
+        case "\u0004":
           stdin.removeListener("data", onData);
           if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
           stdin.pause();
           process.stdout.write("\n");
           resolve(password.trim());
           break;
-        case "\u0003": // Ctrl+C
+        case "\u0003":
           process.exit(1);
           break;
-        case "\u007f": // Backspace
+        case "\u007f":
           if (password.length > 0) {
             password = password.slice(0, -1);
             process.stdout.write("\b \b");

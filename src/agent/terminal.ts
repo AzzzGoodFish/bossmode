@@ -1,20 +1,4 @@
 import { memberRuntimeAllowed } from "./instance.js";
-/**
- * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
- * terminals. A terminal is a real PTY (node-pty locally, an ssh2 channel for
- * ssh workspaces) — cwd/env/long-running processes survive across tool calls.
- * Members own their terminals (cross-scope); state is memory-only — a daemon
- * restart empties the list and stale references fail honestly.
- *
- * Completion protocol (fish: no command wrapping): the shell init sets
- * `stty -echo`, an empty PS1, and appends an OSC 133;D marker to
- * PROMPT_COMMAND — invisible, never enters history, carries the exit code.
- * Output is captured as a byte stream (nothing lost), lines are numbered, and
- * terminal_read accepts an exec id or a line range. Commands that outlive
- * blockUntilMs (default 10s) return as running; read collects the rest later.
- * Known limit (documented in guide): a shell started inside a terminal does
- * not emit markers — the outer exec stays "running" until it returns.
- */
 import { logger } from "../kernel/logger.js";
 export type TerminalWorkspace =
   | {id:string;kind:"original";root:string;description?:string}
@@ -23,7 +7,6 @@ export type TerminalWorkspaceResolver=(memberId:string,workspaceId?:string)=>Ter
 let resolveTerminalWorkspace:TerminalWorkspaceResolver|undefined;
 export function configureTerminalWorkspaces(resolve:TerminalWorkspaceResolver|undefined):void{resolveTerminalWorkspace=resolve;}
 export function memberTerminalWorkspace(memberId:string,workspaceId?:string):TerminalWorkspace|undefined{return resolveTerminalWorkspace?.(memberId,workspaceId);}
-/** A timeout is an explicit cleanup failure, never confirmation of release. */
 export async function awaitResourceClose(closed:Promise<void>,label:string):Promise<void>{
  let timer:ReturnType<typeof setTimeout>|undefined;
  try{await Promise.race([closed,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} closure was not confirmed within 10 seconds`)),10_000);})]);}

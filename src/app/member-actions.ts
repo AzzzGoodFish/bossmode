@@ -19,7 +19,6 @@ function insertWithDm(record: MemberRecord): void {
   });
 }
 export function createMember(input: CreateMemberInput): MemberRecord { return createMemberWithPersona(input, ""); }
-/** All owned files precede the one identity/document/workspace/SSH/chat transaction. */
 export function createMemberWithPersona(input: CreateMemberInput, persona: string,
   prepareMetadata?: (record: MemberRecord) => (db: Database) => void,
 ): MemberRecord {

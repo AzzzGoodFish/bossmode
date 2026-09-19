@@ -5,7 +5,6 @@ import { createHash } from "node:crypto";
 import { type Database } from "../../data/database.js";
 import { logger } from "../../kernel/logger.js";
 const TASK_TABLES = ["tasks", "task_references", "task_subscribers", "task_comments"] as const;
-/** Locate (or create) the dated retirement archive directory under `<root>/archive`. */
 export function taskRetirementDir(root: string): string {
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const base = join(root, "archive");
@@ -368,7 +367,7 @@ export function cleanupMemberMemoryScopes(root: string, db: Database): void {
           continue;
         }
         for (const rel of files) {
-          const target = join(memoryRoot, `scopes-${rel.replace(/\//g, "-")}`);
+          const target=join(memoryRoot,`scopes-${rel.replace(/\//g,"-")}`);
           if (existsSync(target)) {
             skipped += 1;
             continue;
@@ -377,7 +376,6 @@ export function cleanupMemberMemoryScopes(root: string, db: Database): void {
           renameSync(join(scopesRoot, rel), target);
           folded += 1;
         }
-        // Remove the tree if every file moved out (leftovers stay on conflict).
         if (listFiles(scopesRoot).length === 0) rmSync(scopesRoot, { recursive: true });
       }
     }
@@ -416,7 +414,7 @@ function reconcileFoldedMemoryRows(root: string, db: Database): number {
     for (const [table, column] of FOLD_REPOINT_TARGETS) {
       const rows = db.all<{ r: number; v: string }>(`SELECT rowid AS r, "${column}" AS v FROM "${table}" WHERE "${column}" LIKE ?`, `${prefix}%`);
       for (const row of rows) {
-        const next = `members/${member.name}/memory/scopes-${row.v.slice(prefix.length).replace(/\//g, "-")}`;
+        const next=`members/${member.name}/memory/scopes-${row.v.slice(prefix.length).replace(/\//g,"-")}`;
         if (!existsSync(join(root, row.v)) && existsSync(join(root, next))) {
           updates.push({ table, column, rowid: row.r, next });
         }
@@ -424,7 +422,7 @@ function reconcileFoldedMemoryRows(root: string, db: Database): number {
     }
     if (updates.length === 0) continue;
     db.transaction((tx) => {
-      tx.exec("PRAGMA defer_foreign_keys=ON"); // history.document_path references memory_documents(path)
+      tx.exec("PRAGMA defer_foreign_keys=ON");
       for (const update of updates) tx.run(`UPDATE "${update.table}" SET "${update.column}"=? WHERE rowid=?`, update.next, update.rowid);
     });
     repointed += updates.length;
@@ -432,14 +430,6 @@ function reconcileFoldedMemoryRows(root: string, db: Database): number {
   return repointed;
 }
 const COPY_FLAG = "core-room-description-copy-v1";
-/**
- * One-time copy of the legacy room-scoped principles content
- * (`rooms/<id>/memory/room-principles.md`) into the explicit
- * `rooms.description` column added by `core-room-description-v1`.
- * Nothing is deleted or truncated: legacy content becomes the initial
- * description as-is, even when it exceeds the 2000-char edit limit.
- * Idempotent via a `storage_meta` flag; failures retry next startup.
- */
 export function copyRoomPrinciplesToDescriptions(root: string, db: Database): void {
   try {
     if (db.get("SELECT 1 FROM storage_meta WHERE key=?", COPY_FLAG)) return;

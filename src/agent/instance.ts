@@ -1,8 +1,3 @@
-// Agent instance table — one runtime instance per member (① B1), wherever it
-// serves. This module owns the instance registry, creation registries, the
-// member model-switch gate and the state-machine primitives that only touch
-// instance fields. Publication (WS push) and business permission checks stay
-// with callers; instance code never imports app/chat/member.
 import { logger } from "../kernel/logger.js";
 import type { AgentHistoryEvent } from "./events.js";
 import type { AgentHandle, AgentMemberConfig, AgentStatus, ContextUsage } from "./types.js";
@@ -15,11 +10,7 @@ export interface PendingCredentialRefresh {
   providerSlug: string;
   changeType: "profileUpdated" | "profileDeleted";
 }
-/** Start-time sources a live instance was built from: member config as
- *  applied at build, compiled prompts, skills, cwd, roster, runtime name.
- *  Refresh paths consume these instead of re-resolving config. */
 export interface SessionSources {
-  /** Member config as applied at instance build (model/credential/thinking of that moment). */
   member: AgentMemberConfig;
   compiled: { agentPrompt: string; appendSystemPrompt: string[] };
   skills: string[];
@@ -29,10 +20,9 @@ export interface SessionSources {
 }
 export interface AgentInstance {
   handle: AgentHandle;
-  /** Opaque source currently owned by the scheduler; null between batches. */
   activeSourceRef: string | null;
   memberId: string;
-  agentName: string; // current member name snapshot for display/mentions
+  agentName: string;
   sourceAgent: string;
   status: AgentStatus;
   dispatchState: DispatchState;
@@ -41,38 +31,24 @@ export interface AgentInstance {
   pendingThinkingSwitch?: PendingThinkingSwitch;
   pendingCredentialRefresh?: PendingCredentialRefresh;
   hadErrorInTurn: boolean;
-  /** Last turn failure text for wait() error-idle wake. Cleared at next runPrompt start. */
   lastTurnError: string | null;
-  /** Defer system error notice until final agent_end (suppress during willRetry). */
   pendingErrorNotice: string | null;
   lastMessageEndWasLength: boolean;
   lengthContinuationPending: boolean;
   lengthContinuationAttempted: boolean;
-  /** True while an SDK-driven compaction is running between turns (no active prompt/turn). */
   compacting: boolean;
-  /** True from agent_start until agent_end — an SDK turn is actively in flight (distinct from dispatchState, which stays busy past agent_end until prompt() settles). */
   turnActive: boolean;
-  /** Start-time session sources: exactly what this instance was built from —
-   *  member config, compiled prompts, skills, cwd, roster, runtime name.
-   *  Refresh/reload paths consume these instead of re-resolving config. */
   sessionSources: SessionSources;
   unsubscribe: () => void;
   eventBuffer: AgentHistoryEvent[];
   appliedModel: string;
   appliedCredentialId?: string;
-  /** Live model switch in progress (design-model-switch-single-path-v1): the
-   *  TARGET credential served to setModel's auth check before the applied
-   *  binding flips. Set/cleared only by applyModelSwitchToInstance. */
-  /** Batch 6 §3: reload requested mid-run — flushed when the turn settles. */
   pendingReload: string | null;
 }
-/** Runtime instance table key: one runtime per member, wherever it serves (① B1 2026-09-15). */
 export function instanceKey(memberId: string): string {
   if (!memberId) throw new Error("instanceKey requires memberId");
   return memberId;
 }
-// Application continuations outlive SDK idle; keep their ownership until all
-// post-prompt/config work has settled, including fire-and-forget control work.
 const memberOperations = new Map<Promise<unknown>,string>();
 export function trackMemberOperation<T>(memberId: string, operation:()=>Promise<T>): Promise<T> {
   let resolve!: (value:T|PromiseLike<T>)=>void;
@@ -87,8 +63,6 @@ export async function settleMemberOperations(memberId?: string): Promise<void> {
   for (;;) {
     const pending=[...memberOperations].filter(([,owner])=>memberId===undefined || owner===memberId).map(([operation])=>operation);
     if (!pending.length) return;
-    // Execution/control failures are reported by their caller. Here only
-    // completion matters; SDK/resource cleanup failures are collected separately.
     await Promise.allSettled(pending);
   }
 }
@@ -97,14 +71,7 @@ export const activeInstanceCount=():number=>instances.size;
 export const cancelledCreations = new Set<string>();
 export const sessionPublishOwners = new Map<string, object>();
 export const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
-/** §10 interlock, ONE map: presence = a member model switch is in progress.
- * The promise resolves when that switch finishes (commit or rollback). It is
- * both the switch lock (synchronous has/set at switchMemberModel entry) and
- * the creation gate (creations wait for it to end before building). */
 export const memberSwitchGates = new Map<string, Promise<void>>();
-/** §10: creations of this member already in flight (pendingCreations is keyed
- * by member after ① B1) — the switch awaits them so its instance snapshot is
- * complete. */
 export function pendingCreationsFor(memberId: string): Array<Promise<AgentInstance | null>> {
   const pending = pendingCreations.get(instanceKey(memberId));
   return pending ? [pending] : [];
@@ -119,8 +86,6 @@ export function updateDispatchState(instance: AgentInstance, next: DispatchState
   });
   instance.dispatchState = next;
 }
-// -- Status publication (output port; connected by app/wire) --
-/** Same shape as the websocket `agent:status` payload; the app owns the transport. */
 export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId: string; status: AgentStatus }
 export type AgentStatusSink = (target: string, payload: AgentStatusBroadcast) => void;
 let statusSink: AgentStatusSink | undefined;
@@ -152,10 +117,7 @@ export function transition(
     status: newStatus,
   });
 }
-// -- Context usage (cache-only API + idle refresh push) --
 export const contextUsageCache = new Map<string, ContextUsage>();
-// -- Runtime checkpoints (member-level recovery metadata; ① B8 / C3) --
-// DB-owned state; module import never initializes storage.
 import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
 export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number}
@@ -174,7 +136,6 @@ export function getRuntimeStateEntry(memberId: string, db: Database = getDatabas
   const row = db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
   return row ? mapRuntimeCheckpoint(row) : {};
 }
-/** Pure upgrade/runtime import with an explicit database and source timestamp. */
 export function importRuntimeStateEntry(db: Database, memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
   db.transaction(tx => {
     if (!tx.get("SELECT id FROM members WHERE id=?", memberId)) throw new Error(`Unknown execution member ID: ${memberId}`);
@@ -240,7 +201,6 @@ export function memberUnconfiguredMessage(memberName: string): string {
 }
 let profileRevision = 0;
 export function currentProfileRevision(): number { return profileRevision; }
-/** Publication after a committed DB identity update. Never resets an active handle. */
 export function notifyMemberProfileChanged(member: { id: string; name: string; title?: string }): void {
   profileRevision += 1;
   for (const instance of instances.values()) {
@@ -250,7 +210,6 @@ export function notifyMemberProfileChanged(member: { id: string; name: string; t
       instance.sessionSources.member.name = member.name;
       instance.sessionSources.member.title = member.title;
     }
-    // Environment includes current roster names, including other active members.
     instance.profilePromptDirty = true;
   }
 }

@@ -1,5 +1,3 @@
-// One member-session assembly path. Member assets are captured by app as one
-// immutable snapshot; chat source is assigned later by the scheduler per batch.
 import { mainSessionDirectory } from "../files/layout.js";
 import { logger } from "../kernel/logger.js";
 const MEMBER_CONTRACT_VERSION=2;

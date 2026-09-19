@@ -11,11 +11,7 @@ import { parseConversation, storageScopeId, storeRoom, type Room } from "../../c
 import { importArchivedMessage, recordMessageArchive, saveArchiveSummary, type ArchiveSummary } from "../../chat/archives.js";
 import { setDmMemberCursor, setMemberCursor, setUserReadCursor, type UserReadCursor } from "../../chat/cursors.js";
 import { importMessage, importMessageNextSequence, type Message } from "../../chat/messages.js";
-/** Topic feature retired (fish #19358, 2026-09-11): topic scopes are never
- * imported. Legacy topic sources are consumed by the standard source-retire
- * flow instead of being imported; no topic archive copy is written. */
 export function retiredTopicScope(scope:string|undefined):boolean{return !!scope&&scope.startsWith("topic:");}
-/** Missing historical metadata does not justify inventing a current room or member. */
 export function ensureImportedScope(db:Database,input:string,_roomHint?:string):string{
  const ref=parseConversation(input);if(!ref)throw new Error(`Invalid execution scope: ${input}`);
  const id=storageScopeId(ref.scopeId);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;

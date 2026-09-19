@@ -19,9 +19,7 @@ export interface CompiledMemberPrompt {
   fullPrompt: string;
   sections: CompiledPromptSection[];
   manifestHash: string;
-  /** Contract fingerprint: sha1 of the code-owned static platform text (no scope). */
   contractFingerprint: string;
-  /** persona.md over 4000 chars — panel may surface this. */
   profileOverBudget?: boolean;
 }
 function hashContent(content: string): string {
@@ -50,8 +48,6 @@ function section(args: {
     estimatedTokens: estimateTokens(content),
   };
 }
-// ── Platform text (prompt v2, verbatim from the English production text) ──
-/** Environment chapter, with `{identityLine}` as the only dynamic bullet. */
 const ENVIRONMENT_TEMPLATE = `# How to work
 
 ## Environment
@@ -92,7 +88,6 @@ const WORKSPACE_SEGMENT = `## Workspace
 - Relative paths resolve against the current workspace; file tools also take a workspace parameter directly.
 - A terminal persists between calls: cwd and environment variables survive — set once and they stay; don't re-cd or re-export in every command.
 - Look before you run: terminal_list shows the terminals you already have (don't blindly create a new one); one terminal runs one command at a time; keep commands short and direct.`;
-/** Assets chapter template — the only dynamic values are path/name placeholders. */
 const ASSETS_TEMPLATE = `## Assets
 
 - persona: {personaPath} — your identity, character, ways of behaving; only what belongs to you as a person — projects and task work live in memory or documents. Keep it under 4000 characters; when the user's feedback teaches you something lasting, update it with the edit tool.
@@ -103,7 +98,6 @@ const ASSETS_TEMPLATE = `## Assets
 - extensions (pi extensions): {extensionsPath} (extensions/ directory) — install pi extensions to add capabilities (for example web search or subagents); reload after editing. Install only what you understand and trust — servers and extensions run with your full permissions.
 - guide: {guidePath} — deep reference (installing extensions, searching sessions, detailed methods); read it when unsure about identity, memory, or skills; it is platform documentation — don't rewrite it.
 - archive: {archivePath} — history migrated from the old system (old sessions, old notes); read-only.`;
-/** Static text the contract fingerprint covers (no identity, no paths, no lists). */
 const CONTRACT_STATIC_TEXT = [ENVIRONMENT_TEMPLATE, COMMUNICATION_SEGMENT, MEMORY_SEGMENT, WORKSPACE_SEGMENT, ASSETS_TEMPLATE].join("\n\n");
 function renderAssetsSegment(args: { memberId: string; skillsEnabled: string; platformGuideDir: string | null; archiveAvailable: boolean }): string {
   const skillNames = args.skillsEnabled.trim() ? args.skillsEnabled : "(none)";
@@ -199,8 +193,6 @@ export function currentContractFingerprint(): string { return createHash("sha1")
 
 export function formatMemberPromptSegment(profile: { body: string }, currentName: string, description?: string): string {
   const identity = `# Persona\n\nI am ${currentName}${description ? ` (${description})` : ""}, an AI teammate in Bossmode.`;
-  // Match the previous prompt boundary without changing stored Markdown or
-  // interpreting any of its content as metadata.
   const body = profile.body.trim();
   return body ? `${identity}\n\n${body}` : identity;
 }

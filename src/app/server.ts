@@ -56,7 +56,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   await wireApiRoutes();
   seedBuiltinAssets();
   await recoverMemberArchives();
-  // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
   initializeMemberRuntime(registry, loadAgentMemberSnapshot);
@@ -82,21 +81,16 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   });
   async function handleRequest(req: IncomingMessage,res: ServerResponse): Promise<void> {
     const url = req.url || "/";
-    // API routes
     const handled = await handleApiRequest(req, res);
     if (handled) return;
-    // Static file serving (production build)
     if (existsSync(webDistDir)) {
       const filePath = url === "/" ? join(webDistDir, "index.html") : join(webDistDir, url);
       if (serveStatic(res, filePath)) return;
-      // SPA fallback
       if (serveStatic(res, join(webDistDir, "index.html"))) return;
     }
-    // No frontend build available
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end("<!doctype html><title>Bossmode</title><h1>Bossmode</h1><p>Server is running. Frontend not built yet.</p><p>API: <code>/api/</code></p>");
   }
-  // WebSocket
   createWebSocketServer(server);
   let cleanupSettlement: Promise<void> | undefined;
   function cleanupOwnedResources(): Promise<void> {

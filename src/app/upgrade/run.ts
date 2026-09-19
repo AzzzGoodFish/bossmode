@@ -22,15 +22,9 @@ export interface UpgradeOptions {
   importData(context: UpgradeImportContext): Promise<void>;
   validate(context: UpgradeImportContext): Promise<void>;
   onProgress?(progress: UpgradeProgress): void;
-  /** Read-only live-asset checks before retirement/activation, including current-generation reopen. */
   verifyReady?(db: Database): void;
-  /** Production binds/starts consumers and publishes PID ownership before the lease is released. */
   activate?(db: Database): Promise<void>;
-  /** Dependency-injected failure hook for isolated tests, never read from environment. */
   checkpoint?(phase: "backup" | "import" | "validated" | "activated"): void;
-  /** Archive data that a later migration is about to drop, from the staging database,
-   *  before migrations apply. Receives the staging DB (still at the pre-migration
-   *  schema) and the archive root. Throws to abort the upgrade if archiving fails. */
   archiveRetiredData?(stagingDb: Database, root: string): void | Promise<void>;
 }
 export interface UpgradeResult { db: Database; migrated: boolean; backupDirectory?: string; warnings: string[]; }
@@ -65,7 +59,6 @@ export function assertServiceStopped(root: string): void {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return; throw error; }
   throw new Error("Another Bossmode process still owns this data directory");
 }
-/** Independent SQLite lease is released by the OS on process death, never unlink it. */
 function acquireLease(root: string): () => void {
   const directory = managedPath(root, "upgrades");
   ensurePrivateDirectory(directory); syncPath(root);
@@ -80,7 +73,6 @@ async function snapshotDatabase(source: string, target: string): Promise<void> {
   await backupDatabase(source,target);
   chmodSync(target, 0o600); syncPath(target);
 }
-/** Quarantine an interrupted staging database. Authoritative source data is unchanged. */
 function quarantineStage(root: string, stage: string): void {
   if (!existsSync(stage)) return;
   requireRegularFile(stage);

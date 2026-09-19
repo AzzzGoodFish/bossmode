@@ -1,5 +1,3 @@
-// Runtime controls: model/credential changes, stop, compact, reset and teardown.
-// Conversation lookup and publication remain application-owned dependencies.
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
@@ -64,7 +62,6 @@ export function getMemberActiveScopes(memberId:string):string[]{
   const scopes=new Set(pendingRuntimeInputOwners(memberId).filter((scope):scope is string=>scope!==null)),instance=instances.get(instanceKey(memberId));
   if(instance?.activeSourceRef&&(instance.status==="working"||instance.dispatchState!=="idle"))scopes.add(instance.activeSourceRef);return [...scopes];
 }
-
 export function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   const credential=instance.pendingCredentialRefresh;instance.pendingCredentialRefresh=undefined;
   if(credential)void refreshCredential(instance,credential,trigger);

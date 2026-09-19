@@ -1,5 +1,3 @@
-/** pi resource adapter: prompt sources, member asset discovery, hosted MCP wiring.
- * Everything here is SDK-facing; it never imports chat or scheduler. */
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,14 +8,7 @@ export type McpFactoryLoader=(adapterPath:string)=>Promise<{name:string;factory:
 let mcpFactoryLoader:McpFactoryLoader|undefined;
 export function configureMcpFactoryLoader(loader:McpFactoryLoader|undefined):void{mcpFactoryLoader=loader;}
 export function loadMcpFactory(adapterPath:string){if(!mcpFactoryLoader)throw new Error("MCP runtime is not connected");return mcpFactoryLoader(adapterPath);}
-// pi SDK prompt utilities — runtime adapter zone. Re-exported so prompt assembly never imports @earendil-works/* directly.
 export { formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
-/**
- * Resolve systemPrompt vs appendSystemPrompt for pi DefaultResourceLoader.
- * The bossmode-compiled prompt is the only source (fish 2026-09-04: the
- * piBuiltinPrompt flag is retired) — pi's built-in system prompt never loads.
- * Exported for unit tests.
- */
 export function resolvePiSystemPromptSources(args: {
   agentPrompt: string;
   appendSystemPrompt: string[];
@@ -29,7 +20,6 @@ export function resolvePiSystemPromptSources(args: {
     appendSystemPrompt: appends,
   };
 }
-/** Prompt sources are owned by Bossmode; resource discovery stays in the SDK. */
 export class BossmodeResourceLoader extends DefaultResourceLoader {
   private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
   constructor(
@@ -45,7 +35,6 @@ export class BossmodeResourceLoader extends DefaultResourceLoader {
   getSystemPrompt(): string | undefined {
     return this.promptSources.systemPrompt;
   }
-  /** Bossmode prompt sources are in-memory (compiled per scope); there is no file backing. */
   getSystemPromptSource(): { path: string } | undefined {
     return undefined;
   }
@@ -64,7 +53,6 @@ export interface McpRuntimeSettings {
   serverNames: string[];
   dispose(): void;
 }
-/** Materialize one immutable member resource snapshot for the SDK adapter. */
 export function materializeMcpRuntimeSettings(
   resource: AgentResourceSnapshot["mcp"],
 ): McpRuntimeSettings {

@@ -10,16 +10,9 @@ export interface ShortIdMapping {
   rooms: Map<string, string>;
 }
 export interface RenameOp {
-  /** Path relative to the bossmode root, POSIX separators. */
   from: string;
   to: string;
 }
-// ── mapping assignment ──────────────────────────────────────────────────────
-/**
- * Assign new short ids to every member and room. New ids never reuse an old id
- * or a previously assigned one (shapes cannot collide, but the invariant is
- * enforced explicitly). Callers inject generators for deterministic tests.
- */
 export function assignShortIds(
   memberIds: readonly string[],
   roomIds: readonly string[],
@@ -367,14 +360,10 @@ function mapMmTokens(value: string, mapping: ShortIdMapping): string {
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, (character) => "\\" + character);
-/** Structured string replacement for composite values (paths, keys, comments). */
 export function mapCompositeString(value: string, mapping: ShortIdMapping): string {
   let out = mapMmTokens(value, mapping);
   for (const [old, next] of mapping.members) {
     if (!out.includes(old)) continue;
-    // A member id directly following `memory/members/` is a legacy room-tree
-    // segment: those keep the old form (archive semantics, design §3.3) — mirrors
-    // the filesystem walker, which never renames those segments.
     out = out.replace(new RegExp(`(?<!memory/members/)${escapeRegExp(old)}`, "g"), next);
   }
   for (const [old, next] of mapping.rooms) {

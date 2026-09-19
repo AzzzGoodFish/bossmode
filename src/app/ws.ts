@@ -12,13 +12,12 @@ export type WsClientCommand={type:"subscribe:room"|"unsubscribe:room";roomId:str
 interface ClientState {
   ws: WebSocket;
   roomSubscriptions: Set<string>;
-  agentSubscriptions: Set<string>; // "scopeId:memberId"; names resolve only at command time
+  agentSubscriptions: Set<string>;
 }
 const clients = new Map<WebSocket, ClientState>();
 let wss: WebSocketServer | null = null;
 export function createWebSocketServer(server: import("node:http").Server): WebSocketServer {
   wss = new WebSocketServer({ server });
-  // ws forwards HTTP listen errors. The startup listener owns rejection/cleanup.
   wss.on("error", error => logger.error("ws","server error",{error:String(error)}));
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url || "", "http://localhost");
@@ -38,14 +37,12 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
         const cmd = JSON.parse(data.toString()) as WsClientCommand;
         handleCommand(state, cmd);
       } catch {
-        // Ignore malformed messages
       }
     });
     ws.on("close", () => {
       clients.delete(ws);
     });
     ws.on("error", () => {
-      // Prevent unhandled errors from crashing the server
       clients.delete(ws);
       try { ws.terminate(); } catch {}
     });
