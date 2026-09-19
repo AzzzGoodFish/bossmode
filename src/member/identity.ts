@@ -58,9 +58,6 @@ export function getRetainedMember(id: string, db: Database = getDatabase()): Mem
 export function listMembers(db: Database = getDatabase()): MemberRecord[] {
   return db.all<MemberRow>("SELECT * FROM members WHERE archived_at IS NULL").map(decodeMember).sort((a, b) => a.name.localeCompare(b.name));
 }
-export function listMemberIdentities(db: Database = getDatabase()): Array<{ id: string; name: string }> {
-  return db.all("SELECT id,name FROM members ORDER BY id");
-}
 export function findMemberByName(name: string, db: Database = getDatabase()): MemberRecord | null {
   const key = normalizeMemberName(name).toLowerCase();
   const row = key ? db.get<MemberRow>("SELECT * FROM members WHERE name_key=? AND archived_at IS NULL", key) : undefined;

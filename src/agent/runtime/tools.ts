@@ -32,99 +32,12 @@ function requiredOf(schema: TSchema): string[] {
   return Array.isArray(required) ? required.map(String) : [];
 }
 
-function buildGatewayEntries(call: CallFn): GatewayEntry[] {
-  const specs = new Map(GATEWAY_TOOL_SPECS.map((spec) => [spec.name, spec]));
-  const specOf = (name: GatewayToolSpec["name"]): GatewayToolSpec => {
-    const spec = specs.get(name);
-    if (!spec) throw new Error(`Gateway spec missing for "${name}"`);
-    return spec;
-  };
-  const entries: GatewayEntry[] = [
-    {
-      ...specOf("chat_info"),
-      execute: async (_id, params) => {
-        const data = await call("chat_info", params) as any;
-        if (data?.ok === false) throw new Error(data.error || "chat_info failed");
-        const chat = data.chat;
-        const lines = [`${chat.name} — ${chat.kind === "room" ? "group chat" : "private chat"} (${chat.id})`];
-        if (chat.description) lines.push(chat.description);
-        if (Array.isArray(chat.members) && chat.members.length > 0) {
-          lines.push(`members: ${chat.members.map((m: any) => m.name).join(", ")}`);
-        }
-        return textResult(truncate(lines.join("\n")));
-      },
-    },
-    {
-      ...specOf("chat_create"),
-      execute: async (_id, params) => {
-        const data = await call("chat_create", params) as any;
-        if (data?.ok === false) throw new Error(data.error || "chat_create failed");
-        const members = Array.isArray(data.members) && data.members.length > 0
-          ? ` Members: ${data.members.map((m: any) => m.name).join(", ")}.`
-          : "";
-        return textResult(`Created group chat "${data.chat.name}" (${data.chat.id}).${members}`);
-      },
-    },
-    {
-      ...specOf("chat_edit"),
-      execute: async (_id, params) => {
-        const data = await call("chat_edit", params) as any;
-        if (data?.ok === false) throw new Error(data.error || data.message || "chat_edit failed");
-        const parts = [`Updated "${data.chat.name}" (${data.chat.id}).`];
-        if (Array.isArray(data.added) && data.added.length > 0) parts.push(`Added: ${data.added.join(", ")}.`);
-        if (Array.isArray(data.removed) && data.removed.length > 0) parts.push(`Removed: ${data.removed.join(", ")}.`);
-        return textResult(parts.join(" "));
-      },
-    },
-    {
-      ...specOf("member_list"),
-      execute: async (_id, params) => {
-        const data = await call("member_list", params) as any;
-        if (data?.ok === false) throw new Error(data.error || "member_list failed");
-        const members = Array.isArray(data?.members) ? data.members : [];
-        if (members.length === 0) return textResult("No members found.");
-        const lines = members.map((m: any) => `- ${m.name} (${m.id})${m.description ? ` — ${m.description}` : ""}`);
-        const total = typeof data.total === "number" ? data.total : members.length;
-        if (total > members.length) {
-          const next = Number(params.offset ?? 0) + members.length;
-          lines.push(`Showing ${members.length} of ${total}. Use offset=${next} for the next page.`);
-        }
-        return textResult(truncate(lines.join("\n")));
-      },
-    },
-    {
-      ...specOf("member_info"),
-      execute: async (_id, params) => {
-        const data = await call("member_info", params) as any;
-        if (data?.ok === false) throw new Error(data.error || "member_info failed");
-        const member = data.member;
-        const lines = [`${member.name} (${member.id}) — ${member.status}`];
-        if (member.description) lines.push(member.description);
-        return textResult(lines.join("\n"));
-      },
-    },
-    {
-      ...specOf("profile_read"),
-      execute: async (_id, params) => {
-        const data = await call("profile_read", params) as any;
-        if (data?.ok === false) throw new Error(data.error || "profile_read failed");
-        const member = data.member;
-        const lines = [`${member.name} (${member.id})`];
-        if (member.description) lines.push(member.description);
-        return textResult(lines.join("\n"));
-      },
-    },
-    {
-      ...specOf("profile_update"),
-      execute: async (_id, params) => {
-        const data = await call("profile_update", params) as any;
-        // Keep structured validation/conflict details visible in SDK errors.
-        if (data?.ok === false) throw new Error(JSON.stringify(data));
-        return textResult(JSON.stringify(data));
-      },
-    },
-  ];
-  return entries;
+function buildGatewayEntries(call:CallFn):GatewayEntry[]{
+  return GATEWAY_TOOL_SPECS.map(spec=>({...spec,execute:async(_id,params,signal)=>{
+    const data=await call(spec.name,params,signal) as any;
+    if(data?.ok===false)throw new Error(data.error||data.message||`${spec.name} failed`);
+    return textResult(truncate(JSON.stringify(data,null,2)));
+  }}));
 }
 
 function renderGatewayList(entries: GatewayEntry[]): string {
@@ -246,63 +159,13 @@ export function createBossmodeSdkTools(opts: {
     // shadow pi's built-ins by name; relative paths follow the active
     // workspace root). File tool results pass through untouched so image
     // content blocks survive.
-    defineTool({
-      ...specOf("workspace_list"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_list", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("workspace_create"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_create", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("workspace_use"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_use", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("workspace_remove"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("workspace_remove", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("read"),
-      execute: async (_id, params) => (await call("read", params as any)) as any,
-    }),
-    defineTool({
-      ...specOf("write"),
-      execute: async (_id, params) => (await call("write", params as any)) as any,
-    }),
-    defineTool({
-      ...specOf("edit"),
-      execute: async (_id, params) => (await call("edit", params as any)) as any,
-    }),
-    // ── Batch 7 P2: persistent terminals (real PTYs; bash is retired).
-    defineTool({
-      ...specOf("terminal_create"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_create", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("terminal_exec"),
-      execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_exec", params as any, signal), null, 2))),
-    }),
-    defineTool({
-      ...specOf("terminal_read"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_read", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("terminal_wait"),
-      execute: async (_id, params, signal) => textResult(truncate(JSON.stringify(await call("terminal_wait", params as any, signal), null, 2))),
-    }),
-    defineTool({
-      ...specOf("terminal_list"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_list", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("terminal_close"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("terminal_close", params as any), null, 2))),
-    }),
-    defineTool({
-      ...specOf("reload"),
-      execute: async (_id, params) => textResult(truncate(JSON.stringify(await call("reload", params as any), null, 2))),
-    }),
+    ...(["workspace_list","workspace_create","workspace_use","workspace_remove","terminal_create","terminal_read","terminal_list","terminal_close","reload"] as const).map(name=>defineTool({
+      ...specOf(name),execute:async(_id,params)=>textResult(truncate(JSON.stringify(await call(name,params as any),null,2))),
+    })),
+    ...(["read","write","edit"] as const).map(name=>defineTool({...specOf(name),execute:async(_id,params)=>(await call(name,params as any)) as any})),
+    ...(["terminal_exec","terminal_wait"] as const).map(name=>defineTool({
+      ...specOf(name),execute:async(_id,params,signal)=>textResult(truncate(JSON.stringify(await call(name,params as any,signal),null,2))),
+    })),
   ];
 
   // Defensive normalization: TypeBox omits `required` when every property is

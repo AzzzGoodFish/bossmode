@@ -143,7 +143,7 @@ import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/conversations.js";
 import * as sessionStore from "../member/sessions.js";
 
-import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, getRegistry, configureAssembly } from "../agent/assembly.js";
+import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, configureAssembly } from "../agent/assembly.js";
 
 import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../chat/conversations.js";
 import { listRoomsForMember } from "../chat/conversations.js";
@@ -398,11 +398,6 @@ export async function activateDmMember(memberId:string):Promise<void>{
   await waitForInputSettlement(input,pumpRuntimeInputs(memberId));
 }
 
-export function resolveRoomMember(roomId: string, memberRef: string): AgentMemberConfig | null {
-  const roomMember = roomStore.resolveRoomMemberRef(roomId, memberRef);
-  return roomMember ? memberRecordToConfig(roomMember.id) : null;
-}
-
 type RuntimeViewEvent=AgentStatusBroadcast|{type:"agent:context_usage";roomId:string;agent:string;memberId:string;usage:ContextUsage|null};
 /** Transport is registered by app/wire, never imported by application use cases. */
 export type RuntimeViewSink = (scopeId:string,event:RuntimeViewEvent,memberName?:string)=>void;
@@ -410,4 +405,3 @@ let runtimeViewSink:RuntimeViewSink|undefined;
 export function setRuntimeViewSink(sink:RuntimeViewSink|undefined):void{runtimeViewSink=sink;}
 const broadcastToRoom=(scopeId:string,event:RuntimeViewEvent):void=>{runtimeViewSink?.(scopeId,event);};
 const broadcastToAgentSubscribers=(scopeId:string,name:string,event:RuntimeViewEvent):void=>{runtimeViewSink?.(scopeId,event,name);};
-export function getRuntimeCapabilities() { return getRegistry()?.getCapabilities() ?? {}; }

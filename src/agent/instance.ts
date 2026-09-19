@@ -192,7 +192,6 @@ import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
 export interface MountStale {since:number;fields:string[]}
 export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number;staleMounts?:MountStale}
-export type RuntimeStateMap=Record<string,RuntimeStateEntry>;
 
 interface RuntimeCheckpointRow {
   member_id: string; contract_fingerprint: string | null;
