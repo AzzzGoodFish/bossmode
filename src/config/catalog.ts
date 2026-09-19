@@ -89,7 +89,6 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
     if(!bundled.length)return {source:getCatalog().source,error:"Packaged model catalog is empty"};
     const providers=new Set([...bundled.map(model=>String(model.provider)),...BUILTIN_API_KEY_PROVIDERS,...OAUTH_PROVIDERS]);
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),options?.timeoutMs??15_000);
-    const merged=new Map(bundled.map(model=>[`${model.provider}/${model.id}`,model]));
     const overlays:Record<string,ProviderModelsStoreEntry>={};let fetched=0,lastError:string|undefined;
     try {
       for(const provider of providers)try{
@@ -97,13 +96,12 @@ export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number
         if(!response.ok){if(response.status!==404&&response.status!==501)lastError=`pi.dev catalog ${provider}: HTTP ${response.status}`;continue;}
         const value=await response.json() as any,items=Array.isArray(value)?value:Array.isArray(value?.models)?value.models:Object.values(value??{});
         const models=items.filter((item:any)=>item&&item.id).map((item:any)=>({...item,provider,id:String(item.id)}));
-        if(!models.length)continue;fetched++;models.forEach((model:any)=>merged.set(`${provider}/${model.id}`,model));
+        if(!models.length)continue;fetched++;
         overlays[provider]={models,lastModified:Date.parse(response.headers.get("last-modified")??"")||Date.now(),checkedAt:Date.now(),etag:response.headers.get("etag")??undefined};
       }catch(error){lastError=error instanceof Error?error.message:String(error);}
     }finally{clearTimeout(timer);}
     if(!fetched){const snap=getCatalog();return {source:snap.source,error:lastError??"Remote catalog returned no provider data",fetchedAt:snap.fetchedAt};}
-    const models=[...merged.values()],fetchedAt=Date.now();getDatabase().transaction(()=>{commitRemoteCatalog(models,fetchedAt);publishProviderModels(overlays);});
-    return {source:"remote",fetchedAt};
+    publishProviderModels(overlays);return {source:"remote",fetchedAt:Date.now()};
   } catch(error) {
     const snap=getCatalog();return {source:snap.source,error:error instanceof Error?error.message:String(error),fetchedAt:snap.fetchedAt};
   }
@@ -318,13 +316,6 @@ export interface CatalogSnapshot {
   modelCount: number;
 }
 
-export interface DiskCatalogCache {
-  models: any[];
-  /** Epoch ms when this cache was written (successful remote). */
-  fetchedAt: number;
-  updatedAt: string;
-}
-
 export interface ProviderModelsStoreEntry {
   models: any[];
   lastModified?: number;
@@ -332,27 +323,16 @@ export interface ProviderModelsStoreEntry {
   etag?: string;
 }
 
-export function getCatalog(): CatalogSnapshot {
-  const stored=readRemoteCatalog(getDatabase()),models=stored?.models.length?stored.models:loadBundledCatalogSync();
-  const fetchedAt=stored?.models.length?stored.fetchedAt:null,source=fetchedAt===null?"bundled":"remote";
-  return {models,source,fetchedAt,fetchedAtIso:fetchedAt?new Date(fetchedAt).toISOString():null,modelCount:models.length};
+export function getCatalog():CatalogSnapshot{
+  const bundled=loadBundledCatalogSync(),overlays=readProviderOverlays(),models=new Map(bundled.map(model=>[`${model.provider}/${model.id}`,model]));let fetchedAt:number|null=null;
+  for(const [provider,entry]of Object.entries(overlays)){for(const [key,model]of models)if(model.provider===provider)models.delete(key);for(const model of entry.models)models.set(`${provider}/${model.id}`,model);fetchedAt=Math.max(fetchedAt??0,entry.checkedAt??entry.lastModified??0)||fetchedAt;}
+  const source=fetchedAt===null?"bundled":"remote";return {models:[...models.values()],source,fetchedAt,fetchedAtIso:fetchedAt?new Date(fetchedAt).toISOString():null,modelCount:models.size};
 }
 
 export function getCatalogModels(): any[] {
   return getCatalog().models;
 }
 
-export function commitRemoteCatalog(models: any[], fetchedAt: number = Date.now()): void {
-  if (!Array.isArray(models) || models.length === 0) {
-    logger.warn("catalog", "commitRemoteCatalog ignored empty models");
-    return;
-  }
-  if (!importRemoteCatalog({ models, fetchedAt, updatedAt: new Date(fetchedAt).toISOString() }, getDatabase())) return;
-  getDatabase().afterCommit(() => logger.info("catalog", "remote catalog committed", {
-    modelCount: models.length,
-    fetchedAt: new Date(fetchedAt).toISOString(),
-  }));
-}
 
 export function commitProviderOverlays(overlays: Record<string, ProviderModelsStoreEntry>): void {
   importProviderOverlays(overlays, getDatabase());
@@ -410,21 +390,6 @@ function writeCatalogModels(id: string, models: any[], db: Database = getDatabas
     });
   }
 
-export function readRemoteCatalog(db: Database = getDatabase()): DiskCatalogCache | null {
-    const r=db.get<any>("SELECT * FROM catalog_snapshots WHERE id='remote'");
-    return r ? {models:readCatalogModels("remote", db),fetchedAt:r.fetched_at,updatedAt:new Date(r.fetched_at).toISOString()} : null;
-  }
-
-export function importRemoteCatalog(cache: DiskCatalogCache, db: Database = getDatabase()): boolean {
-    if (!Number.isFinite(cache.fetchedAt) || !Array.isArray(cache.models)) throw new Error("Invalid catalog snapshot");
-    return db.transaction(tx => {
-      const current = readRemoteCatalog(db);
-      if (current && current.fetchedAt > cache.fetchedAt) return false;
-      tx.run("INSERT OR REPLACE INTO catalog_snapshots VALUES ('remote',?,NULL,NULL,NULL)",cache.fetchedAt);
-      writeCatalogModels("remote",cache.models, db);
-      return true;
-    });
-  }
 
 export function readProviderOverlays(db: Database = getDatabase()): Record<string, ProviderModelsStoreEntry> {
     return Object.fromEntries(db.all<any>("SELECT * FROM catalog_snapshots WHERE id LIKE 'provider:%'").map(r => [r.id.slice(9),{

@@ -15,7 +15,7 @@ import { type BossmodeConfig } from "../../config/settings.js";
 import { normalizeLegacyCredentialImport } from "../../config/models.js";
 import { decodeLegacyMcpOauthEntry, importHashedMcpOauthEntry } from "../../member/mcp.js";
 import { replaceCredentialStore } from "../../config/models.js";
-import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "../../config/catalog.js";
+import { importProviderOverlays } from "../../config/catalog.js";
 import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailability } from "../../member/mcp.js";
 import { importWorkspaceRegistry, importSshCredential } from "../../member/workspaces.js";
 import { isDeepStrictEqual } from "node:util";
@@ -230,13 +230,16 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
   try{return new TextDecoder("utf-8",{fatal:true}).decode(readFileSync(path));}
   catch{throw new Error(`Invalid legacy text source: ${entry.path}`);}
  };
- const catalog=ctx.db;
+ const catalog=ctx.db;let importedCatalog=[...bundledCatalog];
  for(const entry of entries.filter(e=>e.kind==="catalog-remote"||e.kind==="catalog-overlays")){
   const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
   if(entry.kind==="catalog-remote"){
    const fetchedAt=value.fetchedAt??Date.parse(value.updatedAt);
    if(!Array.isArray(value.models)||!Number.isFinite(fetchedAt))throw new Error(`Invalid legacy catalog: ${entry.path}`);
-   importRemoteCatalog({models:value.models,fetchedAt,updatedAt:typeof value.updatedAt==="string"?value.updatedAt:new Date(fetchedAt).toISOString()}, catalog);
+   importedCatalog=value.models;
+   const overlays:Record<string,{models:any[];checkedAt:number}>={};
+   for(const model of value.models){const provider=String(model.provider),slot=overlays[provider]??={models:[],checkedAt:fetchedAt};slot.models.push(model);}
+   importProviderOverlays(overlays,catalog);
   }else importProviderOverlays(value, catalog);
   consumed.add(entry.path);
  }
@@ -248,7 +251,7 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
    case "model-credentials":{
     const value=requireObject(read(entry), `Invalid legacy settings object: ${entry.path}`);
     if(!Array.isArray(value.profiles)||value.migrations!==undefined&&!Array.isArray(value.migrations))throw new Error("Invalid legacy credential store");
-    const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,readRemoteCatalog(catalog)?.models??[...bundledCatalog]);
+    const normalized=normalizeLegacyCredentialImport({...value,profiles:value.profiles,migrations:value.migrations??[]} as any,importedCatalog);
     replaceCredentialStore({profiles:normalized.profiles,migrations:normalized.migrations??[]}, ctx.db);break;
    }
    case "mcp-oauth":{
