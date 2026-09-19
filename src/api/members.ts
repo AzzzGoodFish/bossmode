@@ -1,5 +1,6 @@
-import { archiveMember } from "../app/member-actions.js";
-import { updateProfileForMember, InvalidProfileError } from "../member/profile.js";
+import { activateDmMember, archiveMember, createMember, getMemberActiveScopes, getScopeLiveStatus } from "../app/member-actions.js";
+import { readMemberProfile, updateProfileForMember, InvalidProfileError } from "../member/profile.js";
+import { memberProfilePath } from "../files/layout.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
@@ -7,7 +8,6 @@ import { updateProfileForMember, InvalidProfileError } from "../member/profile.j
 import { addRoute, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
-import { createMember } from "../app/member-actions.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import {
@@ -60,14 +60,6 @@ function errCode(err: unknown): { status: number; error: string; message: string
 addRoute("GET", "/api/contacts", async (_req, res) => {
   try {
     const rooms = roomStore.listRooms();
-    let getMemberActiveScopes: ((id: string) => string[]) | null = null;
-    let getMemberLiveStatus: ((id: string) => string) | null = null;
-    try {
-      const am = await import("../app/member-actions.js");
-      getMemberActiveScopes = (id) => am.getMemberActiveScopes(id);
-      getMemberLiveStatus = (id) => am.getScopeLiveStatus(`dm:${id}`);
-    } catch { /* runtime cold */ }
-
     const contacts = listMembers().map((m) => {
       const membershipScopes: string[] = [];
       // Membership from globalMemberIds (authority); legacy name match only if no global ids on room
@@ -79,9 +71,9 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
       }
       membershipScopes.unshift(scopeIdOf({ kind: "dm", memberId: m.id }));
 
-      const workingScopes = getMemberActiveScopes?.(m.id) || [];
+      const workingScopes = getMemberActiveScopes(m.id);
       // ① B4: status is member-level — one runtime, one status, every chat.
-      const status = getMemberLiveStatus?.(m.id) === "working" ? "working" : "idle";
+      const status = getScopeLiveStatus(`dm:${m.id}`) === "working" ? "working" : "idle";
 
       return {
         memberId: m.id,
@@ -282,22 +274,12 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
     // Birth wake (identity batch-1): model none→some starts the DM instance so
     // the icebreaker can run. Migrated from the retired /config route.
     const afterModel = modelSwitch?.model || beforeModel;
-    if (!beforeModel && afterModel) {
-      try {
-        const { activateDmMember } = await import("../app/member-actions.js");
-        void activateDmMember(m.id).catch((err) => {
-          logger.error("members", "post-config DM activate failed", {
-            memberId: m.id,
-            error: String((err as Error)?.message || err),
-          });
-        });
-      } catch (err) {
-        logger.error("members", "post-config DM activate import failed", {
-          memberId: m.id,
-          error: String((err as Error)?.message || err),
-        });
-      }
-    }
+    if (!beforeModel && afterModel) void activateDmMember(m.id).catch((err) => {
+      logger.error("members", "post-config DM activate failed", {
+        memberId: m.id,
+        error: String((err as Error)?.message || err),
+      });
+    });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
@@ -353,7 +335,6 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -420,49 +401,12 @@ addRoute("GET", "/api/members/:id/skills", async (_req, res, params) => {
       sendJson(res, 404, { error: "not_found", message: "Member not found" });
       return;
     }
-    const { listMemberSkills } = await import("../member/skills.js");
     sendJson(res, 200, { skills: listMemberSkills(m.id) });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
   }
 });
-
-addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
-  try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const url = new URL(req.url || "", "http://localhost");
-    const layer = url.searchParams.get("layer") || "profile";
-    // Principles/mainline layers are retired (see GET /api/rooms/:id/principles).
-    if (layer === "principles" || layer === "mainline") {
-      sendJson(res, 410, { error: "gone", message: "principles/mainline retired — read persona.md via layer=profile" });
-      return;
-    }
-    // "persona" is the historical name of the same file; profile is the live view.
-    if (layer !== "profile" && layer !== "persona") {
-      sendJson(res, 400, { error: "invalid_layer", message: "layer must be profile" });
-      return;
-    }
-    const { readMemberProfile } = await import("../member/profile.js"); const { memberProfilePath } = await import("../files/layout.js");
-    const profile = readMemberProfile(m.id);
-    sendJson(res, 200, {
-      layer: "profile",
-      path: memberProfilePath(m.id),
-      content: profile.body,
-      raw: profile.raw,
-      overBudget: profile.overBudget,
-      exists: profile.exists,
-    });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
-});
-
 
 // ── Member runtime reads and controls (member-owned; source is an optional filter) ──
 
