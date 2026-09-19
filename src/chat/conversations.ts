@@ -428,25 +428,29 @@ export function isMmScopeId(scope: string): boolean {
   return typeof scope === "string" && scope.startsWith(MM_PREFIX);
 }
 
-/** One parser for the target chat model. Accepts a canonical public/source ref
- * or a bare room storage id and rejects malformed/non-canonical pair ids. */
+function validRoomId(value: string): boolean {
+  return Boolean(value && !value.includes(":") && !/[/\\\0]/.test(value) && ![".", ".."].includes(value));
+}
+
+/** Parse only canonical public/source refs. */
 export function parseConversation(value: string): ConversationIdentity | null {
   if (typeof value !== "string" || !value || value.includes("\0")) return null;
   if (value.startsWith(DM_PREFIX)) {
     const memberId = value.slice(DM_PREFIX.length);
-    return isMemberId(memberId) ? { kind: "dm", scopeId: `${DM_PREFIX}${memberId}`, memberId } : null;
+    return isMemberId(memberId) ? { kind: "dm", scopeId: value, memberId } : null;
   }
   if (value.startsWith(MM_PREFIX)) {
     const memberIds = parseMmScopeId(value);
-    return memberIds ? { kind: "mm", scopeId: mmScopeIdOf(memberIds[0], memberIds[1]), memberIds } : null;
+    return memberIds ? { kind: "mm", scopeId: value, memberIds } : null;
   }
-  const roomId = value.startsWith(ROOM_PREFIX) ? value.slice(ROOM_PREFIX.length) : value;
-  if (!roomId || roomId.includes(":") || /[/\\]/.test(roomId) || [".", ".."].includes(roomId)) return null;
-  return { kind: "room", scopeId: `${ROOM_PREFIX}${roomId}`, roomId };
+  if (!value.startsWith(ROOM_PREFIX)) return null;
+  const roomId = value.slice(ROOM_PREFIX.length);
+  return validRoomId(roomId) ? { kind: "room", scopeId: value, roomId } : null;
 }
 
-/** Database key used by scopes/messages/cursors. */
+/** Convert a canonical source or an internal bare room key to the database key. */
 export function storageScopeId(value: string): string {
+  if (validRoomId(value)) return value;
   const ref = parseConversation(value);
   if (!ref) throw new Error(`Invalid conversation: ${value}`);
   return ref.kind === "room" ? ref.roomId : ref.scopeId;
@@ -613,26 +617,22 @@ export type ScopeAccess =
  * unknown scope). Current rosters and explicit historical ID links are authoritative.
  */
 export function assertMemberScopeAccess(memberId: string, scopeId: ScopeId): ScopeAccess {
-  const member = conversationMember(memberId);
-  if (!member) throw new Error(`Unknown member: ${memberId}`);
-  if (scopeId.startsWith("dm:")) {
-    const target = scopeId.slice("dm:".length);
-    if (target !== memberId) throw new Error("Access denied: a member can only read its own DM scope");
-    return { kind: "dm", memberId: target };
+  if (!conversationMember(memberId)) throw new Error(`Unknown member: ${memberId}`);
+  const ref = parseConversation(scopeId);
+  if (!ref) throw new Error(`Invalid conversation source: ${scopeId}`);
+  if (ref.kind === "dm") {
+    if (ref.memberId !== memberId) throw new Error("Access denied: a member can only read its own DM scope");
+    return ref;
   }
-  if (isMmScopeId(scopeId)) {
-    const pair = parseMmScopeId(scopeId);
-    if (!pair) throw new Error(`Malformed member chat scope: ${scopeId}`);
-    if (!pair.includes(memberId)) throw new Error("Access denied: a member can only read its own member chats");
-    return { kind: "mm", memberIds: pair };
+  if (ref.kind === "mm") {
+    if (!ref.memberIds.includes(memberId)) throw new Error("Access denied: a member can only read its own member chats");
+    return ref;
   }
-  if (scopeId.startsWith("room:")) {
-    const roomId = scopeId.slice("room:".length);
-    const room = listRoomsForMember(memberId).find((r) => r.id === roomId);
-    if (!room) throw new Error(`Access denied: ${member.name} is not a member of room ${roomId} (or the room does not exist)`);
-    return { kind: "room", roomId, room };
+  const room = getRoom(ref.roomId);
+  if (!room || !getRoomMembersFromRoom(room).some(member => member.id === memberId || member.sourceMemberId === memberId)) {
+    throw new Error(`Access denied: member is not in room ${ref.roomId}`);
   }
-  throw new Error(`scope must be 'room:<id>', 'dm:<memberId>' or 'mm:<memberA>-<memberB>', got: ${scopeId}`);
+  return { kind: "room", roomId: ref.roomId, room };
 }
 
 /** Read/modify/write one room under the caller's transaction or a new synchronous one. */
