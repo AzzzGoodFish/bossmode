@@ -34,7 +34,7 @@ import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsa
 import { abortAgent, abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { setStatusSink } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
-import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getMemberInstances, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
+import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
 
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
@@ -156,7 +156,6 @@ export function wireMemberHttp(): () => void {
     readStats,
     readTokenTotal: memberTokenTotal,
     readActivity: pageActivity,
-    readStatus: memberId => ({ instances: getMemberInstances(memberId) }),
     stop: abortMember,
     compact: compactMemberById,
     reset: resetMemberSession,

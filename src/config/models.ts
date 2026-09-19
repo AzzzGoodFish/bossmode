@@ -635,45 +635,6 @@ function refreshBuiltinProviderProfilesFromStore(options: { persist: boolean }):
   });
 }
 
-export interface RefreshModelCredentialProfileResult {
-  profile: PublicModelCredentialProfile;
-  /** Where model metadata came from for this refresh. */
-  catalogSource: CatalogRefreshSource;
-  /** User-facing note when remote catalog was unavailable. */
-  catalogMessage?: string;
-}
-
-export async function refreshModelCredentialProfileModels(id: string): Promise<RefreshModelCredentialProfileResult> {
-  const existing = getModelCredentialProfile(id);
-  if (!existing) throw new Error("Model credential profile not found");
-  if (!isBuiltinProviderProfile(existing)) throw new Error("Only built-in provider profiles can refresh models from catalog");
-
-  const catalog = await refreshPiCatalogFromNetwork();
-  const refreshed = getDatabase().transaction(() => {
-    const profiles = refreshBuiltinProviderProfilesFromStore({ persist: false });
-    const profile = profiles.find((p) => p.id === id);
-    if (!profile) throw new Error("Model credential profile not found");
-    const refreshed = refreshBuiltinProviderProfile(profile);
-    const next = profiles.map((p) => p.id === id ? refreshed : p);
-    writeStore(next);
-    return refreshed;
-  });
-  const status = getCatalogStatus();
-  let catalogMessage: string | undefined;
-  if (catalog.error) {
-    catalogMessage = status.source === "remote" && status.fetchedAtIso
-      ? `Remote refresh failed; kept catalog from ${status.fetchedAtIso}. ${catalog.error}`
-      : `Remote model catalog unavailable; refreshed from the packaged catalog. ${catalog.error}`;
-  } else if (catalog.source === "bundled") {
-    catalogMessage = "Remote model catalog unavailable; refreshed from the packaged catalog.";
-  }
-  return {
-    profile: sanitizeProfile(refreshed),
-    catalogSource: catalog.source,
-    catalogMessage,
-  };
-}
-
 export async function discoverModelCredentialModels(input: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
   const existing = input.id ? getModelCredentialProfile(input.id) : null;
   const profileKind = input.profileKind || existing?.profileKind;

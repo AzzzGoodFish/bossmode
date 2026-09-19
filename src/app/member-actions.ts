@@ -379,12 +379,6 @@ function emitAgentLocalEvent(
 
 // -- Instance management --
 
-export function getMemberInstances(memberRef:string):Array<{roomId:string;roomName:string;status:AgentStatus;runtime:string;runtimeParams?:import("../agent/types.js").AgentRuntimeParams}>{
-  const instance=[...instances.values()].find(value=>value.memberId===memberRef||value.agentName===memberRef);if(!instance)return [];
-  const roomId=instance.activeSourceRef??`dm:${instance.memberId}`,handle=instance.handle as any;
-  return [{roomId,roomName:roomStore.getRoom(chatTargetOf(roomId))?.name??roomId,status:instance.status,runtime:handle.runtimeName??"unknown",runtimeParams:handle.runtimeParams}];
-}
-
 /** Every scope this member can hold queued work in. */
 function memberScopesFor(memberId: string): string[] {
   return [
