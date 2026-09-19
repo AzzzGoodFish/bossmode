@@ -114,6 +114,10 @@ function deriveTitleFromContent(content: string, pathRel: string): string {
   const heading = content.match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
   return heading || filenameTitle(pathRel);
 }
+function describeEntry(rel: string, content: string, source = "user"): KnowledgeEntry {
+  const stat = statSync(absDocPath(rel));
+  return { id: rel, title: deriveTitleFromContent(content, rel), content, source, createdAt: stat.ctimeMs, updatedAt: stat.mtimeMs };
+}
 
 // -- Document tree --
 
@@ -152,34 +156,12 @@ function walkDir(absDir: string, relDir: string): KnowledgeTreeNode {
 /** Flat list of all documents (used for search and lists that need full content). */
 export function listEntries(): KnowledgeEntry[] {
   ensureDocsRoot();
-  const root = docsRoot();
-  const files: string[] = [];
-  (function recur(dir: string, rel: string) {
-    let es: Dirent[];
-    try { es = readdirSync(dir, { withFileTypes: true }) as Dirent[]; } catch { return; }
-    for (const e of es) {
-      if (e.name.startsWith(".")) continue;
-      const abs = join(dir, e.name);
-      const r = rel === "" ? e.name : `${rel}/${e.name}`;
-      if (e.isDirectory()) recur(abs, r);
-      else if (e.isFile() && isAllowedFile(r)) files.push(toPosix(r));
-    }
-  })(root, "");
-
   const entries: KnowledgeEntry[] = [];
-  for (const rel of files) {
+  for (const rel of collectDocPathsInFolder(docsRoot(), "")) {
     const abs = absDocPath(rel);
     try {
-      const st = statSync(abs);
       const content = isTextFile(rel) ? readFileSync(abs, "utf-8") : "";
-      entries.push({
-        id: rel,
-        title: isTextFile(rel) ? deriveTitleFromContent(content, rel) : filenameTitle(rel),
-        content,
-        source: "user",
-        createdAt: st.ctimeMs,
-        updatedAt: st.mtimeMs,
-      });
+      entries.push(describeEntry(rel, content));
     } catch (err) {
       logger.error("knowledge-store", "read doc failed", { rel, error: String(err) });
     }
@@ -196,15 +178,7 @@ export function getEntry(entryId: string): KnowledgeEntry | null {
   if (!existsSync(abs)) return null;
   try {
     const content = readFileSync(abs, "utf-8");
-    const st = statSync(abs);
-    return {
-      id: rel,
-      title: deriveTitleFromContent(content, rel),
-      content,
-      source: "user",
-      createdAt: st.ctimeMs,
-      updatedAt: st.mtimeMs,
-    };
+    return describeEntry(rel, content);
   } catch { return null; }
 }
 
@@ -238,8 +212,7 @@ export function addEntry(
   mkdirSync(dirname(abs), { recursive: true });
 
   writeFileSync(abs, content, "utf-8");
-  const st = statSync(abs);
-  return { id: rel, title: deriveTitleFromContent(content, rel), content, source, createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
+  return describeEntry(rel, content, source);
 }
 
 export function updateEntry(
@@ -254,15 +227,7 @@ export function updateEntry(
   const abs = absDocPath(rel);
   if (!existsSync(abs)) return null;
   writeFileSync(abs, content, "utf-8");
-  const st = statSync(abs);
-  return {
-    id: rel,
-    title: deriveTitleFromContent(content, rel),
-    content,
-    source: "user",
-    createdAt: st.ctimeMs,
-    updatedAt: st.mtimeMs,
-  };
+  return describeEntry(rel, content);
 }
 
 export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
@@ -277,8 +242,7 @@ export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
   const abs = absDocPath(rel);
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, data);
-  const st = statSync(abs);
-  return { id: rel, title: filenameTitle(rel), content: "", source: "user", createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
+  return describeEntry(rel, "");
 }
 
 export function deleteEntry(entryId: string): boolean {
@@ -306,9 +270,7 @@ export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
   mkdirSync(dirname(toAbs), { recursive: true });
   renameSync(fromAbs, toAbs);
   cleanupEmptyParentDirs(dirname(fromAbs));
-  if (isTextFile(toRel)) return getEntry(toRel);
-  const st = statSync(toAbs);
-  return { id: toRel, title: filenameTitle(toRel), content: "", source: "user", createdAt: st.ctimeMs, updatedAt: st.mtimeMs };
+  return isTextFile(toRel) ? getEntry(toRel) : describeEntry(toRel, "");
 }
 
 export function moveFolder(
@@ -401,29 +363,14 @@ function cleanupEmptyParentDirs(startDir: string): void {
 }
 
 function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
-  const out: string[] = [];
-  const walk = (absDir: string, relDir: string): void => {
-    let entries: Dirent[] = [];
-    try {
-      entries = readdirSync(absDir, { withFileTypes: true }) as Dirent[];
-    } catch {
-      return;
-    }
-
-    for (const e of entries) {
-      if (e.name.startsWith(".")) continue;
-      const childAbs = join(absDir, e.name);
-      const childRel = relDir ? `${relDir}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        walk(childAbs, childRel);
-      } else if (e.isFile() && isAllowedFile(childRel)) {
-        out.push(toPosix(childRel));
-      }
-    }
-  };
-
-  walk(absFolder, relPrefix);
-  return out;
+  let entries: Dirent[];
+  try { entries = readdirSync(absFolder, { withFileTypes: true }) as Dirent[]; } catch { return []; }
+  return entries.flatMap(entry => {
+    if (entry.name.startsWith(".")) return [];
+    const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return collectDocPathsInFolder(join(absFolder, entry.name), rel);
+    return entry.isFile() && isAllowedFile(rel) ? [toPosix(rel)] : [];
+  });
 }
 
 export function slugify(input: string): string {

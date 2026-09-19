@@ -45,6 +45,23 @@ interface RollupRowWithRoom extends RollupRow {
   room_id: string;
 }
 
+interface UsageTotals { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }
+function emptyTotals(): UsageTotals { return { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }; }
+function addTotals(total: UsageTotals, row: RollupRow): void {
+  total.inputTokens += row.input_tokens; total.outputTokens += row.output_tokens;
+  total.cacheRead += row.cache_read; total.cacheWrite += row.cache_write;
+  total.cost += row.cost; total.turns += row.turns;
+}
+function grouped<R extends RollupRow, T extends UsageTotals>(
+  rows: R[], keyOf: (row: R) => string | undefined, create: (row: R) => T,
+): T[] {
+  const groups = new Map<string, T>();
+  for (const row of rows) {
+    const key = keyOf(row); if (key === undefined) continue;
+    const group = groups.get(key) ?? create(row); groups.set(key, group); addTotals(group, row);
+  }
+  return [...groups.values()].sort((a, b) => b.inputTokens - a.inputTokens);
+}
 function cacheHitRate(inputTokens: number, cacheRead: number): number {
   const denom = inputTokens + cacheRead;
   return denom > 0 ? cacheRead / denom : 0;
@@ -104,14 +121,7 @@ export function aggregateUsage(
   memberMeta: Map<string, { name: string; agent: string }>,
 ): { kpis: Kpis; series: any[]; breakdown: BreakdownRow[]; byAgent: AgentBucket[] } {
   const kpis = emptyKpis();
-  for (const r of rows) {
-    kpis.inputTokens += r.input_tokens;
-    kpis.outputTokens += r.output_tokens;
-    kpis.cacheRead += r.cache_read;
-    kpis.cacheWrite += r.cache_write;
-    kpis.cost += r.cost;
-    kpis.turns += r.turns;
-  }
+  rows.forEach(row => addTotals(kpis, row));
   kpis.cacheHitRate = cacheHitRate(kpis.inputTokens, kpis.cacheRead);
 
   const seriesMap = new Map<
@@ -137,53 +147,13 @@ export function aggregateUsage(
   }
   const series = [...seriesMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  const breakdownMap = new Map<string, BreakdownRow>();
-  for (const r of rows) {
-    if (!r.member_id) continue;
-    const key = `${r.member_id}\u0000${r.model}`;
-    let b = breakdownMap.get(key);
-    if (!b) {
-      const meta = memberMeta.get(r.member_id);
-      b = {
-        memberId: r.member_id,
-        memberName: meta?.name,
-        agent: meta?.agent,
-        model: r.model,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0,
-        turns: 0,
-      };
-      breakdownMap.set(key, b);
-    }
-    b.inputTokens += r.input_tokens;
-    b.outputTokens += r.output_tokens;
-    b.cacheRead += r.cache_read;
-    b.cacheWrite += r.cache_write;
-    b.cost += r.cost;
-    b.turns += r.turns;
-  }
-  const breakdown = [...breakdownMap.values()].sort((a, b) => b.inputTokens - a.inputTokens);
-
-  const agentMap = new Map<string, AgentBucket>();
-  for (const r of rows) {
-    if (!r.member_id) continue;
-    const agent = memberMeta.get(r.member_id)?.agent || r.member_id;
-    let a = agentMap.get(agent);
-    if (!a) {
-      a = { agent, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
-      agentMap.set(agent, a);
-    }
-    a.inputTokens += r.input_tokens;
-    a.outputTokens += r.output_tokens;
-    a.cacheRead += r.cache_read;
-    a.cacheWrite += r.cache_write;
-    a.cost += r.cost;
-    a.turns += r.turns;
-  }
-  const byAgent = [...agentMap.values()].sort((a, b) => b.inputTokens - a.inputTokens);
+  const breakdown = grouped<RollupRow, BreakdownRow>(rows,
+    r => r.member_id ? `${r.member_id}\u0000${r.model}` : undefined,
+    r => ({ ...emptyTotals(), memberId: r.member_id!, memberName: memberMeta.get(r.member_id!)?.name,
+      agent: memberMeta.get(r.member_id!)?.agent, model: r.model }));
+  const byAgent = grouped<RollupRow, AgentBucket>(rows,
+    r => r.member_id ? memberMeta.get(r.member_id)?.agent || r.member_id : undefined,
+    r => ({ ...emptyTotals(), agent: memberMeta.get(r.member_id!)?.agent || r.member_id! }));
 
   return { kpis, series, breakdown, byAgent };
 }
@@ -269,27 +239,14 @@ export function aggregatePlatformUsage(
   series: any[];
   breakdown: BreakdownRow[];
   byAgent: AgentBucket[];
-  byRoom: Array<{ roomId: string; roomName?: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }>;
+  byRoom: RoomBucket[];
 } {
   // Reuse the single-room aggregation for kpis/series/breakdown/byAgent — the
   // member ids are globally unique (rm_<uuid>) so cross-room mixing is safe.
   const base = aggregateUsage(rows, memberMeta);
 
-  const roomMap = new Map<string, { roomId: string; roomName?: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }>();
-  for (const r of rows) {
-    let rm = roomMap.get(r.room_id);
-    if (!rm) {
-      rm = { roomId: r.room_id, roomName: roomNames.get(r.room_id), inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
-      roomMap.set(r.room_id, rm);
-    }
-    rm.inputTokens += r.input_tokens;
-    rm.outputTokens += r.output_tokens;
-    rm.cacheRead += r.cache_read;
-    rm.cacheWrite += r.cache_write;
-    rm.cost += r.cost;
-    rm.turns += r.turns;
-  }
-  const byRoom = [...roomMap.values()].sort((a, b) => b.inputTokens - a.inputTokens);
+  const byRoom = grouped(rows, r => r.room_id,
+    r => ({ ...emptyTotals(), roomId: r.room_id, roomName: roomNames.get(r.room_id) }));
 
   return { ...base, byRoom };
 }
@@ -323,18 +280,8 @@ addRoute("GET", "/api/usage", async (req, res) => {
   });
 });
 
-interface Kpis {
-  cost: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cacheHitRate: number;
-  turns: number;
-}
-function emptyKpis(): Kpis {
-  return { cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cacheHitRate: 0, turns: 0 };
-}
+interface Kpis extends UsageTotals { cacheHitRate: number }
+function emptyKpis(): Kpis { return { ...emptyTotals(), cacheHitRate: 0 }; }
 
 interface ModelBucket {
   cost: number;
@@ -352,25 +299,6 @@ function addToBucket(b: ModelBucket, r: RollupRow): void {
   b.cacheRead += r.cache_read;
 }
 
-interface BreakdownRow {
-  memberId: string;
-  memberName?: string;
-  agent?: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-  turns: number;
-}
-
-interface AgentBucket {
-  agent: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-  turns: number;
-}
+interface BreakdownRow extends UsageTotals { memberId: string; memberName?: string; agent?: string; model: string }
+interface AgentBucket extends UsageTotals { agent: string }
+interface RoomBucket extends UsageTotals { roomId: string; roomName?: string }
