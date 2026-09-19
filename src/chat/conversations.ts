@@ -124,11 +124,6 @@ export function normalizeMemberName(name: string): string {
 }
 
 
-
-export function roomMemberNames(room: Room): string[] {
-  return getRoomMembersFromRoom(room).map((member) => member.name);
-}
-
 export function slugifyRoomDocsPath(input: string): string {
   const slug = String(input || "")
     .trim()
@@ -362,14 +357,6 @@ export function getRoomMembers(roomId: string): RoomMemberRecord[] {
   return room ? getRoomMembersFromRoom(room) : [];
 }
 
-export function findRoomMemberById(roomId: string, memberId: string): RoomMemberRecord | null {
-  return getRoomMembers(roomId).find(member => member.id === memberId) || null;
-}
-
-export function findRoomMemberByName(roomId: string, name: string): RoomMemberRecord | null {
-  return getRoomMembers(roomId).find(member => member.name === normalizeMemberName(name)) || null;
-}
-
 export function resolveRoomMemberRef(roomId: string, ref: string): RoomMemberRecord | null {
   const room = readStoredRoom(roomId);
   return room ? findRoomMemberByRefInRoom(room, ref) : null;
@@ -433,11 +420,6 @@ export function updateRoomMemberOverride(roomId: string, memberRef: string, patc
   return room;
 }
 
-export function hasRoomMemberModelOverride(roomId: string, memberName: string): boolean {
-  const override = getRoomMemberOverride(roomId, memberName);
-  return typeof override?.model === "string" && override.model.length > 0;
-}
-
 export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
   return changeRoom(roomId, room => {
     if (ruleDocs.length) room.ruleDocs = ruleDocs;
@@ -497,10 +479,6 @@ export function listMmScopesForMember(memberId: string): string[] {
 }
 
 // -- Cursors --
-export function getCursors(roomId: string): CursorMap {
-  return readMemberCursors(roomId, getDatabase());
-}
-
 export function setCursor(roomId: string, agentName: string, cursor: string | null): void {
   storeMemberCursor(roomId, agentName, cursor, undefined, getDatabase());
 }
@@ -519,18 +497,6 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
     "SELECT id FROM messages WHERE scope_id=? ORDER BY seq DESC LIMIT 1", roomId,
   )?.id ?? null;
   setCursor(roomId, memberId, latestId);
-}
-
-/** Append global member id onto room.globalMemberIds if missing. */
-
-
-export function removeGlobalMemberId(roomId: string, globalMemberId: string): Room | null {
-  if (!globalMemberId) return null;
-  return changeRoom(roomId, room => {
-    room.globalMemberIds = (room.globalMemberIds || []).filter(id => id !== globalMemberId);
-    if (room.promptLeaderMemberId === globalMemberId) delete room.promptLeaderMemberId;
-    if (room.promptLeaderGlobalMemberId === globalMemberId) delete room.promptLeaderGlobalMemberId;
-  });
 }
 
 /**
@@ -771,42 +737,9 @@ export function chatScopeRoomId(scopeOrRoomId: string): string | null {
   return scopeOrRoomId.startsWith(ROOM_PREFIX) ? scopeOrRoomId.slice(ROOM_PREFIX.length) : scopeOrRoomId;
 }
 
-/**
- * Filesystem-safe directory segment for a scope under a member tree.
- * - dm:<memberId> → "dm"
- * - room:<roomId> → "room-<roomId>"
- */
-export function scopeDirName(refOrScope: ConversationRef | ScopeId): string {
-  const ref = typeof refOrScope === "string" ? parseScopeId(refOrScope) : refOrScope;
-  if (!ref) throw new Error(`invalid scope for directory name: ${String(refOrScope)}`);
-  if (ref.kind === "dm") return "dm";
-  return `room-${ref.roomId}`;
-}
-
-/** Inverse of scopeDirName when the memberId context is known (for dm). */
-export function parseScopeDirName(dirName: string, memberIdForDm: string): ConversationRef | null {
-  if (dirName === "dm") {
-    if (!memberIdForDm) return null;
-    return { kind: "dm", memberId: memberIdForDm };
-  }
-  if (dirName.startsWith("room-")) {
-    const roomId = dirName.slice("room-".length);
-    if (!roomId) return null;
-    return { kind: "room", roomId };
-  }
-  return null;
-}
-
 /** Wide member-id check: recognizes legacy `mem_<uuid>` and current `mem_<nanoid10>` ids. */
 export function isMemberId(id: string): boolean {
   return typeof id === "string" && /^mem_[A-Za-z0-9-]+$/.test(id);
-}
-
-/** Room id for asset inheritance (room → self; dm → null). */
-export function parentRoomIdOf(refOrScope: ConversationRef | ScopeId): string | null {
-  const ref = typeof refOrScope === "string" ? parseScopeId(refOrScope) : refOrScope;
-  if (!ref) return null;
-  return ref.kind === "room" ? ref.roomId : null;
 }
 
 interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null }
