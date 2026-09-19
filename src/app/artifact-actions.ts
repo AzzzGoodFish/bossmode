@@ -1,8 +1,7 @@
-import {existsSync,readFileSync,realpathSync} from "node:fs";
 import {extname,resolve} from "node:path";
 import {getRoom,roomMemberAssetRoots} from "../chat/conversations.js";
+import {locateReadableFile,readFileBytes} from "../files/io.js";
 import {documentsRoot} from "../files/layout.js";
-import {checkPath} from "../kernel/path.js";
 import {getEntry} from "../knowledge/documents.js";
 
 const MAX_PREVIEW_BYTES=2*1024*1024;
@@ -23,7 +22,6 @@ function typeOf(path:string):ArtifactType|null{
   if(TEXT_EXTENSIONS.has(extension)||TEXT_FILENAMES.has((path.split(/[\\/]/).pop()||"").toLowerCase()))return "text";
   return null;
 }
-function real(path:string):string|null{try{return realpathSync(path);}catch{return null;}}
 function validated(roomId:string,originalPath:string):{normalized:string;type:ArtifactType;roots:string[]}|ArtifactFailure{
   if(!getRoom(roomId))return {ok:false,error:"Room not found",status:404};
   if(!originalPath)return {ok:false,error:"path query parameter is required",status:400};
@@ -34,16 +32,11 @@ function validated(roomId:string,originalPath:string):{normalized:string;type:Ar
 }
 export function resolveArtifact(roomId:string,originalPath:string):ArtifactResolution{
   const input=validated(roomId,originalPath);if("ok" in input)return input;
-  const knowledgeRoot=documentsRoot(),allowed=[real(knowledgeRoot),...input.roots.map(real)].filter((path):path is string=>Boolean(path));
-  const candidates=[resolve(knowledgeRoot,input.normalized),...input.roots.map(root=>resolve(root,originalPath))];
+  const root=documentsRoot(),candidates=[resolve(root,input.normalized),...input.roots.map(value=>resolve(value,originalPath))];
   if(originalPath.startsWith("/"))candidates.push(originalPath);
-  for(const candidate of new Set(candidates)){
-    if(!existsSync(candidate))continue;
-    const checked=checkPath(candidate,{allowedPrefixes:allowed,maxSizeBytes:MAX_PREVIEW_BYTES});
-    if(!checked.ok)return {ok:false,error:checked.error,status:400};
-    return {ok:true,path:checked.absolutePath,size:checked.size,type:input.type,normalized:input.normalized};
-  }
-  return {ok:false,error:`Artifact not found: ${originalPath}`,status:404};
+  const located=locateReadableFile(candidates,[root,...input.roots],MAX_PREVIEW_BYTES);
+  if(!located.ok)return {ok:false,error:located.code==="not_found"?`Artifact not found: ${originalPath}`:located.error,status:located.code==="not_found"?404:400};
+  return {ok:true,path:located.path,size:located.size,type:input.type,normalized:input.normalized};
 }
 export function readArtifactPreview(roomId:string,originalPath:string):ArtifactPreview{
   const input=validated(roomId,originalPath);if("ok" in input)return input;
@@ -52,7 +45,8 @@ export function readArtifactPreview(roomId:string,originalPath:string):ArtifactP
     if(entry)return {ok:true,type:input.type,originalPath,path:entry.id,title:entry.title,content:entry.content};
   }
   const artifact=resolveArtifact(roomId,originalPath);if(!artifact.ok)return artifact;
+  const bytes=readFileBytes(artifact.path);
   return {ok:true,type:artifact.type,originalPath,path:artifact.normalized,
     title:artifact.normalized.split(/[\\/]/).pop()||artifact.normalized,
-    content:artifact.type==="image"?readFileSync(artifact.path):readFileSync(artifact.path,"utf8")};
+    content:artifact.type==="image"?bytes:bytes.toString("utf8")};
 }
