@@ -35,8 +35,6 @@ export interface MessageSearchOptions {
   fromMemberId?: string;
   after?: number;
   before?: number;
-  type?: string;
-  aroundSeq?: number;
   offset?: number;
   limit?: number;
 }
@@ -279,31 +277,23 @@ export function pageMessages(scope: string, options: MessagePageOptions = {}, db
   }
   if (options.fromSeq !== undefined) {
     const first = db.get<{ position: number }>(
-      `SELECT position FROM messages WHERE ${where} AND seq>? ORDER BY position LIMIT 1`,
-      ...params, options.fromSeq,
-    );
+      `SELECT position FROM messages WHERE ${where} AND seq>? ORDER BY position LIMIT 1`, ...params, options.fromSeq);
     if (!first) return [];
     where += " AND position>=?";
     params.push(first.position);
   }
-  return db.all<MessageRow>(
-    `SELECT * FROM messages WHERE ${where} ORDER BY position DESC LIMIT ?`,
-    ...params, limit,
-  ).reverse().map((row) => hydrate(db, row));
+  return db.all<MessageRow>(`SELECT * FROM messages WHERE ${where} ORDER BY position DESC LIMIT ?`, ...params, limit)
+    .reverse().map(row => hydrate(db, row));
 }
 
 export function searchMessages(scope: string, options: MessageSearchOptions = {}, db: Database = getDatabase()): MessageSearchResult {
   const scopeId = storageScopeId(scope);
-  if (options.aroundSeq !== undefined) {
-    const row = db.get<{ position: number }>("SELECT position FROM messages WHERE scope_id=? AND seq=?", scopeId, options.aroundSeq);
-    return row ? { total: 1, messages: around(db, scopeId, row.position, Math.max(1, Math.min(options.limit ?? 30, 500))) } : { total: 0, messages: [] };
-  }
   const params: unknown[] = [scopeId];
   let where = "scope_id=?";
   if (options.query) { where += " AND instr(content_lower,?)>0"; params.push(options.query.toLowerCase()); }
   for (const [column, operator, value] of [
     ["sender", "=", options.from], ["sender_member_id", "=", options.fromMemberId],
-    ["ts", ">=", options.after], ["ts", "<", options.before], ["type", "=", options.type],
+    ["ts", ">=", options.after], ["ts", "<", options.before],
   ] as const) {
     if (value !== undefined && value !== "") { where += ` AND ${column}${operator}?`; params.push(value); }
   }
