@@ -525,9 +525,20 @@ export interface RoomMessageAttachment {
 export interface MemberIdentity { id: string; name: string }
 
 export async function getMemberIdentities(signal?: AbortSignal): Promise<MemberIdentity[]> {
-  const result = await apiFetch<{members: MemberIdentity[]}>("/api/members", {signal});
+  const result = await apiFetch<{members: unknown}>("/api/members/identities", {signal});
   if (!Array.isArray(result.members)) throw new Error("Invalid member identity response");
-  return result.members;
+  const seen = new Set<string>();
+  for (const value of result.members) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid member identity response");
+    const row = value as Record<string, unknown>;
+    const keys = Object.keys(row).sort();
+    if (keys.length !== 2 || keys[0] !== "id" || keys[1] !== "name"
+      || typeof row.id !== "string" || !row.id || typeof row.name !== "string" || !row.name || seen.has(row.id)) {
+      throw new Error("Invalid member identity response");
+    }
+    seen.add(row.id);
+  }
+  return result.members as MemberIdentity[];
 }
 
 export interface RoomMessage {

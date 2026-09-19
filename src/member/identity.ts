@@ -3,6 +3,7 @@ import { newMemberId } from "../kernel/ids.js";
 import { validateArchivePath } from "../files/layout.js";
 export interface MemberGlobalConfig { model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[]; }
 export interface MemberRecord { id:string;name:string;title?:string;agentTemplate:string;global:MemberGlobalConfig;createdAt:number;updatedAt:number; }
+export interface MemberIdentityProjection { id: string; name: string; }
 export interface CreateMemberInput {
   name?: string; title?: string; agentTemplate?: string;
   model?: string | null; credentialId?: string | null; thinkingLevel?: string | null;
@@ -54,6 +55,17 @@ export function getRetainedMember(id: string, db: Database = getDatabase()): Mem
 }
 export function listMembers(db: Database = getDatabase()): MemberRecord[] {
   return db.all<MemberRow>("SELECT * FROM members WHERE archived_at IS NULL").map(decodeMember).sort((a, b) => a.name.localeCompare(b.name));
+}
+/** Complete retained identity snapshot for historical display. This projection
+ * never grants access to archived members or infers identities from archives. */
+export function listMemberIdentityDirectory(db: Database = getDatabase()): MemberIdentityProjection[] {
+  const rows = db.all<MemberIdentityProjection>("SELECT id,name FROM members ORDER BY id");
+  for (const row of rows) {
+    if (typeof row.id !== "string" || !row.id || typeof row.name !== "string" || !row.name) {
+      throw new Error("Invalid retained member identity");
+    }
+  }
+  return rows.map(({ id, name }) => ({ id, name }));
 }
 export function findMemberByName(name: string, db: Database = getDatabase()): MemberRecord | null {
   const key = normalizeMemberName(name).toLowerCase();

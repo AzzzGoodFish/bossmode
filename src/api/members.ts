@@ -5,7 +5,7 @@ import { readMemberProfile, InvalidProfileError } from "../member/profile.js";
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
 import { addRoute, HttpError, sendJson, parseBody } from "./http.js";
-import { listMembers, getMember, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
+import { listMemberIdentityDirectory, listMembers, getMember, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
@@ -64,6 +64,11 @@ function memberError(error: unknown): never {
 
 addRoute("GET", "/api/members", async (_req, res) => {
   sendJson(res, 200, { members: listMembers().map(member => publicMember(member, true)) });
+});
+
+/** Retained id/name directory for projecting historical message authors. */
+addRoute("GET", "/api/members/identities", async (_req, res) => {
+  sendJson(res, 200, { members: listMemberIdentityDirectory() });
 });
 
 addRoute("POST", "/api/members", async (req, res) => {
