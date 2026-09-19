@@ -7,14 +7,6 @@ import { defined, objectJson, parseObject, requireObject } from "../kernel/json.
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";
 
-export interface BossmodeMcpSettingsStatus {
-  enabled: boolean;
-  configPath: string;
-  configText: string;
-  serverCount: number;
-  exists: boolean;
-}
-
 export function getBossmodeMcpDir(): string {
   return join(getBossmodeDir(), "mcp");
 }
@@ -112,8 +104,6 @@ export function readMemberMcpConfig(memberId: string): Record<string, unknown> |
   const repo = getDatabase();
   return hasMcpConfiguration(`member:${memberId}`, repo) ? readMcpConfiguration(`member:${memberId}`, repo) : null;
 }
-
-export interface MaterializedMcpConfig { configPath: string; serverNames: string[]; dispose(): void }
 
 export function filterMcpConfigForServers(config: unknown, serverNames: string[]): Record<string, unknown> {
   const servers = getMcpServersObject(config);

@@ -174,8 +174,6 @@ export function memberSshKeyPath(memberId: string): string { return join(memberD
 
 export function readMemberSshPublicKey(memberId: string): string | null { return readSshCredential(memberId)?.publicKey.trim() ?? null; }
 
-export interface MaterializedSshCredential { keyPath: string; configPath?: string; dispose(): void }
-
 export interface OriginalWorkspace {
   id: string;
   kind: "original";

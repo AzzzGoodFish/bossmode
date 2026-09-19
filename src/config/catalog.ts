@@ -126,148 +126,30 @@ export async function ensurePiCatalogWarm(): Promise<void> {
 
 const PI_DEV_CATALOG_BASE = "https://pi.dev";
 
-function thinkingMapSignature(model: any): string {
-  const map = model?.thinkingLevelMap;
-  if (!map || typeof map !== "object") return "";
-  return Object.keys(map)
-    .filter((k) => (map as any)[k] != null)
-    .sort()
-    .join(",");
-}
-
-function catalogHasRemoteEvidence(bundled: any[], candidate: any[]): boolean {
-  if (!candidate.length) return false;
-  const bundledByKey = new Map(bundled.map((m) => [`${m.provider}/${m.id}`, m]));
-  for (const m of candidate) {
-    const key = `${m.provider}/${m.id}`;
-    const base = bundledByKey.get(key);
-    if (!base) return true;
-    if (thinkingMapSignature(m) !== thinkingMapSignature(base)) return true;
-    if ((positiveNumber(m.contextWindow) ?? 0) !== (positiveNumber(base.contextWindow) ?? 0)) return true;
-    if ((positiveNumber(m.maxTokens, m.max_output_tokens) ?? 0) !== (positiveNumber(base.maxTokens, base.max_output_tokens) ?? 0)) return true;
-  }
-  return false;
-}
-
-function parsePiDevProviderCatalog(providerId: string, value: unknown): any[] {
-  const entries = Array.isArray(value)
-    ? value
-    : typeof value === "object" && value !== null && Array.isArray((value as any).models)
-      ? (value as any).models
-      : typeof value === "object" && value !== null
-        ? Object.values(value as Record<string, unknown>)
-        : [];
-  return (entries as unknown[])
-    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && "id" in (entry as object))
-    .map((model: Record<string, unknown>) => ({ ...model, provider: providerId, id: String(model.id) }));
-}
-
-async function fetchPiDevProviderModels(
-  providerId: string,
-  signal?: AbortSignal,
-): Promise<{ models: any[]; lastModified: number; etag?: string }> {
-  const url = new URL(`/api/models/providers/${encodeURIComponent(providerId)}`, PI_DEV_CATALOG_BASE);
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-    signal,
-  });
-  if (response.status === 404 || response.status === 501) return { models: [], lastModified: 0 };
-  if (!response.ok) throw new Error(`pi.dev catalog ${providerId}: HTTP ${response.status}`);
-  const models = parsePiDevProviderCatalog(providerId, await response.json());
-  const parsedLm = Date.parse(response.headers.get("last-modified") ?? "");
-  const lastModified = Number.isFinite(parsedLm) && !Number.isNaN(parsedLm) ? parsedLm : Date.now();
-  const etag = response.headers.get("etag") ?? undefined;
-  return { models, lastModified, ...(etag ? { etag } : {}) };
-}
-
-export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number }): Promise<{
-  source: CatalogRefreshSource;
-  error?: string;
-  fetchedAt?: number | null;
-}> {
-  // Test injection short-circuits network so unit tests can control the catalog.
-  const networkHook = getCatalogNetworkRefreshForTests();
-  if (networkHook) return networkHook();
-  if (getPiCatalogModelsForTests()) return { source: "remote", fetchedAt: getCatalog().fetchedAt };
-  const timeoutMs = options?.timeoutMs ?? 15_000;
-
+export async function refreshPiCatalogFromNetwork(options?: { timeoutMs?: number }): Promise<{source:CatalogRefreshSource;error?:string;fetchedAt?:number|null}> {
   try {
-    await ensureCatalogRegistry(); // pure bundled registry (offline)
-    const bundled = loadBundledCatalogSync();
-    if (bundled.length === 0) {
-      const kept = retainLastGoodCatalog("bundled_empty");
-      return { source: kept.source, error: "Packaged model catalog is empty", fetchedAt: kept.fetchedAt };
-    }
-
-    const providerIds = new Set<string>();
-    for (const m of bundled) if (m?.provider) providerIds.add(String(m.provider));
-    for (const p of BUILTIN_API_KEY_PROVIDERS) providerIds.add(p);
-    for (const p of OAUTH_PROVIDERS) providerIds.add(p);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const merged = new Map<string, any>(bundled.map((m) => [`${m.provider}/${m.id}`, m]));
-    const providerFetchMeta = new Map<string, { lastModified: number; etag?: string; models: any[] }>();
-    let providersFetched = 0;
-    let lastError: string | undefined;
+    await ensureCatalogRegistry();
+    const bundled=loadBundledCatalogSync();
+    if(!bundled.length)return {source:getCatalog().source,error:"Packaged model catalog is empty"};
+    const providers=new Set([...bundled.map(model=>String(model.provider)),...BUILTIN_API_KEY_PROVIDERS,...OAUTH_PROVIDERS]);
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),options?.timeoutMs??15_000);
+    const merged=new Map(bundled.map(model=>[`${model.provider}/${model.id}`,model]));
+    const overlays:Record<string,ProviderModelsStoreEntry>={};let fetched=0,lastError:string|undefined;
     try {
-      for (const providerId of providerIds) {
-        if (controller.signal.aborted) break;
-        try {
-          const remote = await fetchPiDevProviderModels(providerId, controller.signal);
-          if (remote.models.length === 0) continue;
-          providersFetched += 1;
-          providerFetchMeta.set(providerId, remote);
-          for (const model of remote.models) {
-            merged.set(`${model.provider}/${model.id}`, model);
-          }
-        } catch (err) {
-          lastError = err instanceof Error ? err.message : String(err);
-        }
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-
-    const candidate = Array.from(merged.values());
-
-    if (providersFetched === 0) {
-      // No provider shard applied — keep last-good (never clear).
-      const kept = retainLastGoodCatalog(
-        "no_provider_data",
-        lastError || "Remote catalog fetch did not return any provider data",
-      );
-      return {
-        source: kept.source,
-        error: lastError || "Remote catalog fetch did not return any provider data",
-        fetchedAt: kept.fetchedAt,
-      };
-    }
-
-    const fetchedAt = Date.now();
-    // Commit whenever remote data arrived — even if identical to bundled — so freshness advances.
-    // Evidence gate only affects logging; content is still the merged candidate.
-    const hasEvidence = catalogHasRemoteEvidence(bundled, candidate);
-    const overlays = buildProviderOverlaysFromFetch(candidate, providerFetchMeta, fetchedAt);
-    getDatabase().transaction(() => {
-      commitRemoteCatalog(candidate, fetchedAt);
-      publishProviderModels(overlays);
-    });
-    if (!hasEvidence) {
-      logger.info("catalog", "remote refresh matched bundled metadata; overlay still committed for freshness", {
-        modelCount: candidate.length,
-      });
-    }
-    return { source: "remote", fetchedAt };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const kept = retainLastGoodCatalog("refresh_exception", message);
-    try { await ensurePiCatalogWarm(); } catch { /* ignore */ }
-    return {
-      source: kept.source,
-      error: message,
-      fetchedAt: kept.fetchedAt,
-    };
+      for(const provider of providers)try{
+        const response=await fetch(new URL(`/api/models/providers/${encodeURIComponent(provider)}`,PI_DEV_CATALOG_BASE),{headers:{accept:"application/json"},signal:controller.signal});
+        if(!response.ok){if(response.status!==404&&response.status!==501)lastError=`pi.dev catalog ${provider}: HTTP ${response.status}`;continue;}
+        const value=await response.json() as any,items=Array.isArray(value)?value:Array.isArray(value?.models)?value.models:Object.values(value??{});
+        const models=items.filter((item:any)=>item&&item.id).map((item:any)=>({...item,provider,id:String(item.id)}));
+        if(!models.length)continue;fetched++;models.forEach((model:any)=>merged.set(`${provider}/${model.id}`,model));
+        overlays[provider]={models,lastModified:Date.parse(response.headers.get("last-modified")??"")||Date.now(),checkedAt:Date.now(),etag:response.headers.get("etag")??undefined};
+      }catch(error){lastError=error instanceof Error?error.message:String(error);}
+    }finally{clearTimeout(timer);}
+    if(!fetched){const snap=getCatalog();return {source:snap.source,error:lastError??"Remote catalog returned no provider data",fetchedAt:snap.fetchedAt};}
+    const models=[...merged.values()],fetchedAt=Date.now();getDatabase().transaction(()=>{commitRemoteCatalog(models,fetchedAt);publishProviderModels(overlays);});
+    return {source:"remote",fetchedAt};
+  } catch(error) {
+    const snap=getCatalog();return {source:snap.source,error:error instanceof Error?error.message:String(error),fetchedAt:snap.fetchedAt};
   }
 }
 
@@ -494,56 +376,10 @@ export interface ProviderModelsStoreEntry {
   etag?: string;
 }
 
-let bundledLoader: () => any[] = loadBundledCatalogSync;
-
-let testModels: any[] | null = null;
-
-let networkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) = null;
-
-let remoteModels: any[] | null = null;
-
-let remoteFetchedAt: number | null = null;
-
-export function getCatalogNetworkRefreshForTests(): null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) {
-  return networkRefreshForTests;
-}
-
-export function getPiCatalogModelsForTests(): any[] | null {
-  return testModels;
-}
-
-
-
 export function getCatalog(): CatalogSnapshot {
-  const stored = readRemoteCatalog(getDatabase());
-  const models = remoteModels ?? stored?.models;
-  const fetchedAt = remoteModels ? remoteFetchedAt : stored?.fetchedAt ?? null;
-  if (testModels) {
-    return {
-      models: testModels,
-      source: "remote",
-      fetchedAt,
-      fetchedAtIso: fetchedAt ? new Date(fetchedAt).toISOString() : null,
-      modelCount: testModels.length,
-    };
-  }
-  if (models && models.length > 0) {
-    return {
-      models,
-      source: "remote",
-      fetchedAt,
-      fetchedAtIso: fetchedAt ? new Date(fetchedAt).toISOString() : null,
-      modelCount: models.length,
-    };
-  }
-  const bundled = bundledLoader();
-  return {
-    models: bundled,
-    source: "bundled",
-    fetchedAt: null,
-    fetchedAtIso: null,
-    modelCount: bundled.length,
-  };
+  const stored=readRemoteCatalog(getDatabase()),models=stored?.models.length?stored.models:loadBundledCatalogSync();
+  const fetchedAt=stored?.models.length?stored.fetchedAt:null,source=fetchedAt===null?"bundled":"remote";
+  return {models,source,fetchedAt,fetchedAtIso:fetchedAt?new Date(fetchedAt).toISOString():null,modelCount:models.length};
 }
 
 export function getCatalogModels(): any[] {
