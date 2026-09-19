@@ -225,41 +225,12 @@ export async function compactMember(scopeId: string | null, memberId: string): P
 
 // -- Abort --
 
-export function abortAgent(roomId: string, memberRef: string): { ok: boolean; action: string } {
-  const member = controlServices().resolveMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const memberName = member?.name || memberRef;
-  const key = instanceKey(memberId);
-  cancelPendingRuntimeInputs(memberId,"explicit stop",roomId);
-  const instance = instances.get(key);
-  if (!instance) return { ok: false, action: "not_found" };
-  if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
-
-  // Stop is the sole abort entry.
-  try { settleMemberShellWaits(memberId); } catch { /* ignore */ }
-
-  // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
-  instance.handle.abort();
-  updateDispatchState(instance, "aborting", "abort");
-  if(instance.activeSourceRef)cancelPendingRuntimeInputs(instance.memberId,"explicit stop",instance.activeSourceRef);
-  logger.info("agent", "aborted", { member: memberName, memberId, roomId });
-  return { ok: true, action: "aborted" };
+export function abortAgent(roomId:string,memberRef:string):{ok:boolean;action:string}{
+  const member=controlServices().resolveMember(roomId,memberRef);return abortMember(member?.id??memberRef);
 }
 
 /** Drop the member's live runtime (teardown only; no SQL side effects). */
-function teardownMemberInstance(memberId: string): void {
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  if (!instance) return;
-  invalidateInputScope(key);
-  sessionPublishOwners.delete(key);
-  requestInstanceStop(instance, true);
-  instance.handle.destroy();
-  instance.unsubscribe();
-  if (instances.get(key) === instance) instances.delete(key);
-  contextUsageCache.delete(key);
-  contextCompactionWarningCache.delete(key);
-}
+function teardownMemberInstance(memberId:string):void{destroyInstance(memberId);}
 
 /** Stop the member's current work; queued work in every chat is cancelled. */
 export function abortMember(memberId: string): { ok: boolean; action: string } {

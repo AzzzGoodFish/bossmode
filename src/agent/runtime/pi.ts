@@ -121,9 +121,6 @@ function sessionModelDiffers(sessionManager: SessionManager, provider: string, m
 export class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
-  /** SDK session id when the runtime exposes one (live sessions report
-   *  identity through onSessionChanged instead). */
-  readonly sessionId: string | undefined;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
   private mcpConfigs = new Set<McpRuntimeSettings>();
   private unsubscribeSession: (() => void) | undefined;
@@ -158,7 +155,6 @@ export class PiSdkAgentHandle implements AgentHandle {
   ) {
     if (initialMcpConfig) this.mcpConfigs.add(initialMcpConfig);
     this.runtimeParams = runtimeParams;
-    this.sessionId = session.sessionId;
     this.onTeardownSuccess = onTeardownSuccess;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.executionOwner = executionOwner;
@@ -609,16 +605,10 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   private resourceOperations = new Set<Promise<unknown>>();
-  private trackResourceOperation<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.destroyed) return Promise.reject(new Error("Runtime instance is destroyed"));
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (error: unknown) => void;
-    const pending = new Promise<T>((yes,no) => { resolve=yes; reject=no; });
-    this.resourceOperations.add(pending);
-    // Register ownership first, then start synchronously so an immediate abort
-    // sees manual-compaction admission even before the SDK's first event.
-    try { operation().then(resolve,reject); } catch (error) { reject(error); }
-    return pending.finally(() => this.resourceOperations.delete(pending));
+  private trackResourceOperation<T>(operation:()=>Promise<T>):Promise<T>{
+    if(this.destroyed)return Promise.reject(new Error("Runtime instance is destroyed"));
+    let pending:Promise<T>;try{pending=operation();}catch(error){pending=Promise.reject(error);}
+    this.resourceOperations.add(pending);return pending.finally(()=>this.resourceOperations.delete(pending));
   }
 
   compact(): Promise<{ aborted: boolean }> {
