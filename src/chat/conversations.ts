@@ -1,16 +1,6 @@
 import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
-export interface RoomMemberConfig {
-  model?: string;
-  credentialId?: string;
-  thinkingLevel?: string;
-  contextLimit?: number;
-  skills?: string[];
-  mcpServers?: string[];
-  extensions?: string[];
-}
 export interface RoomMemberRecord {
   id: string;
   roomId?: string;
@@ -18,12 +8,10 @@ export interface RoomMemberRecord {
   sourceAgent: string;
   sourceMemberId?: string;
   avatar?: string;
-  config?: RoomMemberConfig;
   createdAt: number;
   updatedAt: number;
   migratedFrom?: { memberName: string; memberId?: string };
 }
-export interface RoomMemberOverride extends RoomMemberConfig {}
 export interface Room {
   id: string;
   name: string;
@@ -37,7 +25,6 @@ export interface Room {
   promptLeaderGlobalMemberId?: string;
   createdAt: number;
   ruleDocs?: string[];
-  memberOverrides?: Record<string, RoomMemberOverride>;
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
@@ -52,38 +39,6 @@ function serializeRoom(room: Room): Room {
 function writeRoom(room: Room): void {
   room.members = getRoomMembersFromRoom(room).map((member) => member.name);
   storeRoom(serializeRoom(room), getDatabase());
-}
-
-export function createRoomMemberId(): string {
-  return `rm_${randomUUID()}`;
-}
-
-function cleanMemberConfig(config: RoomMemberConfig): RoomMemberConfig {
-  const next: RoomMemberConfig = {};
-  if (config.model) next.model = config.model;
-  if (config.credentialId) next.credentialId = config.credentialId;
-  if (config.thinkingLevel) next.thinkingLevel = config.thinkingLevel;
-  if (typeof config.contextLimit === "number" && Number.isFinite(config.contextLimit)) next.contextLimit = config.contextLimit;
-  if (Array.isArray(config.skills) && config.skills.length > 0) next.skills = Array.from(new Set(config.skills.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
-  if (Array.isArray(config.mcpServers) && config.mcpServers.length > 0) next.mcpServers = Array.from(new Set(config.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
-  if (Array.isArray(config.extensions) && config.extensions.length > 0) next.extensions = Array.from(new Set(config.extensions.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
-  return next;
-}
-
-function buildRoomMemberRecord(roomId: string, memberName: string, override?: RoomMemberOverride, existingId?: string): RoomMemberRecord {
-  const now = Date.now();
-  // Legacy member config must already be materialized by the explicit migration.
-  const config = cleanMemberConfig(override || {});
-  return {
-    id: existingId || createRoomMemberId(),
-    roomId,
-    name: memberName,
-    sourceAgent: memberName,
-    ...(Object.keys(config).length > 0 ? { config } : {}),
-    createdAt: now,
-    updatedAt: now,
-    migratedFrom: { memberName },
-  };
 }
 
 export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
@@ -113,7 +68,9 @@ export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
   if (Array.isArray(room.roomMembers)) {
     return room.roomMembers.map((member) => ({ ...member, roomId: member.roomId || room.id }));
   }
-  return (room.members || []).map((name) => buildRoomMemberRecord(room.id, name, room.memberOverrides?.[name], name));
+  const now = Date.now();
+  return (room.members || []).map((name) => ({ id: name, roomId: room.id, name, sourceAgent: name,
+    createdAt: now, updatedAt: now, migratedFrom: { memberName: name } }));
 }
 
 
@@ -609,7 +566,7 @@ interface RoomRow {
 
 interface SnapshotRow {
   id: string; name: string; source_agent: string; source_member_id: string | null; avatar: string | null;
-  created_at: number; updated_at: number; migrated_name: string | null; migrated_id: string | null; config_json: string | null;
+  created_at: number; updated_at: number; migrated_name: string | null; migrated_id: string | null;
 }
 
 /** Historical references deliberately have no FK to live members. Never resolve names here. */
@@ -638,32 +595,43 @@ export function ensureMmScope(memberA: string, memberB: string, db: Database = g
     return id;
   }
 
+type LegacyRoomInput = Room & {
+  roomMembers?: Array<RoomMemberRecord & { config?: unknown }>;
+  memberOverrides?: Record<string, unknown>;
+};
+
 export function storeRoom(room: Room, db: Database = getDatabase()): void {
-    if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) {
-      throw new Error("Room scope must use the bare room ID");
-    }
+    if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) throw new Error("Room scope must use the bare room ID");
+    const legacy = room as LegacyRoomInput;
     db.transaction(() => {
       ensureConversationScope(room.id, "room", room.id, null, db);
+      const configs = new Map(db.all<{id: string; config_json: string | null}>(
+        "SELECT id,config_json FROM room_member_snapshots WHERE room_id=?", room.id).map(row => [row.id, row.config_json]));
       db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
         roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,created_at=excluded.created_at,legacy_cwd=excluded.legacy_cwd,
         docs_path=excluded.docs_path,description=excluded.description,leader_member_id=excluded.leader_member_id,leader_global_member_id=excluded.leader_global_member_id,
-        roster_kind=excluded.roster_kind,has_local_records=excluded.has_local_records,has_rule_docs=excluded.has_rule_docs,has_overrides=excluded.has_overrides`,
+        roster_kind=excluded.roster_kind,has_local_records=excluded.has_local_records,has_rule_docs=excluded.has_rule_docs`,
         room.id, room.name, room.createdAt, room.cwd ?? null, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null,
         room.promptLeaderGlobalMemberId ?? null, Array.isArray(room.globalMemberIds) ? "global" : Array.isArray(room.roomMembers) ? "local" : "names",
-        Number(Array.isArray(room.roomMembers)), Number(Array.isArray(room.ruleDocs)), Number(room.memberOverrides !== undefined));
-      for (const table of ["room_members", "room_member_labels", "room_member_snapshots", "room_member_overrides", "room_rule_docs"]) {
-        db.run(`DELETE FROM ${table} WHERE room_id=?`, room.id);
-      }
+        Number(Array.isArray(room.roomMembers)), Number(Array.isArray(room.ruleDocs)), Number(legacy.memberOverrides !== undefined));
+      for (const table of ["room_members", "room_member_labels", "room_member_snapshots", "room_rule_docs"]) db.run(`DELETE FROM ${table} WHERE room_id=?`, room.id);
       [...new Set(room.globalMemberIds ?? [])].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
       (room.members ?? []).forEach((label, i) => db.run("INSERT INTO room_member_labels VALUES (?,?,?)", room.id, i, label));
-      (room.roomMembers ?? []).forEach((m, i) => db.run(`INSERT INTO room_member_snapshots
-        (room_id,position,id,name,source_agent,source_member_id,avatar,created_at,updated_at,migrated_name,migrated_id,config_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, room.id, i, m.id, m.name, m.sourceAgent, m.sourceMemberId ?? null,
-        m.avatar ?? null, m.createdAt, m.updatedAt, m.migratedFrom?.memberName ?? null, m.migratedFrom?.memberId ?? null,
-        m.config === undefined ? null : JSON.stringify(m.config)));
-      Object.entries(room.memberOverrides ?? {}).forEach(([label, config]) => db.run(
-        "INSERT INTO room_member_overrides(room_id,member_label,config_json) VALUES (?,?,?)", room.id, label, JSON.stringify(config)));
+      (legacy.roomMembers ?? []).forEach((m, i) => {
+        const config = (m as RoomMemberRecord & { config?: unknown }).config;
+        db.run(`INSERT INTO room_member_snapshots
+          (room_id,position,id,name,source_agent,source_member_id,avatar,created_at,updated_at,migrated_name,migrated_id,config_json)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, room.id, i, m.id, m.name, m.sourceAgent, m.sourceMemberId ?? null,
+          m.avatar ?? null, m.createdAt, m.updatedAt, m.migratedFrom?.memberName ?? null, m.migratedFrom?.memberId ?? null,
+          config === undefined ? configs.get(m.id) ?? null : JSON.stringify(config));
+      });
+      if (legacy.memberOverrides !== undefined) {
+        db.run("UPDATE rooms SET has_overrides=? WHERE id=?", Number(Object.keys(legacy.memberOverrides).length > 0), room.id);
+        db.run("DELETE FROM room_member_overrides WHERE room_id=?", room.id);
+        Object.entries(legacy.memberOverrides).forEach(([label, config]) => db.run(
+          "INSERT INTO room_member_overrides(room_id,member_label,config_json) VALUES (?,?,?)", room.id, label, JSON.stringify(config)));
+      }
       (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
     });
   }
@@ -687,13 +655,10 @@ export function readStoredRoom(id: string, db: Database = getDatabase()): Room |
         id: m.id, roomId: id, name: m.name, sourceAgent: m.source_agent, createdAt: m.created_at, updatedAt: m.updated_at,
         ...(m.source_member_id !== null ? { sourceMemberId: m.source_member_id } : {}),
         ...(m.avatar !== null ? { avatar: m.avatar } : {}),
-        ...(m.config_json !== null ? { config: JSON.parse(m.config_json) } : {}),
         ...(m.migrated_name !== null ? { migratedFrom: { memberName: m.migrated_name, ...(m.migrated_id !== null ? { memberId: m.migrated_id } : {}) } } : {}),
       }));
     if (row.has_rule_docs) room.ruleDocs = db.all<{ path: string }>(
       "SELECT path FROM room_rule_docs WHERE room_id=? ORDER BY position", id).map(r => r.path);
-    if (row.has_overrides) room.memberOverrides = Object.fromEntries(db.all<{ member_label: string; config_json: string }>(
-      "SELECT member_label,config_json FROM room_member_overrides WHERE room_id=?", id).map(r => [r.member_label, JSON.parse(r.config_json)]));
     return room;
   }
 
