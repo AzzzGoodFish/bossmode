@@ -424,9 +424,7 @@ function compositeResidualCount(tx: Database, table: string, column: string, map
   return count;
 }
 
-const isOldMemberId = (value: string): boolean => /mem_[0-9a-f]{8}-[0-9a-f]{4}-/.test(value);
 
-const isOldRoomUuid = (value: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 
 /** A value is residual when the canonical transform would still change it or leaves an old token behind. */
 function jsonResidual(text:string,mapping:ShortIdMapping):boolean{const result=transformJsonText(text,mapping);return result.changed||result.leftovers>0;}

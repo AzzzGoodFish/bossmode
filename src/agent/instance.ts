@@ -93,6 +93,7 @@ export async function settleMemberOperations(memberId?: string): Promise<void> {
   }
 }
 export const instances = new Map<string, AgentInstance>();
+export const activeInstanceCount=():number=>instances.size;
 export const cancelledCreations = new Set<string>();
 export const sessionPublishOwners = new Map<string, object>();
 export const pendingCreations = new Map<string, Promise<AgentInstance | null>>();

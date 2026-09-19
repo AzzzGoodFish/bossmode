@@ -5,7 +5,7 @@ import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, getRegistry } from "./assembly.js";
-import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
+import { hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";

@@ -14,7 +14,8 @@ import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
 import { removePidFile, writePidFile } from "./process.js";
 import { ensurePiCatalogWarm } from "../config/catalog.js";
 import { startCatalogAutoRefreshScheduler } from "../config/models.js";
-import { initializeMemberRuntime, getActiveInstanceCount } from "./member-actions.js";
+import { initializeMemberRuntime } from "./wire.js";
+import { activeInstanceCount } from "../agent/instance.js";
 import { shutdownAll as shutdownAgents } from "../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../agent/scheduler.js";
 import { RuntimeRegistry } from "../agent/types.js";
@@ -154,7 +155,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     logger.info("server", "heartbeat", {
       heapMB: Math.round(mem.heapUsed / 1024 / 1024),
       rssMB: Math.round(mem.rss / 1024 / 1024),
-      activeAgents: getActiveInstanceCount(),
+      activeAgents: activeInstanceCount(),
     });
   }, 60000);
 
@@ -164,7 +165,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const shutdown = async (signal: string) => {
     if (shutdownStarted) return;
     shutdownStarted = true;
-    logger.info("server", `shutdown signal: ${signal}`, {activeInstances:getActiveInstanceCount()});
+    logger.info("server", `shutdown signal: ${signal}`, {activeInstances:activeInstanceCount()});
     const deadline = setTimeout(() => {
       logger.error("server","shutdown deadline exceeded; cleanup remains unconfirmed");
       process.exit(1);
