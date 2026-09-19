@@ -118,15 +118,14 @@ function connectedMemberActions(): MemberHttpActions {
 /** Member prompt preview is member-owned and identical across chat sources. */
 addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
   try {
-    const member = requireMember(params.id);
-    const sourceRef = new URL(req.url || "", "http://localhost").searchParams.get("scope");
-    if (sourceRef) assertMemberScopeAccess(member.id, sourceRef);
+    const sourceRef = sourceQuery(req);
+    const member = authorizedMember(params.id, sourceRef);
     if (!memberHttpActions) throw new Error("Member HTTP actions are not connected");
     const preview = memberHttpActions.previewPrompt(member.id);
     sendJson(res, 200, {
       text: preview.text,
       charCount: preview.text.length,
-      scopeId: sourceRef,
+      scopeId: sourceRef ?? null,
       contractFingerprint: preview.contractFingerprint,
     });
   } catch (error) { memberError(error); }
@@ -247,7 +246,10 @@ function sourceQuery(request: { url?: string }): string | undefined {
 }
 function authorizedMember(memberId: string, sourceRef?: string): MemberRecord {
   const member = requireMember(memberId);
-  if (sourceRef) assertMemberScopeAccess(member.id, sourceRef);
+  if (sourceRef) {
+    try { assertMemberScopeAccess(member.id, sourceRef); }
+    catch (error) { invalidScope(error); }
+  }
   return member;
 }
 function invalidScope(error: unknown): never {
