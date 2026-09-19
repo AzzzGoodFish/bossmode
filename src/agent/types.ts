@@ -1,7 +1,7 @@
 export type AgentStatus="inactive"|"idle"|"working";
 export interface AgentMemberConfig {
-  id:string;name:string;type:"agent";agent:string;title?:string;model?:string;
-  skills?:string[];thinkingLevel:string;contextLimit?:number;credentialId?:string;mcpServers?:string[];createdAt?:number;
+  id:string;name:string;agent:string;title?:string;model?:string;
+  skills?:string[];thinkingLevel:string;credentialId?:string;
 }
 export interface AgentPromptSnapshot {
   agentPrompt: string;
@@ -39,8 +39,6 @@ export interface CreateAgentOpts {
   resources: AgentResourceSnapshot;
   agentPrompt: string;
   appendSystemPrompt: string[];
-  skillPaths: string[];
-  skillNames?: string[];
   resumeSession?: { sessionId?: string; sessionFile?: string };
   sessionDir?: string;
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
@@ -67,17 +65,17 @@ export interface AgentHandle {
   compact(): Promise<{ aborted: boolean }>;
   abort(options?: { preserveCompaction?: boolean }): void;
   destroy(): void;
-  destroyAndWait?(): Promise<void>;
+  destroyAndWait(): Promise<void>;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
-  readonly runtimeName?: string;
-  readonly runtimeParams?: AgentRuntimeParams;
-  setModel?(model: string, credentialId: string): void | Promise<void>;
-  refreshModelRegistry?(opts?: { allowNetwork?: boolean }): void | Promise<void>;
-  setThinkingLevel?(level: string): void;
-  getContextUsage?(): Promise<ContextUsage | null>;
-  refreshPrompt?(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void;
-  getActiveTools?(): MemberActiveToolInfo[];
+  readonly runtimeName: string;
+  readonly runtimeParams: AgentRuntimeParams;
+  setModel(model: string, credentialId: string): void | Promise<void>;
+  refreshModelRegistry(opts?: { allowNetwork?: boolean }): void | Promise<void>;
+  setThinkingLevel(level: string): void;
+  getContextUsage(): Promise<ContextUsage | null>;
+  refreshPrompt(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void;
+  getActiveTools(): MemberActiveToolInfo[];
 }
 export interface MemberActiveToolInfo {
   name: string;

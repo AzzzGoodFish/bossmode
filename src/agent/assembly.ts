@@ -108,15 +108,12 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
         resources: snapshot.resources,
         agentPrompt: compiled.agentPrompt,
         appendSystemPrompt: compiled.appendSystemPrompt,
-        skillPaths: snapshot.resources.skillPaths,
-        skillNames: snapshot.resources.skillNames,
         resumeSession: snapshot.resumeSession,
         sessionDir,
         onSessionChanged,
       });
 
       if (!canPublishInstance()) {
-        if (!handle.destroyAndWait) throw new Error("Runtime cannot confirm rejected builder cleanup");
         await handle.destroyAndWait();
         return null;
       }
@@ -203,7 +200,6 @@ function rebuildLiveInstance(instance: AgentInstance, reason: string): Promise<A
 async function rebuildLiveInstanceInternal(instance: AgentInstance, reason: string): Promise<AgentInstance | null> {
   const memberId = instance.memberId;
   updateDispatchState(instance, "aborting", "session-reload");
-  if (!instance.handle.destroyAndWait) throw new Error("Runtime cannot confirm reload teardown");
   await instance.handle.destroyAndWait();
   if (instances.get(instanceKey(memberId)) !== instance || !memberRuntimeAllowed(memberId)) return null;
   instance.unsubscribe();

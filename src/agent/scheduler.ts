@@ -327,7 +327,7 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
   try{
     if(trigger!=="length_continuation")schedulerServices().emitEvent(sourceRef,instance.memberId,{type:"user_prompt",text:message,trigger});
-    if(instance.profilePromptDirty){schedulerServices().refreshProfileSources(instance);if(!instance.handle.refreshPrompt)throw new Error("Runtime cannot refresh member identity without resetting the session.");instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;}
+    if(instance.profilePromptDirty){schedulerServices().refreshProfileSources(instance);instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;}
     await instance.handle.prompt(message,{beforeDispatch:event=>{
       if(!schedulerServices().authorizeExecution(instance.memberId,sourceRef))throw new ExecutionAuthorizationRevokedError();
       if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}

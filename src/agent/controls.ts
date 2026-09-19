@@ -56,7 +56,7 @@ export function getMemberBusyState(memberId:string):{busy:boolean;reason?:string
 }
 export function getAgentContextUsage(memberId:string):ContextUsage|null{return contextUsageCache.get(instanceKey(memberId))??null;}
 export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:MemberActiveToolInfo[];message?:string}{
-  const handle=instances.get(instanceKey(memberId))?.handle;if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
+  const handle=instances.get(instanceKey(memberId))?.handle;if(!handle)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }
 export function getMemberActiveScopes(memberId:string):string[]{
   const scopes=new Set(pendingRuntimeInputOwners(memberId).filter((scope):scope is string=>scope!==null)),instance=instances.get(instanceKey(memberId));
@@ -78,18 +78,16 @@ function normalizedBinding(model:string,credentialId?:string){
 
 async function applyModel(instance:AgentInstance,binding:{model:string;credentialId?:string},trigger:string):Promise<void>{
   if(!memberRuntimeAllowed(instance.memberId))return;const {model,profile}=normalizedBinding(binding.model,binding.credentialId);
-  if(!instance.handle.setModel)throw new Error("Runtime does not support dynamic model switching");
   if(!exportPiConfigForMember({memberId:instance.memberId,modelRef:model,credentialId:profile.id}))throw new Error(`No model credentials configured for ${model}`);
-  await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setModel!(model,profile.id);});
+  await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setModel(model,profile.id);});
   instance.appliedModel=model;instance.appliedCredentialId=profile.id;
-  if(instance.handle.runtimeParams)Object.assign(instance.handle.runtimeParams,{model,credentialId:profile.id,credentialName:profile.name});
+  Object.assign(instance.handle.runtimeParams,{model,credentialId:profile.id,credentialName:profile.name});
   logger.info("agent","modelSwitchApplied",{member:instance.agentName,model,trigger});publishCurrentStatus(instance);
 }
 
 async function applyThinking(instance:AgentInstance,pending:PendingThinkingSwitch,trigger:string):Promise<void>{
-  if(!memberRuntimeAllowed(instance.memberId))return;if(!instance.handle.setThinkingLevel)throw new Error("Runtime does not support dynamic thinking level switching");
-  await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setThinkingLevel!(pending.thinkingLevel);});
-  if(instance.handle.runtimeParams)instance.handle.runtimeParams.thinkingLevel=pending.thinkingLevel;
+  if(!memberRuntimeAllowed(instance.memberId))return;await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setThinkingLevel(pending.thinkingLevel);});
+  instance.handle.runtimeParams.thinkingLevel=pending.thinkingLevel;
   logger.info("agent","thinkingSwitchApplied",{member:instance.agentName,thinkingLevel:pending.thinkingLevel,trigger});publishCurrentStatus(instance);
 }
 
@@ -103,16 +101,16 @@ async function refreshCredential(instance:AgentInstance,pending:PendingCredentia
   if(!memberRuntimeAllowed(instance.memberId))return;
   try{
     const exported=exportPiConfigForMember({memberId:instance.memberId,modelRef:instance.appliedModel,credentialId:instance.appliedCredentialId});
-    if(!exported||!instance.handle.refreshModelRegistry||!instance.handle.setModel){dropCredential(instance,`${pending.changeType}:${pending.profileId}`);return;}
-    await trackMemberOperation(instance.memberId,async()=>{await instance.handle.refreshModelRegistry!({allowNetwork:false});await instance.handle.setModel!(instance.appliedModel,instance.appliedCredentialId!);});
+    if(!exported){dropCredential(instance,`${pending.changeType}:${pending.profileId}`);return;}
+    await trackMemberOperation(instance.memberId,async()=>{await instance.handle.refreshModelRegistry({allowNetwork:false});await instance.handle.setModel(instance.appliedModel,instance.appliedCredentialId!);});
     instance.appliedCredentialId=exported.profile?.id||instance.appliedCredentialId;
-    if(instance.handle.runtimeParams)Object.assign(instance.handle.runtimeParams,{credentialId:instance.appliedCredentialId,credentialName:exported.profile?.name});
+    Object.assign(instance.handle.runtimeParams,{credentialId:instance.appliedCredentialId,credentialName:exported.profile?.name});
     logger.info("agent","credentialRefreshApplied",{member:instance.agentName,profileId:pending.profileId,trigger});
   }catch(error){if(pending.changeType==="profileDeleted")dropCredential(instance,String(error));else logger.warn("agent","credentialRefreshFailed",{member:instance.agentName,error:String(error)});}
 }
 
 export async function refreshAllInstanceModelRegistries():Promise<{refreshed:number;failed:number}>{
-  let refreshed=0,failed=0;await Promise.all([...instances.values()].map(async instance=>{if(!instance.handle.refreshModelRegistry)return;try{await instance.handle.refreshModelRegistry({allowNetwork:false});refreshed++;}catch(error){failed++;logger.warn("agent","catalogRegistryRefreshFailed",{member:instance.agentName,error:String(error)});}}));return {refreshed,failed};
+  let refreshed=0,failed=0;await Promise.all([...instances.values()].map(async instance=>{try{await instance.handle.refreshModelRegistry({allowNetwork:false});refreshed++;}catch(error){failed++;logger.warn("agent","catalogRegistryRefreshFailed",{member:instance.agentName,error:String(error)});}}));return {refreshed,failed};
 }
 
 export async function invalidateModelCredentialProfile(profileId:string,providerSlug:string,changeType:PendingCredentialRefresh["changeType"]="profileUpdated"):Promise<Array<{roomId:string;memberName:string;applied:boolean;pending:boolean}>>{
@@ -277,7 +275,6 @@ export async function quiesceMember(memberId: string): Promise<void> {
   for (const [key,instance] of [...instances]) if(instance.memberId===memberId) {
     try {
       requestInstanceStop(instance);
-      if (!instance.handle.destroyAndWait) throw new Error("Runtime cannot confirm member teardown");
       await instance.handle.destroyAndWait();instance.unsubscribe();instances.delete(key);sessionPublishOwners.delete(key);
       contextUsageCache.delete(key);
     }catch(error){errors.push(error);}

@@ -175,13 +175,11 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
   return {
     id: rec.id,
     name: rec.name,
-    type: "agent",
     agent: rec.agentTemplate,
     model: eff.model || undefined,
     credentialId: eff.credentialId || undefined,
     thinkingLevel: (eff.thinkingLevel as string) || "off",
     skills: eff.skills || [],
-    mcpServers: eff.mcpServers || [],
   };
 }
 

@@ -560,7 +560,7 @@ export class PiSdkRuntime implements AgentRuntime {
         thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
         // Panel metadata: bossmode-composed segments only (never pi built-in text).
         systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
-        skills: opts.skillNames ?? skillPaths,
+        skills: opts.resources.skillNames.length?opts.resources.skillNames:skillPaths,
         extensions: ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"],
         credentialId: piConfig.profile?.id,
         credentialName: piConfig.profile?.name,
