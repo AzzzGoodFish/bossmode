@@ -12,49 +12,19 @@ function queryPath(req: { url?: string }): string {
   return path;
 }
 
-function inferTargetPath(from: string, to: string): string {
-  // if destination is an existing folder path, preserve source basename
-  const toType = knowledgeStore.getPathType(to);
-  if (toType !== "folder") return to;
-  const base = from.split("/").pop() || from;
-  return `${to}/${base}`;
+function moveOne(from: string, to: string): knowledgeStore.PathMutation {
+  const result = knowledgeStore.movePath(from, to);
+  if (result.ok) {
+    if (result.type === "file") roomStore.updateRuleDocPaths(from, result.to);
+    else roomStore.updateRuleDocPathsByPrefix(from, result.to!);
+  }
+  return result;
 }
 
-function moveOne(from: string, to: string): { ok: boolean; type?: "file" | "folder"; to?: string; error?: string } {
-  const sourceType = knowledgeStore.getPathType(from);
-  if (!sourceType) return { ok: false, error: "Source not found" };
-  const resolvedTo = inferTargetPath(from, to);
-
-  if (sourceType === "file") {
-    const moved = knowledgeStore.moveEntry(from, resolvedTo);
-    if (!moved) return { ok: false, error: "Source not found or destination conflicts" };
-    roomStore.updateRuleDocPaths(from, moved.id);
-    return { ok: true, type: "file", to: moved.id };
-  }
-
-  const movedFolder = knowledgeStore.moveFolder(from, resolvedTo);
-  if (!movedFolder.ok) {
-    return { ok: false, error: movedFolder.error || "Folder move failed" };
-  }
-
-  roomStore.updateRuleDocPathsByPrefix(from, resolvedTo);
-  return { ok: true, type: "folder", to: resolvedTo };
-}
-
-function deleteOne(path: string): { ok: boolean; type?: "file" | "folder"; error?: string } {
-  const type = knowledgeStore.getPathType(path);
-  if (!type) return { ok: false, error: "Document not found" };
-
-  if (type === "file") {
-    if (!knowledgeStore.deleteEntry(path)) return { ok: false, error: "Document not found" };
-    roomStore.updateRuleDocPaths(path);
-    return { ok: true, type: "file" };
-  }
-
-  const result = knowledgeStore.deleteFolder(path);
-  if (!result.ok) return { ok: false, error: "Folder not found" };
-  for (const deletedPath of result.deletedPaths) roomStore.updateRuleDocPaths(deletedPath);
-  return { ok: true, type: "folder" };
+function deleteOne(path: string): knowledgeStore.PathMutation {
+  const result = knowledgeStore.deletePath(path);
+  if (result.ok) for (const deleted of result.affectedPaths!) roomStore.updateRuleDocPaths(deleted);
+  return result;
 }
 
 function batch(paths: string[], action: (path: string) => { ok: boolean }): { count: number; failed: string[] } {

@@ -227,71 +227,43 @@ export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
   return describeEntry(rel, "");
 }
 
-export function deleteEntry(entryId: string): boolean {
-  const file = documentFile(entryId);
-  if (!file) return false;
-  unlinkSync(file.abs);
-  cleanupEmptyParentDirs(dirname(file.abs));
-  return true;
+export interface PathMutation {
+  ok: boolean;
+  type?: "file" | "folder";
+  to?: string;
+  affectedPaths?: string[];
+  error?: string;
 }
 
-/** Move/rename a document. Updates timestamps. */
-export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
-  let fromRel: string, toRel: string;
-  try {
-    fromRel = normalizeDocPath(fromId);
-    toRel = ensureMoveExtension(fromRel, normalizeDocPath(toId));
-  } catch { return null; }
-  if (!isAllowedFile(fromRel) || !isAllowedFile(toRel)) return null;
-  const fromAbs = absDocPath(fromRel);
-  const toAbs = absDocPath(toRel);
-  if (!existsSync(fromAbs)) return null;
-  if (existsSync(toAbs) && fromRel !== toRel) return null; // don't overwrite
-  mkdirSync(dirname(toAbs), { recursive: true });
-  renameSync(fromAbs, toAbs);
-  cleanupEmptyParentDirs(dirname(fromAbs));
-  return isTextFile(toRel) ? getEntry(toRel) : describeEntry(toRel, "");
+export function movePath(fromPath: string, toPath: string): PathMutation {
+  let from: string, to: string;
+  try { from = normalizeDocPath(fromPath); to = normalizeDocPath(toPath); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  const source = getPathType(from);
+  if (!source) return { ok: false, error: "Source not found" };
+  if (getPathType(to) === "folder") to = `${to}/${basename(from)}`;
+  if (source === "file") to = ensureMoveExtension(from, to);
+  if ((source === "file" && (!isAllowedFile(from) || !isAllowedFile(to))) ||
+    (source === "folder" && (to === from || to.startsWith(`${from}/`)))) {
+    return { ok: false, error: source === "file" ? "Unsupported document type" : "Cannot move folder into itself or its subfolder" };
+  }
+  const sourcePath = absDocPath(from), destination = absDocPath(to);
+  if (existsSync(destination) && from !== to) return { ok: false, error: "Destination already exists" };
+  mkdirSync(dirname(destination), { recursive: true });
+  renameSync(sourcePath, destination);
+  cleanupEmptyParentDirs(dirname(sourcePath));
+  return { ok: true, type: source, to };
 }
 
-export function moveFolder(fromPath: string, toPath: string): { ok: boolean; error?: string } {
-  let fromRel: string, toRel: string;
-  try {
-    fromRel = normalizeDocPath(fromPath);
-    toRel = normalizeDocPath(toPath);
-  } catch (err: any) {
-    return { ok: false, error: String(err?.message || err) };
-  }
-
-  if (toRel === fromRel || toRel.startsWith(`${fromRel}/`)) {
-    return { ok: false, error: "Cannot move folder into itself or its subfolder" };
-  }
-
-  const fromAbs = absDocPath(fromRel);
-  const toAbs = absDocPath(toRel);
-  if (!existsSync(fromAbs) || !statSync(fromAbs).isDirectory()) {
-    return { ok: false, error: "Source folder not found" };
-  }
-  if (existsSync(toAbs)) {
-    return { ok: false, error: "Destination already exists" };
-  }
-
-  mkdirSync(dirname(toAbs), { recursive: true });
-  renameSync(fromAbs, toAbs);
-
-  cleanupEmptyParentDirs(dirname(fromAbs));
-  return { ok: true };
-}
-
-export function deleteFolder(folderPath: string): { ok: boolean; deletedPaths: string[] } {
+export function deletePath(path: string): PathMutation {
   let rel: string;
-  try { rel = normalizeDocPath(folderPath); }
-  catch { return { ok: false, deletedPaths: [] }; }
-  const abs = absDocPath(rel);
-  if (!existsSync(abs) || !statSync(abs).isDirectory()) return { ok: false, deletedPaths: [] };
-  const deletedPaths = collectDocPathsInFolder(abs, rel);
-  rmSync(abs, { recursive: true, force: true });
-  cleanupEmptyParentDirs(dirname(abs));
-  return { ok: true, deletedPaths };
+  try { rel = normalizeDocPath(path); } catch { return { ok: false, error: "Document not found" }; }
+  const type = getPathType(rel), absolute = absDocPath(rel);
+  if (!type || (type === "file" && !isAllowedFile(rel))) return { ok: false, error: "Document not found" };
+  const affectedPaths = type === "folder" ? collectDocPathsInFolder(absolute, rel) : [rel];
+  if (type === "folder") rmSync(absolute, { recursive: true, force: true }); else unlinkSync(absolute);
+  cleanupEmptyParentDirs(dirname(absolute));
+  return { ok: true, type, affectedPaths };
 }
 
 // -- Helpers --
