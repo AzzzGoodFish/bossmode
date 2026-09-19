@@ -76,50 +76,6 @@ export async function login(
   return result;
 }
 
-export interface TeamSkillSummary {
-  name: string;
-  description?: string;
-  usedBy: string[];
-}
-
-
-
-// -- Skills --
-
-export interface SkillInfo {
-  name: string;
-  description: string;
-  tags: string[];
-}
-
-export interface SkillDetail extends SkillInfo {
-  content: string;
-}
-
-export async function getSkills(): Promise<SkillInfo[]> {
-  return apiFetch("/api/skills");
-}
-
-export async function getSkill(name: string): Promise<SkillDetail> {
-  return apiFetch(`/api/skills/${name}`);
-}
-
-export async function createSkill(name: string, content: string): Promise<SkillDetail> {
-  return apiFetch("/api/skills", { method: "POST", body: JSON.stringify({ name, content }) });
-}
-
-export async function updateSkill(name: string, content: string): Promise<SkillDetail> {
-  return apiFetch(`/api/skills/${name}`, { method: "PUT", body: JSON.stringify({ content }) });
-}
-
-export async function deleteSkill(name: string): Promise<void> {
-  await apiFetch(`/api/skills/${name}`, { method: "DELETE" });
-}
-
-export async function getSkillTemplates(): Promise<SkillInfo[]> {
-  return apiFetch("/api/skills/templates");
-}
-
 // -- Members --
 
 export interface MemberInfo {
@@ -189,27 +145,6 @@ export interface MemberStats {
 
 export async function getMemberStats(id: string, roomId: string): Promise<MemberStats> {
   return apiFetch(`/api/members/${id}/stats?roomId=${encodeURIComponent(roomId)}`);
-}
-
-export interface AgentRuntimeParams {
-  model?: string;
-  thinkingLevel?: string;
-  systemPrompt?: string;
-  skills?: string[];
-}
-
-export interface MemberInstanceInfo {
-  roomId: string;
-  roomName: string;
-  status: "idle" | "working";
-  runtime: string;
-  runtimeParams?: AgentRuntimeParams;
-  pid?: number;
-  spawnArgs?: string[];
-}
-
-export async function getMemberStatus(id: string): Promise<{ instances: MemberInstanceInfo[] }> {
-  return apiFetch(`/api/members/${id}/status`);
 }
 
 export async function restartMember(id: string, roomId?: string): Promise<void> {
@@ -1119,25 +1054,6 @@ export async function checkMcpServers(server?: string, timeoutMs?: number): Prom
   });
 }
 
-
-// -- Filesystem --
-
-export interface FsDirEntry {
-  name: string;
-  path: string;
-}
-
-export interface FsListDirsResult {
-  path: string;
-  parent: string | null;
-  segments: FsDirEntry[];
-  dirs: FsDirEntry[];
-  truncated: boolean;
-}
-
-export async function listDirs(path: string): Promise<FsListDirsResult> {
-  return apiFetch(`/api/fs/list-dirs?path=${encodeURIComponent(path)}`);
-}
 
 // -- 0.20: Contacts / Members / DM / Chats (member-global model) --
 

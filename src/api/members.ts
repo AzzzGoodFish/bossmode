@@ -10,14 +10,7 @@ import { logger } from "../kernel/logger.js";
 import { listMembers, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
-import {
-  deleteSkillDefinition,
-  listMemberSkills,
-  loadSkillDefinition,
-  loadSkillDefinitionsStrict,
-  loadSkillTemplates,
-  saveSkillDefinition,
-} from "../member/skills.js";
+import { listMemberSkills } from "../member/skills.js";
 import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
 import { assertMemberScopeAccess, scopeIdOf } from "../chat/conversations.js";
@@ -391,11 +384,6 @@ addRoute("GET", "/api/members/:id/events", async (request, response, params) => 
     sendJson(response, 200, connectedMemberActions().readActivity(member.id, { sourceRef, beforeSeq, limit, types }));
   } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
 });
-addRoute("GET", "/api/members/:id/status", async (_request, response, params) => {
-  const member = resolveMemberRef(params.id);
-  if (!member) return sendJson(response, 404, { error: "Member not found" });
-  sendJson(response, 200, connectedMemberActions().readStatus(member.id));
-});
 for (const action of ["stop", "compact", "reset", "restart"] as const) {
   addRoute("POST", `/api/members/:id/${action}`, async (_request, response, params) => {
     const member = resolveMemberRef(params.id);
@@ -404,37 +392,3 @@ for (const action of ["stop", "compact", "reset", "restart"] as const) {
     catch (error) { sendJson(response, 400, { error: `${action}_failed`, message: error instanceof Error ? error.message : String(error) }); }
   });
 }
-
-// Shared skill catalog is a member asset capability; member-local enablement
-// remains in the member configuration routes above.
-addRoute("GET", "/api/skills", async (_request, response) => {
-  try {
-    sendJson(response, 200, loadSkillDefinitionsStrict().map(({ name, description, tags }) => ({ name, description, tags })));
-  } catch (error) {
-    logger.error("api", "failed to load skill list", { error: String(error) });
-    sendJson(response, 500, { error: "Couldn’t load Skills" });
-  }
-});
-addRoute("GET", "/api/skills/templates", async (_request, response) => {
-  sendJson(response, 200, loadSkillTemplates().map(({ name, description, tags }) => ({ name, description, tags })));
-});
-addRoute("GET", "/api/skills/:name", async (_request, response, params) => {
-  const skill = loadSkillDefinition(params.name);
-  if (!skill) return sendJson(response, 404, { error: "Skill not found" });
-  sendJson(response, 200, skill);
-});
-addRoute("POST", "/api/skills", async (request, response) => {
-  const body = await parseBody(request) as { name?: string; content?: string };
-  if (!body.name || !body.content) return sendJson(response, 400, { error: "name and content are required" });
-  if (loadSkillDefinition(body.name)) return sendJson(response, 409, { error: `Skill "${body.name}" already exists` });
-  sendJson(response, 200, saveSkillDefinition(body.name, body.content));
-});
-addRoute("PUT", "/api/skills/:name", async (request, response, params) => {
-  const body = await parseBody(request) as { content?: string };
-  if (!body.content) return sendJson(response, 400, { error: "content is required" });
-  sendJson(response, 200, saveSkillDefinition(params.name, body.content));
-});
-addRoute("DELETE", "/api/skills/:name", async (_request, response, params) => {
-  if (!deleteSkillDefinition(params.name)) return sendJson(response, 404, { error: "Skill not found" });
-  sendJson(response, 200, { ok: true });
-});
