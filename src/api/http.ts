@@ -5,7 +5,6 @@ import { login, requireAuth } from "./auth.js";
 export type RouteHandler = (request: IncomingMessage, response: ServerResponse, params: Record<string, string>) => Promise<void>;
 interface Route { method: string; pattern: RegExp; paramNames: string[]; handler: RouteHandler }
 const routes: Route[] = [];
-let registered = false;
 
 export function addRoute(method: string, path: string, handler: RouteHandler): void {
   const paramNames: string[] = [];
@@ -49,32 +48,17 @@ export function requestUrl(request: Pick<IncomingMessage, "url">): URL {
 
 export function requireHttpAuth(headers: IncomingHttpHeaders): boolean { return requireAuth(headers); }
 
-async function registerRoutes(): Promise<void> {
-  if (registered) return;
-  registered = true;
-  addRoute("POST", "/api/auth/login", async (request, response) => {
-    const body = await parseBody(request) as { username?: string; password?: string };
-    if (!body.username || !body.password) return sendJson(response, 400, { error: "username and password required" });
-    const result = login(body.username, body.password);
-    if (!result) return sendJson(response, 401, { error: "Invalid credentials" });
-    sendJson(response, 200, result);
-  });
-  await Promise.all([
-    import("./members.js"),
-    import("./chats.js"),
-    import("./models.js"),
-    import("./workspaces.js"),
-    import("./files.js"),
-    import("./knowledge.js"),
-    import("./usage.js"),
-    import("./workforce.js"),
-    import("./mcp.js"),
-    import("./conversations.js"),
-  ]);
-}
+addRoute("POST", "/api/auth/login", async (request, response) => {
+  const body = await parseBody(request) as { username?: string; password?: string };
+  if (!body.username || !body.password) return sendJson(response, 400, { error: "username and password required" });
+  const result = login(body.username, body.password);
+  if (!result) return sendJson(response, 401, { error: "Invalid credentials" });
+  sendJson(response, 200, result);
+});
 
+/** Domain route modules are imported once by app/wire before serving. Keeping
+ * registration out of request handling avoids API module cycles and races. */
 export async function handleApiRequest(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
-  await registerRoutes();
   const rawUrl = request.url || "";
   if (!rawUrl.startsWith("/api/") && !rawUrl.startsWith("/internal/")) return false;
   const method = request.method || "GET";
