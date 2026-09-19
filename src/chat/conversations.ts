@@ -170,9 +170,10 @@ export function updateRuleDocPaths(oldPath: string, newPath?: string): number {
  * Example: oldPrefix="rules/dev", newPrefix="rules/protocols"
  *   rules/dev/a.md -> rules/protocols/a.md
  */
-export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string): number {
-  if (!oldPrefix || !newPrefix) return 0;
-  return changeRuleDocPaths(path => path === oldPrefix || path.startsWith(oldPrefix + "/"), path => newPrefix + path.slice(oldPrefix.length));
+export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix?: string): number {
+  if (!oldPrefix) return 0;
+  return changeRuleDocPaths(path => path === oldPrefix || path.startsWith(oldPrefix + "/"),
+    path => newPrefix ? newPrefix + path.slice(oldPrefix.length) : undefined);
 }
 
 /** ⑤ A: room description (name + description) — product cap on every write. */

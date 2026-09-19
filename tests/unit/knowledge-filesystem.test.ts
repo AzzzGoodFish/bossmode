@@ -1,5 +1,5 @@
 
-// Unit tests for the single-namespace filesystem knowledge store (0.8.0)
+// Unit tests for the canonical project-memory document store.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ vi.mock("../../src/config/settings.js", () => ({
   seedTemplates: () => {}
 }));
 
-describe("Knowledge single-namespace store (0.8.0)", () => {
+describe("canonical knowledge documents", () => {
   beforeEach(() => {
     tmpDir = process.env.BOSSMODE_DIR!;
     mkdirSync(tmpDir, {recursive:true});
@@ -25,7 +25,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   });
 
   it("addEntry writes plain markdown without injecting frontmatter", async () => {
-    const { addEntry, getEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry, getEntry } = await import("../../src/knowledge/documents.js");
     const entry = addEntry("Architecture Overview", "# Overview\n\nSome content.", "architect", "bossmode/architecture/overview.md");
     expect(entry.id).toBe("bossmode/architecture/overview.md");
     expect(entry.title).toBe("Overview");
@@ -43,22 +43,22 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   });
 
   it("rejects path traversal and absolute paths", async () => {
-    const { addEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry } = await import("../../src/knowledge/documents.js");
     expect(() => addEntry("bad", "content", "x", "../escape.md")).toThrow();
     expect(() => addEntry("bad", "content", "x", "/etc/passwd")).toThrow();
   });
 
   it("appends .md extension if missing", async () => {
-    const { addEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry } = await import("../../src/knowledge/documents.js");
     const e = addEntry("T", "c", "user", "notes/quick");
     expect(e.id).toBe("notes/quick.md");
   });
 
   it("updateEntry overwrites content and refreshes updatedAt", async () => {
-    const { addEntry, updateEntry, getEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry, updateEntry, getEntry } = await import("../../src/knowledge/documents.js");
     addEntry("Old", "old content", "user", "notes/doc.md");
     const before = getEntry("notes/doc.md")!;
-    const updated = updateEntry("notes/doc.md", "New", "new content");
+    const updated = updateEntry("notes/doc.md", "new content");
     expect(updated).not.toBeNull();
     expect(updated!.title).toBe("doc");
     expect(updated!.content).toBe("new content");
@@ -66,18 +66,18 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   });
 
   it("deleteEntry removes file and cleans empty parent folders", async () => {
-    const { addEntry, deleteEntry, getEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry, deletePath, getEntry } = await import("../../src/knowledge/documents.js");
     addEntry("T", "c", "user", "deep/nested/folder/doc.md");
     const abs = join(tmpDir, "memory", "projects", "deep", "nested", "folder", "doc.md");
     expect(existsSync(abs)).toBe(true);
 
-    expect(deleteEntry("deep/nested/folder/doc.md")).toBe(true);
+    expect(deletePath("deep/nested/folder/doc.md")).toMatchObject({ ok: true, type: "file" });
     expect(getEntry("deep/nested/folder/doc.md")).toBeNull();
     expect(existsSync(join(tmpDir, "memory", "projects", "deep"))).toBe(false);
   });
 
   it("getDocumentTree returns hierarchical structure", async () => {
-    const { addEntry, getDocumentTree } = await import("../../src/knowledge/store.js");
+    const { addEntry, getDocumentTree } = await import("../../src/knowledge/documents.js");
     addEntry("Overview", "c", "user", "bossmode/architecture/overview.md");
     addEntry("TechDebt", "c", "user", "bossmode/architecture/tech-debt.md");
     addEntry("PRD", "c", "user", "bossmode/prds/feature-x.md");
@@ -99,61 +99,43 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
     expect(bmSubPaths).toContain("bossmode/prds");
   });
 
-  it("searchEntries performs case-insensitive substring search across whole tree", async () => {
-    const { addEntry, searchEntries } = await import("../../src/knowledge/store.js");
-    addEntry("React Guide", "Use React hooks for state", "user", "bossmode/guides/react.md");
-    addEntry("Vue Guide", "Use Vue composition API", "user", "freeu/guides/vue.md");
-
-    expect(searchEntries("react").length).toBe(1);
-    expect(searchEntries("HOOKS").length).toBe(1);
-    expect(searchEntries("guide").length).toBe(0); // no frontmatter title; heading/filename/content only
-    expect(searchEntries("nothing").length).toBe(0);
-  });
-
-  it("moveEntry renames without overwriting existing", async () => {
-    const { addEntry, moveEntry, getEntry } = await import("../../src/knowledge/store.js");
+  it("movePath renames without overwriting existing", async () => {
+    const { addEntry, movePath, getEntry } = await import("../../src/knowledge/documents.js");
     addEntry("A", "a", "user", "x.md");
     addEntry("B", "b", "user", "y.md");
 
-    expect(moveEntry("x.md", "y.md")).toBeNull(); // would overwrite
+    expect(movePath("x.md", "y.md")).toMatchObject({ ok: false });
     expect(getEntry("x.md")).not.toBeNull();
 
-    expect(moveEntry("x.md", "archive/z.md")).not.toBeNull();
+    expect(movePath("x.md", "archive/z.md")).toEqual({ ok: true, type: "file", from: "x.md", to: "archive/z.md" });
     expect(getEntry("x.md")).toBeNull();
     expect(getEntry("archive/z.md")).not.toBeNull();
   });
 
-  it("moveFolder renames directory and returns moved file mappings", async () => {
-    const { addEntry, moveFolder, getEntry } = await import("../../src/knowledge/store.js");
+  it("movePath moves a folder without reinterpreting its contents", async () => {
+    const { addEntry, movePath, getEntry } = await import("../../src/knowledge/documents.js");
     addEntry("A", "a", "user", "bossmode/rules/a.md");
     addEntry("B", "b", "user", "bossmode/rules/sub/b.md");
 
-    const moved = moveFolder("bossmode/rules", "bossmode/protocols");
-    expect(moved.ok).toBe(true);
-    expect(moved.movedFiles).toContainEqual(["bossmode/rules/a.md", "bossmode/protocols/a.md"]);
-    expect(moved.movedFiles).toContainEqual(["bossmode/rules/sub/b.md", "bossmode/protocols/sub/b.md"]);
-
+    expect(movePath("bossmode/rules", "bossmode/protocols")).toEqual({
+      ok: true, type: "folder", from: "bossmode/rules", to: "bossmode/protocols",
+    });
     expect(getEntry("bossmode/rules/a.md")).toBeNull();
     expect(getEntry("bossmode/protocols/a.md")).not.toBeNull();
   });
 
-  it("deleteFolder removes recursively and returns deleted paths", async () => {
-    const { addEntry, deleteFolder, getEntry } = await import("../../src/knowledge/store.js");
+  it("deletePath removes a folder recursively", async () => {
+    const { addEntry, deletePath, getEntry } = await import("../../src/knowledge/documents.js");
     addEntry("A", "a", "user", "bossmode/rules/a.md");
     addEntry("B", "b", "user", "bossmode/rules/sub/b.md");
 
-    const deleted = deleteFolder("bossmode/rules");
-    expect(deleted.ok).toBe(true);
-    expect(deleted.deletedCount).toBe(2);
-    expect(deleted.deletedPaths).toContain("bossmode/rules/a.md");
-    expect(deleted.deletedPaths).toContain("bossmode/rules/sub/b.md");
-
+    expect(deletePath("bossmode/rules")).toEqual({ ok: true, type: "folder", from: "bossmode/rules" });
     expect(getEntry("bossmode/rules/a.md")).toBeNull();
     expect(getEntry("bossmode/rules/sub/b.md")).toBeNull();
   });
 
   it("listEntries treats pre-existing frontmatter as plain markdown content", async () => {
-    const { listEntries } = await import("../../src/knowledge/store.js");
+    const { listEntries } = await import("../../src/knowledge/documents.js");
     const docsRoot = join(tmpDir, "memory", "projects", "manual");
     mkdirSync(docsRoot, { recursive: true });
     writeFileSync(
@@ -172,17 +154,17 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   });
 
   it("rejects traversal, unsupported, invalid, and oversize png uploads", async () => {
-    const { writePngEntry, _internal } = await import("../../src/knowledge/store.js");
+    const { writePngEntry } = await import("../../src/knowledge/documents.js");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
     expect(() => writePngEntry("../swatch.png", png)).toThrow();
     expect(() => writePngEntry("swatch.jpg", png)).toThrow(/Only \.png/);
     expect(() => writePngEntry("swatch.png", Buffer.from("not png"))).toThrow(/Invalid PNG/);
-    expect(() => writePngEntry("huge.png", Buffer.concat([png, Buffer.alloc(_internal.MAX_PNG_BYTES)]))).toThrow(/too large/);
+    expect(() => writePngEntry("huge.png", Buffer.alloc(512 * 1024 + 1))).toThrow(/too large/);
   });
 
   it("shows html and png allowlisted files and reads png through raw endpoint helper", async () => {
-    const { addEntry, getDocumentTree, getEntry, getRawEntry, writePngEntry } = await import("../../src/knowledge/store.js");
+    const { addEntry, getDocumentTree, getEntry, getRawEntry, writePngEntry } = await import("../../src/knowledge/documents.js");
     addEntry("Hero", "<!doctype html><h1>Hero</h1>", "user", "site/hero.html");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
     writePngEntry("site/swatch.png", png);
@@ -197,7 +179,7 @@ describe("Knowledge single-namespace store (0.8.0)", () => {
   });
 
   it("listEntries / getDocumentTree handle an empty docs root", async () => {
-    const { listEntries, getDocumentTree } = await import("../../src/knowledge/store.js");
+    const { listEntries, getDocumentTree } = await import("../../src/knowledge/documents.js");
     expect(listEntries()).toEqual([]);
     const tree = getDocumentTree();
     expect(tree.kind).toBe("folder");

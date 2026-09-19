@@ -15,15 +15,18 @@ function queryPath(req: { url?: string }): string {
 function moveOne(from: string, to: string): knowledgeStore.PathMutation {
   const result = knowledgeStore.movePath(from, to);
   if (result.ok) {
-    if (result.type === "file") roomStore.updateRuleDocPaths(from, result.to);
-    else roomStore.updateRuleDocPathsByPrefix(from, result.to!);
+    if (result.type === "file") roomStore.updateRuleDocPaths(result.from, result.to);
+    else roomStore.updateRuleDocPathsByPrefix(result.from, result.to);
   }
   return result;
 }
 
 function deleteOne(path: string): knowledgeStore.PathMutation {
   const result = knowledgeStore.deletePath(path);
-  if (result.ok) for (const deleted of result.affectedPaths!) roomStore.updateRuleDocPaths(deleted);
+  if (result.ok) {
+    if (result.type === "file") roomStore.updateRuleDocPaths(result.from);
+    else roomStore.updateRuleDocPathsByPrefix(result.from);
+  }
   return result;
 }
 

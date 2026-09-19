@@ -227,13 +227,9 @@ export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
   return describeEntry(rel, "");
 }
 
-export interface PathMutation {
-  ok: boolean;
-  type?: "file" | "folder";
-  to?: string;
-  affectedPaths?: string[];
-  error?: string;
-}
+export type PathMutation =
+  | { ok: true; type: "file" | "folder"; from: string; to?: string }
+  | { ok: false; error: string };
 
 export function movePath(fromPath: string, toPath: string): PathMutation {
   let from: string, to: string;
@@ -252,7 +248,7 @@ export function movePath(fromPath: string, toPath: string): PathMutation {
   mkdirSync(dirname(destination), { recursive: true });
   renameSync(sourcePath, destination);
   cleanupEmptyParentDirs(dirname(sourcePath));
-  return { ok: true, type: source, to };
+  return { ok: true, type: source, from, to };
 }
 
 export function deletePath(path: string): PathMutation {
@@ -260,10 +256,9 @@ export function deletePath(path: string): PathMutation {
   try { rel = normalizeDocPath(path); } catch { return { ok: false, error: "Document not found" }; }
   const type = getPathType(rel), absolute = absDocPath(rel);
   if (!type || (type === "file" && !isAllowedFile(rel))) return { ok: false, error: "Document not found" };
-  const affectedPaths = type === "folder" ? collectDocPathsInFolder(absolute, rel) : [rel];
   if (type === "folder") rmSync(absolute, { recursive: true, force: true }); else unlinkSync(absolute);
   cleanupEmptyParentDirs(dirname(absolute));
-  return { ok: true, type, affectedPaths };
+  return { ok: true, type, from: rel };
 }
 
 // -- Helpers --
@@ -279,6 +274,17 @@ function ensureMoveExtension(fromPath: string, toPath: string): string {
   return `${toPath}${ext}`;
 }
 
+function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
+  let entries: Dirent[];
+  try { entries = readdirSync(absFolder, { withFileTypes: true }) as Dirent[]; } catch { return []; }
+  return entries.flatMap(entry => {
+    if (entry.name.startsWith(".")) return [];
+    const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return collectDocPathsInFolder(join(absFolder, entry.name), rel);
+    return entry.isFile() && isAllowedFile(rel) ? [toPosix(rel)] : [];
+  });
+}
+
 function cleanupEmptyParentDirs(startDir: string): void {
   try {
     const root = docsRoot();
@@ -292,17 +298,6 @@ function cleanupEmptyParentDirs(startDir: string): void {
   } catch {
     // best-effort cleanup only
   }
-}
-
-function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
-  let entries: Dirent[];
-  try { entries = readdirSync(absFolder, { withFileTypes: true }) as Dirent[]; } catch { return []; }
-  return entries.flatMap(entry => {
-    if (entry.name.startsWith(".")) return [];
-    const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) return collectDocPathsInFolder(join(absFolder, entry.name), rel);
-    return entry.isFile() && isAllowedFile(rel) ? [toPosix(rel)] : [];
-  });
 }
 
 export function slugify(input: string): string {
