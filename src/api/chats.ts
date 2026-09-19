@@ -30,7 +30,7 @@ import {
 import { attachmentExists, displayFilename, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
 import { getMember, listMembers, resolveMemberRef } from "../member/identity.js";
 import { logger } from "../kernel/logger.js";
-import { addRoute, parseBody, requestUrl, sendJson } from "./http.js";
+import { addRoute, HttpError, parseBody, requestUrl, requestValue, sendJson, type RouteHandler } from "./http.js";
 
 export interface ChatHttpActions {
   postMessage(sourceRef: string, input: MessageInput): Promise<Message> | Message;
@@ -151,57 +151,41 @@ function conversationTarget(rawScope: string, request: { url?: string }): Conver
     ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name }
     : null;
 }
-function requireConversationTarget(rawScope: string, request: { url?: string }, response: Parameters<typeof sendJson>[0]): ConversationTarget | null {
-  const target = conversationTarget(rawScope, request);
-  if (!target) sendJson(response, 400, { error: "scope_or_member_not_found" });
-  return target;
+type TargetHandler = (request: Parameters<RouteHandler>[0], response: Parameters<RouteHandler>[1], target: ConversationTarget) => Promise<void>;
+function addTargetRoute(method: string, path: string, handler: TargetHandler): void {
+  addRoute(method, path, async (request, response, params) => {
+    const target = conversationTarget(params.scope, request);
+    if (!target) throw new HttpError(400, "scope_or_member_not_found", "Conversation or member not found");
+    await handler(request, response, target);
+  });
 }
 
-addRoute("POST", "/api/conversations/:scope/reset-session", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
-  sendJson(response, 200, { ...await connected().resetSession(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
+for (const [path, action] of [["reset-session", "resetSession"], ["abort", "abort"]] as const) {
+  addTargetRoute("POST", `/api/conversations/:scope/${path}`, async (_request, response, target) => {
+    sendJson(response, 200, { ...await connected()[action](target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
+  });
+}
+addTargetRoute("POST", "/api/conversations/:scope/compact", async (_request, response, target) => {
+  const result = await requestValue(() => connected().compact(target.sourceRef, target.memberId), 400, "compact_failed");
+  sendJson(response, 200, { ...result as object, scopeId: target.sourceRef });
 });
-addRoute("POST", "/api/conversations/:scope/abort", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
-  sendJson(response, 200, { ...await connected().abort(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
-});
-addRoute("POST", "/api/conversations/:scope/compact", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
-  try {
-    sendJson(response, 200, { ...await connected().compact(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
-  } catch (error) {
-    sendJson(response, 400, { error: "compact_failed", message: error instanceof Error ? error.message : String(error) });
-  }
-});
-addRoute("GET", "/api/conversations/:scope/context-usage", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
+addTargetRoute("GET", "/api/conversations/:scope/context-usage", async (_request, response, target) => {
   const usage = connected().readContextUsage(target.sourceRef, target.memberId);
-  sendJson(response, 200, usage === null
-    ? { supported: true, unavailable: true, scopeId: target.sourceRef }
+  sendJson(response, 200, usage === null ? { supported: true, unavailable: true, scopeId: target.sourceRef }
     : { supported: true, scopeId: target.sourceRef, ...usage as object });
 });
-addRoute("GET", "/api/conversations/:scope/events", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
+addTargetRoute("GET", "/api/conversations/:scope/events", async (request, response, target) => {
   const url = requestUrl(request);
   const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 50), 200));
-  const beforeValue = url.searchParams.get("before");
-  const before = beforeValue === null ? undefined : Number(beforeValue);
+  const rawBefore = url.searchParams.get("before");
+  const before = rawBefore === null ? undefined : Number(rawBefore);
   const page = connected().readEvents(target.sourceRef, target.memberId, limit, Number.isFinite(before) ? before : undefined);
   sendJson(response, 200, { ...page as object, scopeId: target.sourceRef, memberId: target.memberId });
 });
-addRoute("GET", "/api/conversations/:scope/tools", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
+addTargetRoute("GET", "/api/conversations/:scope/tools", async (_request, response, target) => {
   sendJson(response, 200, { ...connected().readTools(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef, memberId: target.memberId });
 });
-addRoute("GET", "/api/conversations/:scope/session", async (request, response, params) => {
-  const target = requireConversationTarget(params.scope, request, response);
-  if (!target) return;
+addTargetRoute("GET", "/api/conversations/:scope/session", async (_request, response, target) => {
   sendJson(response, 200, { ...connected().readSession(target.sourceRef, target.memberId) as object,
     scopeId: target.sourceRef, memberId: target.memberId, memberName: target.memberName });
 });
@@ -325,31 +309,29 @@ function conversationSource(raw: string): string | null {
   return ref.scopeId;
 }
 
-addRoute("GET", "/api/conversations/:scope/messages", async (request, response, params) => {
-  const sourceRef = conversationSource(params.scope);
-  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
-  const url = requestUrl(request);
-  const messages = pageMessages(sourceRef, {
-    limit: Number(url.searchParams.get("limit") || 100),
-    before: url.searchParams.get("before") || undefined,
-    around: url.searchParams.get("around") || undefined,
-    fromSeq: url.searchParams.has("from_seq") ? Number(url.searchParams.get("from_seq")) : undefined,
+type ConversationHandler = (request: Parameters<RouteHandler>[0], response: Parameters<RouteHandler>[1], sourceRef: string) => Promise<void>;
+function addConversationRoute(method: string, path: string, handler: ConversationHandler): void {
+  addRoute(method, path, async (request, response, params) => {
+    const sourceRef = conversationSource(params.scope);
+    if (!sourceRef) throw new HttpError(404, "conversation_not_found", "Conversation not found");
+    await handler(request, response, sourceRef);
   });
+}
+addConversationRoute("GET", "/api/conversations/:scope/messages", async (request, response, sourceRef) => {
+  const url = requestUrl(request);
+  const messages = pageMessages(sourceRef, { limit: Number(url.searchParams.get("limit") || 100),
+    before: url.searchParams.get("before") || undefined, around: url.searchParams.get("around") || undefined,
+    fromSeq: url.searchParams.has("from_seq") ? Number(url.searchParams.get("from_seq")) : undefined });
   sendJson(response, 200, { scopeId: sourceRef, messages });
 });
-addRoute("POST", "/api/conversations/:scope/messages", async (request, response, params) => {
-  const sourceRef = conversationSource(params.scope);
-  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
-  try { sendJson(response, 200, { scopeId: sourceRef, message: await postUserMessage(sourceRef, request) }); }
-  catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
+addConversationRoute("POST", "/api/conversations/:scope/messages", async (request, response, sourceRef) => {
+  const message = await requestValue(() => postUserMessage(sourceRef, request));
+  sendJson(response, 200, { scopeId: sourceRef, message });
 });
-addRoute("GET", "/api/conversations/:scope/messages/search", async (request, response, params) => {
-  const sourceRef = conversationSource(params.scope);
-  if (!sourceRef) return sendJson(response, 404, { error: "conversation_not_found" });
+addConversationRoute("GET", "/api/conversations/:scope/messages/search", async (request, response, sourceRef) => {
   const url = requestUrl(request);
   sendJson(response, 200, searchMessages(sourceRef, {
-    query: url.searchParams.get("query") || undefined,
-    from: url.searchParams.get("from") || undefined,
+    query: url.searchParams.get("query") || undefined, from: url.searchParams.get("from") || undefined,
     fromMemberId: url.searchParams.get("fromMemberId") || undefined,
     after: url.searchParams.has("after") ? Number(url.searchParams.get("after")) : undefined,
     before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : undefined,
