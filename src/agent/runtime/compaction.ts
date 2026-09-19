@@ -1,7 +1,6 @@
 /** SDK compaction watchdog: thresholds, continuation prompts, and session shutdown.
  * The handle keeps run/turn state; this module owns the decision math and teardown. */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { logger } from "../../kernel/logger.js";
 
 export interface CompactionWatchdogRun {
   maxTokens: number;

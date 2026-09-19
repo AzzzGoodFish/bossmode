@@ -12,7 +12,6 @@ export interface SkillDefinition {
 }
 
 const globalSkills = join(getBossmodeDir(), "skills");
-export function getSkillsDir(): string { return globalSkills; }
 export function ensureSkillsDir(): void { mkdirSync(globalSkills, { recursive: true }); }
 export function platformSkillsDir(): string { return join(installationRoot, "assets", "skills"); }
 
@@ -55,14 +54,10 @@ function loadPool(strict: boolean): SkillDefinition[] {
     return true;
   });
 }
-export function loadSkillDefinitions(): SkillDefinition[] { return loadPool(false); }
 export function loadSkillDefinitionsStrict(): SkillDefinition[] { return loadPool(true); }
 export function loadSkillDefinition(name: string): SkillDefinition | null {
   const file = join(globalSkills, name, "SKILL.md");
   return existsSync(file) ? parseSkill(readFileSync(file, "utf8"), name, globalSkills) : null;
-}
-export function loadSkillsByNames(names: string[]): SkillDefinition[] {
-  return names.flatMap(name => { const skill = loadSkillDefinition(name); return skill ? [skill] : []; });
 }
 export function resolveGlobalSkillPaths(names: string[]): string[] {
   ensureSkillsDir();

@@ -2,7 +2,7 @@ import { Type, type TSchema } from "typebox";
 import { getUserDisplayName } from "../config/settings.js";
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, chmodSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { awaitResourceClose, memberTerminalWorkspace, createShell, execInShell, readShell, waitShell, listShells, closeShell, type TerminalWorkspace } from "./terminal.js";
 import { memberRuntimeAllowed } from "./instance.js";
 import { logger } from "../kernel/logger.js";
@@ -47,14 +47,6 @@ export const MEMBER_GATEWAY_TOOL_NAMES = [
   "profile_read",
   "profile_update",
 ] as const;
-
-/** qm-style guidance for a tool name the member surface does not know. */
-export function unknownMemberToolMessage(tool: string): string {
-  return `Unknown tool "${tool}" — available: ${MEMBER_DIRECT_TOOL_NAMES.join(", ")}. `
-    + `Gateway capabilities (${MEMBER_GATEWAY_TOOL_NAMES.join(", ")}) are called through bossmode: `
-    + `{action:"list"} to discover them, {action:"describe", tool:"<name>"} for parameters, `
-    + `{action:"call", tool:"<name>", args:{…}} to run one.`;
-}
 
 // Canonical description for the `chat_send` tool used by agent tool definitions;
 // the @mention contract stays in a single source of truth.

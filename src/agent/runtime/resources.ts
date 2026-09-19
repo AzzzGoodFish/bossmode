@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentResourceSnapshot } from "../types.js";
 import { logger } from "../../kernel/logger.js";
-import { DefaultResourceLoader, type ResourceLoader, type AgentSession, type ExtensionFactory, formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, type ResourceLoader, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 export type McpFactoryLoader=(adapterPath:string)=>Promise<{name:string;factory:ExtensionFactory}>;
 let mcpFactoryLoader:McpFactoryLoader|undefined;
@@ -137,63 +137,4 @@ export async function bindMcpExtension(session: AgentSession, opts: { configPath
     logger.warn("runtime:pi-sdk", "mcp extension bind failed", { agent: opts.agent, error: err.message || String(err) });
     throw err;
   }
-}
-import { exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
-import type { AgentMemberConfig } from "../../kernel/types.js";
-
-export interface FinalMemberSystemPromptArgs {
-  /** Scope-shaped id exactly as the runtime passes it (room:<id> / dm:<memberId>). */
-  scopeId: string;
-  /** Session cwd exactly as the runtime passes it (room cwd / process.cwd() for DM). */
-  cwd: string;
-  member: AgentMemberConfig;
-  /** Skill dirs/files the runtime would pass pi's loader. */
-  skillPaths: string[];
-  agentPrompt: string;
-  appendSystemPrompt: string[];
-}
-
-/**
- * Returns the final system prompt text. The bossmode-compiled prompt is the
- * only source (piBuiltinPrompt flag retired 2026-09-04) — no null mode.
- */
-export function buildFinalMemberSystemPrompt(args: FinalMemberSystemPromptArgs): string {
-  const sources = resolvePiSystemPromptSources({
-    agentPrompt: args.agentPrompt,
-    appendSystemPrompt: args.appendSystemPrompt,
-  });
-  const customPrompt = sources.systemPrompt ?? "";
-  const appendSection = sources.appendSystemPrompt.length > 0
-    ? `\n\n${sources.appendSystemPrompt.join("\n\n")}`
-    : "";
-
-  // Agent dir resolution mirrors pi-sdk createAgent (credential override wins).
-  const piConfig = args.member.model && args.member.credentialId
-    ? exportPiConfigForMember({
-        memberId: args.member.id,
-        modelRef: args.member.model,
-        credentialId: args.member.credentialId,
-      })
-    : null;
-  const agentDir = piConfig?.agentDir || resolvePiAgentDir(args.member.id);
-
-  const skillPaths = args.skillPaths.filter((p) => existsSync(p));
-  const skills = loadSkills({ cwd: args.cwd, agentDir, skillPaths, includeDefaults: false }).skills;
-  const contextFiles = loadProjectContextFiles({ cwd: args.cwd, agentDir });
-
-  // pi core/system-prompt.js buildSystemPrompt(), customPrompt branch.
-  let prompt = customPrompt + appendSection;
-  if (contextFiles.length > 0) {
-    prompt += "\n\n<project_context>\n\n";
-    prompt += "Project-specific instructions and guidelines:\n\n";
-    for (const { path, content } of contextFiles) {
-      prompt += `<project_instructions path="${path}">\n${content}\n</project_instructions>\n\n`;
-    }
-    prompt += "</project_context>\n";
-  }
-  // "read" is always among a member's selected tools, so pi always appends
-  // the skills section when any skills loaded (pi ≥0.84 passes the reading tool).
-  prompt += formatSkillsForPrompt(skills, "read");
-  prompt += `\nCurrent working directory: ${args.cwd.replace(/\\/g, "/")}\n`;
-  return prompt;
 }

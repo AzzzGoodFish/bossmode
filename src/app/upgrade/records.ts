@@ -1,14 +1,13 @@
 import { getDefaultConfig, writeConfig } from "../../config/settings.js";
 import { parseDocument, parse } from "yaml";
 import { type MemberRecord } from "../../data/types.js";
-import { readFileSync, lstatSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { listMembers, insertMemberIdentity } from "../../member/identity.js";
 import { ensureDmScope } from "../../chat/conversations.js";
 import { managedPath, requireRegularFile } from "../../files/io.js";
 import { assertLegacyMemberDirectories, type LegacySourceEntry, type UpgradeImportContext, readLegacyJson } from "./inventory.js";
-import { type TemplateMetadata, templateMetadataKeys, validateTemplateSlug, validateTemplatePath, importTemplateMetadata } from "../../member/templates.js";
+import { type TemplateMetadata, templateMetadataKeys, validateTemplateSlug, importTemplateMetadata } from "../../member/templates.js";
 import { asString, asStringArray } from "../../kernel/markdown.js";
-import { isAbsolute, join } from "node:path";
 import { type Database } from "../../data/database.js";
 import { createHash } from "node:crypto";
 import { requireObject } from "../../kernel/json.js";
@@ -179,25 +178,6 @@ export function parseAgentDefinitionMarkdown(slug: string, markdown: string): Pa
   };
 }
 
-function assetPath(root: string, slug: string, relativePath: string): string {
-  if (!isAbsolute(root)) throw new Error("Agent asset root must be absolute");
-  validateTemplatePath(slug, relativePath);
-  let path = root;
-  // Managed data root is supplied by bootstrap. Reject symlinks within it, including root itself.
-  for (const part of ["", ...relativePath.split("/")]) {
-    path = join(path, part);
-    try { if (lstatSync(path).isSymbolicLink()) throw new Error("Agent asset path contains a symlink"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
-  return path;
-}
-
-export function readTemplateBody(root: string, metadata: TemplateMetadata): string {
-  const path = assetPath(root, metadata.slug, metadata.personaPath);
-  if (!lstatSync(path).isFile()) throw new Error("Agent persona must be a regular file");
-  return readFileSync(path, "utf8");
-}
-
 export interface TemplateSource {
   /** Historical inventory path; never opened here. */
   path: string;
@@ -208,11 +188,6 @@ export interface TemplateSource {
 export interface TemplateImportContext {
   db: Database;
   stageAsset(relativePath: string, bytes: Uint8Array): void;
-}
-
-/** Pure source-inventory filter for parent's backup/retirement coordinator. */
-export function legacyAgentTemplateSources(sourceFiles: readonly string[]): {path: string; retire: true}[] {
-  return sourceFiles.filter(path => /^agents\/[^/\\]+\.md$/.test(path)).map(path => ({ path, retire: true }));
 }
 
 /** Parent reads its explicit backup inventory and supplies bytes. No filesystem discovery or lifecycle. */

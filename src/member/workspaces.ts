@@ -1,7 +1,7 @@
 import { getDatabase, type Database } from "../data/database.js";
 import { memberDir } from "../files/layout.js";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 
@@ -169,47 +169,12 @@ export function prepareMemberSshCredential(memberId: string, optional = false): 
     return { privateKey: readFileSync(key, "utf8"), publicKey: readFileSync(key + ".pub", "utf8").trim() };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
-export function ensureMemberSshKeyPair(memberId: string): string | null {
-  const existing = readSshCredential(memberId);
-  if (existing) return existing.publicKey.trim();
-  const material = prepareMemberSshCredential(memberId, true);
-  if (!material) return null;
-  return getDatabase().transaction(() => {
-    const concurrent = readSshCredential(memberId);
-    if (concurrent) return concurrent.publicKey.trim();
-    importSshCredential(memberId, material);
-    return material.publicKey;
-  });
-}
 
 export function memberSshKeyPath(memberId: string): string { return join(memberDir(memberId), "ssh", "id_ed25519"); }
 
 export function readMemberSshPublicKey(memberId: string): string | null { return readSshCredential(memberId)?.publicKey.trim() ?? null; }
 
-/** Native SSH adapters use this; explicit external key references stay external. */
-export function readWorkspaceSshPrivateKey(memberId: string, keyPath: string): Buffer {
-  if (resolve(keyPath) !== resolve(memberSshKeyPath(memberId))) return readFileSync(keyPath);
-  const material = readSshCredential(memberId);
-  if (!material) throw new Error("Member SSH credential is missing");
-  return Buffer.from(material.privateKey);
-}
-
 export interface MaterializedSshCredential { keyPath: string; configPath?: string; dispose(): void }
-
-/** File-only callers must dispose after the SSH process/connection ends. Never read back. */
-export function materializeMemberSshCredential(memberId: string): MaterializedSshCredential {
-  const material = readSshCredential(memberId);
-  if (!material) throw new Error("Member SSH credential is missing");
-  const dir = mkdtempSync(join(tmpdir(),"bossmode-ssh-runtime-"));
-  try {
-    const keyPath = join(dir,"id_ed25519");
-    writeFileSync(keyPath,material.privateKey,{mode:0o600});
-    writeFileSync(`${keyPath}.pub`,material.publicKey,{mode:0o600});
-    const configPath = material.config === undefined ? undefined : join(dir,"config");
-    if (configPath) writeFileSync(configPath,material.config!,{mode:0o600});
-    return {keyPath,...(configPath ? {configPath}:{}),dispose:()=>rmSync(dir,{recursive:true,force:true})};
-  } catch (error) { rmSync(dir,{recursive:true,force:true}); throw error; }
-}
 
 export interface OriginalWorkspace {
   id: string;

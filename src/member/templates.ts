@@ -139,11 +139,6 @@ export interface TemplateMetadata {
   extensions: Record<string, unknown>;
 }
 
-interface Row {
-  slug: string; display_name: string; description: string; avatar: string | null; model: string | null;
-  tags_present: number; skills_present: number; persona_path: string; extensions_json: string;
-}
-
 export function validateTemplateSlug(slug: string): void {
   if (!slug || slug === "." || slug === ".." || /[\\/\0]/.test(slug)) throw new Error("Invalid agent template slug");
 }
@@ -154,22 +149,6 @@ export function validateTemplatePath(slug: string, path: string): void {
   if (parts.length < 3 || parts[0] !== "agents" || parts[1] !== slug || parts.at(-1) !== "persona.md"
     || parts.some(p => !p || p === "." || p === ".." || /[\\\0]/.test(p))) throw new Error("Invalid agent persona path");
 }
-
-/** Explicit initialized Database only; never opens, binds, migrates, or reads legacy files. */
-export function hasTemplateMetadata(slug: string, db: Database = getDatabase()): boolean {
-    validateTemplateSlug(slug);
-    return !!db.get("SELECT 1 FROM agent_templates WHERE slug=?", slug);
-  }
-
-export function readTemplateMetadata(slug: string, db: Database = getDatabase()): TemplateMetadata | null {
-    validateTemplateSlug(slug);
-    const row = db.get<Row>("SELECT * FROM agent_templates WHERE slug=?", slug);
-    return row ? decodeTemplateMetadata(row, db) : null;
-  }
-
-export function listTemplateMetadata(db: Database = getDatabase()): TemplateMetadata[] {
-    return db.all<Row>("SELECT * FROM agent_templates ORDER BY slug").map(row => decodeTemplateMetadata(row, db));
-  }
 
 export function importTemplateMetadata(template: TemplateMetadata, db: Database = getDatabase()): void {
     validateTemplatePath(template.slug, template.personaPath);
@@ -191,23 +170,4 @@ export function importTemplateMetadata(template: TemplateMetadata, db: Database 
         values?.forEach((value, position) => tx.run(`INSERT INTO ${table} (slug,position,value) VALUES (?,?,?)`, template.slug, position, value));
       }
     });
-  }
-
-export function deleteTemplateMetadata(slug: string, db: Database = getDatabase()): boolean {
-    return db.transaction(tx => {
-      if (!hasTemplateMetadata(slug, tx)) return false;
-      tx.run("DELETE FROM agent_templates WHERE slug=?", slug);
-      return true;
-    });
-  }
-
-function decodeTemplateMetadata(row: Row, db: Database = getDatabase()): TemplateMetadata {
-    const values = (table: string) => db.all<{value: string}>(`SELECT value FROM ${table} WHERE slug=? ORDER BY position`, row.slug).map(v => v.value);
-    return {
-      slug: row.slug, name: row.display_name, description: row.description,
-      avatar: row.avatar ?? undefined, model: row.model ?? undefined,
-      tags: row.tags_present ? values("agent_template_tags") : undefined,
-      skills: row.skills_present ? values("agent_template_skills") : undefined,
-      personaPath: row.persona_path, extensions: JSON.parse(row.extensions_json),
-    };
   }

@@ -1,12 +1,10 @@
-import { type OAuthLoginJobStatus, type ModelCredentialProfileInput, type OAuthLoginJobPublic, type OAuthDeviceCodeInfo, type StartOAuthConnectionRequest } from "../kernel/types.js";
+import { type ModelCredentialProfileInput, type OAuthLoginJobPublic, type OAuthDeviceCodeInfo, type StartOAuthConnectionRequest } from "../kernel/types.js";
 import { type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, sanitizeOAuthCredentials, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
 import { PiAiOAuthLoginAdapter } from "./pi-adapt/credentials.js";
 import { modelsForBuiltinProvider, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider } from "./catalog.js";
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { randomUUID } from "node:crypto";
-
-type OAuthJobStatus = OAuthLoginJobStatus;
 
 type OAuthInputWaiter = { resolve: (value: string) => void; reject: (error: Error) => void };
 
@@ -101,10 +99,6 @@ function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { pro
       models: modelsForBuiltinProvider(providerId),
     },
   };
-}
-
-export function setOAuthLoginAdapterForTests(adapter: OAuthLoginAdapter | null): void {
-  oauthLoginAdapter = adapter;
 }
 
 function transition(job: OAuthLoginJob, state: Partial<OAuthLoginJobPublic>, ready = true): void {

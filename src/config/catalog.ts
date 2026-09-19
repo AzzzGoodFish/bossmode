@@ -348,7 +348,7 @@ export function oauthProviderIds(): Set<string> {
   }
 }
 
-export function modelsForBuiltinProvider(providerSlug: string, baseUrlOverride?: string): ModelDefinitionConfig[] {
+export function modelsForBuiltinProvider(providerSlug: string, _baseUrlOverride?: string): ModelDefinitionConfig[] {
   return loadPiCatalogModelsSync()
     .filter((m) => m.provider === providerSlug)
     .map((m) => ({
@@ -503,8 +503,6 @@ let networkRefreshForTests: null | (() => Promise<{ source: CatalogRefreshSource
 let remoteModels: any[] | null = null;
 
 let remoteFetchedAt: number | null = null;
-
-let providerOverlays: Record<string, ProviderModelsStoreEntry> | null = null;
 
 export function getCatalogNetworkRefreshForTests(): null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) {
   return networkRefreshForTests;

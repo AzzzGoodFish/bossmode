@@ -669,7 +669,7 @@ export function destroyInstance(memberId: string,options:{preservePending?:boole
   }
 }
 
-export function interruptAcceptedInput(scopeId:string,instance:AgentInstance,trigger:string):void{
+export function interruptAcceptedInput(_scopeId:string,instance:AgentInstance,trigger:string):void{
   try{settleMemberShellWaits(instance.memberId);}catch{}
   // ① B1: one runtime serves every chat, so an interrupt can arrive while the
   // member is between turns. Only a real in-flight turn becomes "aborting" —
