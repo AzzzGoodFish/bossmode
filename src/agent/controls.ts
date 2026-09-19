@@ -4,7 +4,7 @@ import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
-import { buildMemberAgentSession, maybeFlushPendingReload, getRegistry } from "./assembly.js";
+import { buildMemberAgentSession, getRegistry } from "./assembly.js";
 import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
@@ -140,75 +140,22 @@ export async function switchMemberThinkingLevel(memberId:string,thinkingLevel:st
  * old prompt settling and compaction actually starting. Shell processes are
  * never killed — blocking shell waits are settled so the member's turn can
  * end, but the commands keep running in the PTY. */
-export async function compactMember(scopeId: string | null, memberId: string): Promise<{ ok: boolean; action: string }> {
-  let instance: AgentInstance | undefined = instances.get(instanceKey(memberId)) ?? undefined;
-  if (!instance) {
-    // The room /compact command can arrive before any activation — build the
-    // session (no prompt) so there is something to compact. Unresolvable or
-    // unconfigured members still fail honestly.
-    instance = (await buildMemberAgentSession(memberId)) ?? undefined;
-    if (!instance) throw new Error(`No active member session to compact (${memberId})`);
-  }
-  if (instance.compacting) throw new Error("Compaction is already in progress for this session");
-  if (!instance.handle.compact) throw new Error("Runtime does not support manual compaction");
-
-  // Busy before the next await (§3): once an instance is in hand (live or
-  // freshly built — the build itself is gated), the lifecycle is marked
-  // synchronously so message paths see a compacting/busy instance and queue;
-  // Stop finds a busy lifecycle in every window instead of an already-idle
-  // no-op. Reuses the existing compacting/dispatch fields — no second queue,
-  // no timers.
-  instance.activeSourceRef = scopeId;
-  instance.compacting = true;
-  updateDispatchState(instance, "running", "compact-requested");
-  transition(instance, scopeId, instance.agentName, "working", "compact-requested");
-  let started = false;
-  let completed = false;
-  try {
-    // Settle the old turn first: shell waits return as running (commands stay
-    // alive in the PTY), the SDK abort finishes the in-flight prompt.
-    if (instance.turnActive || instance.promptInFlight || instance.status === "working") {
-      settleMemberShellWaits(instance.memberId);
-      try { instance.handle.abort(); } catch { /* already stopped */ }
-      await instance.handle.waitForIdle();
-      // Stop landed in the gap (old prompt finished, compact not started):
-      if (instance.dispatchState === "aborting" || !memberRuntimeAllowed(memberId)) {
-        logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, sourceRef: activeSource(instance) });
-        return { ok: false, action: "stopped" };
-      }
-    }
-    started = true;
-    // From here the event bridge owns the lifecycle: compaction_end resets
-    // compacting/status and resumes queued inputs as a fresh prompt.
-    const outcome = await instance.handle.compact();
-    if (outcome?.aborted) {
-      logger.info("agent", "manualCompactAborted", { member: instance.agentName, sourceRef: activeSource(instance) });
-      return { ok: false, action: "stopped" };
-    }
-    completed = true;
-    return { ok: true, action: "compacted" };
-  } catch (err) {
-    const message = formatRuntimeErrorMessage(err);
-    if (started) {
-      // The bridge already emitted compaction_end(aborted/error) and settled.
-      logger.error("agent", "manualCompactFailed", { member: instance.agentName, sourceRef: activeSource(instance), error: message });
-      noticeCurrentSource(instance, `Manual compaction failed for "${instance.agentName}": ${message}`);
-    }
-    throw err;
-  } finally {
-    if (!started) {
-      // Never reached the SDK operation (stopped in the window or pre-start
-      // failure): restore the lifecycle here and resume queued inputs.
-      instance.compacting = false;
-      updateDispatchState(instance, "idle", "compact-not-started");
-      transition(instance, scopeId, instance.agentName, "idle", "compact-not-started");
-      drainQueuedInputsAsPrompt(instance, "compact-not-started");
-    }
-    // A manual compact emits agent_end after compaction_end and has no input
-    // pump to flush deferred reloads. Wait for the actual SDK operation first.
-    if (completed && instances.get(instanceKey(memberId)) === instance
-      && memberRuntimeAllowed(memberId) && !queueDepth(instance)) maybeFlushPendingReload(instance);
-    if (instance.activeSourceRef === scopeId && !instance.promptInFlight && !instance.turnActive) instance.activeSourceRef = null;
+export async function compactMember(sourceRef:string|null,memberId:string):Promise<{ok:boolean;action:string}>{
+  const instance=instances.get(instanceKey(memberId))??await buildMemberAgentSession(memberId)??undefined;
+  if(!instance)throw new Error(`No active member session to compact (${memberId})`);
+  if(instance.compacting)throw new Error("Compaction is already in progress for this session");
+  instance.activeSourceRef=sourceRef;instance.compacting=true;updateDispatchState(instance,"running","compact-requested");
+  transition(instance,sourceRef,instance.agentName,"working","compact-requested");
+  try{
+    if(instance.turnActive||instance.promptInFlight){settleMemberShellWaits(memberId);instance.handle.abort();await instance.handle.waitForIdle();}
+    if(instance.dispatchState==="aborting"||!memberRuntimeAllowed(memberId))return {ok:false,action:"stopped"};
+    const outcome=await instance.handle.compact();return outcome.aborted?{ok:false,action:"stopped"}:{ok:true,action:"compacted"};
+  }catch(error){
+    const message=formatRuntimeErrorMessage(error);logger.error("agent","manualCompactFailed",{member:instance.agentName,sourceRef,error:message});
+    noticeCurrentSource(instance,`Manual compaction failed for "${instance.agentName}": ${message}`);throw error;
+  }finally{
+    if(instance.compacting){instance.compacting=false;updateDispatchState(instance,"idle","compact-settled");transition(instance,sourceRef,instance.agentName,"idle","compact-settled");drainQueuedInputsAsPrompt(instance,"compact-settled");}
+    if(instance.activeSourceRef===sourceRef&&!instance.promptInFlight&&!instance.turnActive)instance.activeSourceRef=null;
   }
 }
 
