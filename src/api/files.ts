@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
-import { getRoom, parseMmScopeId, roomMemberAssetRoots } from "../chat/conversations.js";
+import { getRoom, parseConversation, roomMemberAssetRoots } from "../chat/conversations.js";
 import {
   attachmentExists,
   getAttachmentPath,
@@ -52,30 +52,27 @@ addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
   }
 });
 
-function roomLocation(id: string): AttachmentLocation | null { return getRoom(id) ? { kind: "room", roomId: id } : null; }
-function dmLocation(id: string): AttachmentLocation | null { return getMember(id) ? { kind: "dm", memberId: id } : null; }
-function mmLocation(scope: string): AttachmentLocation | null {
-  const memberIds = parseMmScopeId(scope);
-  return memberIds ? { kind: "mm", memberIds } : null;
+function conversationLocation(raw: string): { scopeId: string; location: AttachmentLocation } | null {
+  let scope: string;
+  try { scope = decodeURIComponent(raw); } catch { return null; }
+  const ref = parseConversation(scope);
+  if (!ref) return null;
+  if (ref.kind === "room") return getRoom(ref.roomId) ? { scopeId: ref.scopeId, location: { kind: "room", roomId: ref.roomId } } : null;
+  if (ref.kind === "dm") return getMember(ref.memberId) ? { scopeId: ref.scopeId, location: { kind: "dm", memberId: ref.memberId } } : null;
+  return ref.memberIds.every(id => getMember(id)) ? { scopeId: ref.scopeId, location: { kind: "mm", memberIds: ref.memberIds } } : null;
 }
-function attachmentUrl(location: AttachmentLocation, filename: string): string {
-  if (location.kind === "room") return `/api/rooms/${location.roomId}/attachments/${filename}`;
-  if (location.kind === "dm") return `/api/dm/${location.memberId}/attachments/${filename}`;
-  return `/api/member-chats/${encodeURIComponent(`mm:${location.memberIds.join("-")}`)}/attachments/${filename}`;
+function attachmentUrl(scopeId: string, filename: string): string {
+  return `/api/conversations/${encodeURIComponent(scopeId)}/attachments/${encodeURIComponent(filename)}`;
 }
-async function upload(request: Parameters<typeof requestUrl>[0] & NodeJS.ReadableStream, response: Parameters<typeof sendJson>[0], location: AttachmentLocation): Promise<void> {
+async function upload(request: Parameters<typeof requestUrl>[0] & NodeJS.ReadableStream, response: Parameters<typeof sendJson>[0], scopeId: string, location: AttachmentLocation): Promise<void> {
   const originalFilename = requestUrl(request).searchParams.get("filename");
   if (!originalFilename) return sendJson(response, 400, { error: "filename query parameter is required" });
   try {
     const stored = await storeAttachment(request as import("node:stream").Readable, location, originalFilename);
     if (!stored.size) return sendJson(response, 400, { error: "Empty file" });
     sendJson(response, 200, {
-      filename: stored.storedFilename,
-      originalFilename: stored.originalFilename,
-      path: stored.storedFilename,
-      size: stored.size,
-      url: attachmentUrl(location, stored.storedFilename),
-      previewType: inferAttachmentPreviewType(stored.originalFilename),
+      filename: stored.storedFilename, originalFilename: stored.originalFilename, path: stored.storedFilename, size: stored.size,
+      url: attachmentUrl(scopeId, stored.storedFilename), previewType: inferAttachmentPreviewType(stored.originalFilename),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -86,59 +83,35 @@ function download(response: Parameters<typeof sendJson>[0], location: Attachment
   if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
   try {
     const path = getAttachmentPath(location, filename);
-    response.writeHead(200, {
-      "Content-Type": mime(filename),
-      "Content-Length": statSync(path).size,
-      "Cache-Control": "public, max-age=86400",
-      "X-Content-Type-Options": "nosniff",
-    });
+    response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": statSync(path).size,
+      "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" });
     createReadStream(path).pipe(response);
   } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
 }
-function preview(response: Parameters<typeof sendJson>[0], location: AttachmentLocation, filename: string): void {
+function preview(response: Parameters<typeof sendJson>[0], scopeId: string, location: AttachmentLocation, filename: string): void {
   if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
   const type = inferAttachmentPreviewType(filename);
   if (type === "download") return sendJson(response, 400, { error: "Attachment is download-only" });
   const path = getAttachmentPath(location, filename);
   if (statSync(path).size > MAX_PREVIEW_BYTES) return sendJson(response, 413, { error: "Attachment preview is too large" });
-  sendJson(response, 200, {
-    type: type === "markdown" ? "md" : type,
-    originalPath: filename,
-    path: filename,
-    title: filename,
-    content: type === "image" ? attachmentUrl(location, filename) : readFileSync(path, "utf8"),
-  });
+  sendJson(response, 200, { type: type === "markdown" ? "md" : type, originalPath: filename, path: filename, title: filename,
+    content: type === "image" ? attachmentUrl(scopeId, filename) : readFileSync(path, "utf8") });
 }
 
-addRoute("POST", "/api/rooms/:id/upload", async (request, response, params) => {
-  const location = roomLocation(params.id);
-  if (!location) return sendJson(response, 404, { error: "Room not found" });
-  await upload(request, response, location);
+addRoute("POST", "/api/conversations/:scope/attachments", async (request, response, params) => {
+  const target = conversationLocation(params.scope);
+  if (!target) return sendJson(response, 404, { error: "Conversation not found" });
+  await upload(request, response, target.scopeId, target.location);
 });
-addRoute("POST", "/api/dm/:memberId/upload", async (request, response, params) => {
-  const location = dmLocation(params.memberId);
-  if (!location) return sendJson(response, 404, { error: "Member not found" });
-  await upload(request, response, location);
+addRoute("GET", "/api/conversations/:scope/attachments/:filename", async (_request, response, params) => {
+  const target = conversationLocation(params.scope);
+  if (!target) return sendJson(response, 404, { error: "Conversation not found" });
+  download(response, target.location, params.filename);
 });
-addRoute("GET", "/api/rooms/:id/attachments/:filename", async (_request, response, params) => {
-  const location = roomLocation(params.id);
-  if (!location) return sendJson(response, 404, { error: "Room not found" });
-  download(response, location, params.filename);
-});
-addRoute("GET", "/api/dm/:memberId/attachments/:filename", async (_request, response, params) => {
-  const location = dmLocation(params.memberId);
-  if (!location) return sendJson(response, 404, { error: "Member not found" });
-  download(response, location, params.filename);
-});
-addRoute("GET", "/api/member-chats/:scope/attachments/:filename", async (_request, response, params) => {
-  const location = mmLocation(params.scope);
-  if (!location) return sendJson(response, 404, { error: "Member chat not found" });
-  download(response, location, params.filename);
-});
-addRoute("GET", "/api/rooms/:id/attachments/:filename/preview", async (_request, response, params) => {
-  const location = roomLocation(params.id);
-  if (!location) return sendJson(response, 404, { error: "Room not found" });
-  preview(response, location, params.filename);
+addRoute("GET", "/api/conversations/:scope/attachments/:filename/preview", async (_request, response, params) => {
+  const target = conversationLocation(params.scope);
+  if (!target) return sendJson(response, 404, { error: "Conversation not found" });
+  preview(response, target.scopeId, target.location, params.filename);
 });
 
 const TEXT_EXTENSIONS = new Set([
