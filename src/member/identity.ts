@@ -26,10 +26,7 @@ function decodeMember(row: MemberRow): MemberRecord {
   return { id: row.id, name: row.name, ...(row.title ? { title: row.title } : {}),
     agentTemplate: row.agent_template, global, createdAt: row.created_at, updatedAt: row.updated_at };
 }
-function encodeConfig(config: MemberGlobalConfig): string {
-  const { extensions: _retired, ...retained } = config as MemberGlobalConfig & { extensions?: unknown };
-  return JSON.stringify(retained);
-}
+function encodeConfig(config:MemberGlobalConfig):string{return JSON.stringify(config);}
 export function normalizeMemberName(name: unknown): string { return String(name ?? "").trim(); }
 export function validateMemberName(name: string): void {
   if (!name || name.length > 64 || /[/\0]/.test(name)) throw new Error("invalid_member_name");
@@ -140,13 +137,6 @@ export function getMemberConfiguration(id: string): MemberGlobalConfig {
   return { model: config.model ?? null, credentialId: config.credentialId ?? null, thinkingLevel: config.thinkingLevel ?? null,
     skills: config.skills ?? [], mcpServers: config.mcpServers ?? [] };
 }
-
-/** Runs inside the config-patch transaction: stale-mount bookkeeping stays atomic
- *  with the patch (a failure rolls both back). Connected by the composition root
- *  to the runtime checkpoint owner; member code never imports the agent. */
-export type GlobalConfigPatchObserver = (id: string, fields: string[]) => void;
-let globalConfigPatchObserver: GlobalConfigPatchObserver | undefined;
-export function setGlobalConfigPatchObserver(observer: GlobalConfigPatchObserver | undefined): void { globalConfigPatchObserver = observer; }
 
 /** Current identity projection without reading runtime configuration. */
 export function readMemberIdentity(id: string, retained = false): { id: string; name: string; agentTemplate: string; createdAt: number; updatedAt: number } | null {

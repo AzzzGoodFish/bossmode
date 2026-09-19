@@ -241,12 +241,6 @@ export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEnt
 export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
   updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
 }
-export function markStaleMounts(memberId: string, fields: string[]): void {
-  const now = Date.now();
-  updateRuntimeState(memberId, current => ({...current, staleMounts: {
-    since: now, fields: [...new Set([...(current.staleMounts?.fields ?? []), ...fields])],
-  }}), now);
-}
 export function clearStaleMounts(memberId: string): void {
   updateRuntimeState(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }

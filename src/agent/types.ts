@@ -3,7 +3,6 @@
 // tool info. Owned by the agent capability; no chat-kind branches here.
 // ============================================================================
 
-import { logger } from "../kernel/logger.js";
 export type AgentStatus="inactive"|"idle"|"working";
 export interface AgentMemberConfig {
   id:string;name:string;type:"agent";agent:string;title?:string;model?:string;runtime:"pi-cli";
@@ -45,32 +44,10 @@ export interface AgentMemberSnapshot {
 
 export interface AgentRuntime {
   readonly name: string;
-  readonly capabilities: RuntimeCapabilities;
-
-  detect(): Promise<RuntimeDetectResult>;
   createAgent(opts: CreateAgentOpts): Promise<AgentHandle>;
   /** Await every owned handle, including detached instances and failed teardown attempts. */
   shutdownMember(memberId: string): Promise<void>;
   shutdownAll(): Promise<void>;
-}
-
-export interface RuntimeDetectResult {
-  available: boolean;
-  version?: string;
-  path?: string;
-  error?: string;
-}
-
-export interface RuntimeCapabilities {
-  streaming: boolean;
-  toolEvents: boolean;
-  thinking: boolean;
-  usage: boolean;
-  dynamicModel: boolean;
-  dynamicThinking: boolean;
-  permissionControl: boolean;
-  sessionResume: boolean;
-  contextUsage: boolean;  // supports get_context_usage control_request
 }
 
 // -- Agent creation --
@@ -193,34 +170,10 @@ export interface ContextUsage {
   compacted?: boolean;
 }
 
-// -- Runtimes config --
-
-export interface RuntimesConfig {
-  runtimes: Record<string, { enabled: boolean; cliPath?: string }>;
-}
-
 // Runtime registry — runtime adapters register from composition (app/wire);
 // the agent core only consumes the registry through assembly.
 export class RuntimeRegistry {
   private runtimes = new Map<string, AgentRuntime>();
-
-  async init(config: RuntimesConfig): Promise<void> {
-    for (const [name, conf] of Object.entries(config.runtimes)) {
-      if (!conf.enabled) continue;
-
-      // Runtimes are registered externally via register()
-      const runtime = this.runtimes.get(name);
-      if (runtime) {
-        const result = await runtime.detect();
-        if (result.available) {
-          logger.info("runtime", `${name}: detected`, { version: result.version, path: result.path });
-        } else {
-          logger.warn("runtime", `${name}: not available`, { error: result.error });
-          this.runtimes.delete(name);
-        }
-      }
-    }
-  }
 
   register(runtime: AgentRuntime): void {
     this.runtimes.set(runtime.name, runtime);
@@ -234,11 +187,4 @@ export class RuntimeRegistry {
     return Array.from(this.runtimes.values());
   }
 
-  getCapabilities(): Record<string, { capabilities: AgentRuntime["capabilities"]; name: string }> {
-    const result: Record<string, { capabilities: AgentRuntime["capabilities"]; name: string }> = {};
-    for (const [name, rt] of this.runtimes) {
-      result[name] = { name: rt.name, capabilities: rt.capabilities };
-    }
-    return result;
-  }
 }

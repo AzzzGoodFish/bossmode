@@ -22,7 +22,7 @@ import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import { shutdownSdkSession } from "./compaction.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
@@ -404,26 +404,10 @@ export class PiSdkAgentHandle implements AgentHandle {
 
 export class PiSdkRuntime implements AgentRuntime {
   readonly name = "pi-cli"; // storage compatibility alias
-  readonly capabilities: RuntimeCapabilities = {
-    streaming: true,
-    toolEvents: true,
-    thinking: true,
-    usage: true,
-    dynamicModel: true,
-    dynamicThinking: true,
-    permissionControl: false,
-    sessionResume: true,
-    contextUsage: true,
-  };
-
   private handles = new Map<PiSdkAgentHandle, string>();
   private creationCleanupFailures = new Map<string, Error[]>();
   /** Shared shutdown settlement: concurrent shutdownAll calls await the same teardown. */
   private shutdownSettlement: Promise<void> | null = null;
-
-  async detect(): Promise<RuntimeDetectResult> {
-    return { available: true, version: PI_SDK_VERSION, path: "@earendil-works/pi-coding-agent" };
-  }
 
   async createAgent(opts: CreateAgentOpts): Promise<AgentHandle> {
     // Session creation happens before a chat batch owns the instance. Durable

@@ -8,20 +8,12 @@ export function wireConfiguration(): () => void {
 }
 
 import { onMemberProfileChanged } from "../member/profile.js";
-import { setGlobalConfigPatchObserver } from "../member/identity.js";
-import { markStaleMounts } from "../agent/instance.js";
 import { broadcastMemberProfileChanged } from "./ws.js";
 
 export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberProfileChanged(member => notifyMemberProfileChanged(member));
   const stopViews = onMemberProfileChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
-}
-
-/** Stale-mount bookkeeping rides the config-patch transaction (failure rolls back together). */
-export function wireMemberConfigPatches(): () => void {
-  setGlobalConfigPatchObserver((id, fields) => markStaleMounts(id, fields));
-  return () => setGlobalConfigPatchObserver(undefined);
 }
 
 import { assertMemberScopeAccess, chatScopeAssetRoots, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, parseMmScopeId } from "../chat/conversations.js";
@@ -265,7 +257,7 @@ export function wireChatHttp(): () => void {
     readContextUsage: (_sourceRef, memberId) => getAgentContextUsage(memberId),
     readEvents: (sourceRef, memberId, limit, before) => loadEventsPaginated(sourceRef, memberId, limit, before),
     readTools: (_sourceRef, memberId) => getMemberActiveTools(memberId),
-    readSession: (sourceRef, memberId) => ({
+    readSession: (_sourceRef, memberId) => ({
       status: getAgentStatus(memberId),
       busy: getMemberBusyState(memberId),
       contextUsage: getAgentContextUsage(memberId),

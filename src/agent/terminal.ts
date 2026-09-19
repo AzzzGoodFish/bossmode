@@ -45,7 +45,6 @@ interface ShellExec {
   exitCode: number | null;
   output: string;
   status: "running" | "done";
-  resolve?: () => void;
   /** Settles when the exec reaches done — terminal_wait blocks on this. */
   done: Promise<void>;
   doneResolve: () => void;
@@ -196,8 +195,6 @@ function pushData(shell: LiveShell, raw: string): void {
       exec.exitCode = marker.exitCode;
       exec.lineEnd = Math.max(shell.lineCount - 2, exec.lineStart); // last written line (lineCount counts the trailing empty line)
       shell.currentExec = null;
-      exec.resolve?.();
-      exec.resolve = undefined;
       exec.doneResolve?.();
       archiveExec(shell, exec);
     }
@@ -245,7 +242,7 @@ function settleShellExit(shell: LiveShell): void {
   for (const exec of pending) {
     exec.status = "done"; exec.exitCode = null;
     exec.lineEnd = Math.max(shell.lineCount-2,exec.lineStart);
-    exec.resolve?.(); exec.resolve = undefined; exec.doneResolve?.();
+    exec.doneResolve?.();
     archiveExec(shell,exec);
   }
   shell.markExited();
@@ -461,7 +458,6 @@ export async function execInShell(args: {
     output: "",
     status: "running",
   } as ShellExec;
-  const done = new Promise<void>((resolve) => { exec.resolve = resolve; });
   exec.done = new Promise<void>((resolve) => { exec.doneResolve = resolve; });
   shell.writeQueue.push({ command: args.command, exec });
   drainQueue(shell);

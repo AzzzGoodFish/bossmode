@@ -24,7 +24,7 @@ import { RuntimeRegistry } from "../agent/types.js";
 import { PiSdkRuntime } from "../agent/runtime/pi.js";
 import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../member/templates.js";
-import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
+import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -71,7 +71,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   initializeMemberRuntime(registry, loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
-  const unsubscribeConfigPatches = wireMemberConfigPatches();
   const unsubscribeMembers = wireConversationMembers();
   const unsubscribeMemberHttp = wireMemberHttp();
   const unsubscribeUsageHttp = wireUsageHttp();
@@ -128,7 +127,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     accepting = false;
     unsubscribeConfiguration();
     unsubscribeProfiles();
-    unsubscribeConfigPatches();
     unsubscribeAgentEvents();
     unsubscribeChats();
     unsubscribeUsageHttp();

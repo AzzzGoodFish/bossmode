@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { getBossmodeDir, memberSkillsDir, installationRoot } from "../files/layout.js";
+import { memberSkillsDir, installationRoot } from "../files/layout.js";
 import { parseFrontmatter, asStringArray, asString } from "../kernel/markdown.js";
 import { logger } from "../kernel/logger.js";
 export interface SkillDefinition {
@@ -11,8 +11,6 @@ export interface SkillDefinition {
   source?: string; // directory this skill was loaded from
 }
 
-const globalSkills = join(getBossmodeDir(), "skills");
-export function ensureSkillsDir(): void { mkdirSync(globalSkills, { recursive: true }); }
 export function platformSkillsDir(): string { return join(installationRoot, "assets", "skills"); }
 
 function parseSkill(content: string, name: string, source: string, summary = false): SkillDefinition {
@@ -43,10 +41,6 @@ function scanSkills(dir:string,summary=false):SkillFile[]{
     }
   }
   return result;
-}
-export function resolveGlobalSkillPaths(names: string[]): string[] {
-  ensureSkillsDir();
-  return names.map(name => join(globalSkills, name));
 }
 export type SkillCatalogMode = "under_budget" | "shortened_descriptions" | "dropped_descriptions" | "omitted_skills" | "absent";
 export interface SkillCatalogEntry { relPath: string; description: string; absPath?: string; platform?: boolean }
