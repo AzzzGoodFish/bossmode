@@ -10,7 +10,14 @@ import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemb
 import { createMember } from "../app/member-actions.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
-import { listMemberSkills } from "../member/skills.js";
+import {
+  deleteSkillDefinition,
+  listMemberSkills,
+  loadSkillDefinition,
+  loadSkillDefinitionsStrict,
+  loadSkillTemplates,
+  saveSkillDefinition,
+} from "../member/skills.js";
 import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
 import { assertMemberScopeAccess, parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
@@ -153,11 +160,23 @@ addRoute("GET", "/api/members/:id", async (_req, res, params) => {
 
 export interface MemberHttpActions {
   previewPrompt(memberId: string): { text: string; contractFingerprint: string };
+  readStats(memberId: string): unknown;
+  readTokenTotal(memberId: string, sourceRef?: string): number;
+  readActivity(memberId: string, options: { sourceRef?: string; beforeSeq?: number; limit?: number; types?: string[] }): unknown;
+  readStatus(memberId: string): unknown;
+  stop(memberId: string): Promise<unknown> | unknown;
+  compact(memberId: string): Promise<unknown> | unknown;
+  reset(memberId: string): Promise<unknown> | unknown;
+  restart(memberId: string): Promise<unknown> | unknown;
 }
 let memberHttpActions: MemberHttpActions | undefined;
 export function connectMemberHttpActions(actions: MemberHttpActions): () => void {
   memberHttpActions = actions;
   return () => { if (memberHttpActions === actions) memberHttpActions = undefined; };
+}
+function connectedMemberActions(): MemberHttpActions {
+  if (!memberHttpActions) throw new Error("Member HTTP actions are not connected");
+  return memberHttpActions;
 }
 
 /** Member prompt preview is member-owned and identical across chat sources. */
@@ -447,3 +466,93 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
   }
 });
 
+
+// ── Member runtime reads and controls (member-owned; source is an optional filter) ──
+
+function sourceQuery(request: { url?: string }): string | undefined {
+  const url = new URL(request.url || "", "http://localhost");
+  const scope = url.searchParams.get("scope");
+  const roomId = url.searchParams.get("roomId");
+  return scope || (roomId ? `room:${roomId}` : undefined);
+}
+function authorizedMember(memberRef: string, sourceRef?: string): MemberRecord | null {
+  const member = resolveMemberRef(memberRef);
+  if (member && sourceRef) assertMemberScopeAccess(member.id, sourceRef);
+  return member;
+}
+
+addRoute("GET", "/api/members/:id/token-usage", async (request, response, params) => {
+  try {
+    const sourceRef = sourceQuery(request);
+    const member = authorizedMember(params.id, sourceRef);
+    if (!member) return sendJson(response, 404, { error: "Member not found" });
+    sendJson(response, 200, { totalTokens: connectedMemberActions().readTokenTotal(member.id, sourceRef) });
+  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+});
+addRoute("GET", "/api/members/:id/stats", async (request, response, params) => {
+  try {
+    const sourceRef = sourceQuery(request);
+    const member = authorizedMember(params.id, sourceRef);
+    if (!member) return sendJson(response, 404, { error: "Member not found" });
+    sendJson(response, 200, connectedMemberActions().readStats(member.id));
+  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+});
+addRoute("GET", "/api/members/:id/events", async (request, response, params) => {
+  try {
+    const sourceRef = sourceQuery(request);
+    const member = authorizedMember(params.id, sourceRef);
+    if (!member) return sendJson(response, 404, { error: "Member not found" });
+    const url = new URL(request.url || "", "http://localhost");
+    const beforeSeq = url.searchParams.has("beforeSeq") ? Number(url.searchParams.get("beforeSeq")) : undefined;
+    const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 50), 500));
+    const types = url.searchParams.get("types")?.split(",").map((value) => value.trim()).filter(Boolean);
+    sendJson(response, 200, connectedMemberActions().readActivity(member.id, { sourceRef, beforeSeq, limit, types }));
+  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+});
+addRoute("GET", "/api/members/:id/status", async (_request, response, params) => {
+  const member = resolveMemberRef(params.id);
+  if (!member) return sendJson(response, 404, { error: "Member not found" });
+  sendJson(response, 200, connectedMemberActions().readStatus(member.id));
+});
+for (const action of ["stop", "compact", "reset", "restart"] as const) {
+  addRoute("POST", `/api/members/:id/${action}`, async (_request, response, params) => {
+    const member = resolveMemberRef(params.id);
+    if (!member) return sendJson(response, 404, { error: "Member not found" });
+    try { sendJson(response, 200, await connectedMemberActions()[action](member.id)); }
+    catch (error) { sendJson(response, 400, { error: `${action}_failed`, message: error instanceof Error ? error.message : String(error) }); }
+  });
+}
+
+// Shared skill catalog is a member asset capability; member-local enablement
+// remains in the member configuration routes above.
+addRoute("GET", "/api/skills", async (_request, response) => {
+  try {
+    sendJson(response, 200, loadSkillDefinitionsStrict().map(({ name, description, tags }) => ({ name, description, tags })));
+  } catch (error) {
+    logger.error("api", "failed to load skill list", { error: String(error) });
+    sendJson(response, 500, { error: "Couldn’t load Skills" });
+  }
+});
+addRoute("GET", "/api/skills/templates", async (_request, response) => {
+  sendJson(response, 200, loadSkillTemplates().map(({ name, description, tags }) => ({ name, description, tags })));
+});
+addRoute("GET", "/api/skills/:name", async (_request, response, params) => {
+  const skill = loadSkillDefinition(params.name);
+  if (!skill) return sendJson(response, 404, { error: "Skill not found" });
+  sendJson(response, 200, skill);
+});
+addRoute("POST", "/api/skills", async (request, response) => {
+  const body = await parseBody(request) as { name?: string; content?: string };
+  if (!body.name || !body.content) return sendJson(response, 400, { error: "name and content are required" });
+  if (loadSkillDefinition(body.name)) return sendJson(response, 409, { error: `Skill "${body.name}" already exists` });
+  sendJson(response, 200, saveSkillDefinition(body.name, body.content));
+});
+addRoute("PUT", "/api/skills/:name", async (request, response, params) => {
+  const body = await parseBody(request) as { content?: string };
+  if (!body.content) return sendJson(response, 400, { error: "content is required" });
+  sendJson(response, 200, saveSkillDefinition(params.name, body.content));
+});
+addRoute("DELETE", "/api/skills/:name", async (_request, response, params) => {
+  if (!deleteSkillDefinition(params.name)) return sendJson(response, 404, { error: "Skill not found" });
+  sendJson(response, 200, { ok: true });
+});

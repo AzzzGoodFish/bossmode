@@ -30,7 +30,7 @@ import {
   type MessageInput,
 } from "../chat/messages.js";
 import { attachmentExists, displayFilename, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
-import { getMember, listMembers } from "../member/identity.js";
+import { getMember, listMembers, resolveMemberRef } from "../member/identity.js";
 import { logger } from "../kernel/logger.js";
 import { addRoute, parseBody, requestUrl, sendJson } from "./http.js";
 
@@ -146,7 +146,7 @@ function conversationTarget(rawScope: string, request: { url?: string }): Conver
     const member = resolveRoomMemberRef(ref.roomId, memberRef);
     return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
   }
-  const member = getMember(memberRef);
+  const member = resolveMemberRef(memberRef);
   return member && ref.memberIds.includes(member.id)
     ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name }
     : null;
