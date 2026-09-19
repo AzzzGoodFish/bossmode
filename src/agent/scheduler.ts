@@ -225,7 +225,6 @@ export interface SchedulerServices {
   applyPendingControls(instance:AgentInstance,trigger:string):void;
   interruptAccepted(instance:AgentInstance,sourceRef:string):void;
   flushPendingReload(instance:AgentInstance):void;
-  reloadSession(memberId:string,reason:string):Promise<{queued:boolean;rebuilt:boolean}>;
   hasPendingReply(db:Database,memberId:string,sourceRef:string,replySources:string[]):boolean;
   dismissReplies(db:Database,memberId:string,sourceRef:string|null|undefined,diagnosis:string,disposition:"failed"|"cancelled"|"silent"|"continuation-exhausted"):void;
 }
@@ -433,23 +432,6 @@ export function wireInstanceEvents(instance: AgentInstance): void {
         transition(instance, sourceRef, memberName, "idle", event.type);
         drainQueuedInputsAsPrompt(instance, event.type);
         schedulerServices().flushPendingReload(instance);
-        // Batch 6 §3: after compaction the session is rebuilt with fresh
-        // assets, resuming from the compacted file (member-invisible). If
-        // anything is still settling, defer via the pendingReload flag.
-        const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
-          && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
-        if (settled) {
-          const compactionMemberId = instance.memberId;
-          const compactionKey = instanceKey(compactionMemberId);
-          setTimeout(() => {
-            if (instances.get(compactionKey) !== instance) return;
-            void schedulerServices().reloadSession(compactionMemberId, "compaction").catch((err) =>
-              logger.error("agent", "post-compaction reload failed", { memberId: compactionMemberId, error: String(err) }),
-            );
-          }, 0);
-        } else {
-          instance.pendingReload = instance.pendingReload || "compaction";
-        }
       }
     } else if (event.type === "runtime_exit" && event.unexpected) {
       updateDispatchState(instance, "idle", event.type);

@@ -81,7 +81,6 @@ export class PiSdkAgentHandle implements AgentHandle {
   private listeners = new Set<(event: AgentStreamEvent) => void>();
   private mcpConfig?:McpRuntimeSettings;
   private unsubscribeSession: (() => void) | undefined;
-  private currentRun: Promise<void> | null = null;
   private promptAttempt: SdkExecutionAttempt | null = null;
   /** Outlives SDK preflight, where Agent.abort() has no active controller yet. */
   private promptAbortIntent: { aborted: boolean } | null = null;
@@ -214,8 +213,7 @@ export class PiSdkAgentHandle implements AgentHandle {
       if(options?.beforeDispatch?.constructor.name==="AsyncFunction")throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
       const attempt=this.dispatchExecution("input","pi-sdk:session.prompt",options?.beforeDispatch?attemptId=>options.beforeDispatch!({attemptId,dispatchIndex:0,message}):undefined);
       this.promptAttempt=attempt;if(this.promptAbortIntent.aborted||this.destroyed)attempt.interrupt("Runtime abort requested before SDK preflight");
-      const run=attempt.run(()=>this.session.prompt(message,{source:"external" as any})).catch(error=>{this.emit({type:"message_end",text:"",stopReason:"error",errorMessage:error.message||String(error)});throw error;}).finally(()=>{if(this.currentRun===run)this.currentRun=null;});
-      this.currentRun=run;await run;
+      await attempt.run(()=>this.session.prompt(message,{source:"external" as any})).catch(error=>{this.emit({type:"message_end",text:"",stopReason:"error",errorMessage:error.message||String(error)});throw error;});
     }finally{this.promptAttempt=null;this.promptAbortIntent=null;this.publishSessionReferenceIfMaterialized();}
   }
 
@@ -278,7 +276,6 @@ export class PiSdkAgentHandle implements AgentHandle {
 
   async waitForIdle(): Promise<void> {
     if (this.promptOperation) await this.promptOperation.catch(() => {});
-    else if (this.currentRun) await this.currentRun.catch(() => {});
   }
 
   refreshModelRegistry(_opts?: { allowNetwork?: boolean }): Promise<void> {
@@ -321,9 +318,7 @@ export class PiSdkAgentHandle implements AgentHandle {
 
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
-      const raw = typeof (this.session as any).getContextUsage === "function"
-        ? await (this.session as any).getContextUsage()
-        : (typeof (this.session as any).getSessionStats === "function" ? (await (this.session as any).getSessionStats())?.contextUsage : undefined);
+      const raw=await this.session.getContextUsage();
       return mapContextUsage(raw, this.runtimeParams.model);
     } catch (err) {
       logger.warn("runtime:pi-sdk", "getContextUsage failed", { error: String(err) });
@@ -335,7 +330,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (this.destroyed) return [];
     try {
       const session = this.session as any;
-      if (typeof session.getActiveToolNames !== "function" || typeof session.getAllTools !== "function") return [];
       const active = new Set<string>((session.getActiveToolNames() as string[]) || []);
       const all = (session.getAllTools() as Array<{
         name: string;
@@ -346,7 +340,7 @@ export class PiSdkAgentHandle implements AgentHandle {
       const tools: MemberActiveToolInfo[] = [];
       for (const t of all) {
         if (!t?.name || !active.has(t.name)) continue;
-        const def = typeof session.getToolDefinition === "function" ? session.getToolDefinition(t.name) : undefined;
+        const def=session.getToolDefinition(t.name);
         tools.push({
           name: t.name,
           label: typeof def?.label === "string" ? def.label : t.name,
@@ -365,7 +359,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   /** Called by the owner at the idle boundary before the next prompt. */
   refreshPrompt(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
-    if (this.currentRun || this.manualCompactionOutcome || this.session.isStreaming || this.session.isCompacting) {
+    if (this.promptOperation || this.manualCompactionOutcome || this.session.isStreaming || this.session.isCompacting) {
       throw new Error("Prompt refresh requires an idle pre-prompt boundary");
     }
     const sources = resolvePiSystemPromptSources(opts);

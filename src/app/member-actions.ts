@@ -141,7 +141,7 @@ import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/conversations.js";
 import * as sessionStore from "../member/sessions.js";
 
-import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, configureAssembly } from "../agent/assembly.js";
+import { buildMemberAgentSession, maybeFlushPendingReload, compileForMember, configureAssembly } from "../agent/assembly.js";
 
 import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../chat/conversations.js";
 import { listRoomsForMember } from "../chat/conversations.js";
@@ -224,7 +224,6 @@ export function initializeMemberRuntime(reg: RuntimeRegistry, loadSnapshot: (mem
     applyPendingControls: applyPendingAfterPromptSettlement,
     interruptAccepted: (instance, sourceRef) => interruptAcceptedInput(sourceRef, instance, "message_interrupt"),
     flushPendingReload: maybeFlushPendingReload,
-    reloadSession: reloadMemberSession,
     hasPendingReply: (db, memberId, sourceRef, replySources) =>
       listPendingReplies(sourceRef, memberId, db).some(reply => replySources.includes(reply.messageId)),
     dismissReplies: (db, memberId, sourceRef, diagnosis, disposition) => {
