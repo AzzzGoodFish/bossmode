@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
-import { getRoom, resolveConversation, roomMemberAssetRoots } from "../chat/conversations.js";
+import { attachmentLocation, getRoom, resolveConversation, roomMemberAssetRoots } from "../chat/conversations.js";
 import {
   attachmentExists,
   getAttachmentPath,
@@ -48,9 +48,7 @@ addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
 function conversationLocation(scope: string): { scopeId: string; location: AttachmentLocation } | null {
   const ref = resolveConversation(scope);
   if (!ref) return null;
-  if (ref.kind === "room") return { scopeId: ref.scopeId, location: { kind: "room", roomId: ref.roomId } };
-  if (ref.kind === "dm") return { scopeId: ref.scopeId, location: { kind: "dm", memberId: ref.memberId } };
-  return { scopeId: ref.scopeId, location: { kind: "mm", memberIds: ref.memberIds } };
+  return { scopeId: ref.scopeId, location: attachmentLocation(ref) };
 }
 function attachmentUrl(scopeId: string, filename: string): string {
   return `/api/conversations/${encodeURIComponent(scopeId)}/attachments/${encodeURIComponent(filename)}`;

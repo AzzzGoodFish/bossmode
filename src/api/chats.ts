@@ -1,5 +1,6 @@
 import { readConfig } from "../config/settings.js";
 import {
+  attachmentLocation,
   createRoom,
   deleteRoom,
   getRoom,
@@ -24,7 +25,7 @@ import {
   type Message,
   type MessageInput,
 } from "../chat/messages.js";
-import { attachmentExists, displayFilename, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
+import { attachmentExists, displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../files/attachments.js";
 import { getMember, listMembers } from "../member/identity.js";
 import { addRoute, HttpError, parseBody, requestUrl, requestValue, sendJson, type RouteHandler } from "./http.js";
 
@@ -220,16 +221,9 @@ addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
   sendJson(response, 200, roomResponse(updated!));
 });
 
-function attachmentLocation(sourceRef: string): AttachmentLocation {
-  const ref = parseConversation(sourceRef);
-  if (!ref) throw new Error("Invalid conversation");
-  if (ref.kind === "room") return { kind: "room", roomId: ref.roomId };
-  if (ref.kind === "dm") return { kind: "dm", memberId: ref.memberId };
-  return { kind: "mm", memberIds: ref.memberIds };
-}
 function parseAttachments(sourceRef: string, raw: unknown): RoomMessageAttachment[] {
   if (!Array.isArray(raw)) return [];
-  const location = attachmentLocation(sourceRef);
+  const location = attachmentLocation(parseConversation(sourceRef)!);
   return raw.map((value: { storedFilename?: string; filename?: string; originalFilename?: string; size?: number }) => {
     const storedFilename = displayFilename(value?.storedFilename || value?.filename || "");
     if (!storedFilename || !attachmentExists(location, storedFilename)) throw new Error(`Attachment not found: ${storedFilename || "(missing filename)"}`);

@@ -14,6 +14,7 @@ export interface Room {
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
+import type { AttachmentLocation } from "../files/attachments.js";
 
 export function slugifyRoomDocsPath(input: string): string {
   const slug = String(input || "")
@@ -324,6 +325,11 @@ export function resolveConversation(value: string): ConversationIdentity | null 
   if (ref.kind === "room") return getRoom(ref.roomId) ? ref : null;
   if (ref.kind === "dm") return conversationMember(ref.memberId) ? ref : null;
   return ref.memberIds.every(id => conversationMember(id)) ? ref : null;
+}
+export function attachmentLocation(ref: ConversationIdentity): AttachmentLocation {
+  if (ref.kind === "room") return { kind: "room", roomId: ref.roomId };
+  if (ref.kind === "dm") return { kind: "dm", memberId: ref.memberId };
+  return { kind: "mm", memberIds: ref.memberIds };
 }
 
 /** Convert a canonical source or an internal bare room key to the database key. */

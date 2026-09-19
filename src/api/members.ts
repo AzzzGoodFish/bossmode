@@ -71,10 +71,6 @@ addRoute("POST", "/api/members", async (req, res) => {
       skills?: string[];
       mcpServers?: string[];
     };
-    if ("agentTemplate" in body) {
-      sendJson(res, 400, { error: "agent_templates_retired", message: "Agent templates are retired; configure the member directly." });
-      return;
-    }
     // Batch-1 one-click create: name optional → "New Member" (+ suffix).
     const member = createMember({
       name: body.name,
@@ -143,10 +139,6 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       skills?: string[];
       mcpServers?: string[];
     };
-    if ("agentTemplate" in body) {
-      sendJson(res, 400, { error: "agent_templates_retired", message: "Agent templates are retired; configure the member directly." });
-      return;
-    }
     // Single-path model switch (design-model-switch-single-path-v1 §6): the
     // field is either omitted (no change) or a real model ref — null/empty is
     // a parameter error, clearing is not a supported product action.

@@ -62,19 +62,9 @@ interface MessageRow {
 }
 
 const RUNTIME_FAILURE_LIMIT = 300;
-const RUNTIME_FAILURE_PATTERNS = [
-  /^Member "[^"]+" request failed\./,
-  /^Member "[^"]+" error:/,
-  /^Member "[^"]+" runtime ended unexpectedly/,
-  /^Member "[^"]+" model credential is no longer available\./,
-  /^Failed to create member "[^"]+":/,
-  /^Failed to activate member "[^"]+":/,
-  /^Failed to switch model for "[^"]+":/,
-  /^Failed to switch thinking level for "[^"]+":/,
-  /^Failed to refresh model credential for "[^"]+":/,
-];
+const RUNTIME_FAILURE = /^(?:Member "[^"]+" (?:request failed\.|error:|runtime ended unexpectedly|model credential is no longer available\.)|Failed to (?:create member "[^"]+"|activate member "[^"]+"|switch model for "[^"]+"|switch thinking level for "[^"]+"|refresh model credential for "[^"]+"):)/;
 function visibleMessage<T extends { sender: string; content: string }>(message: T): T {
-  if (message.sender !== "system" || !RUNTIME_FAILURE_PATTERNS.some((pattern) => pattern.test(message.content))) return message;
+  if (message.sender !== "system" || !RUNTIME_FAILURE.test(message.content)) return message;
   const characters = Array.from(message.content);
   return characters.length <= RUNTIME_FAILURE_LIMIT ? message : {
     ...message,
