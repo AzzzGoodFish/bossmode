@@ -17,6 +17,7 @@ const dependencies = {
   app: ['app', 'api', 'knowledge', 'agent', 'member', 'chat', 'config', 'data', 'files', 'kernel'],
 };
 const apiAgentFiles = new Set(['types', 'controls', 'events', 'tools', 'terminal'].map(n => `src/agent/${n}.ts`));
+const apiAppFiles = new Set(['member-actions', 'usage-actions', 'artifact-actions'].map(n => `src/app/${n}.ts`));
 const adapter = p => p.startsWith('src/agent/runtime/') || p.startsWith('src/config/pi-adapt/');
 const lines = text => (text.match(/\n/g) || []).length + (text && !text.endsWith('\n') ? 1 : 0);
 const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
@@ -44,7 +45,7 @@ function permitted(from, to) {
   const a = from.split('/')[1], b = to.split('/')[1];
   if (a === 'api') {
     if (from === 'src/api/auth.ts' && b === 'data') return true;
-    if (apiAgentFiles.has(to) || to === 'src/app/member-actions.ts' || to === 'src/knowledge/documents.ts') return true;
+    if (apiAgentFiles.has(to) || apiAppFiles.has(to) || to === 'src/knowledge/documents.ts') return true;
     if (adapter(to)) return false;
   }
   // Application use cases must never depend on the transport/composition root.
