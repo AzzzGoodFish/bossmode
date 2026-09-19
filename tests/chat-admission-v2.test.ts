@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
-import { storeRoom } from "../src/chat/conversations.js";
-import { appendMessageWithAdmissions, confirmChatAdmission } from "../src/chat/delivery.js";
+import { assertMemberScopeAccess, ensureDmScope, ensureMmScope, storeRoom } from "../src/chat/conversations.js";
+import { appendMessageWithAdmissions, confirmChatAdmission, repairPendingChatAdmission } from "../src/chat/delivery.js";
 import { getMemberCursor } from "../src/chat/cursors.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
@@ -40,6 +40,41 @@ describe("chat delivery v2", () => {
     expect(getMemberCursor("room:rm_test", "mem_one", fixture.db)).toBe(result.message.id);
     expect(confirmChatAdmission(fixture.db, result.admissions[0].chatToken, result.id)).toEqual({ confirmed: false, cursorConfirmed: false });
     expect(fixture.db.get<{status:string}>("SELECT status FROM chat_admissions")!.status).toBe("confirmed");
+  });
+
+  it("repairs only explicit pending admission and never confirmed work", () => {
+    const fixture = setup();
+    const pending = appendMessageWithAdmissions(fixture.db, "room:rm_test", {
+      sender: "user", content: "@One pending", mentions: ["One"], mentionMemberIds: ["mem_one"],
+    });
+    const repaired = repairPendingChatAdmission(fixture.db, "room:rm_test", pending.message.id, "mem_one");
+    expect(repaired).toEqual(pending.admissions[0]);
+    const inputId = enqueue(fixture, repaired!);
+    confirmChatAdmission(fixture.db, repaired!.chatToken, inputId);
+    expect(repairPendingChatAdmission(fixture.db, "room:rm_test", pending.message.id, "mem_one")).toBeNull();
+  });
+
+  it("prepares DM and member-chat inputs without room unread context", () => {
+    const fixture = setup();
+    ensureDmScope("mem_one", fixture.db);
+    ensureMmScope("mem_one", "mem_two", fixture.db);
+    const dm = appendMessageWithAdmissions(fixture.db, "dm:mem_one", {
+      sender: "user", content: "private user", mentions: [],
+    });
+    expect(dm.admissions).toHaveLength(1);
+    expect(dm.admissions[0].memberId).toBe("mem_one");
+    expect(dm.admissions[0].chatToken.cursor).toBeNull();
+    expect(dm.admissions[0].input.prompt).toContain("private chat with the user");
+
+    const mm = appendMessageWithAdmissions(fixture.db, "mm:mem_one-mem_two", {
+      sender: "One", senderMemberId: "mem_one", content: "private member", mentions: [],
+    });
+    expect(mm.admissions).toHaveLength(1);
+    expect(mm.admissions[0].memberId).toBe("mem_two");
+    expect(mm.admissions[0].chatToken.cursor).toBeNull();
+    expect(mm.admissions[0].input.prompt).toContain("private chat with member `One`");
+    expect(assertMemberScopeAccess("mem_one", "mm:mem_one-mem_two").kind).toBe("mm");
+    expect(() => assertMemberScopeAccess("mem_one", "dm:mem_two")).toThrow("own DM");
   });
 
   it("rolls message, capture, admission, queue and cursor back together", () => {

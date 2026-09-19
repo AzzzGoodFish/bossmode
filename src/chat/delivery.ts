@@ -416,6 +416,25 @@ export function appendMessageWithAdmissions(
   });
 }
 
+/** Narrow repair entry: only an explicit durable pending admission can be
+ * retried. Historical captures without this marker and confirmed/terminal work
+ * are never reconstructed from chat history. */
+export function repairPendingChatAdmission(
+  db: Database,
+  sourceRef: string,
+  messageId: string,
+  memberId: string,
+): PreparedChatAdmission | null {
+  const ref = parseConversation(sourceRef);
+  if (!ref) throw new Error(`Invalid chat source: ${sourceRef}`);
+  const row = db.get<AdmissionRow>(`SELECT a.* FROM chat_admissions a
+    JOIN captured_deliveries d ON d.scope_id=a.scope_id AND d.message_id=a.message_id
+      AND d.target_actor_key=a.target_actor_key AND d.delivery_kind=a.delivery_kind
+    WHERE a.scope_id=? AND a.message_id=? AND d.target_member_id=? AND a.status='pending'`,
+  storageScopeId(sourceRef), messageId, memberId);
+  return row ? admissionFromRow(row, memberId, ref.scopeId) : null;
+}
+
 /** Confirm the queue receipt and cursor in the caller's outer transaction. A
  * confirmed replay is accepted only with the exact original input id and never
  * moves a cursor again. */
