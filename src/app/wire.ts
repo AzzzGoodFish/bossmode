@@ -273,8 +273,8 @@ export function wireAgentEvents(): () => void {
     if (!sourceRef.startsWith("room:")) return;
     maybeEmitKnowledgeActivity(sourceRef.slice(5),memberId,toolName,args,isError);
   });
-  setContextUsageRefreshHook((sourceRef, memberId, options) => {
-    if (sourceRef) refreshContextUsage(sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef, memberId, options);
+  setContextUsageRefreshHook((sourceRef, memberId) => {
+    if (sourceRef) refreshContextUsage(sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef, memberId);
   });
   return () => { setRuntimeViewSink(undefined); setAgentEventSink(undefined); setStatusSink(undefined); setToolActivityHook(undefined); setContextUsageRefreshHook(undefined); };
 }

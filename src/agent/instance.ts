@@ -153,20 +153,6 @@ export function transition(
 }
 // -- Context usage (cache-only API + idle refresh push) --
 export const contextUsageCache = new Map<string, ContextUsage>();
-export function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
-  if (!previous) return false;
-  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
-  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
-  const max = next.rawMaxTokens || previous.rawMaxTokens || 0;
-  const wasNearOrOverLimit = max > 0 ? previous.totalTokens >= max * 0.8 : previous.percentage >= 80;
-  return wasNearOrOverLimit && next.totalTokens <= previous.totalTokens * 0.25;
-}
-export function shouldKeepCompactedMarker(previous: ContextUsage | undefined, next: ContextUsage): boolean {
-  if (!previous?.compacted) return false;
-  if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
-  if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
-  return next.totalTokens <= previous.totalTokens * 1.25;
-}
 // -- Runtime checkpoints (member-level recovery metadata; ① B8 / C3) --
 // DB-owned state; module import never initializes storage.
 import { getDatabase } from "../data/database.js";

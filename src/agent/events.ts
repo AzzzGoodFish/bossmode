@@ -36,7 +36,7 @@ export interface AgentEventBroadcast {type:"agent:event";roomId:string;memberId:
 export type AgentEventSink=(sourceRef:string,memberId:string,payload:AgentEventBroadcast)=>void;
 export interface ToolActivity {sourceRef:string;memberId:string;toolName:string;args:unknown;isError:boolean}
 export type AgentToolActivityHook=(activity:ToolActivity)=>void;
-export type AgentContextUsageRefresh=(sourceRef:string|null,memberId:string,options?:{acceptCompactedSnapshot:boolean;retries:number;retryDelayMs:number})=>void;
+export type AgentContextUsageRefresh=(sourceRef:string|null,memberId:string)=>void;
 let eventSink:AgentEventSink|undefined,toolActivityHook:AgentToolActivityHook|undefined,usageRefreshHook:AgentContextUsageRefresh|undefined;
 export function setAgentEventSink(sink:AgentEventSink|undefined):void{eventSink=sink;if(sink)scheduleAgentEventDispatch();}
 export function setToolActivityHook(hook:AgentToolActivityHook|undefined):void{toolActivityHook=hook;}
@@ -145,7 +145,7 @@ export function handleAgentEvent(sourceRef:string|null,_agentName:string,instanc
     getDatabase().afterCommit(()=>{
       if(fact.event.type==="tool_start")toolArgs.set(`${instanceKey}:${(fact.event as any).toolCallId}`,(fact.event as any).args);
       else if(fact.event.type==="tool_end"){const key=`${instanceKey}:${(fact.event as any).toolCallId}`,args=toolArgs.get(key);toolArgs.delete(key);if(sourceRef)toolActivityHook?.({sourceRef,memberId,toolName:(fact.event as any).toolName,args,isError:!!(fact.event as any).isError});}
-      if(fact.event.type==="message_end"||(fact.event.type==="agent_end"&&!(fact.event as any).willRetry))usageRefreshHook?.(sourceRef,memberId);else if(fact.event.type==="compaction_end")usageRefreshHook?.(sourceRef,memberId,{acceptCompactedSnapshot:true,retries:3,retryDelayMs:500});
+      if(fact.event.type==="message_end"||(fact.event.type==="agent_end"&&!(fact.event as any).willRetry))usageRefreshHook?.(sourceRef,memberId);else if(fact.event.type==="compaction_end")usageRefreshHook?.(sourceRef,memberId);
     });
   }
   if(fact.event.type==="runtime_exit")return (fact.event as any).unexpected?"inactive":undefined;

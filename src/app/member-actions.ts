@@ -151,7 +151,7 @@ import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
 import type { AgentStatus, ContextUsage } from "../agent/types.js";
-import { contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance, type AgentStatusBroadcast } from "../agent/instance.js";
+import { contextUsageCache, instanceKey, instances, memberIdentityMeta, pendingCreations, type AgentInstance, type AgentStatusBroadcast } from "../agent/instance.js";
 
 const chatTargetOf = (sourceRef: string): string => sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
 const canonicalSourceRef = (value: string): string => value.startsWith("room:") || value.startsWith("dm:") || value.startsWith("mm:") ? value : `room:${value}`;
@@ -280,51 +280,14 @@ export function getMemberActiveTools(memberId:string):{sessionActive:boolean;too
   const handle=instances.get(instanceKey(memberId))?.handle;if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }
 
-interface RefreshContextUsageOptions {
-  /** Trust compacted/null-token usage as a real post-compact update instead of carrying forward the previous value. */
-  acceptCompactedSnapshot?: boolean;
-  /** Extra delayed refreshes for runtimes that update session stats shortly after compaction_end. */
-  retries?: number;
-  retryDelayMs?: number;
-}
-
-function refreshContextUsageOnce(roomId: string, memberId: string, options: RefreshContextUsageOptions = {}): void {
-  const agentName = getMember(memberId)?.name || memberId;
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  if (!instance?.handle.getContextUsage) return;
-
-  instance.handle.getContextUsage().then((usage) => {
-    if (!usage) return;
-    const previous = contextUsageCache.get(key);
-    if (usage.compacted && previous && !options.acceptCompactedSnapshot) usage = { ...previous, compacted: true };
-    else if (isCompactUsageDrop(previous, usage) || shouldKeepCompactedMarker(previous, usage)) usage = { ...usage, compacted: true };
-    if (usage.compacted && !previous && !options.acceptCompactedSnapshot) return;
-    contextUsageCache.set(key, usage);
-    broadcastToRoom(roomId, {
-      type: "agent:context_usage",
-      roomId,
-      agent: agentName,
-      ...memberIdentityMeta(agentName, memberId),
-      usage,
-    });
-  }).catch(() => {});
-}
-
-/** Proactively refresh context usage cache (called on agent_end / compaction_end). Fire-and-forget, non-blocking. */
-export function refreshContextUsage(roomId: string, memberId: string, options: RefreshContextUsageOptions = {}): void {
-  refreshContextUsageOnce(roomId, memberId, options);
-  const retries = Math.max(0, options.retries || 0);
-  const delay = Math.max(0, options.retryDelayMs || 0);
-  for (let i = 1; i <= retries; i += 1) {
-    const timer = setTimeout(() => {
-      // A retry can fire after teardown (shutdown, test isolation): drop it
-      // instead of letting the storage access escape as an unhandled error.
-      try { refreshContextUsageOnce(roomId, memberId, options); }
-      catch { /* runtime torn down — drop the retry */ }
-    }, delay * i);
-    (timer as { unref?: () => void }).unref?.();
-  }
+export function refreshContextUsage(roomId:string,memberId:string):void{
+  const agentName=getMember(memberId)?.name||memberId,key=instanceKey(memberId),instance=instances.get(key);
+  if(!instance?.handle.getContextUsage)return;
+  instance.handle.getContextUsage().then(usage=>{
+    if(!usage)return;
+    contextUsageCache.set(key,usage);
+    broadcastToRoom(roomId,{type:"agent:context_usage",roomId,agent:agentName,...memberIdentityMeta(agentName,memberId),usage});
+  }).catch(()=>{});
 }
 
 function emitAgentLocalEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void{
