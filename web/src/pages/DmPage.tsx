@@ -6,7 +6,7 @@ import { useMemberProfileRevision, getMemberProfileRevision } from "../hooks/use
  * List Unification v1). The member panel is the SAME Sheet component the room
  * Header gear opens the member page scoped to this DM (member-page merge v1
  * — the room-side Sheet is retired; one member, one home).
- * Data: /api/members/:id, /api/dm/:memberId/{messages,session}; realtime via
+ * Data: /api/members/:id and /api/conversations/dm:<memberId>/{messages,session}; realtime via
  * WS room:message on dm:<memberId>.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
