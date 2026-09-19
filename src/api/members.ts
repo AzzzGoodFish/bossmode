@@ -1,13 +1,13 @@
-import { activateDmMember, archiveMember, createMember, getMemberActiveScopes, getScopeLiveStatus } from "../app/member-actions.js";
+import { activateDmMember, archiveMember, createMember, getMemberActiveScopes } from "../app/member-actions.js";
 import { readMemberProfile, updateProfileForMember, InvalidProfileError } from "../member/profile.js";
 import { memberProfilePath } from "../files/layout.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
-import { addRoute, sendJson, parseBody } from "./http.js";
+import { addRoute, HttpError, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
-import { listMembers, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
+import { listMembers, getMember, updateMember, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
@@ -22,12 +22,19 @@ function publicMember(m: MemberRecord, live = false) {
     global: m.global, createdAt: m.createdAt, updatedAt: m.updatedAt };
   if (!live) return base;
   const activeScopes = [`dm:${m.id}`, ...roomStore.listRoomsForMember(m.id).map(room => `room:${room.id}`)];
-  return { ...base, status: getScopeLiveStatus(`dm:${m.id}`) === "working" ? "working" : "idle",
-    activeScopes, workingScopes: getMemberActiveScopes(m.id), model: m.global.model ?? null,
+  const workingScopes = getMemberActiveScopes(m.id);
+  return { ...base, status: workingScopes.length ? "working" : "idle",
+    activeScopes, workingScopes, model: m.global.model ?? null,
     contextPct: null, tokensToday: 0, tokensTotal: 0 };
 }
 
+function requireMember(id: string): MemberRecord {
+  const member = getMember(id);
+  if (!member) throw new HttpError(404, "not_found", "Member not found");
+  return member;
+}
 function errCode(err: unknown): { status: number; error: string; message: string } {
+  if (err instanceof HttpError) return { status: err.status, error: err.code, message: err.message };
   if (err instanceof InvalidProfileError) return { status: 400, error: err.code, message: err.message };
   if (err instanceof MemberNameTakenError) {
     return { status: 409, error: "name_taken", message: err.message };
@@ -42,6 +49,10 @@ function errCode(err: unknown): { status: number; error: string; message: string
   if (msg === "scope_not_found") return { status: 400, error: "scope_not_found", message: msg };
   if (msg === "archive_not_found") return { status: 404, error: "archive_not_found", message: msg };
   return { status: 500, error: "internal", message: msg };
+}
+function memberError(error: unknown): never {
+  const mapped = errCode(error);
+  throw new HttpError(mapped.status, mapped.error, mapped.message);
 }
 
 // ── Members CRUD ──
@@ -75,18 +86,11 @@ addRoute("POST", "/api/members", async (req, res) => {
       title: (body as { title?: string }).title,
     });
     sendJson(res, 200, { member: publicMember(member) });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 addRoute("GET", "/api/members/:id", async (_req, res, params) => {
-  const m = resolveMemberRef(params.id);
-  if (!m) {
-    sendJson(res, 404, { error: "not_found", message: "Member not found" });
-    return;
-  }
+  const m = requireMember(params.id);
   sendJson(res, 200, { member: publicMember(m) });
 });
 
@@ -113,8 +117,7 @@ function connectedMemberActions(): MemberHttpActions {
 /** Member prompt preview is member-owned and identical across chat sources. */
 addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
   try {
-    const member = resolveMemberRef(params.id);
-    if (!member) return sendJson(res, 404, { error: "not_found", message: "Member not found" });
+    const member = requireMember(params.id);
     const sourceRef = new URL(req.url || "", "http://localhost").searchParams.get("scope");
     if (sourceRef) assertMemberScopeAccess(member.id, sourceRef);
     if (!memberHttpActions) throw new Error("Member HTTP actions are not connected");
@@ -125,10 +128,7 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
       scopeId: sourceRef,
       contractFingerprint: preview.contractFingerprint,
     });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
@@ -154,11 +154,7 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
       sendJson(res, 400, { error: "invalid_model", message: "model must be a non-empty model reference; omit the field to leave it unchanged" });
       return;
     }
-    let m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
+    let m = requireMember(params.id);
     const beforeModel = getMemberConfiguration(m.id).model;
 
     // Model/credential: the one public switch method — validates, applies to
@@ -222,34 +218,20 @@ addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
         error: String((err as Error)?.message || err),
       });
     });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 addRoute("DELETE", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as { confirm?: boolean };
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
+    const m = requireMember(params.id);
     const result = await archiveMember(m.id, { confirm: !!body.confirm });
     sendJson(res, 200, result);
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
-  const m = resolveMemberRef(params.id);
-  if (!m) {
-    sendJson(res, 404, { error: "not_found", message: "Member not found" });
-    return;
-  }
+  const m = requireMember(params.id);
   const scopes: Array<{ scopeId: string; kind: string; label: string; status: string; lastActiveAt: number | null }> = [
     { scopeId: `dm:${m.id}`, kind: "dm", label: "Direct message", status: "idle", lastActiveAt: null },
   ];
@@ -263,11 +245,7 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
 /** persona.md read-only panel surface (identity batch-2 / designer contract). */
 addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
   try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
+    const m = requireMember(params.id);
     const profile = readMemberProfile(m.id);
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
@@ -276,10 +254,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
       overBudget: profile.overBudget,
       exists: profile.exists,
     });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 /** Batch 6 §4 read outlet: member-owned asset inventory (designer's Assets tab).
@@ -287,11 +262,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
  * availability cache has one — counting tools requires a live connection);
  * extensions use the runtime discovery rules; skills come from the member folder. */
 addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
-  const m = resolveMemberRef(params.id);
-  if (!m) {
-    sendJson(res, 404, { error: "not_found", message: "Member not found" });
-    return;
-  }
+  const m = requireMember(params.id);
   const config = readMemberMcpConfig(m.id);
   const names = config ? getMcpServerNames(config) : [];
   let cache: Record<string, { toolCount?: number }> = {};
@@ -329,64 +300,54 @@ addRoute("GET", "/api/members/:id/assets", async (_req, res, params) => {
 /** Member skills/ directory list (reuses skill-catalog scan rules). */
 addRoute("GET", "/api/members/:id/skills", async (_req, res, params) => {
   try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
+    const m = requireMember(params.id);
     sendJson(res, 200, { skills: listMemberSkills(m.id) });
-  } catch (err) {
-    const e = errCode(err);
-    sendJson(res, e.status, { error: e.error, message: e.message });
-  }
+  } catch (error) { memberError(error); }
 });
 
 // ── Member runtime reads and controls (member-owned; source is an optional filter) ──
 
 function sourceQuery(request: { url?: string }): string | undefined {
-  const url = new URL(request.url || "", "http://localhost");
-  const scope = url.searchParams.get("scope");
-  const roomId = url.searchParams.get("roomId");
-  return scope || (roomId ? `room:${roomId}` : undefined);
+  return new URL(request.url || "", "http://localhost").searchParams.get("scope") || undefined;
 }
-function authorizedMember(memberRef: string, sourceRef?: string): MemberRecord | null {
-  const member = resolveMemberRef(memberRef);
-  if (member && sourceRef) assertMemberScopeAccess(member.id, sourceRef);
+function authorizedMember(memberId: string, sourceRef?: string): MemberRecord {
+  const member = requireMember(memberId);
+  if (sourceRef) assertMemberScopeAccess(member.id, sourceRef);
   return member;
+}
+function invalidScope(error: unknown): never {
+  if (error instanceof HttpError) throw error;
+  throw new HttpError(400, "invalid_scope", error instanceof Error ? error.message : String(error));
 }
 
 addRoute("GET", "/api/members/:id/token-usage", async (request, response, params) => {
   try {
     const sourceRef = sourceQuery(request);
     const member = authorizedMember(params.id, sourceRef);
-    if (!member) return sendJson(response, 404, { error: "Member not found" });
     sendJson(response, 200, { totalTokens: connectedMemberActions().readTokenTotal(member.id, sourceRef) });
-  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+  } catch (error) { invalidScope(error); }
 });
 addRoute("GET", "/api/members/:id/stats", async (request, response, params) => {
   try {
     const sourceRef = sourceQuery(request);
     const member = authorizedMember(params.id, sourceRef);
-    if (!member) return sendJson(response, 404, { error: "Member not found" });
     sendJson(response, 200, connectedMemberActions().readStats(member.id));
-  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+  } catch (error) { invalidScope(error); }
 });
 addRoute("GET", "/api/members/:id/events", async (request, response, params) => {
   try {
     const sourceRef = sourceQuery(request);
     const member = authorizedMember(params.id, sourceRef);
-    if (!member) return sendJson(response, 404, { error: "Member not found" });
     const url = new URL(request.url || "", "http://localhost");
     const beforeSeq = url.searchParams.has("beforeSeq") ? Number(url.searchParams.get("beforeSeq")) : undefined;
     const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 50), 500));
     const types = url.searchParams.get("types")?.split(",").map((value) => value.trim()).filter(Boolean);
     sendJson(response, 200, connectedMemberActions().readActivity(member.id, { sourceRef, beforeSeq, limit, types }));
-  } catch (error) { sendJson(response, 400, { error: "invalid_scope", message: String(error) }); }
+  } catch (error) { invalidScope(error); }
 });
 for (const action of ["stop", "compact", "reset", "restart"] as const) {
   addRoute("POST", `/api/members/:id/${action}`, async (_request, response, params) => {
-    const member = resolveMemberRef(params.id);
-    if (!member) return sendJson(response, 404, { error: "Member not found" });
+    const member = requireMember(params.id);
     try { sendJson(response, 200, await connectedMemberActions()[action](member.id)); }
     catch (error) { sendJson(response, 400, { error: `${action}_failed`, message: error instanceof Error ? error.message : String(error) }); }
   });
