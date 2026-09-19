@@ -1,6 +1,6 @@
 import { Type, type TSchema } from "typebox";
 import { getUserDisplayName } from "../config/settings.js";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, chmodSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { awaitResourceClose, memberTerminalWorkspace, createShell, execInShell, readShell, waitShell, listShells, closeShell, type TerminalWorkspace } from "./terminal.js";
 import { memberRuntimeAllowed } from "./instance.js";
@@ -333,6 +333,14 @@ function textResult(text: string, details: Record<string, unknown> = {}): FileTo
 function toolError(message: string): FileToolResult {
   return textResult(`Failed: ${message}`);
 }
+async function readWorkspaceBytes(memberId:string,workspace:TerminalWorkspace,path:string,max:number):Promise<Buffer>{
+  const bytes=workspace.kind==="original"?(()=>{if(!existsSync(path))throw new Error(`File not found: ${path}`);const stat=statSync(path);if(!stat.isFile())throw new Error(`Not a file: ${path}`);return readFileSync(path);})():await sftpReadFile(await getSftp(memberId,workspace),path);
+  if(bytes.length>max)throw new Error(`File too large (${bytes.length} bytes > ${max})`);return bytes;
+}
+async function writeWorkspaceBytes(memberId:string,workspace:TerminalWorkspace,path:string,bytes:Buffer):Promise<void>{
+  if(workspace.kind==="original"){mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes);return;}
+  const sftp=await getSftp(memberId,workspace);await sftpMkdirp(sftp,dirname(path));await sftpWriteFile(sftp,path,bytes,false);
+}
 
 export async function workspaceReadTool(memberId: string, args: { path?: string; offset?: number; limit?: number; workspace?: string }): Promise<FileToolResult> {
   if (!memberRuntimeAllowed(memberId)) return toolError("member runtime admission is closed");
@@ -342,31 +350,15 @@ export async function workspaceReadTool(memberId: string, args: { path?: string;
   const offset = args.offset && args.offset > 0 ? args.offset : 1;
   const limit = args.limit && args.limit > 0 ? args.limit : 2000;
   try {
-    if (workspace.kind === "original") {
-      if (!existsSync(path)) return toolError(`File not found: ${path}`);
-      const stat = statSync(path);
-      const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
-      if (!stat.isFile()) return toolError(`Not a file: ${path}`);
-      if (IMAGE_EXTENSIONS.has(ext) && stat.size <= MAX_READ_BYTES) {
-        const data = readFileSync(path).toString("base64");
-        const mimeType = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/bmp";
-        return { content: [{ type: "image", data, mimeType }], details: { path, workspace: workspace.id, bytes: stat.size } };
-      }
-      const text = readFileSync(path, "utf-8");
-      const lines = text.split("\n");
-      const sliced = lines.slice(offset - 1, offset - 1 + limit);
-      const truncatedNote = offset - 1 + limit < lines.length ? `\n[${sliced.length} of ${lines.length} lines shown — pass offset=${offset + limit} for more]` : "";
-      return textResult(sliced.join("\n") + truncatedNote, { path, workspace: workspace.id, lines: Math.min(sliced.length, lines.length) });
+    const ext=path.slice(path.lastIndexOf(".")).toLowerCase(),image=workspace.kind==="original"&&IMAGE_EXTENSIONS.has(ext);
+    const buf=await readWorkspaceBytes(memberId,workspace,path,image||workspace.kind==="ssh"?MAX_READ_BYTES:Number.MAX_SAFE_INTEGER);
+    if(image){
+      const mimeType=ext===".jpg"||ext===".jpeg"?"image/jpeg":ext===".png"?"image/png":ext===".gif"?"image/gif":ext===".webp"?"image/webp":"image/bmp";
+      return {content:[{type:"image",data:buf.toString("base64"),mimeType}],details:{path,workspace:workspace.id,bytes:buf.length}};
     }
-    // ssh
-    const sftp = await getSftp(memberId, workspace);
-    const buf = await sftpReadFile(sftp, path);
-    if (buf.length > MAX_READ_BYTES) {
-      return toolError(`File too large to read remotely (${buf.length} bytes > ${MAX_READ_BYTES}). Copy it locally, or use a terminal on that workspace to read it in chunks.`);
-    }
-    const lines = buf.toString("utf-8").split("\n");
-    const sliced = lines.slice(offset - 1, offset - 1 + limit);
-    return textResult(sliced.join("\n"), { path, workspace: workspace.id, remote: true });
+    const lines=buf.toString("utf-8").split("\n"),sliced=lines.slice(offset-1,offset-1+limit);
+    const note=offset-1+limit<lines.length?`\n[${sliced.length} of ${lines.length} lines shown — pass offset=${offset+limit} for more]`:"";
+    return textResult(sliced.join("\n")+note,{path,workspace:workspace.id,lines:sliced.length,...(workspace.kind==="ssh"?{remote:true}:{})});
   } catch (err: any) {
     logger.warn("file-tools", "read failed", { memberId, workspace: workspace.id, path, error: String(err?.message || err) });
     return toolError(err?.message || String(err));
@@ -380,20 +372,8 @@ export async function workspaceWriteTool(memberId: string, args: { path?: string
   if (typeof args.content !== "string") return toolError("content is required");
   const { workspace, path } = resolution;
   try {
-    if (workspace.kind === "original") {
-      mkdirSync(dirname(path), { recursive: true });
-      const existed = existsSync(path);
-      writeFileSync(path, args.content, "utf-8");
-      // Preserve exec bit when overwriting an executable file.
-      if (existed) {
-        try { const st = statSync(path); if (st.mode & 0o111) chmodSync(path, st.mode); } catch { /* best effort */ }
-      }
-      return textResult(`Wrote ${Buffer.byteLength(args.content, "utf-8")} bytes to ${path}`, { path, workspace: workspace.id });
-    }
-    const sftp = await getSftp(memberId, workspace);
-    await sftpMkdirp(sftp, dirname(path));
-    await sftpWriteFile(sftp, path, Buffer.from(args.content, "utf-8"), false);
-    return textResult(`Wrote ${Buffer.byteLength(args.content, "utf-8")} bytes to ${path} (ssh:${workspace.id})`, { path, workspace: workspace.id, remote: true });
+    const bytes=Buffer.from(args.content,"utf-8");await writeWorkspaceBytes(memberId,workspace,path,bytes);
+    return textResult(`Wrote ${bytes.length} bytes to ${path}${workspace.kind==="ssh"?` (ssh:${workspace.id})`:""}`,{path,workspace:workspace.id,...(workspace.kind==="ssh"?{remote:true}:{})});
   } catch (err: any) {
     return toolError(err?.message || String(err));
   }
@@ -412,19 +392,7 @@ export async function workspaceEditTool(memberId: string, args: { path?: string;
   }
   const { workspace, path } = resolution;
   try {
-    let text: string;
-    if (workspace.kind === "original") {
-      if (!existsSync(path)) return toolError(`File not found: ${path}`);
-      const stat = statSync(path);
-      if (!stat.isFile()) return toolError(`Not a file: ${path}`);
-      if (stat.size > MAX_EDIT_FILE_BYTES) return toolError(`File too large for edit (${stat.size} bytes > ${MAX_EDIT_FILE_BYTES})`);
-      text = readFileSync(path, "utf-8");
-    } else {
-      const sftp = await getSftp(memberId, workspace);
-      const buf = await sftpReadFile(sftp, path);
-      if (buf.length > MAX_EDIT_FILE_BYTES) return toolError(`File too large for edit (${buf.length} bytes)`);
-      text = buf.toString("utf-8");
-    }
+    let text=(await readWorkspaceBytes(memberId,workspace,path,MAX_EDIT_FILE_BYTES)).toString("utf-8");
 
     for (let i = 0; i < edits.length; i++) {
       const { oldText, newText } = edits[i];
@@ -438,12 +406,7 @@ export async function workspaceEditTool(memberId: string, args: { path?: string;
       text = text.replace(String(oldText), String(newText));
     }
 
-    if (workspace.kind === "original") {
-      writeFileSync(path, text, "utf-8");
-    } else {
-      const sftp = await getSftp(memberId, workspace);
-      await sftpWriteFile(sftp, path, Buffer.from(text, "utf-8"), false);
-    }
+    await writeWorkspaceBytes(memberId,workspace,path,Buffer.from(text,"utf-8"));
     return textResult(`Applied ${edits.length} edit${edits.length > 1 ? "s" : ""} to ${path}`, { path, workspace: workspace.id });
   } catch (err: any) {
     return toolError(err?.message || String(err));
