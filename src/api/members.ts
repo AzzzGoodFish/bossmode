@@ -1,20 +1,19 @@
-import { activateDmMember, archiveMember, createMember, getMemberActiveScopes } from "../app/member-actions.js";
-import { readMemberProfile, updateProfileForMember, InvalidProfileError } from "../member/profile.js";
+import { archiveMember, createMember, updateMember } from "../app/member-actions.js";
+import { readMemberProfile, InvalidProfileError } from "../member/profile.js";
 import { memberProfilePath } from "../files/layout.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
 import { addRoute, HttpError, sendJson, parseBody } from "./http.js";
-import { logger } from "../kernel/logger.js";
-import { listMembers, getMember, updateMember, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
+import { listMembers, getMember, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
 import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
 import { assertMemberScopeAccess } from "../chat/conversations.js";
-import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
+import { getMemberActiveScopes } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
 
 function publicMember(m: MemberRecord, live = false) {
@@ -46,6 +45,9 @@ function errCode(err: unknown): { status: number; error: string; message: string
   if (msg === "confirm_required") return { status: 400, error: "confirm_required", message: "confirm: true required" };
   if (msg === "reserved_member_name") return { status: 400, error: msg, message: "all, user and system are reserved for group mentions, the human user and system messages." };
   if (msg === "invalid_member_name") return { status: 400, error: "invalid_member_name", message: msg };
+  if (msg === "invalid_model") return { status: 400, error: msg, message: "model must be a non-empty model reference; omit the field to leave it unchanged" };
+  if (msg === "invalid_binding") return { status: 400, error: msg, message: "A complete model + credentialId pair is required (model cannot be paired with an empty credential)." };
+  if ((err as { name?: string })?.name === "MemberModelSwitchConflictError") return { status: 409, error: "switch_in_progress", message: msg };
   if (msg === "scope_not_found") return { status: 400, error: "scope_not_found", message: msg };
   if (msg === "archive_not_found") return { status: 404, error: "archive_not_found", message: msg };
   return { status: 500, error: "internal", message: msg };
@@ -127,90 +129,21 @@ addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
   } catch (error) { memberError(error); }
 });
 
-addRoute("PATCH", "/api/members/:id", async (req, res, params) => {
+addRoute("PATCH", "/api/members/:id", async (request, response, params) => {
+  let switchRequested = false;
   try {
-    const body = (await parseBody(req)) as {
-      name?: string;
-      /** database card field (description retired batch-5 — ignored) */
-      title?: string | null;
-      model?: string | null;
-      credentialId?: string | null;
-      thinkingLevel?: string | null;
-      skills?: string[];
-      mcpServers?: string[];
+    const body = await parseBody(request) as {
+      name?: string; title?: string | null; model?: string | null; credentialId?: string | null;
+      thinkingLevel?: string | null; skills?: string[]; mcpServers?: string[];
     };
-    // Single-path model switch (design-model-switch-single-path-v1 §6): the
-    // field is either omitted (no change) or a real model ref — null/empty is
-    // a parameter error, clearing is not a supported product action.
-    if (body.model !== undefined && (body.model === null || !String(body.model).trim())) {
-      sendJson(res, 400, { error: "invalid_model", message: "model must be a non-empty model reference; omit the field to leave it unchanged" });
-      return;
-    }
-    let m = requireMember(params.id);
-    const beforeModel = getMemberConfiguration(m.id).model;
-
-    // Model/credential: the one public switch method — validates, applies to
-    // every live instance (room+DM) via the SDK, saves config once.
-    let modelSwitch: Awaited<ReturnType<typeof switchMemberModel>> | undefined;
-    if (body.model !== undefined || body.credentialId !== undefined) {
-      const eff = getMemberConfiguration(m.id);
-      const targetModel = body.model !== undefined ? String(body.model) : eff.model;
-      const targetCred = body.credentialId !== undefined ? (body.credentialId as string | null) : eff.credentialId;
-      if (!targetModel || !targetCred) {
-        sendJson(res, 400, { error: "invalid_binding", message: "A complete model + credentialId pair is required (model cannot be paired with an empty credential)." });
-        return;
-      }
-      try {
-        modelSwitch = await switchMemberModel(m.id, { model: targetModel, credentialId: targetCred });
-        // Return the committed record, not the pre-switch object held by this route.
-        m = getMember(m.id)!;
-      } catch (err: any) {
-        if (err && err.name === "MemberModelSwitchConflictError") {
-          sendJson(res, 409, { error: "switch_in_progress", message: err.message || String(err) });
-        } else {
-          sendJson(res, 400, { error: "model_switch_failed", message: err.message || String(err) });
-        }
-        return;
-      }
-    }
-
-    let thinkingSwitch: Awaited<ReturnType<typeof switchMemberThinkingLevel>> | undefined;
-    if (body.thinkingLevel !== undefined) {
-      thinkingSwitch = await switchMemberThinkingLevel(m.id, body.thinkingLevel === null ? "off" : String(body.thinkingLevel));
-    }
-
-    if (body.name !== undefined || body.title !== undefined) {
-      updateProfileForMember(m.id, {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.title !== undefined ? { title: body.title === null ? "" : body.title } : {}),
-      });
-    }
-    m = getMember(m.id)!;
-    // Non-model fields commit in ONE save, and only when there is something to
-    // save — a pure model PATCH must not run a second record write after the
-    // switch already committed (an unrelated write failure would wrongly fail
-    // the whole request after the switch succeeded).
-    const globalPatch: { thinkingLevel?: string; skills?: string[]; mcpServers?: string[] } = {};
-    if (body.thinkingLevel !== undefined) globalPatch.thinkingLevel = body.thinkingLevel ?? "off";
-    if (body.skills !== undefined) globalPatch.skills = body.skills;
-    if (body.mcpServers !== undefined) globalPatch.mcpServers = body.mcpServers;
-    if (Object.keys(globalPatch).length > 0) {
-      m = updateMember(m.id, {
-        global: globalPatch,
-      });
-    }
-    sendJson(res, 200, { member: publicMember(m), ...(modelSwitch ? { modelSwitch } : {}), ...(thinkingSwitch ? { thinkingSwitch } : {}) });
-
-    // Birth wake (identity batch-1): model none→some starts the DM instance so
-    // the icebreaker can run. Migrated from the retired /config route.
-    const afterModel = modelSwitch?.model || beforeModel;
-    if (!beforeModel && afterModel) void activateDmMember(m.id).catch((err) => {
-      logger.error("members", "post-config DM activate failed", {
-        memberId: m.id,
-        error: String((err as Error)?.message || err),
-      });
-    });
-  } catch (error) { memberError(error); }
+    switchRequested = body.model !== undefined || body.credentialId !== undefined;
+    const result = await updateMember(params.id, body);
+    sendJson(response, 200, { member: publicMember(result.member) });
+  } catch (error) {
+    const mapped = errCode(error);
+    if (switchRequested && mapped.status === 500) throw new HttpError(400, "model_switch_failed", mapped.message);
+    memberError(error);
+  }
 });
 
 addRoute("DELETE", "/api/members/:id", async (req, res, params) => {
@@ -242,7 +175,7 @@ addRoute("GET", "/api/members/:id/profile", async (_req, res, params) => {
     sendJson(res, 200, {
       path: memberProfilePath(m.id),
       body: profile.body,
-      charCount: profile.raw.length,
+      charCount: profile.body.length,
       overBudget: profile.overBudget,
       exists: profile.exists,
     });
