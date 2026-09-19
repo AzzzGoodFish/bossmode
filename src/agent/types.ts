@@ -2,13 +2,11 @@
 // Agent runtime contracts — inputs, member snapshot config, handle, events,
 // tool info. Owned by the agent capability; no chat-kind branches here.
 // ============================================================================
-
 export type AgentStatus="inactive"|"idle"|"working";
 export interface AgentMemberConfig {
   id:string;name:string;type:"agent";agent:string;title?:string;model?:string;runtime:"pi-cli";
   skills?:string[];thinkingLevel:string;contextLimit?:number;credentialId?:string;mcpServers?:string[];createdAt?:number;
 }
-
 /** Build material for a member session, assembled outside the agent core.
  *  The app layer reads member state; agent code consumes only this snapshot. */
 export interface AgentPromptSnapshot {
@@ -16,7 +14,6 @@ export interface AgentPromptSnapshot {
   appendSystemPrompt: string[];
   contractFingerprint: string;
 }
-
 export interface AgentResourceSnapshot {
   skillNames: string[];
   skillPaths: string[];
@@ -28,7 +25,6 @@ export interface AgentResourceSnapshot {
     serverNames: string[];
   };
 }
-
 /** Immutable build material captured by app before the agent core assembles a
  * session. Chat source and roster are deliberately absent: one member runtime
  * serves every conversation. */
@@ -39,9 +35,7 @@ export interface AgentMemberSnapshot {
   workspaceRoot: string;
   resumeSession?: CreateAgentOpts["resumeSession"];
 }
-
 // -- Runtime interface --
-
 export interface AgentRuntime {
   readonly name: string;
   createAgent(opts: CreateAgentOpts): Promise<AgentHandle>;
@@ -49,9 +43,7 @@ export interface AgentRuntime {
   shutdownMember(memberId: string): Promise<void>;
   shutdownAll(): Promise<void>;
 }
-
 // -- Agent creation --
-
 export interface CreateAgentOpts {
   cwd: string;
   member: AgentMemberConfig;
@@ -59,7 +51,6 @@ export interface CreateAgentOpts {
    * each durable batch and must never be interpreted by the runtime adapter. */
   resolveSourceRef: () => string | null;
   resources: AgentResourceSnapshot;
-
   // Layered prompt content
   agentPrompt: string;       // Source agent role prompt only. Empty for builtin/general.
   appendSystemPrompt: string[];
@@ -72,7 +63,6 @@ export interface CreateAgentOpts {
   // Called whenever runtime reports session identity (initial + later changes after compact/fork)
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
 }
-
 export interface AgentRuntimeParams {
   model?: string;
   thinkingLevel?: string;
@@ -82,18 +72,15 @@ export interface AgentRuntimeParams {
   credentialId?: string;
   credentialName?: string;
 }
-
 export interface RuntimePromptDispatch {
   attemptId: string;
   dispatchIndex: number;
   message: string;
 }
-
 export interface RuntimePromptOptions {
   /** Runs synchronously in the SDK dispatch transaction, before external IO, for every iteration. */
   beforeDispatch?: (event: RuntimePromptDispatch) => void;
 }
-
 export interface AgentHandle {
   prompt(message: string, options?: RuntimePromptOptions): Promise<void>;
   /** Manual compaction (conversation action). Emits the full event bridge
@@ -110,11 +97,9 @@ export interface AgentHandle {
   destroyAndWait?(): Promise<void>;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
-
   // Metadata for status reporting
   readonly runtimeName?: string;
   readonly runtimeParams?: AgentRuntimeParams;
-
   // Optional — check runtime.capabilities before calling
   setModel?(model: string, credentialId: string): void | Promise<void>;
   refreshModelRegistry?(opts?: { allowNetwork?: boolean }): void | Promise<void>;
@@ -125,7 +110,6 @@ export interface AgentHandle {
   /** Active tools currently exposed to the model (session-live). */
   getActiveTools?(): MemberActiveToolInfo[];
 }
-
 export interface MemberActiveToolInfo {
   name: string;
   label?: string;
@@ -134,9 +118,7 @@ export interface MemberActiveToolInfo {
   /** builtin | bossmode | mcp | extension:<id> */
   source: string;
 }
-
 // -- Unified event model --
-
 export type AgentStreamEvent =
   | { type: "agent_start" }
   | { type: "agent_end"; willRetry?: boolean }
@@ -153,7 +135,6 @@ export type AgentStreamEvent =
   // Emitted when a runtime ends unexpectedly or during normal shutdown.
   // `unexpected` is true for crashes / startup failures / parse errors.
   | { type: "runtime_exit"; code: number | null; signal: string | null; stderrTail?: string; unexpected: boolean };
-
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -161,7 +142,6 @@ export interface TokenUsage {
   cacheWrite?: number;
   cost?: number;
 }
-
 export interface ContextUsage {
   totalTokens: number;
   rawMaxTokens: number;
@@ -169,22 +149,17 @@ export interface ContextUsage {
   model: string;
   compacted?: boolean;
 }
-
 // Runtime registry — runtime adapters register from composition (app/wire);
 // the agent core only consumes the registry through assembly.
 export class RuntimeRegistry {
   private runtimes = new Map<string, AgentRuntime>();
-
   register(runtime: AgentRuntime): void {
     this.runtimes.set(runtime.name, runtime);
   }
-
   get(name: string): AgentRuntime | undefined {
     return this.runtimes.get(name);
   }
-
   getAll(): AgentRuntime[] {
     return Array.from(this.runtimes.values());
   }
-
 }

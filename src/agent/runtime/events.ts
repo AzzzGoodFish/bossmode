@@ -1,5 +1,4 @@
 import type { AgentStreamEvent, ContextUsage, TokenUsage } from "../types.js";
-
 function textFromMessage(msg: any): string {
   const content = msg?.content;
   if (typeof content === "string") return content;
@@ -9,7 +8,6 @@ function textFromMessage(msg: any): string {
     .map((c: any) => typeof c === "string" ? c : c.text || "")
     .join("");
 }
-
 export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
   switch (raw?.type) {
     case "agent_start": return { type: "agent_start" };
@@ -61,7 +59,6 @@ export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
       return null;
   }
 }
-
 export function mapContextUsage(raw: any, modelLabel = "unknown"): ContextUsage | null {
   if (!raw) return null;
   const compacted = raw.tokens === null || raw.totalTokens === null || raw.total === null;

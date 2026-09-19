@@ -6,19 +6,15 @@
 import { logger } from "../kernel/logger.js";
 import type { AgentHistoryEvent } from "./events.js";
 import type { AgentHandle, AgentMemberConfig, AgentStatus, ContextUsage } from "./types.js";
-
 export type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
-
 export interface PendingThinkingSwitch {
   thinkingLevel: string;
 }
-
 export interface PendingCredentialRefresh {
   profileId: string;
   providerSlug: string;
   changeType: "profileUpdated" | "profileDeleted";
 }
-
 /** Start-time sources a live instance was built from: member config as
  *  applied at build, compiled prompts, skills, cwd, roster, runtime name.
  *  Refresh paths consume these instead of re-resolving config. */
@@ -31,7 +27,6 @@ export interface SessionSources {
   cwd: string;
   runtimeName: string;
 }
-
 export interface AgentInstance {
   handle: AgentHandle;
   /** Opaque source currently owned by the scheduler; null between batches. */
@@ -71,13 +66,11 @@ export interface AgentInstance {
   /** Batch 6 §3: reload requested mid-run — flushed when the turn settles. */
   pendingReload: string | null;
 }
-
 /** Runtime instance table key: one runtime per member, wherever it serves (① B1 2026-09-15). */
 export function instanceKey(memberId: string): string {
   if (!memberId) throw new Error("instanceKey requires memberId");
   return memberId;
 }
-
 // Application continuations outlive SDK idle; keep their ownership until all
 // post-prompt/config work has settled, including fire-and-forget control work.
 const memberOperations = new Map<Promise<unknown>,string>();
@@ -99,18 +92,15 @@ export async function settleMemberOperations(memberId?: string): Promise<void> {
     await Promise.allSettled(pending);
   }
 }
-
 export const instances = new Map<string, AgentInstance>();
 export const cancelledCreations = new Set<string>();
 export const sessionPublishOwners = new Map<string, object>();
 export const pendingCreations = new Map<string, Promise<AgentInstance | null>>();
-
 /** §10 interlock, ONE map: presence = a member model switch is in progress.
  * The promise resolves when that switch finishes (commit or rollback). It is
  * both the switch lock (synchronous has/set at switchMemberModel entry) and
  * the creation gate (creations wait for it to end before building). */
 export const memberSwitchGates = new Map<string, Promise<void>>();
-
 /** §10: creations of this member already in flight (pendingCreations is keyed
  * by member after ① B1) — the switch awaits them so its instance snapshot is
  * complete. */
@@ -118,7 +108,6 @@ export function pendingCreationsFor(memberId: string): Array<Promise<AgentInstan
   const pending = pendingCreations.get(instanceKey(memberId));
   return pending ? [pending] : [];
 }
-
 export function updateDispatchState(instance: AgentInstance, next: DispatchState, trigger: string): void {
   if (instance.dispatchState === next) return;
   logger.info("agent", "dispatchStateTransition", {
@@ -129,16 +118,13 @@ export function updateDispatchState(instance: AgentInstance, next: DispatchState
   });
   instance.dispatchState = next;
 }
-
 // -- Status publication (output port; connected by app/wire) --
 /** Same shape as the websocket `agent:status` payload; the app owns the transport. */
 export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId: string; status: AgentStatus }
 export type AgentStatusSink = (target: string, payload: AgentStatusBroadcast) => void;
 let statusSink: AgentStatusSink | undefined;
 export function setStatusSink(sink: AgentStatusSink | undefined): void { statusSink = sink; }
-
 export function memberIdentityMeta(_agentName: string, memberId: string): { memberId:string } { return {memberId}; }
-
 export function transition(
   instance: AgentInstance,
   sourceRef: string | null,
@@ -165,10 +151,8 @@ export function transition(
     status: newStatus,
   });
 }
-
 // -- Context usage (cache-only API + idle refresh push) --
 export const contextUsageCache = new Map<string, ContextUsage>();
-
 export function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
   if (!previous) return false;
   if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
@@ -177,26 +161,22 @@ export function isCompactUsageDrop(previous: ContextUsage | undefined, next: Con
   const wasNearOrOverLimit = max > 0 ? previous.totalTokens >= max * 0.8 : previous.percentage >= 80;
   return wasNearOrOverLimit && next.totalTokens <= previous.totalTokens * 0.25;
 }
-
 export function shouldKeepCompactedMarker(previous: ContextUsage | undefined, next: ContextUsage): boolean {
   if (!previous?.compacted) return false;
   if (!Number.isFinite(previous.totalTokens) || !Number.isFinite(next.totalTokens)) return false;
   if (previous.totalTokens <= 0 || next.totalTokens <= 0) return false;
   return next.totalTokens <= previous.totalTokens * 1.25;
 }
-
 // -- Runtime checkpoints (member-level recovery metadata; ① B8 / C3) --
 // DB-owned state; module import never initializes storage.
 import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
 export interface MountStale {since:number;fields:string[]}
 export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number;staleMounts?:MountStale}
-
 interface RuntimeCheckpointRow {
   member_id: string; contract_fingerprint: string | null;
   contract_version: number | null; drift_notified: number | null; stale_since: number | null;
 }
-
 function mapRuntimeCheckpoint(db: Database, row: RuntimeCheckpointRow): RuntimeStateEntry {
   return {
     ...(row.contract_fingerprint === null ? {} : {contractFingerprint: row.contract_fingerprint}),
@@ -206,12 +186,10 @@ function mapRuntimeCheckpoint(db: Database, row: RuntimeCheckpointRow): RuntimeS
       fields: db.all<{field: string}>("SELECT field FROM runtime_stale_fields WHERE member_id=? ORDER BY ordinal", row.member_id).map(item => item.field)}}),
   };
 }
-
 export function getRuntimeStateEntry(memberId: string, db: Database = getDatabase()): RuntimeStateEntry {
   const row = db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
   return row ? mapRuntimeCheckpoint(db, row) : {};
 }
-
 /** Pure upgrade/runtime import with an explicit database and source timestamp. */
 export function importRuntimeStateEntry(db: Database, memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
   db.transaction(tx => {
@@ -281,11 +259,8 @@ export function isMemberConfigured(member: AgentMemberConfig): boolean {
 export function memberUnconfiguredMessage(memberName: string): string {
   return `Member "${memberName}" hasn't selected a model yet. Open the member card to choose a model and credential, then try again.`;
 }
-
-
 let profileRevision = 0;
 export function currentProfileRevision(): number { return profileRevision; }
-
 /** Publication after a committed DB identity update. Never resets an active handle. */
 export function notifyMemberProfileChanged(member: { id: string; name: string; title?: string }): void {
   profileRevision += 1;

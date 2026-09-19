@@ -3,15 +3,12 @@ import { memberDir, memberProfilePath, memberSkillsDir } from "../files/layout.j
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { getMember, updateMemberIdentity, MemberNotFoundError, type MemberRecord } from "./identity.js";
-
 const profilePublishers = new Set<(member: MemberRecord) => void>();
 export function onMemberProfileChanged(publish: (member: MemberRecord) => void): () => void {
   profilePublishers.add(publish);
   return () => { profilePublishers.delete(publish); };
 }
-
 export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
-
 export interface MemberProfile {
   /** Literal Markdown, with no metadata parsing or required headings. Empty at birth. */
   body: string;
@@ -21,7 +18,6 @@ export interface MemberProfile {
   exists: boolean;
   overBudget: boolean;
 }
-
 /** Birth creates an empty persona and its skills directory. */
 export function writeMemberProfileSkeleton(memberId: string): string {
   getDatabase().assertOutsideTransaction();
@@ -31,7 +27,6 @@ export function writeMemberProfileSkeleton(memberId: string): string {
   if (!existsSync(path)) writeFileSync(path, "", "utf-8");
   return path;
 }
-
 export function readMemberProfile(memberId: string): MemberProfile {
   getDatabase().assertOutsideTransaction();
   const path = memberProfilePath(memberId);
@@ -49,18 +44,13 @@ export function readMemberProfile(memberId: string): MemberProfile {
   }
   return { body: raw, raw, path, exists: true, overBudget };
 }
-
 /** Identity is supplied by the registry, never parsed from persona text. */
-
-
 export function isBlankPersona(profile: MemberProfile): boolean {
   return !profile.body.trim();
 }
-
 export class InvalidProfileError extends Error {
   readonly code = "invalid_profile";
 }
-
 /** Validate before committing either field. The API adapter may convert title=null to "". */
 export function validateProfilePatch(input: unknown): { name?: string; title?: string } {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new InvalidProfileError("Expected name and/or title.");

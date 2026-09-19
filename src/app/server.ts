@@ -2,7 +2,6 @@ import { loadAgentMemberSnapshot } from "./member-actions.js";
 import { readConfig, writeConfig } from "../config/settings.js";
 import { ensureDirectory } from "../files/io.js";
 import { getBossmodeDir } from "../files/layout.js";
-
 import { recoverMemberArchives } from "./member-actions.js";
 import { prepareCoreStorage } from "./upgrade/run.js";
 import { type UpgradeProgress } from "./upgrade/inventory.js";
@@ -12,20 +11,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { handleApiRequest } from "../api/http.js";
 import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
-
 import { removePidFile, writePidFile } from "./process.js";
 import { ensurePiCatalogWarm } from "../config/catalog.js";
 import { startCatalogAutoRefreshScheduler } from "../config/models.js";
 import { initializeMemberRuntime, getActiveInstanceCount } from "./member-actions.js";
 import { shutdownAll as shutdownAgents } from "../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../agent/scheduler.js";
-
 import { RuntimeRegistry } from "../agent/types.js";
 import { PiSdkRuntime } from "../agent/runtime/pi.js";
 import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../member/templates.js";
 import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
-
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -35,7 +31,6 @@ const MIME_TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
-
 function serveStatic(res: ServerResponse, filePath: string): boolean {
   if (!existsSync(filePath)) return false;
   const ext = extname(filePath);
@@ -45,26 +40,21 @@ function serveStatic(res: ServerResponse, filePath: string): boolean {
   res.end(content);
   return true;
 }
-
 export interface ServerOptions {
   host: string;
   port: number;
   initialConfig?: BossmodeConfig;
   onProgress?(progress: UpgradeProgress): void;
 }
-
 export async function startServer(opts: ServerOptions): Promise<void> {
   ensureDirectory(getBossmodeDir());
   await prepareCoreStorage({root:getBossmodeDir(),initialConfig:opts.initialConfig,onProgress:opts.onProgress,
     activate:async()=>{await startApplication(opts);}});
 }
-
 async function startApplication(opts: ServerOptions): Promise<void> {
   await wireApiRoutes();
   seedBuiltinAssets();
-
   await recoverMemberArchives();
-
   // Initialize runtime registry
   const registry = new RuntimeRegistry();
   registry.register(new PiSdkRuntime());
@@ -76,10 +66,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const unsubscribeUsageHttp = wireUsageHttp();
   const unsubscribeChats = wireChatHttp();
   const unsubscribeAgentEvents = wireAgentEvents();
-
-
   const webDistDir = join(import.meta.dirname, "../../web/dist");
-
   let accepting = true;
   const requests = new Set<Promise<void>>();
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -94,11 +81,9 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   });
   async function handleRequest(req: IncomingMessage,res: ServerResponse): Promise<void> {
     const url = req.url || "/";
-
     // API routes
     const handled = await handleApiRequest(req, res);
     if (handled) return;
-
     // Static file serving (production build)
     if (existsSync(webDistDir)) {
       const filePath = url === "/" ? join(webDistDir, "index.html") : join(webDistDir, url);
@@ -106,7 +91,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
       // SPA fallback
       if (serveStatic(res, join(webDistDir, "index.html"))) return;
     }
-
     // No frontend build available
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`
@@ -118,7 +102,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
       </body></html>
     `);
   }
-
   // WebSocket
   createWebSocketServer(server);
   let cleanupSettlement: Promise<void> | undefined;
@@ -140,7 +123,6 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     })().finally(unsubscribeMembers);
     return cleanupSettlement;
   }
-
   let publicationAttempted = false;
   await listenAndPublish(server, opts, () => {
     publicationAttempted = true;

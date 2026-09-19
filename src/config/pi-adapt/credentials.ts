@@ -8,7 +8,6 @@ import { type ModelCredentialProfile, type PublicModelCredentialProfile } from "
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createDatabaseModelsStore } from "../catalog.js";
 import { mkdirSync } from "node:fs";
-
 export class PiAiOAuthLoginAdapter implements OAuthLoginAdapter {
   async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
     const runtime = await ensureCatalogRegistryRuntime();

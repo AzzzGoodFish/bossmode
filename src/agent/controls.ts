@@ -10,7 +10,6 @@ import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";
 import type { AgentHistoryEvent } from "./events.js";
-
 export interface ControlServices {
   memberConfig(memberId: string): AgentMemberConfig | null;
   memberScopes(memberId: string): string[];
@@ -32,11 +31,9 @@ function controlServices(): ControlServices {
   if (!services) throw new Error("Runtime controls are not connected");
   return services;
 }
-
 function activeSource(instance: AgentInstance): string | null {
   return instance.activeSourceRef;
 }
-
 function publishCurrentStatus(instance: AgentInstance): void {
   const sourceRef = activeSource(instance);
   if (!sourceRef) return;
@@ -45,27 +42,21 @@ function publishCurrentStatus(instance: AgentInstance): void {
     ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status,
   });
 }
-
 function noticeCurrentSource(instance: AgentInstance, message: string): void {
   const sourceRef = activeSource(instance);
   if (sourceRef) controlServices().postSystemNotice(sourceRef, message);
 }
-
 function cancelMemberPending(memberId: string, diagnosis: string): void {
   cancelPendingRuntimeInputs(memberId, diagnosis);
 }
-
 let shutdownSettlement: Promise<void> | null = null;
-
 let shutdownRunning = false;
-
 export function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   const credential=instance.pendingCredentialRefresh;instance.pendingCredentialRefresh=undefined;
   if(credential)void refreshCredential(instance,credential,trigger);
   const thinking=instance.pendingThinkingSwitch;instance.pendingThinkingSwitch=undefined;
   if(thinking)void applyThinking(instance,thinking,trigger).catch(error=>noticeCurrentSource(instance,`Failed to switch thinking level for "${instance.agentName}": ${String(error)}`));
 }
-
 function normalizedBinding(model:string,credentialId?:string){
   const ref=normalizeModelRef(model.trim());if(!ref)throw new Error("model is required");
   assertModelAvailable(ref,"model switch");const profile=credentialId?getModelCredentialProfile(credentialId):null;

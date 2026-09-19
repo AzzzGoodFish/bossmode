@@ -3,7 +3,6 @@ import { lstatSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, posix } from "node:path";
 import type { Database } from "../data/database.js";
-
 /** Revision metadata for a member document in the asset registry. */
 export interface DocumentMeta {
   revision: number;
@@ -14,7 +13,6 @@ export interface DocumentMeta {
   updatedByMemberId?: string;
   updatedByName?: string;
 }
-
 export interface DocumentIdentity {
   /** POSIX path relative to BOSSMODE_DIR, also the stable document key. */
   path: string;
@@ -23,7 +21,6 @@ export interface DocumentIdentity {
   /** Shared scopes key: bare room ID, dm:<id>; absent for global. */
   scopeId?: string;
 }
-
 export interface DocumentHistory {
   ordinal: number;
   revision: number;
@@ -40,13 +37,10 @@ export interface DocumentHistory {
   snapshotHash: string;
   snapshotBytes: number;
 }
-
 export interface DocumentRecord extends DocumentIdentity { meta: DocumentMeta }
-
 export function documentContentMeta(content: string): Pick<DocumentMeta, "contentHash" | "contentLength"> {
   return { contentHash: createHash("sha256").update(content, "utf8").digest("hex"), contentLength: content.length };
 }
-
 /** Asset references never escape the retained body roots or name non-Markdown files. */
 export function validateDocumentPath(path: string): string {
   const parts = path.split("/");

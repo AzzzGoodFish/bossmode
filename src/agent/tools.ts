@@ -1,6 +1,5 @@
 import { Type, type TSchema } from "typebox";
 import { getUserDisplayName } from "../config/settings.js";
-
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { awaitResourceClose, memberTerminalWorkspace, createShell, execInShell, readShell, waitShell, listShells, closeShell, type TerminalWorkspace } from "./terminal.js";
@@ -15,7 +14,6 @@ import { logger } from "../kernel/logger.js";
 //
 // Description scope: capability + mechanical facts only (no usage guidance —
 // that belongs to the prompt layers).
-
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
@@ -66,7 +64,6 @@ function parameterSchema(spec=""):TSchema{
     if(optional)value=Type.Optional(value);return [name,value];}):[]);
   return Type.Object(properties,{additionalProperties:false});
 }
-
 // Gateway capability specs (name + label + description + parameters + example);
 // the runtime adapter executes them through the same dispatch as direct tools.
 export interface GatewayToolSpec {
@@ -76,7 +73,6 @@ export interface GatewayToolSpec {
   parameters: TSchema;
   example: Record<string, unknown>;
 }
-
 const gatewaySpec=(name:string,label:string,description:string,parameters:TSchema,example:Record<string,unknown>):GatewayToolSpec=>({name,label,description,parameters,example});
 export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   gatewaySpec("chat_info","Chat Info",`One chat's details: name, description, and members (group chat) or counterpart (private chat). chat is an id or name.`,parameterSchema("chat:s"),{ chat: "user" }),
@@ -87,7 +83,6 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   gatewaySpec("profile_read","Profile Read",`Read your own profile: name, description and member id.`,parameterSchema(""),{}),
   gatewaySpec("profile_update","Profile Update",`Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`,parameterSchema("name?:s description?:s"),{ description: "<your description>" }),
 ];
-
 // Direct tool specs (name + label + description + parameters); the runtime
 // adapter binds each spec to its execution path and registers it with the SDK.
 export interface DirectToolSpec {
@@ -96,7 +91,6 @@ export interface DirectToolSpec {
   description: string;
   parameters: TSchema;
 }
-
 const directSpec=(name:string,label:string,description:string,parameters:TSchema):DirectToolSpec=>({name,label,description,parameters});
 export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   directSpec("chat_send","Chat Send",`Send a message to one chat.
@@ -134,18 +128,15 @@ search locates; read opens the context — feed a hit's seq to chat_read around_
   directSpec("terminal_close","Terminal Close",`Close a terminal and kill its process. Running commands receive a close signal.`,parameterSchema("terminalId:s")),
   directSpec("reload","Reload",`Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`,parameterSchema("")),
 ];
-
 /**
  * Member-view rendering for chat_read / chat_search (fish/architect rc.8 read-chain).
  * One renderer for both output modes: inline SDK text and markdown file export.
  * Row shape = the tool's JSON projection (seq/sender/content/ts/replyTo/attachments).
  */
-
 /** Same mapping as the activation envelope (message-envelope.ts): user → display name. */
 function senderDisplayName(sender: string): string {
   return sender === "user" ? getUserDisplayName() : sender;
 }
-
 export interface QueryRowReplyTo {
   seq: number;
   messageId: string;
@@ -153,7 +144,6 @@ export interface QueryRowReplyTo {
   excerpt?: string;
   unavailable?: boolean;
 }
-
 export interface QueryRow {
   seq?: number;
   sender: string;
@@ -162,7 +152,6 @@ export interface QueryRow {
   replyTo?: QueryRowReplyTo;
   attachments?: Array<{ originalFilename: string; path: string }>;
 }
-
 function replyToLine(replyTo: QueryRowReplyTo): string {
   if (replyTo.unavailable || !replyTo.sender || !replyTo.excerpt) {
     return `[In reply to msg:#${replyTo.seq} — original not visible in this context]`;
@@ -315,7 +304,6 @@ function sftpWriteFile(sftp: any, path: string, data: Buffer, mkdirp: boolean): 
     });
   });
 }
-
 async function sftpMkdirp(sftp: any, dir: string): Promise<void> {
   const parts = dir.split("/").filter(Boolean);
   let cur = dir.startsWith("/") ? "" : ".";

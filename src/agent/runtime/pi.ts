@@ -23,9 +23,7 @@ import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import { shutdownSdkSession } from "./compaction.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
-
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
-
 /** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
 function classifyToolSource(name:string,bossmodeTools:ReadonlySet<string>,source?:{path?:string;source?:string;baseDir?:string}):string{
   if(BUILTIN_TOOL_NAMES.has(name))return "builtin";if(bossmodeTools.has(name))return "bossmode";

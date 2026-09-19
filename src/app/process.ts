@@ -5,15 +5,11 @@ import { getBossmodeDir } from "../files/layout.js";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-
-
 const PID_PATH = join(getBossmodeDir(), "bossmode.pid");
-
 export function writePidFile(pid: number): void {
   ensureDirectory(getBossmodeDir());
   writeFileSync(PID_PATH, String(pid), "utf-8");
 }
-
 export function readPidFile(): number | null {
   try {
     const raw = readFileSync(PID_PATH, "utf-8").trim();
@@ -23,7 +19,6 @@ export function readPidFile(): number | null {
     return null;
   }
 }
-
 export function removePidFile(): void {
   try {
     unlinkSync(PID_PATH);
@@ -31,7 +26,6 @@ export function removePidFile(): void {
     // ignore
   }
 }
-
 export function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -40,7 +34,6 @@ export function isProcessRunning(pid: number): boolean {
     return false;
   }
 }
-
 export function processIsAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; }
   catch (error) {
@@ -49,7 +42,6 @@ export function processIsAlive(pid: number): boolean {
     throw error;
   }
 }
-
 /** Keep PID ownership until the old writer has actually exited. Never SIGKILL. */
 export async function stopDaemonProcess(pid: number, timeoutMs = 30000): Promise<void> {
   if (!Number.isSafeInteger(pid) || pid < 2 || pid === process.pid) throw new Error("Invalid daemon process identity");

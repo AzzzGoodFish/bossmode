@@ -12,14 +12,12 @@ import { dirname } from "node:path";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
 import { documentContentMeta, importDocument, type DocumentImport, type DocumentIdentity, type DocumentMeta, type ImportedDocumentHistory } from "../../member/assets.js";
 import { type Database } from "../../data/database.js";
-
 export interface FiredArchiveSource {
   archivePath: string;
   /** Parsed explicit member.json export; its ID is NOT automatically associated with live SQL identity. */
   member: Pick<MemberRecord, "name" | "agentTemplate" | "global"> & Partial<Pick<MemberRecord, "id" | "title">>;
   persona?: {path:string; format:"plain" | "frontmatter"; hasContent:boolean};
 }
-
 /** Pure DTO conversion. Parent reads/validates sources once, then calls repository.importCatalog(). */
 export function catalogFromFiredExport(source: FiredArchiveSource): ArchiveCatalogSource {
   validateArchivePath(source.archivePath);
@@ -27,7 +25,6 @@ export function catalogFromFiredExport(source: FiredArchiveSource): ArchiveCatal
     title:source.member.title, global:source.member.global ?? {}, personaPath:source.persona?.path,
     personaFormat:source.persona?.format ?? "plain", hasPersona:source.persona?.hasContent ?? false, roomScopes:[], kind:"fired"};
 }
-
 export interface LegacyArchiveManifestSource {
   archivePath: string;
   members: Array<{
@@ -38,7 +35,6 @@ export interface LegacyArchiveManifestSource {
     hasPersona?:boolean;
   }>;
 }
-
 /** Aggregate historical labels only within one manifest. No current member lookup or ID guessing. */
 export function catalogFromLegacyManifest(source: LegacyArchiveManifestSource): ArchiveCatalogSource[] {
   validateArchivePath(source.archivePath);
@@ -58,7 +54,6 @@ export function catalogFromLegacyManifest(source: LegacyArchiveManifestSource): 
   }
   return [...byName.values()];
 }
-
 function archiveTime(path:string):number|undefined{
  const match=path.match(/(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/);
  if(!match)return;

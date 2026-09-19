@@ -4,22 +4,17 @@ import { isMmScopeId, mmScopeIdOf, parseMmScopeId } from "../../chat/conversatio
 import { readdirSync, existsSync, mkdirSync, renameSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { logger } from "../../kernel/logger.js";
 import { inspectDatabase, type Database } from "../../data/database.js";
-
 export const SHORT_ID_MIGRATION_ID = "core-short-ids-v1";
-
 export interface ShortIdMapping {
   members: Map<string, string>;
   rooms: Map<string, string>;
 }
-
 export interface RenameOp {
   /** Path relative to the bossmode root, POSIX separators. */
   from: string;
   to: string;
 }
-
 // ── mapping assignment ──────────────────────────────────────────────────────
-
 /**
  * Assign new short ids to every member and room. New ids never reuse an old id
  * or a previously assigned one (shapes cannot collide, but the invariant is
@@ -39,7 +34,6 @@ export function assignShortIds(
   for (const old of roomIds) rooms.set(old, reserve(roomGen, taken, "room"));
   return { members, rooms };
 }
-
 function reserve(gen: () => string, taken: Set<string>, kind: string): string {
   for (let attempt = 0; attempt < 1000; attempt++) {
     const candidate = gen();
@@ -372,7 +366,6 @@ function mapMmTokens(value: string, mapping: ShortIdMapping): string {
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, (character) => "\\" + character);
-
 /** Structured string replacement for composite values (paths, keys, comments). */
 export function mapCompositeString(value: string, mapping: ShortIdMapping): string {
   let out = mapMmTokens(value, mapping);

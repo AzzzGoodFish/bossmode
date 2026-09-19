@@ -4,11 +4,8 @@ import { lstatSync, readdirSync, closeSync, constants, fstatSync, openSync, read
 import { promisify } from "node:util";
 import { requireRegularFile, managedPath } from "../../files/io.js";
 import { CORE_STORAGE_FORMAT } from "../../data/schema.js";
-
 export type UpgradePhase = "checking" | "backing-up" | "importing" | "validating" | "cutover" | "retiring" | "ready";
-
 export interface UpgradeProgress { phase: UpgradePhase; completed?: number; total?: number; }
-
 export interface UpgradeImportContext {
   readonly db: Database;
   readonly root: string;
@@ -21,9 +18,7 @@ export interface UpgradeImportContext {
   /** New allowed file bodies only; existing different content is never overwritten. */
   stageAsset(relativePath: string, bytes: Uint8Array): void;
 }
-
 export interface UpgradeSource { path: string; retire: boolean; }
-
 /** Startup-only, read-only source discovery. This module has no application imports.
  * Run under exclusive startup ownership, then read the runner's immutable backup/files
  * root, not the live source. Neither inventory order nor mtime chooses authority.
@@ -38,9 +33,7 @@ export type LegacyKind =
   | "current-sessions" | "old-sessions" | "runtime-state" | "user-cursors" | "background-task"
   | "document-body" | "document-meta" | "document-history" | "document-snapshot"
   | "export-snapshot";
-
 export type LegacyFormat = "json" | "jsonl" | "text";
-
 export interface LegacySourceEntry {
   /** Canonical POSIX relative path; structurally compatible with UpgradeSource. */
   path: string;
@@ -66,21 +59,17 @@ export interface LegacySourceEntry {
   archivePath?: string;
   snapshotKind?: Exclude<LegacyKind, "export-snapshot"> | "archive-manifest";
 }
-
 export interface LegacyDiagnostic {
   code: "unknown-metadata";
   path: string;
 }
-
 export interface LegacyInventory {
   entries: LegacySourceEntry[];
   diagnostics: LegacyDiagnostic[];
 }
-
 export type LegacySourceErrorCode = "invalid-root" | "invalid-path" | "duplicate-path" | "symlink-source"
   | "not-directory" | "not-regular-file" | "unapproved-source" | "wrong-format" | "source-io"
   | "invalid-utf8" | "invalid-json" | "unterminated-jsonl-line";
-
 export class LegacySourceError extends Error {
   constructor(readonly code: LegacySourceErrorCode, readonly path: string, readonly lineNumber?: number) {
     // Do not include native IO/JSON errors or causes: they can contain secret bytes.
@@ -88,13 +77,9 @@ export class LegacySourceError extends Error {
     this.name = "LegacySourceError";
   }
 }
-
 type Description = Omit<LegacySourceEntry, "path" | "mtimeMs" | "size">;
-
 type Params = Record<string, string>;
-
 interface Rule { parts: string[]; describe: (p: Params, path: string) => Description }
-
 const tokens: Record<string, RegExp> = {
   member: /^.+$/, room: /^.+$/, topic: /^.+$/, owner: /^.+$/,
   event: /^(.+)\.jsonl$/, archive: /^(?:fired|legacy)-.+$/,
@@ -109,13 +94,9 @@ const tokens: Record<string, RegExp> = {
   hashBody: /^[a-f0-9]{64}\.md$/,
   oauthHash: /^sha256-[a-f0-9]{64}$/,
 };
-
 const rules: Rule[] = [];
-
 function rule(pattern: string, describe: Rule["describe"]): void { rules.push({ parts: pattern.split("/"), describe }); }
-
 function description(kind: LegacyKind, format: LegacyFormat = "json", retire = true): Description { return { kind, format, retire }; }
-
 // Topic paths/dirs remain identifiable here so importers can consume them via the
 // source-retire flow; topic sources are never imported (fish #19358).
 function scope(p: Params): string { return p.topic ? `topic:${p.topic}` : p.room; }

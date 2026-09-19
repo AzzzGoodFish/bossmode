@@ -2,14 +2,10 @@ import { memberDir, getBossmodeDir } from "../files/layout.js";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { getDatabase, type Database } from "../data/database.js";
-
 export interface AgentSession { runtime: string; sessionId?: string; sessionFile?: string }
-
 const SAFE_ID = /^[^/:\\]+$/;
-
 /** Member session files live under `sessions/<day>/main/` (① A2). */
 const MEMBER_SESSION_PATTERN = /^sessions\/\d{4}-\d{2}-\d{2}\/main\/[^/]+\.jsonl$/;
-
 function validateMemberId(memberId: string): void {
   if (!SAFE_ID.test(memberId) || memberId === "." || memberId === "..") throw new Error(`Invalid member ID: ${memberId}`);
 }

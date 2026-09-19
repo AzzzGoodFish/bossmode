@@ -4,9 +4,7 @@ import { ensurePrivateDirectory, syncPath, writeDurably } from "../../files/io.j
 import { createHash } from "node:crypto";
 import { type Database } from "../../data/database.js";
 import { logger } from "../../kernel/logger.js";
-
 const TASK_TABLES = ["tasks", "task_references", "task_subscribers", "task_comments"] as const;
-
 /** Locate (or create) the dated retirement archive directory under `<root>/archive`. */
 export function taskRetirementDir(root: string): string {
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -433,9 +431,7 @@ function reconcileFoldedMemoryRows(root: string, db: Database): number {
   }
   return repointed;
 }
-
 const COPY_FLAG = "core-room-description-copy-v1";
-
 /**
  * One-time copy of the legacy room-scoped principles content
  * (`rooms/<id>/memory/room-principles.md`) into the explicit

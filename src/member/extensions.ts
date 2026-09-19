@@ -1,7 +1,6 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { installationRoot, memberExtensionsDir } from "../files/layout.js";
-
 /** Filesystem discovery only: entries are not evidence of successful execution. */
 export interface ExtensionAsset {
   name: string;
@@ -11,25 +10,20 @@ export interface ExtensionAsset {
   source: "member" | "builtin";
   issues: string[];
 }
-
 const INSTALL_ARTIFACTS = new Set(["node_modules", "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"]);
-
 export function builtinMcpAdapterPath(): string {
   return join(installationRoot, "vendor", "pi-mcp-adapter", "index.ts");
 }
-
 function assetAt(path: string, source: ExtensionAsset["source"]): ExtensionAsset {
   const asset: ExtensionAsset = { name: basename(path), path, realPath: null, entryPoints: [], source, issues: [] };
   try { asset.realPath = realpathSync(path); }
   catch { asset.issues.push("Path is missing or inaccessible (possibly a broken symbolic link)."); }
   return asset;
 }
-
 function pathPresent(path: string): boolean {
   try { lstatSync(path); return true; }
   catch (err: any) { return err.code !== "ENOENT"; }
 }
-
 function addEntry(asset: ExtensionAsset, path: string): void {
   try {
     if (!statSync(path).isFile()) throw new Error("not a file");

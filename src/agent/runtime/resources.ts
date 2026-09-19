@@ -6,15 +6,12 @@ import { tmpdir } from "node:os";
 import type { AgentResourceSnapshot } from "../types.js";
 import { logger } from "../../kernel/logger.js";
 import { DefaultResourceLoader, type ResourceLoader, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-
 export type McpFactoryLoader=(adapterPath:string)=>Promise<{name:string;factory:ExtensionFactory}>;
 let mcpFactoryLoader:McpFactoryLoader|undefined;
 export function configureMcpFactoryLoader(loader:McpFactoryLoader|undefined):void{mcpFactoryLoader=loader;}
 export function loadMcpFactory(adapterPath:string){if(!mcpFactoryLoader)throw new Error("MCP runtime is not connected");return mcpFactoryLoader(adapterPath);}
-
 // pi SDK prompt utilities — runtime adapter zone. Re-exported so prompt assembly never imports @earendil-works/* directly.
 export { formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
-
 /**
  * Resolve systemPrompt vs appendSystemPrompt for pi DefaultResourceLoader.
  * The bossmode-compiled prompt is the only source (fish 2026-09-04: the
@@ -36,7 +33,6 @@ export function resolvePiSystemPromptSources(args: {
 export class BossmodeResourceLoader implements ResourceLoader {
   private delegate: DefaultResourceLoader;
   private promptSources: ReturnType<typeof resolvePiSystemPromptSources>;
-
   constructor(
     options: ConstructorParameters<typeof DefaultResourceLoader>[0],
     sources: ReturnType<typeof resolvePiSystemPromptSources>,
@@ -44,40 +40,32 @@ export class BossmodeResourceLoader implements ResourceLoader {
     this.delegate = new DefaultResourceLoader(options);
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
-
   async reload(options?: Parameters<ResourceLoader["reload"]>[0]): Promise<void> {
     await this.delegate.reload(options);
   }
-
   getExtensions() { return this.delegate.getExtensions(); }
   getSkills() { return this.delegate.getSkills(); }
   getPrompts() { return this.delegate.getPrompts(); }
   getThemes() { return this.delegate.getThemes(); }
   getAgentsFiles() { return this.delegate.getAgentsFiles(); }
   extendResources(paths: Parameters<ResourceLoader["extendResources"]>[0]): void { this.delegate.extendResources(paths); }
-
   setPromptSources(sources: ReturnType<typeof resolvePiSystemPromptSources>): void {
     this.promptSources = { ...sources, appendSystemPrompt: [...sources.appendSystemPrompt] };
   }
-
   getSystemPrompt(): string | undefined {
     return this.promptSources.systemPrompt;
   }
-
   /** Bossmode prompt sources are in-memory (compiled per scope); there is no file backing. */
   getSystemPromptSource(): { path: string } | undefined {
     return undefined;
   }
-
   getAppendSystemPrompt(): string[] {
     return [...this.promptSources.appendSystemPrompt];
   }
-
   getAppendSystemPromptSources(): Array<{ path: string }> {
     return [];
   }
 }
-
 export interface McpRuntimeSettings {
   enabled: boolean;
   adapterPath?: string;

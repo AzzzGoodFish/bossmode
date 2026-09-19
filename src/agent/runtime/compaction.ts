@@ -1,5 +1,4 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-
 /** Complete every supported shutdown stage, even after an earlier failure. */
 export async function shutdownSdkSession(session: AgentSession, beforeDispose?: () => void, settleResources?: () => Promise<void>): Promise<string[]> {
   const errors: string[] = [];

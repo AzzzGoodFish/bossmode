@@ -9,23 +9,17 @@ export type WsServerEvent=
   |{type:"agent:event";roomId:string;agent:string;memberId:string;event:unknown}
   |{type:"agent:context_usage";roomId:string;agent:string;memberId:string;usage:import("../agent/types.js").ContextUsage|null};
 export type WsClientCommand={type:"subscribe:room"|"unsubscribe:room";roomId:string}|{type:"subscribe:agent"|"unsubscribe:agent";roomId:string;memberId:string};
-
-
 interface ClientState {
   ws: WebSocket;
   roomSubscriptions: Set<string>;
   agentSubscriptions: Set<string>; // "scopeId:memberId"; names resolve only at command time
 }
-
 const clients = new Map<WebSocket, ClientState>();
-
 let wss: WebSocketServer | null = null;
-
 export function createWebSocketServer(server: import("node:http").Server): WebSocketServer {
   wss = new WebSocketServer({ server });
   // ws forwards HTTP listen errors. The startup listener owns rejection/cleanup.
   wss.on("error", error => logger.error("ws","server error",{error:String(error)}));
-
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url || "", "http://localhost");
     const token = url.searchParams.get("token");
@@ -33,14 +27,12 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
       ws.close(4001, "Unauthorized");
       return;
     }
-
     const state: ClientState = {
       ws,
       roomSubscriptions: new Set(),
       agentSubscriptions: new Set(),
     };
     clients.set(ws, state);
-
     ws.on("message", (data: Buffer) => {
       try {
         const cmd = JSON.parse(data.toString()) as WsClientCommand;
@@ -49,21 +41,17 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
         // Ignore malformed messages
       }
     });
-
     ws.on("close", () => {
       clients.delete(ws);
     });
-
     ws.on("error", () => {
       // Prevent unhandled errors from crashing the server
       clients.delete(ws);
       try { ws.terminate(); } catch {}
     });
   });
-
   return wss;
 }
-
 function handleCommand(client: ClientState, cmd: WsClientCommand): void {
   switch (cmd.type) {
     case "subscribe:room":

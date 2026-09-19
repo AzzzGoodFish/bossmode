@@ -15,7 +15,6 @@ import { configureMcpFactoryLoader } from "../agent/runtime/resources.js";
 import { getCurrentSession } from "../member/sessions.js";
 import type { AgentMemberSnapshot } from "../agent/types.js";
 import { writeMemberProfileSkeleton } from "../member/profile.js";
-
 function insertWithDm(record: MemberRecord): void {
   getDatabase().transaction(() => {
     insertMemberIdentity(record);

@@ -10,9 +10,7 @@ export interface SkillDefinition {
   content: string;
   source?: string; // directory this skill was loaded from
 }
-
 export function platformSkillsDir(): string { return join(installationRoot, "assets", "skills"); }
-
 function parseSkill(content: string, name: string, source: string, summary = false): SkillDefinition {
   try {
     const { meta, body } = parseFrontmatter(content);

@@ -4,9 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-
 const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-
 export function originalWorkspace(memberId: string): OriginalWorkspace {
   return {
     id: "original",
@@ -16,27 +14,22 @@ export function originalWorkspace(memberId: string): OriginalWorkspace {
     builtin: true,
   };
 }
-
 export function readWorkspaces(memberId: string): WorkspaceRegistry {
   const saved = readWorkspaceRegistry(memberId);
   if (!saved) return { active: "original", workspaces: [originalWorkspace(memberId)] };
   const workspaces = [originalWorkspace(memberId), ...saved.workspaces.filter(w => w.id !== "original")];
   return { active: workspaces.some(w => w.id === saved.active) ? saved.active : "original", workspaces };
 }
-
 function writeWorkspaces(memberId: string, registry: WorkspaceRegistry): void {
   importWorkspaceRegistry(memberId, registry);
 }
-
 export function getActiveWorkspace(memberId: string): WorkspaceEntry {
   const reg = readWorkspaces(memberId);
   return reg.workspaces.find((w) => w.id === reg.active) ?? reg.workspaces[0];
 }
-
 export function getWorkspace(memberId: string, id: string): WorkspaceEntry | null {
   return readWorkspaces(memberId).workspaces.find((w) => w.id === id) ?? null;
 }
-
 export interface CreateWorkspaceArgs {
   id: string;
   kind: "ssh";
@@ -47,11 +40,9 @@ export interface CreateWorkspaceArgs {
   keyPath?: string;
   root?: string;
 }
-
 export type CreateWorkspaceResult =
   | { ok: true; workspace: SshWorkspace }
   | { ok: false; error: string };
-
 export function createWorkspace(memberId: string, args: CreateWorkspaceArgs): CreateWorkspaceResult {
   if (!ID_RE.test(args.id)) {
     return { ok: false, error: `Invalid workspace id "${args.id}" — use letters, digits, dot, dash or underscore (max 64 chars), starting with a letter or digit.` };

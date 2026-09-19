@@ -16,7 +16,6 @@ import { memberRuntimeAllowed } from "./instance.js";
  * not emit markers — the outer exec stays "running" until it returns.
  */
 import { logger } from "../kernel/logger.js";
-
 export type TerminalWorkspace =
   | {id:string;kind:"original";root:string;description?:string}
   | {id:string;kind:"ssh";root:string;description?:string;host:string;port:number;user:string;keyPath:string};
@@ -24,7 +23,6 @@ export type TerminalWorkspaceResolver=(memberId:string,workspaceId?:string)=>Ter
 let resolveTerminalWorkspace:TerminalWorkspaceResolver|undefined;
 export function configureTerminalWorkspaces(resolve:TerminalWorkspaceResolver|undefined):void{resolveTerminalWorkspace=resolve;}
 export function memberTerminalWorkspace(memberId:string,workspaceId?:string):TerminalWorkspace|undefined{return resolveTerminalWorkspace?.(memberId,workspaceId);}
-
 /** A timeout is an explicit cleanup failure, never confirmation of release. */
 export async function awaitResourceClose(closed:Promise<void>,label:string):Promise<void>{
  let timer:ReturnType<typeof setTimeout>|undefined;
@@ -579,10 +577,8 @@ export async function waitShell(args: {
   if (exec.status === "done" || args.signal?.aborted) return respond();
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : 30_000;
   await waitForTerminal(exec.done,args.memberId,args.signal,blockMs);
-
   return respond();
 }
-
 export function listShells(memberId: string): Array<{ id: string; name?: string; workspace: string; running: string | null; alive: boolean; lines: number }> {
   const out = [];
   for (const shell of shells.values()) {
@@ -598,7 +594,6 @@ export function listShells(memberId: string): Array<{ id: string; name?: string;
   }
   return out;
 }
-
 export async function closeShell(memberId: string, shellId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const key = shellKey(memberId, shellId);
   const shell = shells.get(key);

@@ -4,9 +4,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getBossmodeDir, installationRoot } from "../files/layout.js";
 import { logger } from "../kernel/logger.js";
-
 interface TemplateFile { category: "skill" | "rule"; relativePath: string; name: string; sourcePath: string; localPath: string }
-
 /** Package files only: hidden entries and symlinks are not installation inputs. */
 function templateFiles(root: string): string[] {
   const files: string[] = [];

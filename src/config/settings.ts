@@ -3,7 +3,6 @@ export interface BossmodeConfig {
   auth:{username:string;passwordHash:string};apiKeys:Record<string,string>;defaults:{host:string;port:number};
   mcp?:{enabled:boolean};catalog?:{autoRefreshIntervalDays?:number};
 }
-
 /** Internal secret-bearing configuration; public transports select their own fields. */
 export function readConfig(db: Database = getDatabase()): BossmodeConfig {
   const row = db.get<any>("SELECT * FROM app_settings WHERE id=1");
@@ -18,7 +17,6 @@ export function readConfig(db: Database = getDatabase()): BossmodeConfig {
     ...(row.catalog_interval_days === null ? {} : { catalog: { autoRefreshIntervalDays: row.catalog_interval_days } }),
   };
 }
-
 /** Atomic settings update, also used with the startup staging database. */
 export function writeConfig(config: BossmodeConfig, db: Database = getDatabase()): void {
   db.transaction(tx => {
@@ -30,11 +28,9 @@ export function writeConfig(config: BossmodeConfig, db: Database = getDatabase()
     for (const [provider, key] of Object.entries(config.apiKeys)) tx.run("INSERT INTO provider_api_keys VALUES (?,?)", provider, key);
   });
 }
-
 export function getDefaultConfig(): BossmodeConfig {
   return { auth: { username: "", passwordHash: "" }, apiKeys: {}, defaults: { host: "127.0.0.1", port: 8080 }, mcp: { enabled: false } };
 }
-
 /** User identity is stable internally; display uses the current installation login. */
 export function getUserDisplayName(): string {
   try { return String(readConfig().auth.username ?? "").trim() || "User"; }

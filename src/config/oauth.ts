@@ -6,9 +6,7 @@ import { modelsForBuiltinProvider, protocolForBuiltinProvider, baseUrlForBuiltin
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { randomUUID } from "node:crypto";
-
 type OAuthInputWaiter = { resolve: (value: string) => void; reject: (error: Error) => void };
-
 type OAuthLoginJob = OAuthLoginJobPublic & {
   profileInput: ModelCredentialProfileInput & { id?: string };
   profileRevision: number | null;
@@ -17,11 +15,8 @@ type OAuthLoginJob = OAuthLoginJobPublic & {
   ready: Promise<void>;
   resolveReady: () => void;
 };
-
 const oauthJobs = new Map<string, OAuthLoginJob>();
-
 let oauthLoginAdapter: OAuthLoginAdapter | null = null;
-
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
   return {
     id: job.id,
@@ -38,23 +33,19 @@ function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
     updatedAt: job.updatedAt,
   };
 }
-
 function createDeferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => { resolve = r; });
   return { promise, resolve };
 }
-
 function waitForOAuthInput(job: OAuthLoginJob): Promise<string> {
   if (job.status === "cancelled") return Promise.reject(new Error("OAuth login job was cancelled"));
   return new Promise<string>((resolve, reject) => { job.inputWaiter = { resolve, reject }; });
 }
-
 function getOAuthLoginAdapter(): OAuthLoginAdapter {
   if (!oauthLoginAdapter) oauthLoginAdapter = new PiAiOAuthLoginAdapter();
   return oauthLoginAdapter;
 }
-
 function mapOAuthError(err: unknown): string {
   const message = String((err as any)?.message || err || "OAuth login failed");
   if (message.includes("Failed to extract accountId from token") || message.toLowerCase().includes("invalid_grant") || message.toLowerCase().includes("refresh")) {
@@ -62,14 +53,12 @@ function mapOAuthError(err: unknown): string {
   }
   return message;
 }
-
 function parseDeviceCodeFromAuth(info: { url: string; instructions?: string }): OAuthDeviceCodeInfo | undefined {
   const instructions = info.instructions || "";
   const codeMatch = instructions.match(/(?:enter code|code)[:：]?\s*([A-Z0-9-]{4,})/i);
   if (!codeMatch) return undefined;
   return { userCode: codeMatch[1], verificationUri: info.url };
 }
-
 function buildNativeOAuthProfileInput(input: StartOAuthConnectionRequest): { providerId: string; profileInput: ModelCredentialProfileInput & { id?: string }; profileId?: string } {
   const providerId = validateOAuthProvider(input.providerId);
   const provider = getBuiltinProvider(providerId);

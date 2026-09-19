@@ -11,11 +11,9 @@ import { asString, asStringArray } from "../../kernel/markdown.js";
 import { type Database } from "../../data/database.js";
 import { createHash } from "node:crypto";
 import { requireObject } from "../../kernel/json.js";
-
 import { type BossmodeConfig } from "../../config/settings.js";
 import { normalizeLegacyCredentialImport } from "../../config/models.js";
 import { decodeLegacyMcpOauthEntry, importHashedMcpOauthEntry } from "../../member/mcp.js";
-
 import { replaceCredentialStore } from "../../config/models.js";
 import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "../../config/catalog.js";
 import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailability } from "../../member/mcp.js";
@@ -24,7 +22,6 @@ import { isDeepStrictEqual } from "node:util";
 import { importRuntimeStateEntry } from "../../agent/instance.js";
 import { storageScopeId } from "../../chat/conversations.js";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
-
 function importExecutionAmbiguity(db: UpgradeImportContext["db"], entry: {
   sourcePath: string; sourceKey: string; domain: "session" | "runtime" | "cursor";
   reason: string; recordJson: string; importedAt: number;
@@ -35,7 +32,6 @@ function importExecutionAmbiguity(db: UpgradeImportContext["db"], entry: {
     reason=excluded.reason,record_json=excluded.record_json,imported_at=excluded.imported_at`,
   entry.sourcePath,entry.sourceKey,entry.domain,entry.reason,entry.recordJson,entry.importedAt);
 }
-
 function text(bytes: Uint8Array, path: string): string {
   try { return new TextDecoder("utf-8", {fatal:true}).decode(bytes); }
   catch { throw new Error(`Invalid UTF-8 in legacy member source: ${path}`); }

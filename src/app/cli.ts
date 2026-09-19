@@ -3,10 +3,8 @@ import { getDefaultConfig } from "../config/settings.js";
 import { hashPassword } from "../api/auth.js";
 import { ensureDirectory } from "../files/io.js";
 import { getBossmodeDir } from "../files/layout.js";
-
 import { inspectStartupSettings } from "./upgrade/inventory.js";
 import type { BossmodeConfig } from "../config/settings.js";
-
 import { fork, type ChildProcess } from "node:child_process";
 import { stopDaemonProcess, processIsAlive } from "./process.js";
 import { openSync, closeSync, readFileSync } from "node:fs";
@@ -14,13 +12,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { networkInterfaces } from "node:os";
-
-
 import { isProcessRunning, readPidFile, removePidFile } from "./process.js";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 function getLocalIp(): string {
   const nets = networkInterfaces();
   for (const iface of Object.values(nets)) {
@@ -30,14 +24,12 @@ function getLocalIp(): string {
   }
   return "localhost";
 }
-
 function formatAddress(host: string, port: string | number): string {
   if (host === "0.0.0.0") {
     return `http://${getLocalIp()}:${port} (listening on all interfaces)`;
   }
   return `http://${host}:${port}`;
 }
-
 async function promptUser(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -47,21 +39,17 @@ async function promptUser(question: string): Promise<string> {
     });
   });
 }
-
 async function promptPassword(question: string): Promise<string> {
   return new Promise((resolve) => {
     process.stdout.write(question);
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
-
     if (stdin.isTTY) {
       stdin.setRawMode(true);
     }
     stdin.resume();
     stdin.setEncoding("utf-8");
-
     let password = "";
-
     const onData = (ch: string) => {
       const c = ch.toString();
       switch (c) {
@@ -89,33 +77,25 @@ async function promptPassword(question: string): Promise<string> {
           break;
       }
     };
-
     stdin.on("data", onData);
   });
 }
-
 async function firstRunSetup(): Promise<BossmodeConfig> {
   console.log("Welcome to Bossmode! Let's set up your account.\n");
-
   const username = await promptUser("Username: ");
   const password = await promptPassword("Password: ");
-
   if (!username || !password) {
     console.error("Username and password are required.");
     process.exit(1);
   }
-
   const config = getDefaultConfig();
   config.auth.username = username;
   config.auth.passwordHash = hashPassword(password);
-
   return config;
 }
-
 function parseArgs(args: string[]): { command: string; flags: Record<string, string> } {
   const command = args[0] || "help";
   const flags: Record<string, string> = {};
-
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith("--")) {
@@ -124,13 +104,10 @@ function parseArgs(args: string[]): { command: string; flags: Record<string, str
       flags[key] = value;
     }
   }
-
   return { command, flags };
 }
-
 async function cmdOn(flags: Record<string, string>): Promise<void> {
   ensureDirectory(getBossmodeDir());
-
   const snapshot = inspectStartupSettings(getBossmodeDir());
   const existingPid = readPidFile();
   if (existingPid && isProcessRunning(existingPid)) {
@@ -223,20 +200,15 @@ function cmdStatus(): void {
 function showHelp(): void {
   console.log(`
 Usage: bossmode <command> [options]
-
 Commands:
   on          Start the bossmode server (daemon mode)
   off         Stop the bossmode server
   status      Show server status
-
-
 Options (for 'on'):
   --host <host>   Bind address (default: 127.0.0.1)
   --port <port>   Port number (default: 8080)
-
 Options (global):
   --version, -v   Show version
-
 Examples:
   bossmode on
   bossmode on --host 0.0.0.0 --port 1234

@@ -23,15 +23,12 @@ import {
   type AgentInstance,
 } from "./instance.js";
 import { queueDepth, drainQueuedInputsAsPrompt, wireInstanceEvents } from "./scheduler.js";
-
 export interface AssemblyServices {
   saveSession(memberId: string, runtime: string, session: { sessionId?: string; sessionFile?: string }): void;
 }
-
 let registry: RuntimeRegistry | null = null;
 let memberSnapshotSource: ((memberId: string) => AgentMemberSnapshot | null) | null = null;
 let services: AssemblyServices | undefined;
-
 export function configureAssembly(
   reg: RuntimeRegistry,
   loadSnapshot: (memberId: string) => AgentMemberSnapshot | null,
@@ -42,17 +39,14 @@ export function configureAssembly(
   memberSnapshotSource = loadSnapshot;
   services = deps;
 }
-
 function assemblyServices(): AssemblyServices {
   if (!services) throw new Error("Session assembly services are not connected");
   return services;
 }
-
 function memberSnapshot(memberId: string): AgentMemberSnapshot | null {
   if (!memberSnapshotSource) throw new Error("Member snapshot source is not connected");
   return memberSnapshotSource(memberId);
 }
-
 export function compileForMember(memberId: string): AgentMemberSnapshot["prompt"] {
   const snapshot = memberSnapshot(memberId);
   if (!snapshot) throw new Error(`Member not found: ${memberId}`);

@@ -14,25 +14,14 @@ export interface ConnectApiKeyRequest {providerSlug:string;apiKey:string;name?:s
 export interface OAuthDeviceCodeInfo {userCode:string;verificationUri:string;expiresInSeconds?:number;intervalSeconds?:number;}
 export interface OAuthSelectPrompt {message:string;options:Array<{id:string;label:string}>;}
 export interface AvailableModelOption extends Omit<ModelDefinitionConfig,"id"|"name"> {ref:string;provider:string;providerSlug:string;providerDisplayName?:string;modelId:string;displayName?:string;profileId:string;profileName:string;profileBaseUrl?:string;protocol:ModelProtocol;credentialStatus:"configured"|"missing"|"no_auth"|"ambient";images:boolean;}
-
-
-
 export const DUMMY_API_KEY = "__bossmode_no_auth__";
-
 const AUTH_TYPES: ModelAuthType[] = ["api_key", "oauth", "none", "ambient"];
-
 const REQUEST_PROFILES: ModelRequestProfile[] = ["standard", "openai_codex_subscription"];
-
 const PROFILE_KINDS: ModelCredentialProfileKind[] = ["builtin_provider", "custom_endpoint", "trusted_adapter"];
-
 const MIGRATION_CUSTOM_ENDPOINT_VISION_V1 = "custom-endpoint-vision-v1";
-
 const MIGRATION_CUSTOM_ENDPOINT_REASONING_DEFAULT_V1 = "custom-endpoint-reasoning-default-v1";
-
 type ModelCredentialStore = { profiles: ModelCredentialProfile[]; migrations: string[] };
-
 export type OAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown };
-
 export type OAuthLoginCallbacks = {
   onAuth: (info: { url: string; instructions?: string }) => void;
   onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
@@ -42,18 +31,13 @@ export type OAuthLoginCallbacks = {
   onSelect: (prompt: OAuthSelectPrompt) => Promise<string | undefined>;
   signal?: AbortSignal;
 };
-
 export interface OAuthLoginAdapter {
   login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 }
-
 export function now(): number { return Date.now(); }
-
-
 function writeStore(profiles: ModelCredentialProfile[], migrations?: string[]): void {
   replaceCredentialStore({ profiles, migrations: migrations ?? readCredentialStore().migrations }, getDatabase());
 }
-
 export function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredentialProfile {
   const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, headers: _headers, ...rest } = profile;
   const catalogModels = isBuiltinProviderProfile(profile)

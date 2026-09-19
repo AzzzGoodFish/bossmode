@@ -5,32 +5,25 @@ import { join } from "node:path";
 export interface McpServerAvailability {name:string;status:"unchecked"|"checking"|"available"|"unavailable"|"auth-required"|"invalid-config";checkedAt?:number;toolCount?:number;resourceCount?:number;error?:string;}
 export interface McpServerSummary {name:string;transport:"http"|"stdio"|"invalid";assignedCount?:number;availability?:McpServerAvailability;}
 import { defined, objectJson, parseObject, requireObject } from "../kernel/json.js";
-
 export const MCP_REDACTED_VALUE = "[REDACTED]";
-
 export function getBossmodeMcpDir(): string {
   return join(getBossmodeDir(), "mcp");
 }
-
 export function getBossmodeMcpRuntimeDir(): string {
   return join(getBossmodeMcpDir(), "runtime");
 }
-
 export function getMcpServersObject(config: unknown): Record<string, unknown> {
   if (!config || typeof config !== "object" || Array.isArray(config)) return {};
   const servers = (config as Record<string, unknown>).mcpServers;
   if (!servers || typeof servers !== "object" || Array.isArray(servers)) return {};
   return servers as Record<string, unknown>;
 }
-
 export function getMcpServerNames(config: unknown): string[] {
   return Object.keys(getMcpServersObject(config));
 }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-
 /** Classify credential flags without treating ordinary positional/option values as secrets. */
 function credentialArgument(value: unknown): { flag: string; secret?: string } | null {
   if (typeof value !== "string") return null;
@@ -40,7 +33,6 @@ function credentialArgument(value: unknown): { flag: string; secret?: string } |
   const secretFlag = /(?:^|[-_])(?:api[-_]?key|private[-_]?key|access[-_]?key|token|secret|password|passwd|authorization|bearer|credentials?)$/.test(flag);
   return secretFlag ? { flag: match[1], secret: match[2] } : null;
 }
-
 export function restoreRedactedMcpConfig(submitted: unknown, existing: unknown): unknown {
   if (submitted === MCP_REDACTED_VALUE && existing !== undefined) return existing;
   const submittedArg = credentialArgument(submitted);
@@ -60,7 +52,6 @@ export function restoreRedactedMcpConfig(submitted: unknown, existing: unknown):
   }
   return submitted;
 }
-
 export function inferMcpServerTransport(entry: unknown): McpServerSummary["transport"] {
   if (!isRecord(entry)) return "invalid";
   if (typeof entry.url === "string" && entry.url.trim()) {
@@ -74,22 +65,17 @@ export function inferMcpServerTransport(entry: unknown): McpServerSummary["trans
   if (typeof entry.command === "string" && entry.command.trim()) return "stdio";
   return "invalid";
 }
-
 export function isAssignableMcpServerConfig(entry: unknown): boolean {
   return inferMcpServerTransport(entry) !== "invalid";
 }
-
 export function getAssignableMcpServerNames(config: unknown): string[] {
   const servers = getMcpServersObject(config);
   return getMcpServerNames(config).filter((name) => isAssignableMcpServerConfig(servers[name]));
 }
-
 export function readMcpStatusCache(): Record<string, McpServerAvailability & { configHash?: string }> {
   return readMcpAvailability(getDatabase());
 }
-
 const DEFERRED_MCP_CAPABILITY_KEYS = new Set(["sampling", "samplingautoapprove", "elicitation", "directtools"]);
-
 export function disableDeferredMcpCapabilities(value: unknown, key?: string): unknown {
   if (key && DEFERRED_MCP_CAPABILITY_KEYS.has(key.toLowerCase())) return false;
   if (Array.isArray(value)) return value.map((item) => disableDeferredMcpCapabilities(item));
@@ -100,7 +86,6 @@ export function disableDeferredMcpCapabilities(value: unknown, key?: string): un
   }
   return out;
 }
-
 export function readMemberMcpConfig(memberId: string): Record<string, unknown> | null {
   const repo = getDatabase();
   return hasMcpConfiguration(`member:${memberId}`, repo) ? readMcpConfiguration(`member:${memberId}`, repo) : null;

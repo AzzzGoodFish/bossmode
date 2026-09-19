@@ -14,8 +14,6 @@ import { importLegacyMembers, importLegacySettings, importLegacyExecution, impor
 import { importLegacyConversations } from "./conversations.js";
 import { rebuildEventAggregates } from "../../agent/events.js";
 import { archiveRetiredTasks, cleanupRetiredTopicSessionFiles, cleanupRetiredBackgroundSessionFiles, archiveRetiredScopeSessions, archiveLegacySharedMemory, cleanupMemberMemoryScopes, copyRoomPrinciplesToDescriptions } from "./retirements.js";
-
-
 export interface UpgradeOptions {
   root: string;
   formatVersion: number;
@@ -35,21 +33,14 @@ export interface UpgradeOptions {
    *  schema) and the archive root. Throws to abort the upgrade if archiving fails. */
   archiveRetiredData?(stagingDb: Database, root: string): void | Promise<void>;
 }
-
 export interface UpgradeResult { db: Database; migrated: boolean; backupDirectory?: string; warnings: string[]; }
-
 interface Authority { format: number; schema: string; }
-
 interface SourceRecord { path: string; backup_path: string; hash: string; retire: number; }
-
 interface PreparedAsset { path: string; staged: string; hash: string; }
-
 const authorityKey = "core-authority";
-
 function schemaDigest(migrations: readonly StorageMigration[]): string {
   return createHash("sha256").update(JSON.stringify(migrations.map(m => [m.id, m.sql]))).digest("hex");
 }
-
 function inspectAuthority(path: string): Authority | undefined {
   if (!existsSync(path)) return undefined;
   requireRegularFile(path);
@@ -62,7 +53,6 @@ function inspectAuthority(path: string): Authority | undefined {
     return marker;
   });
 }
-
 export function assertServiceStopped(root: string): void {
   const path = join(root, "bossmode.pid");
   if (!existsSync(path)) return;
@@ -75,7 +65,6 @@ export function assertServiceStopped(root: string): void {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return; throw error; }
   throw new Error("Another Bossmode process still owns this data directory");
 }
-
 /** Independent SQLite lease is released by the OS on process death, never unlink it. */
 function acquireLease(root: string): () => void {
   const directory = managedPath(root, "upgrades");
@@ -86,13 +75,11 @@ function acquireLease(root: string): () => void {
   try { release=lockDatabase(path,"exclusive");chmodSync(path,0o600);return release; }
   catch(error){release?.();throw new Error("Cannot acquire startup upgrade lease",{cause:error});}
 }
-
 async function snapshotDatabase(source: string, target: string): Promise<void> {
   requireRegularFile(source);
   await backupDatabase(source,target);
   chmodSync(target, 0o600); syncPath(target);
 }
-
 /** Quarantine an interrupted staging database. Authoritative source data is unchanged. */
 function quarantineStage(root: string, stage: string): void {
   if (!existsSync(stage)) return;

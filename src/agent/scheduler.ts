@@ -9,7 +9,6 @@ import {
   memberRuntimeAllowed, memberUnconfiguredMessage, runtimeIsStopping,
   trackMemberOperation, transition, updateDispatchState, type AgentInstance,
 } from "./instance.js";
-
 export interface PreparedRuntimeInput {
   prompt: string;
   source?: "room_mention" | "private_instruction" | "system";
@@ -53,7 +52,6 @@ const QUEUE_SELECT = `SELECT id,member_id AS memberId,idempotency_key AS idempot
   placement,status,created_at AS createdAt,dispatched_at AS dispatchedAt,ended_at AS endedAt,
   dispatch_token AS dispatchToken,execution_attempt_id AS executionAttemptId,outcome,
   result_json AS resultJson,diagnosis FROM queued_inputs`;
-
 function requiredText(value: string, label: string): string {
   if (typeof value !== "string" || !value.trim() || value.includes("\0")) throw new Error(`Invalid ${label}`);
   return value;

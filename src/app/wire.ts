@@ -1,34 +1,28 @@
 import { onCatalogChanged } from "../config/catalog.js";
 import { refreshAllInstanceModelRegistries } from "../agent/controls.js";
 import { notifyMemberProfileChanged } from "../agent/instance.js";
-
 /** Configuration reports changes; only the composition root connects them to execution. */
 export function wireConfiguration(): () => void {
   return onCatalogChanged(async () => { await refreshAllInstanceModelRegistries(); });
 }
-
 import { onMemberProfileChanged } from "../member/profile.js";
 import { broadcastMemberProfileChanged } from "./ws.js";
-
 export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberProfileChanged(member => notifyMemberProfileChanged(member));
   const stopViews = onMemberProfileChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
 }
-
 import { assertMemberScopeAccess, chatScopeAssetRoots, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, parseMmScopeId } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef } from "../member/identity.js";
 import { activeWorkspaceRoot } from "../member/workspaces.js";
 export function wireConversationMembers(): () => void {
   return connectConversationMembers(readMemberIdentity);
 }
-
 import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
 import { abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { setStatusSink } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
 import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
-
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
 // truth ("记录自动成为沟通"). Known limit: bash-driven writes are not detected (args are opaque).
@@ -37,20 +31,16 @@ import { displayFilename, importAttachments, inferAttachmentPreviewType, type At
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, sep, relative, isAbsolute } from "node:path";
-
 import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/conversations.js";
 interface KnowledgeEventMeta {path:string;title:string;actor:string;tool:"write"|"edit";outsideRoomDocsPath?:boolean;}
-
 function docsRoot(): string {
   return resolve(documentsRoot());
 }
-
 /** Dedup window: the same agent touching the same doc repeatedly (multi-edit
  *  sessions) should produce one card, not a stream of them. */
 const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 const recentCards = new Map<string, number>(); // `${roomId}:${actor}:${relPath}` -> ts
-
 function shouldEmit(key: string): boolean {
   const now = Date.now();
   const last = recentCards.get(key);
@@ -64,7 +54,6 @@ function shouldEmit(key: string): boolean {
   }
   return true;
 }
-
 /** Extract a display title: first markdown heading > filename. Frontmatter is plain content. */
 function extractTitle(absPath: string, relPath: string): string {
   try {
@@ -77,7 +66,6 @@ function extractTitle(absPath: string, relPath: string): string {
   const base = relPath.split("/").pop() || relPath;
   return base.replace(/\.[^.]+$/i, "").replace(/[-_]/g, " ");
 }
-
 /**
  * Inspect a finished tool call; if it wrote into the knowledge docs tree,
  * post a knowledge_event card into the room.
@@ -91,15 +79,12 @@ export function maybeEmitKnowledgeActivity(
 ): void {
   if (isError) return;
   if (toolName !== "write" && toolName !== "edit") return;
-
   const rawPath = (args as any)?.path ?? (args as any)?.file_path;
   if (typeof rawPath !== "string" || !rawPath) return;
-
   const room=roomStore.getRoom(roomId),agentName=readMemberIdentity(memberId)?.name??memberId;
   const root = docsRoot();
   const abs=isAbsolute(rawPath)?resolve(rawPath):resolve(activeWorkspaceRoot(memberId),rawPath);
   if (abs !== root && !abs.startsWith(root + sep)) return;
-
   const relPath = relative(root, abs).split(sep).join("/");
   const key = `${roomId}:${agentName}:${relPath}`;
   if (!shouldEmit(key)) return;

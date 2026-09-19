@@ -5,14 +5,10 @@ import { logger } from "../kernel/logger.js";
 import { readConfig, writeConfig } from "./settings.js";
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
 import { defined, objectJson, parseObject } from "../kernel/json.js";
-
 export const MODEL_PROTOCOLS=["openai-completions","openai-responses","openai-codex-responses","anthropic-messages","azure-openai-responses","google-generative-ai","google-gemini-cli","google-vertex","bedrock-converse-stream","mistral-conversations"] as const;
 export type ModelProtocol=(typeof MODEL_PROTOCOLS)[number];
-
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
-
 const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together", "kimi-coding"]);
-
 type ModelDiscoveredMetadata = {
   contextWindow?: number;
   maxTokens?: number;
@@ -21,9 +17,7 @@ type ModelDiscoveredMetadata = {
   thinkingLevelMap?: ModelDefinitionConfig["thinkingLevelMap"];
   compat?: ModelDefinitionConfig["compat"];
 };
-
 const THINKING_LEVEL_MAP_KEYS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 export function validateThinkingLevelMap(raw: unknown): ModelDefinitionConfig["thinkingLevelMap"] | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("thinkingLevelMap must be an object");

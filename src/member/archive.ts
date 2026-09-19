@@ -6,11 +6,9 @@ import { type Database, getDatabase } from "../data/database.js";
 import { memberArchivePath, getMember, retireMemberIdentity } from "./identity.js";
 import { validateArchivePath } from "../files/layout.js";
 import { type MemberGlobalConfig } from "./identity.js";
-
 function statIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try { return lstatSync(path); } catch (err: any) { if (err.code === "ENOENT") return null; throw err; }
 }
-
 /** Caller-selected data root; reject symlinks on path segments instead of following archive metadata. */
 export function checkedAssetPath(root: string, relativePath: string): string {
   const base = resolve(root);

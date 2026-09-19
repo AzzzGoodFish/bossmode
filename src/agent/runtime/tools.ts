@@ -10,7 +10,6 @@ import {
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
 }
-
 function truncate(text: string): string {
   const max = 25000;
   return text.length <= max ? text : text.slice(0, max) + `\n\n--- Result truncated (${text.length} chars). Use a more specific query. ---`;
@@ -44,7 +43,6 @@ function renderGatewayList(entries: GatewayEntry[]): string {
   const lines = entries.map((entry) => `- ${entry.name} — ${entry.description.split("\n")[0]}`);
   return `${lines.join("\n")}\nUse {action:"describe", tool:"<name>"} for one capability's parameters.`;
 }
-
 function renderGatewayDescribe(entry: GatewayEntry): string {
   return [
     `${entry.name}: ${entry.description}`,
