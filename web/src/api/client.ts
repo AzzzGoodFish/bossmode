@@ -818,39 +818,6 @@ export async function getAgentContextUsage(roomId: string, memberId: string): Pr
   return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?memberId=${encodeURIComponent(memberId)}`);
 }
 
-// -- Attachments --
-
-export interface UploadResult {
-  storedFilename: string;
-  originalFilename: string;
-  size: number;
-  url: string;
-  previewType?: AttachmentPreviewType;
-}
-
-export async function uploadFile(roomId: string, file: File): Promise<UploadResult> {
-  const headers: Record<string, string> = {};
-  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-
-  const res = await fetch(
-    `${BASE_URL}/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments?filename=${encodeURIComponent(file.name)}`,
-    { method: "POST", headers, body: file },
-  );
-
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: "Upload failed" }));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
-
-  return res.json();
-}
-
 // -- Usage (token stats) --
 
 export interface UsageKpis {
