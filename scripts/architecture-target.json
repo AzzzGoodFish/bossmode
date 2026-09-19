@@ -27,7 +27,6 @@
     "src/member/identity.ts",
     "src/member/profile.ts",
     "src/member/assets.ts",
-    "src/member/memory.ts",
     "src/member/skills.ts",
     "src/member/extensions.ts",
     "src/member/mcp.ts",

@@ -3,8 +3,44 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { latestMessage } from "../data/repositories/message-repository.js";
-import { type Room, type CursorMap, type RoomMemberOverride, type RoomMemberRecord, type RoomMemberConfig } from "../kernel/types.js";
-import { readWorkspaces } from "../member/workspaces.js";
+export interface RoomMemberConfig {
+  model?: string;
+  credentialId?: string;
+  thinkingLevel?: string;
+  contextLimit?: number;
+  skills?: string[];
+  mcpServers?: string[];
+  extensions?: string[];
+}
+export interface RoomMemberRecord {
+  id: string;
+  roomId?: string;
+  name: string;
+  sourceAgent: string;
+  sourceMemberId?: string;
+  avatar?: string;
+  config?: RoomMemberConfig;
+  createdAt: number;
+  updatedAt: number;
+  migratedFrom?: { memberName: string; memberId?: string };
+}
+export interface RoomMemberOverride extends RoomMemberConfig {}
+export interface Room {
+  id: string;
+  name: string;
+  cwd?: string;
+  members: string[];
+  promptLeaderMemberId?: string;
+  docsPath?: string;
+  description?: string;
+  roomMembers?: RoomMemberRecord[];
+  globalMemberIds?: string[];
+  promptLeaderGlobalMemberId?: string;
+  createdAt: number;
+  ruleDocs?: string[];
+  memberOverrides?: Record<string, RoomMemberOverride>;
+}
+export type CursorMap = Record<string, string | null>;
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
 
@@ -121,16 +157,23 @@ export function normalizeRoomDocsPath(input: string | null | undefined): string 
 /** Batch 7 P3: rooms no longer bind a cwd — attachment/artifact path policy
  * covers each room member's home directory and all their workspace roots. */
 /** Local asset roots for a set of members: their data dirs plus registered workspaces. */
+let memberWorkspaceRoots: ((memberId: string) => string[]) | undefined;
+
+/** App wiring supplies workspace roots; chat owns scope authorization but never
+ * reads member assets/configuration directly. */
+export function connectConversationWorkspaceRoots(read: (memberId: string) => string[]): () => void {
+  const connection = read;
+  memberWorkspaceRoots = connection;
+  return () => { if (memberWorkspaceRoots === connection) memberWorkspaceRoots = undefined; };
+}
+
 export function memberAssetRoots(memberIds: Iterable<string>): string[] {
   const roots: string[] = [];
   for (const id of new Set(memberIds)) {
     roots.push(memberDir(id));
-    try {
-      const reg = readWorkspaces(id);
-      for (const w of reg.workspaces) roots.push(w.root);
-    } catch { /* synthesized on read — ignore */ }
+    for (const root of memberWorkspaceRoots?.(id) ?? []) roots.push(root);
   }
-  return roots;
+  return [...new Set(roots)];
 }
 
 export function roomMemberAssetRoots(roomId: string): string[] {
@@ -631,6 +674,13 @@ const ROOM_PREFIX = "room:";
 
 const MM_PREFIX = "mm:";
 
+/** Canonical conversation identity used by all new chat capabilities. Bare room
+ * ids remain the storage key; public/source refs always use `room:<id>`. */
+export type ConversationIdentity =
+  | { kind: "room"; scopeId: ScopeId; roomId: string }
+  | { kind: "dm"; scopeId: ScopeId; memberId: string }
+  | { kind: "mm"; scopeId: ScopeId; memberIds: [string, string] };
+
 /**
  * Member↔member private chat scope (⑤ B, 2026-09-15): `mm:` + the two member ids
  * sorted and joined by a single dash. `mem_` appears exactly once per id in both
@@ -659,6 +709,30 @@ export function parseMmScopeId(scope: string): [string, string] | null {
 
 export function isMmScopeId(scope: string): boolean {
   return typeof scope === "string" && scope.startsWith(MM_PREFIX);
+}
+
+/** One parser for the target chat model. Accepts a canonical public/source ref
+ * or a bare room storage id and rejects malformed/non-canonical pair ids. */
+export function parseConversation(value: string): ConversationIdentity | null {
+  if (typeof value !== "string" || !value || value.includes("\0")) return null;
+  if (value.startsWith(DM_PREFIX)) {
+    const memberId = value.slice(DM_PREFIX.length);
+    return isMemberId(memberId) ? { kind: "dm", scopeId: `${DM_PREFIX}${memberId}`, memberId } : null;
+  }
+  if (value.startsWith(MM_PREFIX)) {
+    const memberIds = parseMmScopeId(value);
+    return memberIds ? { kind: "mm", scopeId: mmScopeIdOf(memberIds[0], memberIds[1]), memberIds } : null;
+  }
+  const roomId = value.startsWith(ROOM_PREFIX) ? value.slice(ROOM_PREFIX.length) : value;
+  if (!roomId || roomId.includes(":") || /[/\\]/.test(roomId) || [".", ".."].includes(roomId)) return null;
+  return { kind: "room", scopeId: `${ROOM_PREFIX}${roomId}`, roomId };
+}
+
+/** Database key used by scopes/messages/cursors. */
+export function storageScopeId(value: string): string {
+  const ref = parseConversation(value);
+  if (!ref) throw new Error(`Invalid conversation: ${value}`);
+  return ref.kind === "room" ? ref.roomId : ref.scopeId;
 }
 
 export function scopeIdOf(ref: ConversationRef): ScopeId {

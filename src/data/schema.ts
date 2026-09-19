@@ -858,4 +858,247 @@ CREATE TABLE id_migration_map (
 );
 `,
 },
+  {
+  id: "core-agent-queue-v2",
+  foreignKeysOff: true,
+  sql: `
+DROP TRIGGER queued_input_guard;
+DROP TRIGGER queued_input_placement_guard;
+DROP INDEX queued_inputs_pending;
+DROP INDEX queued_inputs_actor_pending;
+DROP INDEX queued_inputs_ready;
+ALTER TABLE queued_inputs RENAME TO queued_inputs_delivery_v1;
+CREATE TABLE chat_admissions (
+  scope_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  target_actor_key TEXT NOT NULL,
+  delivery_kind TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  input_json TEXT NOT NULL CHECK(json_valid(input_json)),
+  reply_expected INTEGER NOT NULL CHECK(reply_expected IN (0,1)),
+  cursor_message_id TEXT,
+  cursor_message_seq INTEGER,
+  status TEXT NOT NULL CHECK(status IN ('pending','confirmed')),
+  input_id INTEGER,
+  opened_at INTEGER NOT NULL,
+  confirmed_at INTEGER,
+  PRIMARY KEY(scope_id,message_id,target_actor_key,delivery_kind),
+  UNIQUE(idempotency_key),
+  FOREIGN KEY(scope_id,message_id,target_actor_key,delivery_kind)
+    REFERENCES captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind),
+  CHECK((status='pending' AND input_id IS NULL AND confirmed_at IS NULL)
+    OR (status='confirmed' AND input_id IS NOT NULL AND confirmed_at IS NOT NULL))
+);
+INSERT INTO chat_admissions(
+  scope_id,message_id,target_actor_key,delivery_kind,idempotency_key,input_json,reply_expected,
+  cursor_message_id,cursor_message_seq,status,input_id,opened_at,confirmed_at
+)
+SELECT q.scope_id,q.message_id,q.target_actor_key,q.delivery_kind,
+  'legacy:'||json_array(q.scope_id,q.message_id,q.target_actor_key,q.delivery_kind),q.payload_json,
+  CASE WHEN EXISTS(
+    SELECT 1 FROM reply_obligations r
+    WHERE r.scope_id=q.scope_id AND r.actor_key=q.target_actor_key
+      AND (r.message_id=q.message_id OR EXISTS(
+        SELECT 1 FROM json_each(q.payload_json,'$.replySources') s WHERE s.value=r.message_id
+      ))
+  ) THEN 1 ELSE 0 END,
+  NULL,NULL,'confirmed',q.id,q.created_at,COALESCE(q.dispatched_at,q.ended_at,q.created_at)
+FROM queued_inputs_delivery_v1 q;
+CREATE TRIGGER chat_admission_guard BEFORE UPDATE ON chat_admissions
+WHEN NEW.scope_id IS NOT OLD.scope_id OR NEW.message_id IS NOT OLD.message_id
+  OR NEW.target_actor_key IS NOT OLD.target_actor_key OR NEW.delivery_kind IS NOT OLD.delivery_kind
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key OR NEW.input_json IS NOT OLD.input_json
+  OR NEW.reply_expected IS NOT OLD.reply_expected OR NEW.cursor_message_id IS NOT OLD.cursor_message_id
+  OR NEW.cursor_message_seq IS NOT OLD.cursor_message_seq OR NEW.opened_at IS NOT OLD.opened_at
+  OR NOT (OLD.status='pending' AND NEW.status='confirmed' AND OLD.input_id IS NULL
+    AND NEW.input_id IS NOT NULL AND OLD.confirmed_at IS NULL AND NEW.confirmed_at IS NOT NULL)
+BEGIN SELECT RAISE(ABORT,'Invalid chat admission transition'); END;
+CREATE TABLE queued_inputs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id TEXT REFERENCES members(id),
+  historical_target_actor_key TEXT,
+  idempotency_key TEXT NOT NULL,
+  source_ref TEXT CHECK(source_ref IS NULL OR length(source_ref)>0),
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+  trigger TEXT NOT NULL CHECK(length(trigger)>0),
+  reply_expected INTEGER NOT NULL CHECK(reply_expected IN (0,1)),
+  placement TEXT NOT NULL DEFAULT 'tail' CHECK(placement IN ('front','tail')),
+  status TEXT NOT NULL CHECK(status IN ('pending','dispatched','settled','interrupted','uncertain')),
+  created_at INTEGER NOT NULL,
+  dispatched_at INTEGER,
+  ended_at INTEGER,
+  dispatch_token TEXT,
+  execution_attempt_id TEXT,
+  outcome TEXT CHECK(outcome IN ('completed','failed','cancelled')),
+  result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json)),
+  diagnosis TEXT,
+  UNIQUE(member_id,idempotency_key),
+  CHECK(member_id IS NOT NULL OR historical_target_actor_key IS NOT NULL),
+  CHECK((dispatch_token IS NULL) = (dispatched_at IS NULL)),
+  CHECK(execution_attempt_id IS NULL OR dispatch_token IS NOT NULL),
+  CHECK((status='pending' AND dispatched_at IS NULL AND ended_at IS NULL)
+    OR (status='dispatched' AND dispatched_at IS NOT NULL AND ended_at IS NULL)
+    OR (status='settled' AND dispatched_at IS NOT NULL AND ended_at IS NOT NULL AND outcome IS NOT NULL)
+    OR (status='interrupted' AND dispatched_at IS NULL AND ended_at IS NOT NULL AND diagnosis IS NOT NULL)
+    OR (status='uncertain' AND dispatched_at IS NOT NULL AND ended_at IS NOT NULL AND diagnosis IS NOT NULL)),
+  CHECK(status='settled' OR (outcome IS NULL AND result_json IS NULL))
+);
+INSERT INTO queued_inputs(
+  id,member_id,historical_target_actor_key,idempotency_key,source_ref,payload_json,trigger,reply_expected,placement,status,
+  created_at,dispatched_at,ended_at,dispatch_token,execution_attempt_id,outcome,result_json,diagnosis
+)
+SELECT q.id,d.target_member_id,q.target_actor_key,
+  'legacy:'||json_array(q.scope_id,q.message_id,q.target_actor_key,q.delivery_kind),
+  CASE WHEN q.scope_id LIKE 'dm:%' OR q.scope_id LIKE 'mm:%' OR q.scope_id LIKE 'room:%'
+    THEN q.scope_id ELSE 'room:'||q.scope_id END,
+  q.payload_json,q.trigger,
+  CASE WHEN EXISTS(
+    SELECT 1 FROM reply_obligations r
+    WHERE r.scope_id=q.scope_id AND r.actor_key=q.target_actor_key AND r.settled_at IS NULL
+      AND NOT EXISTS(
+        SELECT 1 FROM reply_obligation_dispositions d
+        WHERE d.scope_id=r.scope_id AND d.message_id=r.message_id AND d.actor_key=r.actor_key
+      )
+      AND (r.message_id=q.message_id OR EXISTS(
+        SELECT 1 FROM json_each(q.payload_json,'$.replySources') s WHERE s.value=r.message_id
+      ))
+  ) THEN 1 ELSE 0 END,
+  q.placement,q.status,q.created_at,q.dispatched_at,q.ended_at,q.dispatch_token,
+  q.execution_attempt_id,q.outcome,q.result_json,q.diagnosis
+FROM queued_inputs_delivery_v1 q
+JOIN captured_deliveries d ON d.scope_id=q.scope_id AND d.message_id=q.message_id
+  AND d.target_actor_key=q.target_actor_key AND d.delivery_kind=q.delivery_kind;
+DROP TABLE queued_inputs_delivery_v1;
+CREATE INDEX queued_inputs_pending ON queued_inputs(status,id);
+CREATE INDEX queued_inputs_ready ON queued_inputs(member_id,status,placement,id);
+CREATE TRIGGER queued_input_guard BEFORE UPDATE ON queued_inputs
+WHEN NEW.id IS NOT OLD.id OR NEW.member_id IS NOT OLD.member_id
+  OR NEW.historical_target_actor_key IS NOT OLD.historical_target_actor_key
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key OR NEW.source_ref IS NOT OLD.source_ref
+  OR NEW.payload_json IS NOT OLD.payload_json OR NEW.trigger IS NOT OLD.trigger
+  OR NEW.reply_expected IS NOT OLD.reply_expected OR NEW.placement IS NOT OLD.placement
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NOT ((OLD.status='pending' AND NEW.status IN ('dispatched','interrupted'))
+    OR (OLD.status='dispatched' AND NEW.status IN ('settled','uncertain')))
+  OR (OLD.status='dispatched' AND (NEW.dispatch_token IS NOT OLD.dispatch_token
+    OR NEW.execution_attempt_id IS NOT OLD.execution_attempt_id OR NEW.dispatched_at IS NOT OLD.dispatched_at))
+BEGIN SELECT RAISE(ABORT,'Invalid queued input transition'); END;
+CREATE TRIGGER queued_input_member_required BEFORE INSERT ON queued_inputs
+WHEN NEW.member_id IS NULL
+BEGIN SELECT RAISE(ABORT,'Live queued input requires member ownership'); END;
+DROP INDEX execution_attempts_status;
+ALTER TABLE execution_attempts RENAME TO execution_attempts_scope_v1;
+CREATE TABLE execution_attempts (
+  id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL REFERENCES members(id),
+  source_ref TEXT CHECK(source_ref IS NULL OR length(source_ref)>0),
+  operation TEXT NOT NULL CHECK(operation IN ('input','session-create','session-fork','external')),
+  external_reference TEXT,
+  status TEXT NOT NULL CHECK(status IN ('prepared','dispatched','acknowledged','interrupted')),
+  started_at INTEGER NOT NULL,
+  dispatched_at INTEGER,
+  ended_at INTEGER,
+  diagnosis TEXT
+);
+INSERT INTO execution_attempts(
+  id,member_id,source_ref,operation,external_reference,status,started_at,dispatched_at,ended_at,diagnosis
+)
+SELECT id,member_id,
+  CASE WHEN scope_id LIKE 'dm:%' OR scope_id LIKE 'mm:%' OR scope_id LIKE 'room:%'
+    THEN scope_id ELSE 'room:'||scope_id END,
+  operation,external_reference,status,started_at,dispatched_at,ended_at,diagnosis
+FROM execution_attempts_scope_v1;
+DROP TABLE execution_attempts_scope_v1;
+CREATE INDEX execution_attempts_status ON execution_attempts(status);
+CREATE TABLE event_usage_receipts_saved AS SELECT * FROM event_usage_receipts;
+CREATE TABLE event_source_receipts_saved AS SELECT * FROM event_source_receipts;
+DROP TABLE event_usage_receipts;
+DROP TABLE event_source_receipts;
+DROP INDEX agent_events_history;
+DROP INDEX agent_events_member;
+ALTER TABLE agent_events RENAME TO agent_events_scope_v1;
+CREATE TABLE agent_events (
+  id TEXT PRIMARY KEY,
+  member_id TEXT REFERENCES members(id),
+  source_ref TEXT,
+  member_seq INTEGER CHECK(member_seq IS NULL OR member_seq >= 1),
+  historical_source_key TEXT,
+  historical_owner_key TEXT,
+  historical_seq INTEGER CHECK(historical_seq IS NULL OR historical_seq >= 1),
+  ts INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+  CHECK((member_id IS NOT NULL AND member_seq IS NOT NULL)
+    OR (historical_source_key IS NOT NULL AND historical_owner_key IS NOT NULL AND historical_seq IS NOT NULL))
+);
+WITH ranked AS (
+  SELECT e.*,
+    CASE WHEN e.member_id IS NOT NULL THEN ROW_NUMBER() OVER(PARTITION BY e.member_id ORDER BY e.ts,e.id) END AS next_member_seq
+  FROM agent_events_scope_v1 e
+)
+INSERT INTO agent_events(
+  id,member_id,source_ref,member_seq,historical_source_key,historical_owner_key,historical_seq,ts,type,payload_json
+)
+SELECT id,member_id,
+  CASE WHEN member_id IS NULL OR scope_id LIKE 'topic:%' THEN NULL
+    WHEN scope_id LIKE 'dm:%' OR scope_id LIKE 'mm:%' OR scope_id LIKE 'room:%' THEN scope_id
+    ELSE 'room:'||scope_id END,
+  next_member_seq,scope_id,owner_key,seq,ts,type,payload_json
+FROM ranked;
+DROP TABLE agent_events_scope_v1;
+CREATE UNIQUE INDEX agent_events_member_sequence ON agent_events(member_id,member_seq) WHERE member_id IS NOT NULL;
+CREATE UNIQUE INDEX agent_events_history_identity ON agent_events(historical_source_key,historical_owner_key,historical_seq)
+  WHERE historical_source_key IS NOT NULL;
+CREATE INDEX agent_events_source_member ON agent_events(source_ref,member_id,member_seq);
+CREATE INDEX agent_events_member_type_time ON agent_events(member_id,type,ts);
+CREATE TABLE event_usage_receipts (
+  event_id TEXT PRIMARY KEY REFERENCES agent_events(id) ON DELETE CASCADE,
+  total_tokens INTEGER NOT NULL
+);
+INSERT INTO event_usage_receipts SELECT event_id,total_tokens FROM event_usage_receipts_saved;
+DROP TABLE event_usage_receipts_saved;
+CREATE TABLE event_source_receipts (
+  event_id TEXT PRIMARY KEY REFERENCES agent_events(id) ON DELETE CASCADE,
+  input_fingerprint TEXT NOT NULL
+);
+INSERT INTO event_source_receipts SELECT event_id,input_fingerprint FROM event_source_receipts_saved;
+DROP TABLE event_source_receipts_saved;
+DROP TABLE member_statistics;
+CREATE TABLE member_statistics (
+  member_id TEXT PRIMARY KEY REFERENCES members(id),
+  turns INTEGER NOT NULL DEFAULT 0,
+  tool_calls INTEGER NOT NULL DEFAULT 0,
+  active_ms INTEGER NOT NULL DEFAULT 0,
+  open_start_ts INTEGER,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read INTEGER NOT NULL DEFAULT 0,
+  cache_write INTEGER NOT NULL DEFAULT 0,
+  cost REAL NOT NULL DEFAULT 0,
+  updated_at INTEGER
+);
+DROP INDEX idx_token_daily_room_date;
+DROP TABLE token_usage_daily;
+CREATE TABLE token_usage_daily (
+  member_id TEXT NOT NULL REFERENCES members(id),
+  date TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read INTEGER NOT NULL DEFAULT 0,
+  cache_write INTEGER NOT NULL DEFAULT 0,
+  cost REAL NOT NULL DEFAULT 0,
+  turns INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(member_id,date,model)
+);
+CREATE INDEX token_usage_daily_date ON token_usage_daily(date,member_id);
+INSERT INTO storage_meta(key,value) VALUES('event_aggregates_rebuild_required','1')
+  ON CONFLICT(key) DO UPDATE SET value='1';
+UPDATE outbox SET scope_id=CASE
+  WHEN scope_id LIKE 'dm:%' OR scope_id LIKE 'mm:%' OR scope_id LIKE 'room:%' THEN scope_id
+  ELSE 'room:'||scope_id END
+WHERE kind='agent-event' AND scope_id IS NOT NULL;
+PRAGMA foreign_key_check;
+`,
+},
 ]);
