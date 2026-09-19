@@ -7,11 +7,12 @@
 // 三个相位：
 //   T terminal：terminal_create → exec（快/慢）→ wait → read → list → close（六件套真调用）
 //   L lifecycle：@激活 → 工具回合 → chat_send 回复落回房间（核对 daemon 落账）
+//   M multi-chat：同一真实 runtime 显式发送 user DM / member chat，并跨 chat_read
 //   R restart：在飞慢轮次中 CLI off/on → 成员回到 idle → 重启后续跑落账 → 队列落定
 //
 // 用法：
 //   npm run build                       # 先构建（或 --dist <package-root> 指向已装包）
-//   node scripts/smoke-e2e.mjs [--dist <path>] [--keep] [--only T|L|R]
+//   node scripts/smoke-e2e.mjs [--dist <path>] [--keep] [--only T|L|M|R]
 //
 // 隔离：临时 HOME/BOSSMODE_DIR（断言在 tmp 下）＋随机端口；不碰真实环境。
 // 失败保留现场目录并打印路径；成功默认清理（--keep 保留）。
@@ -216,8 +217,8 @@ async function freePort() {
 }
 
 // ---- fixtures ----
-let DAEMON_PORT, MID, ROOM_ID, PROFILE_ID;
-const M1 = "smoke-m1", ROOM_NAME = "smoke-room";
+let DAEMON_PORT, MID, MID2, ROOM_ID, PROFILE_ID;
+const M1 = "smoke-m1", M2 = "smoke-m2", ROOM_NAME = "smoke-room";
 
 async function login() {
   const r = await api("POST", "/api/auth/login", { username: USER, password: PASS }, { auth: false });
@@ -272,13 +273,13 @@ async function createRoom() {
 }
 
 async function postMessage(content) {
-  const r = await api("POST", `/api/rooms/${ROOM_ID}/messages`, { content });
+  const r = await api("POST", `/api/conversations/${encodeURIComponent(`room:${ROOM_ID}`)}/messages`, { content });
   assert(r.status === 200, `post message failed: ${r.status} ${JSON.stringify(r.data).slice(0, 200)}`);
   return r.data;
 }
 
 function roomMessages() {
-  return api("GET", `/api/rooms/${ROOM_ID}/messages?limit=100`).then((r) => Array.isArray(r.data) ? r.data : (r.data.messages || []));
+  return api("GET", `/api/conversations/${encodeURIComponent(`room:${ROOM_ID}`)}/messages?limit=100`).then((r) => Array.isArray(r.data) ? r.data : (r.data.messages || []));
 }
 function senderMatches(m, mid, name) {
   return [m.sender, m.senderMemberId, m.senderId].filter(Boolean).some((v) => v === mid || v === name);
@@ -291,6 +292,11 @@ async function memberStatus() {
   const rooms = Array.isArray(r.data) ? r.data : (r.data.rooms || []);
   const room = rooms.find((x) => x.id === ROOM_ID || x.name === ROOM_NAME);
   return room?.agentStatuses?.[M1];
+}
+async function conversationMessages(scope) {
+  const r = await api("GET", `/api/conversations/${encodeURIComponent(scope)}/messages?limit=100`);
+  assert(r.status === 200, `conversation read failed for ${scope}: ${r.status}`);
+  return Array.isArray(r.data) ? r.data : (r.data.messages || []);
 }
 
 // ---- phases ----
@@ -374,6 +380,37 @@ async function phaseLifecycle() {
   const msg = await waitRoomMessage("SMOKE_REPLY_OK");
   check("replyMessageId", msg.id);
   step("chat_send 回复落回房间", msg.id);
+}
+
+async function phaseMultiChat() {
+  console.log("[M] 同一 runtime：room → user DM / member chat");
+  let n = mockLog.length;
+  mode = { id: "m-dm", kind: "chat", to: "user", text: "SMOKE_DM_OK" };
+  await postMessage(`@${M1} m-dm`);
+  await mockWait(n, (e) => e.id === "m-dm" && e.toolCount >= 1, "DM chat_send");
+  const dm = await waitFor(async () => (await conversationMessages(`dm:${MID}`)).find((m) => (m.content || "").includes("SMOKE_DM_OK") && senderMatches(m, MID, M1)), 45000, "DM persistence");
+  step("user DM 落账", dm.id);
+
+  mode = null;
+  const created = await api("POST", "/api/members", { name: M2, model: `${PROFILE_ID}/smokemodel`, credentialId: PROFILE_ID });
+  assert(created.status === 200, `second member create failed: ${created.status}`);
+  const member = created.data.member || created.data;
+  MID2 = member.memberId || member.id;
+  assert(MID2, "second member id missing");
+  const mm = `mm:${[MID, MID2].sort().join("-")}`;
+  n = mockLog.length;
+  mode = { id: "m-mm", kind: "chat", to: MID2, text: "SMOKE_MM_OK" };
+  await postMessage(`@${M1} m-mm`);
+  await mockWait(n, (e) => e.id === "m-mm" && e.toolCount >= 1, "member chat_send");
+  const sent = await waitFor(async () => (await conversationMessages(mm)).find((m) => (m.content || "").includes("SMOKE_MM_OK") && senderMatches(m, MID, M1)), 45000, "member-chat persistence");
+  step("member chat 落账", sent.id);
+
+  n = mockLog.length;
+  mode = { id: "m-read", kind: "tool", tool: "chat_read", args: { chat: mm, limit: 20 } };
+  await postMessage(`@${M1} m-read`);
+  const read = await mockWait(n, (e) => e.id === "m-read" && e.lastTool, "cross-chat read");
+  assert(read.lastTool.includes("SMOKE_MM_OK"), `chat_read omitted member-chat fact: ${read.lastTool.slice(0, 300)}`);
+  step("跨 chat_read", mm);
 }
 
 async function lockStep(name, fn, timeout = 120000) {
@@ -481,6 +518,7 @@ async function main() {
 
   if (want("T")) await phaseTerminal();
   if (want("L")) await phaseLifecycle();
+  if (want("M")) await phaseMultiChat();
   if (want("R")) await phaseRestart();
 
   await stopDaemon("final off");
