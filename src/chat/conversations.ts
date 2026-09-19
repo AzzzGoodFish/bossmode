@@ -26,7 +26,6 @@ export interface Room {
   createdAt: number;
   ruleDocs?: string[];
 }
-export type CursorMap = Record<string, string | null>;
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
 
@@ -107,24 +106,9 @@ export function normalizeRoomDocsPath(input: string | null | undefined): string 
 
 /** Batch 7 P3: rooms no longer bind a cwd — attachment/artifact path policy
  * covers each room member's home directory and all their workspace roots. */
-/** Local asset roots for a set of members: their data dirs plus registered workspaces. */
-let memberWorkspaceRoots: ((memberId: string) => string[]) | undefined;
-
-/** App wiring supplies workspace roots; chat owns scope authorization but never
- * reads member assets/configuration directly. */
-export function connectConversationWorkspaceRoots(read: (memberId: string) => string[]): () => void {
-  const connection = read;
-  memberWorkspaceRoots = connection;
-  return () => { if (memberWorkspaceRoots === connection) memberWorkspaceRoots = undefined; };
-}
-
+/** Member-owned local roots; workspace roots are authorized by the app host. */
 export function memberAssetRoots(memberIds: Iterable<string>): string[] {
-  const roots: string[] = [];
-  for (const id of new Set(memberIds)) {
-    roots.push(memberDir(id));
-    for (const root of memberWorkspaceRoots?.(id) ?? []) roots.push(root);
-  }
-  return [...new Set(roots)];
+  return [...new Set(memberIds)].map(memberDir);
 }
 
 export function roomMemberAssetRoots(roomId: string): string[] {
@@ -192,67 +176,6 @@ export function getRoom(roomId: string): Room | null {
   const room = readStoredRoom(roomId, getDatabase());
   if (room && Array.isArray(room.globalMemberIds)) room.members = getRoomMembersFromRoom(room).map(member => member.name);
   return room;
-}
-
-/**
- * Replace authoritative global membership. Historical shadows never determine the roster.
- * Safe to call repeatedly (overwrite); cursor moves require explicit source IDs.
- */
-export function stampGlobalMemberIds(
-  roomId: string,
-  globalMemberIds: string[],
-  promptLeaderGlobalMemberId?: string | null,
-): Room | null {
-  return getDatabase().transaction(() => {
-    const room = getRoom(roomId);
-    if (!room) return null;
-    room.globalMemberIds = Array.from(new Set(globalMemberIds.filter(Boolean)));
-    if (promptLeaderGlobalMemberId) {
-      room.promptLeaderGlobalMemberId = promptLeaderGlobalMemberId;
-      room.promptLeaderMemberId = promptLeaderGlobalMemberId; // leader id is mem_* after cutover
-    } else if (promptLeaderGlobalMemberId === null) {
-      delete room.promptLeaderGlobalMemberId;
-      delete room.promptLeaderMemberId;
-    }
-    // Preserve historical shadows as source metadata, not active membership.
-    migrateCursorsToGlobalIds(room);
-    if (room.globalMemberIds.length > 0) {
-      room.members = room.globalMemberIds
-        .map((id) => conversationMember(id)?.name)
-        .filter((n): n is string => Boolean(n));
-    }
-    writeRoom(room);
-    return room;
-  });
-}
-
-/** Rekey only proven historical IDs; unresolved actor keys remain historical. */
-function migrateCursorsToGlobalIds(room: Room): void {
-  const repository = getDatabase();
-  const cursors = readMemberCursors(room.id, repository);
-  repository.transaction(() => {
-    for (const local of room.roomMembers ?? []) {
-      const gid = local.sourceMemberId;
-      if (!gid || local.id === gid || !(local.id in cursors)) continue;
-      if (!(gid in cursors)) storeMemberCursor(room.id, gid, cursors[local.id], undefined, repository);
-      deleteMemberCursor(room.id, local.id, repository);
-    }
-  });
-}
-
-/**
- * Resolve the global mem_* id for a local room member.
- * Only explicit stable links are accepted. Historical labels are never identity evidence.
- */
-export function resolveGlobalMemberId(
-  room: Room,
-  local: Pick<RoomMemberRecord, "id" | "name" | "sourceMemberId">,
-): string | null {
-  if (local.sourceMemberId && /^mem_/.test(local.sourceMemberId)) {
-    // Prefer explicit link even if globalMemberIds not yet stamped (invite race).
-    return local.sourceMemberId;
-  }
-  return local.id.startsWith("mem_") && room.globalMemberIds?.includes(local.id) ? local.id : null;
 }
 
 export function deleteRoom(roomId: string): boolean {
@@ -410,7 +333,9 @@ export function inviteGlobalMember(
     }
     const agentName = identity.agentTemplate;
     // Existing DB members join by ID. No room-local copies or second name rule.
-    stampGlobalMemberIds(roomId, [...(room.globalMemberIds || []), global.id]);
+    room.globalMemberIds = [...(room.globalMemberIds || []), global.id];
+    room.members = room.globalMemberIds.map(id => conversationMember(id)?.name).filter((name): name is string => Boolean(name));
+    writeRoom(room);
     initializeMemberCursor(roomId, global.id);
     const synthesized = getRoomMembers(roomId).find((m) => m.id === global.id || m.sourceMemberId === global.id);
     if (!synthesized) {
@@ -443,7 +368,7 @@ export function removeRoomMemberByRef(
     if (!member) return { ok: false, error: "Member is not in this room" };
 
     const gid = opts?.globalMemberId
-      || resolveGlobalMemberId(room, member)
+      || (member.sourceMemberId?.startsWith("mem_") ? member.sourceMemberId : undefined)
       || (member.id.startsWith("mem_") ? member.id : undefined)
       || (memberRef.startsWith("mem_") ? memberRef : undefined);
 
@@ -758,11 +683,6 @@ export function readMemberChatScopes(memberId: string, db: Database = getDatabas
 
 export function listMmScopes(db: Database = getDatabase()): string[] {
     return db.all<{ id: string }>("SELECT id FROM scopes WHERE kind='mm' ORDER BY id").map(r => r.id);
-  }
-
-export function readMemberCursors(scopeId: string, db: Database = getDatabase()): CursorMap {
-    return Object.fromEntries(db.all<{ actor_key: string; value: string | null }>(
-      "SELECT actor_key,value FROM read_cursors WHERE scope_id=? AND kind='member'", scopeId).map(r => [r.actor_key, r.value]));
   }
 
 export function storeMemberCursor(scopeId: string, actorKey: string, value: string | null, updatedAt = Date.now(), db: Database = getDatabase()): void {

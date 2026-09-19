@@ -1,5 +1,4 @@
 import { expect, it } from "vitest";
-import { appendMessage } from "../src/chat/messages.js";
 import { ensureMmScope } from "../src/chat/conversations.js";
 import { createTestServer, jsonRequest, setupTestWorkspace } from "./helpers/test-server.js";
 import { request } from "node:http";
@@ -40,12 +39,19 @@ it("reads room, DM and member chat facts through one conversation API", async ()
     const roomId = JSON.parse(roomResponse.body).id as string;
     const mm = ensureMmScope(one, two);
     const scopes = [`room:${roomId}`, `dm:${one}`, mm];
-    scopes.forEach((scope, index) => appendMessage(scope, { sender: "user", content: `fact-${index}`, mentions: [] }));
+    for (const [index, scope] of scopes.entries()) {
+      const written = await jsonRequest(test.port, "POST", `/api/conversations/${encodeURIComponent(scope)}/messages`, {
+        token, body: { content: `fact-${index}` },
+      });
+      expect(written.status).toBe(200);
+    }
 
     for (const [index, scope] of scopes.entries()) {
       const response = await jsonRequest(test.port, "GET", `/api/conversations/${encodeURIComponent(scope)}/messages`, { token });
       expect(response.status).toBe(200);
-      expect(JSON.parse(response.body)).toMatchObject({ scopeId: scope, messages: [{ content: `fact-${index}` }] });
+      const body = JSON.parse(response.body);
+      expect(body.scopeId).toBe(scope);
+      expect(body.messages).toEqual(expect.arrayContaining([expect.objectContaining({ content: `fact-${index}` })]));
       const uploaded = await rawRequest(test.port, "POST",
         `/api/conversations/${encodeURIComponent(scope)}/attachments?filename=fact-${index}.txt`, token, Buffer.from(`file-${index}`));
       expect(uploaded.status).toBe(200);

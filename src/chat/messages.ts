@@ -209,11 +209,6 @@ export function scheduleMessageDispatch(): void {
   });
 }
 
-/** Low-level import/control entry. User/tool sends must use delivery.sendMessage. */
-export function appendMessage(scope: string, input: MessageInput): Message {
-  return appendMessageInTransaction(getDatabase(), scope, input);
-}
-
 export function normalizeHistoricalMessage(message: Message): Message {
   if (typeof (message as unknown as Record<string, unknown>).needResponse !== "boolean") return message;
   const { needResponse: _retired, ...rest } = message;
@@ -241,12 +236,6 @@ export function readMessage(scope: string, id: string, db: Database = getDatabas
 export function readMessages(scope: string, db: Database = getDatabase()): Message[] {
   const scopeId = storageScopeId(scope);
   return db.all<MessageRow>("SELECT * FROM messages WHERE scope_id=? ORDER BY position", scopeId).map((row) => hydrate(db, row));
-}
-
-export function latestMessage(scope: string, db: Database = getDatabase()): Message | null {
-  const scopeId = storageScopeId(scope);
-  const row = db.get<MessageRow>("SELECT * FROM messages WHERE scope_id=? ORDER BY position DESC LIMIT 1", scopeId);
-  return row ? hydrate(db, row) : null;
 }
 
 export function messagesSince(scope: string, cursor: string | null, db: Database = getDatabase()): Message[] {
@@ -326,24 +315,3 @@ export function searchMessages(scope: string, options: MessageSearchOptions = {}
   return { total, messages: rows.map((row) => hydrate(db, row)) };
 }
 
-export function replaceMessages(scope: string, messages: Message[], db: Database = getDatabase()): void {
-  const scopeId = storageScopeId(scope);
-  db.transaction((tx) => {
-    tx.run("DELETE FROM messages WHERE scope_id=?", scopeId);
-    for (const message of messages) insert(tx, scopeId, message);
-  });
-}
-
-export function updateMessage(scope: string, id: string, patch: Partial<Message>, db: Database = getDatabase()): Message | null {
-  const scopeId = storageScopeId(scope);
-  return db.transaction((tx) => {
-    const old = readMessage(scopeId, id, tx);
-    if (!old) return null;
-    const next = { ...old, ...patch, id: old.id, seq: old.seq, ts: old.ts };
-    const position = tx.get<{ position: number }>("SELECT position FROM messages WHERE scope_id=? AND id=?", scopeId, id)!.position;
-    tx.run("DELETE FROM messages WHERE scope_id=? AND id=?", scopeId, id);
-    insert(tx, scopeId, next);
-    tx.run("UPDATE messages SET position=? WHERE scope_id=? AND id=?", position, scopeId, id);
-    return next;
-  });
-}
