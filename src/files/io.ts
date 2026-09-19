@@ -123,13 +123,16 @@ export type DirectoryListing =
   | { ok: false; code: "outside" | "not_found" | "not_directory"; error: string };
 
 export function browseDirectories(root: string, requested = root, limit = 200): DirectoryListing {
-  const boundary = resolve(root);
+  let boundary: string;
+  try { boundary = realpathSync(root); }
+  catch { return { ok: false, code: "not_found", error: "Directory not found" }; }
   const expanded = requested.replace(/^~(\/|$)/, boundary + "$1");
-  const path = resolve(expanded), rel = relative(boundary, path);
+  const unresolved = resolve(expanded);
+  if (!existsSync(unresolved)) return { ok: false, code: "not_found", error: "Directory not found" };
+  const path = realpathSync(unresolved), rel = relative(boundary, path);
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     return { ok: false, code: "outside", error: "Path must be within home directory" };
   }
-  if (!existsSync(path)) return { ok: false, code: "not_found", error: "Directory not found" };
   if (!statSync(path).isDirectory()) return { ok: false, code: "not_directory", error: "Path is not a directory" };
   const all = readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory())
     .map(entry => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));

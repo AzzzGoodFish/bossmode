@@ -24,6 +24,10 @@ describe("generic filesystem reads", () => {
     });
     expect(browseDirectories(root, join(root, ".."))).toMatchObject({ ok: false, code: "outside" });
     expect(browseDirectories(root, join(root, "plain.txt"))).toMatchObject({ ok: false, code: "not_directory" });
+    const outside = temporary("bossmode-files-outside-");
+    const link = join(root, "escape");
+    symlinkSync(outside, link, "dir");
+    expect(browseDirectories(root, link)).toMatchObject({ ok: false, code: "outside" });
   });
 
   it("selects the first existing regular file and reports its canonical size", () => {
