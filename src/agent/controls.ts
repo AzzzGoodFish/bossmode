@@ -5,10 +5,10 @@ import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, getRegistry } from "./assembly.js";
-import { hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
+import { hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope, pendingRuntimeInputOwners } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
-import type { AgentMemberConfig } from "./types.js";
+import type {AgentMemberConfig,AgentStatus,ContextUsage,MemberActiveToolInfo} from "./types.js";
 import type { AgentHistoryEvent } from "./events.js";
 export interface ControlServices {
   memberConfig(memberId: string): AgentMemberConfig | null;
@@ -51,6 +51,20 @@ function cancelMemberPending(memberId: string, diagnosis: string): void {
 }
 let shutdownSettlement: Promise<void> | null = null;
 let shutdownRunning = false;
+export function getAgentStatus(memberId:string):AgentStatus{return instances.get(instanceKey(memberId))?.status??"inactive";}
+export function getMemberBusyState(memberId:string):{busy:boolean;reason?:string}{
+  const key=instanceKey(memberId),instance=instances.get(key);if(pendingCreations.has(key))return {busy:true,reason:"pending_creation"};if(!instance)return {busy:false};
+  const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;return reason?{busy:true,reason}:{busy:false};
+}
+export function getAgentContextUsage(memberId:string):ContextUsage|null{return contextUsageCache.get(instanceKey(memberId))??null;}
+export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:MemberActiveToolInfo[];message?:string}{
+  const handle=instances.get(instanceKey(memberId))?.handle;if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
+}
+export function getMemberActiveScopes(memberId:string):string[]{
+  const scopes=new Set(pendingRuntimeInputOwners(memberId).filter((scope):scope is string=>scope!==null)),instance=instances.get(instanceKey(memberId));
+  if(instance?.activeSourceRef&&(instance.status==="working"||instance.dispatchState!=="idle"))scopes.add(instance.activeSourceRef);return [...scopes];
+}
+
 export function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
   const credential=instance.pendingCredentialRefresh;instance.pendingCredentialRefresh=undefined;
   if(credential)void refreshCredential(instance,credential,trigger);

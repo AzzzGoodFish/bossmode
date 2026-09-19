@@ -12,7 +12,7 @@ export function wireMemberProfiles(): () => void {
   const stopViews = onMemberProfileChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
 }
-import { assertMemberScopeAccess, chatScopeAssetRoots, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, parseMmScopeId } from "../chat/conversations.js";
+import { assertMemberScopeAccess,chatScopeAssetRoots,connectConversationMembers,ensureMmScope,isMmScopeId,listRoomsForMember,parseMmScopeId,parseScopeId,type ScopeId } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef,updateMember } from "../member/identity.js";
 import { activeWorkspaceRoot,getActiveWorkspace,getWorkspace } from "../member/workspaces.js";
 export function wireConversationMembers(): () => void { return connectConversationMembers(readMemberIdentity); }
@@ -54,10 +54,10 @@ export function initializeMemberRuntime(registry:RuntimeRegistry,loadSnapshot:(m
   repairPendingAgentAdmissions();
 }
 import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
-import { abortMember, compactMember, compactMemberById, resetMemberSession, restartMember,configureControls,applyPendingAfterPromptSettlement,interruptAcceptedInput } from "../agent/controls.js";
+import { abortMember,compactMember,compactMemberById,resetMemberSession,restartMember,configureControls,getAgentContextUsage,getAgentStatus,getMemberActiveTools,getMemberBusyState,applyPendingAfterPromptSettlement,interruptAcceptedInput } from "../agent/controls.js";
 import { setStatusSink,openRuntimeAdmission,memberRuntimeAllowed,instances,instanceKey,contextUsageCache,memberIdentityMeta,type AgentInstance } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
-import { commitChatMessage,getAgentContextUsage,getAgentStatus,getMemberActiveTools,getMemberBusyState,getRoomAgentStatuses,getScopeLiveStatus,previewMemberPrompt,repairPendingAgentAdmissions,memberRecordToConfig } from "./member-actions.js";
+import { commitChatMessage,previewMemberPrompt,repairPendingAgentAdmissions,memberRecordToConfig } from "./member-actions.js";
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
 // truth ("记录自动成为沟通"). Known limit: bash-driven writes are not detected (args are opaque).
@@ -264,6 +264,12 @@ async function executeAgentHostTool(input:{tool:string;params:Record<string,unkn
   if(tool==="workspace_remove")return removeWorkspace(memberId,String(params.id??""));
   return {ok:false,error:`Unsupported tool: ${tool}`};
 }
+
+function getScopeLiveStatus(scopeId:ScopeId):"idle"|"working"|"inactive"{
+  const ref=parseScopeId(scopeId);if(!ref)return "inactive";if(ref.kind==="dm")return getAgentStatus(ref.memberId);
+  const statuses=roomStore.getRoomMembers(ref.roomId).map(member=>getAgentStatus(member.id));return statuses.includes("working")?"working":statuses.some(status=>status!=="inactive")?"idle":"inactive";
+}
+const getRoomAgentStatuses=(roomId:string)=>Object.fromEntries(roomStore.getRoomMembers(roomId).map(member=>[member.name,getAgentStatus(member.id)]));
 
 export function wireChatHttp(): () => void {
   setMessageSink((sourceRef, message) => {

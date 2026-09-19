@@ -123,7 +123,7 @@ export function previewMemberPrompt(memberId: string, contextWindowTokens?: numb
   return compileMemberPrompt(loadMemberPromptSource(memberId, contextWindowTokens));
 }
 
-import { acceptAgentAdmission, acceptControlInput, pendingRuntimeInputOwners, waitForInputSettlement, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
+import { acceptAgentAdmission, acceptControlInput, waitForInputSettlement, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
 
 import { appendMessageWithAdmissions, confirmChatAdmission, listPendingChatAdmissions, repairPendingChatAdmission, type PreparedChatAdmission } from "../chat/delivery.js";
 import { scheduleMessageDispatch, type Message, type MessageInput } from "../chat/messages.js";
@@ -132,12 +132,8 @@ import { memberRuntimeAllowed } from "../agent/instance.js";
 
 import { logger } from "../kernel/logger.js";
 
-import * as roomStore from "../chat/conversations.js";
-import { parseScopeId, type ScopeId } from "../chat/conversations.js";
 import type { AgentMemberConfig } from "../agent/types.js";
 
-import type { AgentStatus, ContextUsage } from "../agent/types.js";
-import { contextUsageCache, instanceKey, instances, pendingCreations } from "../agent/instance.js";
 
 
 /** Compose chat acceptance, agent enqueue and cursor confirmation in the caller's transaction. */
@@ -170,32 +166,6 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
   });
   scheduleMessageDispatch();
   return message;
-}
-
-
-export function getScopeLiveStatus(scopeId:ScopeId):"idle"|"working"|"inactive"{
-  const ref=parseScopeId(scopeId);if(!ref)return "inactive";
-  if(ref.kind==="dm")return getAgentStatus(ref.memberId);
-  const statuses=roomStore.getRoomMembers(ref.roomId).map(member=>getAgentStatus(member.id));
-  return statuses.includes("working")?"working":statuses.some(status=>status!=="inactive")?"idle":"inactive";
-}
-
-export function getMemberActiveScopes(memberId:string):ScopeId[]{
-  const scopes=new Set(pendingRuntimeInputOwners(memberId).filter((scope):scope is string=>scope!==null));
-  const instance=instances.get(instanceKey(memberId));if(instance?.activeSourceRef&&(instance.status==="working"||instance.dispatchState!=="idle"))scopes.add(instance.activeSourceRef);
-  return [...scopes] as ScopeId[];
-}
-
-
-export function getAgentStatus(memberId:string):AgentStatus{return instances.get(instanceKey(memberId))?.status??"inactive";}
-export function getMemberBusyState(memberId:string):{busy:boolean;reason?:string}{
-  const key=instanceKey(memberId),instance=instances.get(key);if(pendingCreations.has(key))return {busy:true,reason:"pending_creation"};if(!instance)return {busy:false};
-  const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;return reason?{busy:true,reason}:{busy:false};
-}
-export function getRoomAgentStatuses(roomId:string):Record<string,AgentStatus>{return Object.fromEntries(roomStore.getRoomMembers(roomId).map(member=>[member.name,getAgentStatus(member.id)]));}
-export function getAgentContextUsage(memberId:string):ContextUsage|null{return contextUsageCache.get(instanceKey(memberId))??null;}
-export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:Array<{name:string;label?:string;description:string;parameters:unknown;source:string}>;message?:string}{
-  const handle=instances.get(instanceKey(memberId))?.handle;if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }
 
 
