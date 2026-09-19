@@ -1,16 +1,10 @@
 // Engine API routes — Runtime status/capabilities
 import { addRoute, sendJson, parseBody } from "./http.js";
-import { getRuntimeCapabilities } from "../app/member-actions.js";
 import { invalidateModelCredentialProfile } from "../agent/controls.js";
 import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
 import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile } from "../config/models.js";
 import { listBuiltinModelProviders, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
 import { listAvailableModels } from "../config/models.js";
-
-// GET /api/capabilities — runtime capabilities
-addRoute("GET", "/api/capabilities", async (_req, res) => {
-  sendJson(res, 200, { runtimes: getRuntimeCapabilities() });
-});
 
 // GET /api/model-provider-catalog — built-in provider catalog for Connect Provider flow
 addRoute("GET", "/api/model-provider-catalog", async (_req, res) => {
@@ -35,11 +29,6 @@ addRoute("GET", "/api/model-credential-profiles", async (_req, res) => {
   sendJson(res, 200, listPublicModelCredentialProfiles());
 });
 
-// Backward-compatible alias while UI copy settles on Model Credentials.
-addRoute("GET", "/api/model-providers", async (_req, res) => {
-  sendJson(res, 200, listPublicModelCredentialProfiles());
-});
-
 async function createModelCredentialProfileRoute(req: any, res: any): Promise<void> {
   try {
     const body = (await parseBody(req)) as any;
@@ -52,7 +41,6 @@ async function createModelCredentialProfileRoute(req: any, res: any): Promise<vo
 }
 
 addRoute("POST", "/api/model-credential-profiles", createModelCredentialProfileRoute);
-addRoute("POST", "/api/model-providers", createModelCredentialProfileRoute);
 
 async function discoverModelsRoute(req: any, res: any): Promise<void> {
   try {
@@ -64,7 +52,6 @@ async function discoverModelsRoute(req: any, res: any): Promise<void> {
 }
 
 addRoute("POST", "/api/model-credential-profiles/discover-models", discoverModelsRoute);
-addRoute("POST", "/api/model-providers/discover-models", discoverModelsRoute);
 
 async function startOAuthLoginRoute(req: any, res: any): Promise<void> {
   try {
@@ -85,7 +72,6 @@ addRoute("POST", "/api/model-credential-profiles/oauth/start", async (req, res) 
 });
 
 addRoute("POST", "/api/model-credential-profiles/oauth-login/start", startOAuthLoginRoute);
-addRoute("POST", "/api/model-providers/oauth-login/start", startOAuthLoginRoute);
 
 async function getOAuthLoginRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   const job = getOAuthLoginJob(params.id);
@@ -95,7 +81,6 @@ async function getOAuthLoginRoute(_req: any, res: any, params: Record<string, st
 
 addRoute("GET", "/api/model-credential-profiles/oauth/:id", getOAuthLoginRoute);
 addRoute("GET", "/api/model-credential-profiles/oauth-login/:id", getOAuthLoginRoute);
-addRoute("GET", "/api/model-providers/oauth-login/:id", getOAuthLoginRoute);
 
 async function submitOAuthLoginInputRoute(req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
@@ -110,7 +95,6 @@ async function submitOAuthLoginInputRoute(req: any, res: any, params: Record<str
 
 addRoute("POST", "/api/model-credential-profiles/oauth/:id/input", submitOAuthLoginInputRoute);
 addRoute("POST", "/api/model-credential-profiles/oauth-login/:id/input", submitOAuthLoginInputRoute);
-addRoute("POST", "/api/model-providers/oauth-login/:id/input", submitOAuthLoginInputRoute);
 
 async function cancelOAuthLoginRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   const job = cancelOAuthLoginJob(params.id);
@@ -120,7 +104,6 @@ async function cancelOAuthLoginRoute(_req: any, res: any, params: Record<string,
 
 addRoute("POST", "/api/model-credential-profiles/oauth/:id/cancel", cancelOAuthLoginRoute);
 addRoute("POST", "/api/model-credential-profiles/oauth-login/:id/cancel", cancelOAuthLoginRoute);
-addRoute("POST", "/api/model-providers/oauth-login/:id/cancel", cancelOAuthLoginRoute);
 
 async function updateModelCredentialProfileRoute(req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
@@ -134,7 +117,6 @@ async function updateModelCredentialProfileRoute(req: any, res: any, params: Rec
 }
 
 addRoute("PUT", "/api/model-credential-profiles/:id", updateModelCredentialProfileRoute);
-addRoute("PUT", "/api/model-providers/:id", updateModelCredentialProfileRoute);
 
 async function refreshModelCredentialProfileModelsRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   try {
@@ -147,7 +129,6 @@ async function refreshModelCredentialProfileModelsRoute(_req: any, res: any, par
 }
 
 addRoute("POST", "/api/model-credential-profiles/:id/refresh-models", refreshModelCredentialProfileModelsRoute);
-addRoute("POST", "/api/model-providers/:id/refresh-models", refreshModelCredentialProfileModelsRoute);
 
 async function deleteModelCredentialProfileRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   const existing = getModelCredentialProfile(params.id);
@@ -160,15 +141,9 @@ async function deleteModelCredentialProfileRoute(_req: any, res: any, params: Re
 }
 
 addRoute("DELETE", "/api/model-credential-profiles/:id", deleteModelCredentialProfileRoute);
-addRoute("DELETE", "/api/model-providers/:id", deleteModelCredentialProfileRoute);
 
 // GET /api/available-models — Bossmode-owned available model options for member picker
 addRoute("GET", "/api/available-models", async (_req, res) => {
-  sendJson(res, 200, listAvailableModels());
-});
-
-// GET /api/models — backward-compatible alias
-addRoute("GET", "/api/models", async (_req, res) => {
   sendJson(res, 200, listAvailableModels());
 });
 

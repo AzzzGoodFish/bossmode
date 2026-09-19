@@ -7,7 +7,7 @@ import { memberProfilePath } from "../files/layout.js";
  */
 import { addRoute, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
-import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
+import { listMembers, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import {
@@ -24,18 +24,14 @@ import { assertMemberScopeAccess, scopeIdOf } from "../chat/conversations.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
 
-function publicMember(m: MemberRecord) {
-  return {
-    memberId: m.id,
-    id: m.id,
-    name: m.name,
-    /** Card field from database (identity batch-1; description retired batch-5). */
-    title: m.title ?? null,
-    agentTemplate: m.agentTemplate,
-    global: m.global,
-    createdAt: m.createdAt,
-    updatedAt: m.updatedAt,
-  };
+function publicMember(m: MemberRecord, live = false) {
+  const base = { memberId: m.id, id: m.id, name: m.name, title: m.title ?? null, agentTemplate: m.agentTemplate,
+    global: m.global, createdAt: m.createdAt, updatedAt: m.updatedAt };
+  if (!live) return base;
+  const activeScopes = [`dm:${m.id}`, ...roomStore.listRoomsForMember(m.id).map(room => `room:${room.id}`)];
+  return { ...base, status: getScopeLiveStatus(`dm:${m.id}`) === "working" ? "working" : "idle",
+    activeScopes, workingScopes: getMemberActiveScopes(m.id), model: m.global.model ?? null,
+    contextPct: null, tokensToday: 0, tokensTotal: 0 };
 }
 
 function errCode(err: unknown): { status: number; error: string; message: string } {
@@ -55,56 +51,10 @@ function errCode(err: unknown): { status: number; error: string; message: string
   return { status: 500, error: "internal", message: msg };
 }
 
-// ── Contacts (directory) ──
-
-addRoute("GET", "/api/contacts", async (_req, res) => {
-  try {
-    const rooms = roomStore.listRooms();
-    const contacts = listMembers().map((m) => {
-      const membershipScopes: string[] = [];
-      // Membership from globalMemberIds (authority); legacy name match only if no global ids on room
-      for (const room of rooms) {
-        const inGlobal = room.globalMemberIds?.includes(m.id);
-        const inLegacy = (!room.globalMemberIds || room.globalMemberIds.length === 0)
-          && roomStore.getRoomMembers(room.id).some((rm) => rm.name === m.name || rm.sourceMemberId === m.id);
-        if (inGlobal || inLegacy) membershipScopes.push(scopeIdOf({ kind: "room", roomId: room.id }));
-      }
-      membershipScopes.unshift(scopeIdOf({ kind: "dm", memberId: m.id }));
-
-      const workingScopes = getMemberActiveScopes(m.id);
-      // ① B4: status is member-level — one runtime, one status, every chat.
-      const status = getScopeLiveStatus(`dm:${m.id}`) === "working" ? "working" : "idle";
-
-      return {
-        memberId: m.id,
-        name: m.name,
-        /** database title — replaces template chip on Contacts. */
-        title: m.title ?? null,
-        agentTemplate: m.agentTemplate,
-        status,
-        activeScopes: membershipScopes,
-        workingScopes,
-        model: m.global.model ?? null,
-        contextPct: null as number | null,
-        tokensToday: 0,
-        tokensTotal: 0,
-      };
-    });
-    sendJson(res, 200, { contacts });
-  } catch (err) {
-    logger.error("members-api", "contacts failed", { error: String(err) });
-    sendJson(res, 500, { error: "internal", message: String(err) });
-  }
-});
-
 // ── Members CRUD ──
 
 addRoute("GET", "/api/members", async (_req, res) => {
-  sendJson(res, 200, { members: listMembers().map(publicMember) });
-});
-
-addRoute("GET", "/api/members/identities", async (_req, res) => {
-  sendJson(res, 200, { members: listMemberIdentities() });
+  sendJson(res, 200, { members: listMembers().map(member => publicMember(member, true)) });
 });
 
 addRoute("POST", "/api/members", async (req, res) => {

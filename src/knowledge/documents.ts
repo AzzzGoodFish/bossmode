@@ -32,8 +32,6 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-export type KnowledgeFileKind = "markdown" | "text" | "png";
-
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".html", ".htm", ".txt", ".json"]);
 const BINARY_EXTENSIONS = new Set([".png"]);
 const MAX_PNG_BYTES = 512 * 1024;
@@ -76,14 +74,6 @@ function absDocPath(relativeDocPath: string): string {
 
 function extensionOf(pathRel: string): string {
   return extname(pathRel).toLowerCase();
-}
-
-function kindForPath(pathRel: string): KnowledgeFileKind | null {
-  const ext = extensionOf(pathRel);
-  if (ext === ".md" || ext === ".markdown") return "markdown";
-  if (ext === ".png") return "png";
-  if (TEXT_EXTENSIONS.has(ext)) return "text";
-  return null;
 }
 
 function isAllowedFile(pathRel: string): boolean {
@@ -438,4 +428,4 @@ export function slugify(input: string): string {
 }
 
 /** Re-export path helpers for migration / external callers. */
-export const _internal = { normalizeDocPath, docsRoot, absDocPath, isAllowedFile, isTextFile, kindForPath, contentTypeForPath, MAX_PNG_BYTES };
+export const _internal = { normalizeDocPath, docsRoot, absDocPath };
