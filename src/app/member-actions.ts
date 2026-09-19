@@ -249,45 +249,16 @@ function memberScopeAllowsExecution(scopeValue: string, memberId: string): boole
   return memberRuntimeAllowed(memberId) && memberHasScopeAccess(scopeValue, memberId);
 }
 
-/** Aggregate live status for a conversation scope (chats list / working-set). */
-export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inactive" {
-  const ref = parseScopeId(scopeId);
-  if (!ref) return "inactive";
-  if (ref.kind === "dm") {
-    const st = getAgentStatus(scopeId, ref.memberId);
-    if (st === "working") return "working";
-    if (st === "inactive") return "inactive";
-    return "idle";
-  }
-  // Room: any member working → working; else idle if any live instance else inactive
-  let sawInstance = false;
-  for (const m of roomStore.getRoomMembers(ref.roomId)) {
-    const st = getAgentStatus(ref.roomId, m.id);
-    if (st === "inactive") continue;
-    sawInstance = true;
-    if (st === "working") return "working";
-  }
-  const room = roomStore.getRoom(ref.roomId);
-  for (const gid of room?.globalMemberIds || []) {
-    const st = getAgentStatus(ref.roomId, gid);
-    if (st === "working") return "working";
-    if (st !== "inactive") sawInstance = true;
-  }
-  if (sawInstance) return "idle";
-  return "inactive";
+export function getScopeLiveStatus(scopeId:ScopeId):"idle"|"working"|"inactive"{
+  const ref=parseScopeId(scopeId);if(!ref)return "inactive";
+  if(ref.kind==="dm")return getAgentStatus(scopeId,ref.memberId);
+  const statuses=roomStore.getRoomMembers(ref.roomId).map(member=>getAgentStatus(ref.roomId,member.id));
+  return statuses.includes("working")?"working":statuses.some(status=>status!=="inactive")?"idle":"inactive";
 }
 
-/**
- * ① B4: working-set for contacts — the scopes where this member has unhandled
- * messages queued or a turn being served right now (one runtime serves every
- * chat, so the build scope says nothing about where it is active).
- */
-export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
-  const scopes = new Set<string>(pendingRuntimeInputOwners(globalMemberId).filter((scope): scope is string => scope !== null));
-  const instance = instances.get(instanceKey(globalMemberId));
-  if (instance?.activeSourceRef && (instance.status === "working" || instance.dispatchState !== "idle")) {
-    scopes.add(instance.activeSourceRef);
-  }
+export function getMemberActiveScopes(memberId:string):ScopeId[]{
+  const scopes=new Set(pendingRuntimeInputOwners(memberId).filter((scope):scope is string=>scope!==null));
+  const instance=instances.get(instanceKey(memberId));if(instance?.activeSourceRef&&(instance.status==="working"||instance.dispatchState!=="idle"))scopes.add(instance.activeSourceRef);
   return [...scopes] as ScopeId[];
 }
 
@@ -303,80 +274,24 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.compiled = compiled;
 }
 
-// -- Model switching --
-
-/**
- * Persist a model binding to the 0.20 authority — the member registry (F4,
- * 2026-08-04). Batch-5b: config is always the member's global binding
- * (unified flags retired). The pre-0.20 room.json memberOverrides write was
- * invisible to every read side (display / effective-config / activate-heal),
- * which produced "switch works once, display shows old, heal silently rolls
- * back". Legacy non-mem_ rooms still persist to memberOverrides — that is the
- * only authority their read side (name-keyed overrides) consults.
- */
-export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const instance = instances.get(instanceKey(memberId));
-  if (!instance) return "inactive";
-  return instance.status;
+export function getAgentStatus(roomId:string,memberRef:string):AgentStatus{
+  const member=resolveRoomMember(roomId,memberRef),instance=instances.get(instanceKey(member?.id||memberRef));return instance?.status??"inactive";
 }
-
-export function getMemberBusyState(roomId: string, memberRef: string): { busy: boolean; reason?: string } {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const key = instanceKey(memberId);
-  if (pendingCreations.has(key)) return { busy: true, reason: "pending_creation" };
-  const instance = instances.get(key);
-  if (!instance) return { busy: false };
-  if (instance.status === "working") return { busy: true, reason: "working" };
-  if (instance.dispatchState !== "idle") return { busy: true, reason: instance.dispatchState };
-  if (instance.promptInFlight) return { busy: true, reason: "prompt_in_flight" };
-  return { busy: false };
+export function getMemberBusyState(roomId:string,memberRef:string):{busy:boolean;reason?:string}{
+  const member=resolveRoomMember(roomId,memberRef),key=instanceKey(member?.id||memberRef),instance=instances.get(key);
+  if(pendingCreations.has(key))return {busy:true,reason:"pending_creation"};
+  if(!instance)return {busy:false};
+  const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;
+  return reason?{busy:true,reason}:{busy:false};
 }
-
-export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus> {
-  const result: Record<string, AgentStatus> = {};
-  for (const member of roomStore.getRoomMembers(roomId)) result[member.name] = getAgentStatus(roomId, member.id);
-  return result;
+export function getRoomAgentStatuses(roomId:string):Record<string,AgentStatus>{return Object.fromEntries(roomStore.getRoomMembers(roomId).map(member=>[member.name,getAgentStatus(roomId,member.id)]));}
+export function getAgentContextUsage(roomId:string,memberRef:string):ContextUsage|null{
+  const member=resolveRoomMember(roomId,memberRef);return contextUsageCache.get(instanceKey(member?.id||memberRef))??null;
 }
-
-// -- Context usage (cache-only API + idle refresh push) --
-
-export function getAgentContextUsage(roomId: string, memberRef: string): ContextUsage | null {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const key = instanceKey(memberId);
-  return contextUsageCache.get(key) ?? null;
-}
-
-/** Live tools from the running session. No session → sessionActive false, empty tools (no config projection). */
-export function getMemberActiveTools(roomId: string, memberRef: string): {
-  sessionActive: boolean;
-  tools: Array<{ name: string; label?: string; description: string; parameters: unknown; source: string }>;
-  message?: string;
-} {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  if (!instance?.handle.getActiveTools) {
-    return {
-      sessionActive: false,
-      tools: [],
-      message: "Start or Reload this member to see active tools.",
-    };
-  }
-  try {
-    const tools = instance.handle.getActiveTools() || [];
-    return { sessionActive: true, tools };
-  } catch {
-    return {
-      sessionActive: false,
-      tools: [],
-      message: "Start or Reload this member to see active tools.",
-    };
-  }
+export function getMemberActiveTools(roomId:string,memberRef:string):{sessionActive:boolean;tools:Array<{name:string;label?:string;description:string;parameters:unknown;source:string}>;message?:string}{
+  const member=resolveRoomMember(roomId,memberRef),handle=instances.get(instanceKey(member?.id||memberRef))?.handle;
+  if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};
+  return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }
 
 interface RefreshContextUsageOptions {
@@ -464,38 +379,11 @@ function emitAgentLocalEvent(
 
 // -- Instance management --
 
-export function getMemberInstances(memberName: string): Array<{
-  roomId: string;
-  roomName: string;
-  status: AgentStatus;
-  runtime: string;
-  pid?: number;
-  spawnArgs?: string[];
-  runtimeParams?: import("../agent/types.js").AgentRuntimeParams;
-}> {
-  const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("../agent/types.js").AgentRuntimeParams }> = [];
-  for (const instance of instances.values()) {
-    if (instance.agentName === memberName || instance.memberId === memberName) {
-      const roomId = instance.activeSourceRef ?? `dm:${instance.memberId}`;
-      const room = roomStore.getRoom(roomId);
-      const handle = instance.handle as any;
-      result.push({
-        roomId,
-        roomName: room?.name || roomId,
-        status: instance.status,
-        runtime: handle.runtimeName || "unknown",
-        pid: handle.pid,
-        spawnArgs: handle.spawnArgs,
-        runtimeParams: handle.runtimeParams,
-      });
-    }
-  }
-  return result;
+export function getMemberInstances(memberRef:string):Array<{roomId:string;roomName:string;status:AgentStatus;runtime:string;pid?:number;spawnArgs?:string[];runtimeParams?:import("../agent/types.js").AgentRuntimeParams}>{
+  const instance=[...instances.values()].find(value=>value.memberId===memberRef||value.agentName===memberRef);if(!instance)return [];
+  const roomId=instance.activeSourceRef??`dm:${instance.memberId}`,handle=instance.handle as any;
+  return [{roomId,roomName:roomStore.getRoom(chatTargetOf(roomId))?.name??roomId,status:instance.status,runtime:handle.runtimeName??"unknown",pid:handle.pid,spawnArgs:handle.spawnArgs,runtimeParams:handle.runtimeParams}];
 }
-
-// -- Member-level operations (① B5) --
-// Stop / compact / reset / restart target the member directly — one runtime
-// per member means no chat scope belongs in the interface.
 
 /** Every scope this member can hold queued work in. */
 function memberScopesFor(memberId: string): string[] {
