@@ -43,6 +43,9 @@ export const PARAM_DESCRIPTIONS = {
   fileOffset: "Line number to start from (1-indexed).",
   fileLimit: "Maximum lines to read (default 2000).",
   fileContent: "Full file content to write.",
+  fileEdits: "Exact-match text replacements to apply in order.",
+  fileEditOldText: "Exact text to find; it must match exactly once.",
+  fileEditNewText: "Replacement text to write in place of oldText.",
   terminalId: "Terminal id from terminal_create / terminal_list.",
   terminalExecId: "Exec id (for example, e3).",
   terminalFromLine: "First absolute line number to read.",
@@ -60,7 +63,7 @@ const PARAMETER_ALIASES:Record<string,string>={workspace:"workspaceId",host:"ssh
 function parameterSchema(spec="",aliases:Record<string,string>={}):TSchema{
   const descriptions=PARAM_DESCRIPTIONS as Record<string,string>;
   const properties=Object.fromEntries(spec?spec.split(" ").map(field=>{const [raw,kind]=field.split(":"),optional=raw!.endsWith("?"),name=optional?raw!.slice(0,-1):raw!,description=descriptions[aliases[name]??PARAMETER_ALIASES[name]??name]??name;
-    let value:TSchema=kind==="n"?Type.Number({description}):kind==="as"?Type.Array(Type.String(),{description}):kind==="any"?Type.Any({description}):kind==="edits"?Type.Array(Type.Object({oldText:Type.String(),newText:Type.String()})):Type.String({description});
+    let value:TSchema=kind==="n"?Type.Number({description}):kind==="as"?Type.Array(Type.String(),{description}):kind==="any"?Type.Any({description}):kind==="edits"?Type.Array(Type.Object({oldText:Type.String({description:descriptions.fileEditOldText}),newText:Type.String({description:descriptions.fileEditNewText})}),{description}):Type.String({description});
     if(optional)value=Type.Optional(value);return [name,value];}):[]);
   return Type.Object(properties,{additionalProperties:false});
 }
@@ -115,7 +118,7 @@ search locates; read opens the context — feed a hit's seq to chat_read around_
   directSpec("workspace_remove","Workspace Remove",`Remove a workspace by id. The builtin original workspace cannot be removed.`,parameterSchema("id:s",{id:"workspaceTargetId"})),
   directSpec("read","Read File",`Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s offset?:n limit?:n workspace?:s",{path:"filePath",offset:"fileOffset",limit:"fileLimit"})),
   directSpec("write","Write File",`Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s content:s workspace?:s",{path:"filePath",content:"fileContent"})),
-  directSpec("edit","Edit File",`Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s edits:edits workspace?:s",{path:"filePath"})),
+  directSpec("edit","Edit File",`Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s edits:edits workspace?:s",{path:"filePath",edits:"fileEdits"})),
   directSpec("terminal_create","Terminal Create",`Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`,parameterSchema("name?:s workspace?:s cwd?:s",{name:"terminalName"})),
   directSpec("terminal_exec","Terminal Exec",`Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,parameterSchema("terminalId:s command?:s keys?:s blockSeconds?:n",{terminalId:"terminalId"})),
   directSpec("terminal_read","Terminal Read",`Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`,parameterSchema("terminalId:s exec?:s fromLine?:n toLine?:n",{terminalId:"terminalId",exec:"terminalExecId",fromLine:"terminalFromLine",toLine:"terminalToLine"})),

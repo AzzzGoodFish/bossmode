@@ -27,6 +27,14 @@ describe("member tool parameter descriptions v2",()=>{
     expect(descriptions(direct("terminal_wait")).blockSeconds).toContain("0 waits until completion");
   });
 
+  it("describes the edit batch and each exact-match replacement field",()=>{
+    const edit=DIRECT_TOOL_SPECS.find(spec=>spec.name==="edit")!;
+    const edits=(edit.parameters as {properties:{edits:{description:string;items:{properties:{oldText:{description:string};newText:{description:string}}}}}}).properties.edits;
+    expect(edits.description).toBe("Exact-match text replacements to apply in order.");
+    expect(edits.items.properties.oldText.description).toBe("Exact text to find; it must match exactly once.");
+    expect(edits.items.properties.newText.description).toBe("Replacement text to write in place of oldText.");
+  });
+
   it("uses owning-tool semantics for list, chat, file, and terminal fields",()=>{
     const direct=(name:string)=>DIRECT_TOOL_SPECS.find(spec=>spec.name===name)!;
     expect(descriptions(direct("chat_list"))).toMatchObject({query:"Keyword filter.",limit:"Max entries to return (default 50).",offset:"Skip this many entries (for paging)."});
