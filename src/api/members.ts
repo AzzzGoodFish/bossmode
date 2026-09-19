@@ -1,6 +1,3 @@
-import { readConfig } from "../config/settings.js";
-
-import { postMessage } from "../chat/message-bus.js";
 import { archiveMember } from "../app/member-actions.js";
 import { updateProfileForMember, InvalidProfileError } from "../member/profile.js";
 /**
@@ -11,22 +8,15 @@ import { addRoute, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { createMember } from "../app/member-actions.js";
-import {
-  readAllDmMessages,
-  getLatestDmSeq,
-} from "../chat/dm-message-store.js";
+import { latestMessage } from "../chat/messages.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
-import { activeWorkspaceRoot, readWorkspaces } from "../member/workspaces.js";
+import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
-import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
+import { assertMemberScopeAccess, parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
-import * as messageStore from "../chat/message-store.js";
-import { getUserReadCursor, setUserReadCursor } from "../chat/user-read-cursors.js";
-
-import type { RoomMessage } from "../kernel/types.js";
 import { readMemberProfile } from "../member/profile.js";
 
 function publicMember(m: MemberRecord) {
@@ -58,50 +48,6 @@ function errCode(err: unknown): { status: number; error: string; message: string
   if (msg === "scope_not_found") return { status: 400, error: "scope_not_found", message: msg };
   if (msg === "archive_not_found") return { status: 404, error: "archive_not_found", message: msg };
   return { status: 500, error: "internal", message: msg };
-}
-
-function summarizeMessage(m: RoomMessage | undefined): { sender: string; senderMemberId?: string; text: string; ts: number } | null {
-  if (!m) return null;
-  const text = (m.content || "").replace(/\s+/g, " ").trim().slice(0, 140);
-  return { sender: m.sender, ...(m.senderMemberId ? {senderMemberId: m.senderMemberId} : {}), text, ts: m.ts };
-}
-
-/** Unread/mention for the human user (not member agent cursors). Exported for tests. */
-export function countUserUnreadAndMention(
-  messages: RoomMessage[],
-  cursorId: string | null,
-  cursorSeq: number | null,
-  userLoginName: string,
-): { unreadCount: number; mentioned: boolean } {
-  let start = 0;
-  if (cursorSeq != null) {
-    const idx = messages.findIndex((m) => typeof m.seq === "number" && m.seq > cursorSeq);
-    start = idx === -1 ? messages.length : idx;
-  } else if (cursorId) {
-    const idx = messages.findIndex((m) => m.id === cursorId);
-    start = idx === -1 ? 0 : idx + 1;
-  }
-  const slice = messages.slice(start);
-  // Unread = user-visible chat messages after the user's read cursor.
-  // System notices and typed task/knowledge events never badge (Feishu semantics,
-  // fish 2026-08-04): they are not conversation the user needs to chase.
-  const isUserVisibleChat = (m: RoomMessage): boolean =>
-    m.sender !== "user" && m.sender !== "system" && m.type !== "task_event" && m.type !== "knowledge_event" && m.type !== "topic_event";
-  const unreadCount = slice.filter(isUserVisibleChat).length;
-  // v1 mention approx: text contains @<loginName>
-  const needle = userLoginName ? `@${userLoginName}` : "";
-  const mentioned = needle
-    ? slice.some((m) => isUserVisibleChat(m) && typeof m.content === "string" && m.content.includes(needle))
-    : false;
-  return { unreadCount, mentioned };
-}
-
-function userLoginName(): string {
-  try {
-    return String((readConfig() as any).username || "").trim();
-  } catch {
-    return "";
-  }
 }
 
 // ── Contacts (directory) ──
@@ -206,90 +152,30 @@ addRoute("GET", "/api/members/:id", async (_req, res, params) => {
   sendJson(res, 200, { member: publicMember(m) });
 });
 
-/** Item-5 preview (pm 2026-09-02): render the member's actual compiled system
- * prompt for a scope by calling the same compiler with the same arguments the
- * activation points pass — byte-identical to what a real turn injects. */
+export interface MemberHttpActions {
+  previewPrompt(memberId: string): { text: string; contractFingerprint: string };
+}
+let memberHttpActions: MemberHttpActions | undefined;
+export function connectMemberHttpActions(actions: MemberHttpActions): () => void {
+  memberHttpActions = actions;
+  return () => { if (memberHttpActions === actions) memberHttpActions = undefined; };
+}
+
+/** Member prompt preview is member-owned and identical across chat sources. */
 addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
   try {
-    const m = resolveMemberRef(params.id);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const url = new URL(req.url || "", "http://localhost");
-    const scopeParam = url.searchParams.get("scope") || "";
-    const ref = parseScopeId(scopeParam);
-    if (!scopeParam || !ref) {
-      sendJson(res, 400, { error: "scope_not_found", message: "scope query required" });
-      return;
-    }
-
-    const { previewMemberPrompt } = await import("../app/member-actions.js");
-    const { getRoom, resolveRoomMemberRef } = await import("../chat/conversations.js");
-    const { getBossmodeDir } = await import("../files/layout.js");
-    const { join } = await import("node:path");
-    const { buildFinalMemberSystemPrompt } = await import("../agent/runtime/resources.js");
-    const { memberRecordToConfig, resolveSkills } = await import("../app/member-actions.js");
-    const { resolveRoomMember } = await import("../app/member-actions.js");
-    const { resolveGlobalSkillPaths } = await import("../member/skills.js");
-
-    const respond = (compiled: { fullPrompt: string; agentPrompt: string; appendSystemPrompt: string[]; contractFingerprint: string }, finalArgs: {
-      cwd: string;
-      member: { id: string; agent: string; model?: string; credentialId?: string; skills?: string[] };
-      skillPaths: string[];
-    }) => {
-      const text = buildFinalMemberSystemPrompt({
-        scopeId: scopeParam,
-        cwd: finalArgs.cwd,
-        member: finalArgs.member as any,
-        skillPaths: finalArgs.skillPaths,
-        agentPrompt: compiled.agentPrompt,
-        appendSystemPrompt: compiled.appendSystemPrompt,
-      });
-      sendJson(res, 200, {
-        text,
-        charCount: text.length,
-        scopeId: scopeParam,
-        contractFingerprint: compiled.contractFingerprint,
-      });
-    };
-
-    if (ref.kind === "dm") {
-      // DM activation passes room=null + roster-labeled activeScopes, cwd=process.cwd().
-      if (ref.memberId !== m.id) {
-        sendJson(res, 404, { error: "not_found", message: "scope belongs to another member" });
-        return;
-      }
-      const member = memberRecordToConfig(m.id);
-      if (!member) {
-        sendJson(res, 404, { error: "not_found", message: "Member not found" });
-        return;
-      }
-      const compiled = previewMemberPrompt(m.id);
-      respond(compiled, {
-        cwd: activeWorkspaceRoot(m.id),
-        member,
-        skillPaths: [],
-      });
-      return;
-    }
-
-    // room: roster member config, room cwd, global-skill + extension skill paths.
-    const roomId = ref.roomId;
-    const room = roomId ? getRoom(roomId) : null;
-    const rosterMember = roomId ? resolveRoomMember(roomId, m.id) : null;
-    if (!room || !rosterMember || !resolveRoomMemberRef(room.id, m.id)) {
-      sendJson(res, 404, { error: "not_found", message: "member not in this room" });
-      return;
-    }
-    const member = rosterMember;
-    const skills = resolveSkills(member);
-    const skillPaths = [
-      ...resolveGlobalSkillPaths(skills),
-    ];
-
-    const compiled = previewMemberPrompt(member.id);
-    respond(compiled, { cwd: activeWorkspaceRoot(member.id), member, skillPaths });
+    const member = resolveMemberRef(params.id);
+    if (!member) return sendJson(res, 404, { error: "not_found", message: "Member not found" });
+    const sourceRef = new URL(req.url || "", "http://localhost").searchParams.get("scope");
+    if (sourceRef) assertMemberScopeAccess(member.id, sourceRef);
+    if (!memberHttpActions) throw new Error("Member HTTP actions are not connected");
+    const preview = memberHttpActions.previewPrompt(member.id);
+    sendJson(res, 200, {
+      text: preview.text,
+      charCount: preview.text.length,
+      scopeId: sourceRef,
+      contractFingerprint: preview.contractFingerprint,
+    });
   } catch (err) {
     const e = errCode(err);
     sendJson(res, e.status, { error: e.error, message: e.message });
@@ -586,6 +472,6 @@ addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
     scopeId,
     status,
     contextPct,
-    latestSeq: getLatestDmSeq(m.id),
+    latestSeq: latestMessage(scopeId)?.seq ?? null,
   });
 });
