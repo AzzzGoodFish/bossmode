@@ -1,12 +1,11 @@
 import { getDatabase, type Database } from "../data/database.js";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, rmSync, constants } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, constants } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getBossmodeDir, installationRoot } from "../files/layout.js";
 import { logger } from "../kernel/logger.js";
 
 interface TemplateFile { category: "skill" | "rule"; relativePath: string; name: string; sourcePath: string; localPath: string }
-const legacyRules = ["rules/dev-team-protocol.md", "rules/lite-team-protocol.md", "rules/ssot.md", "rules/universal-agent-principles.md"];
 
 /** Package files only: hidden entries and symlinks are not installation inputs. */
 function templateFiles(root: string): string[] {
@@ -108,19 +107,13 @@ export function seedBuiltinAssets(): void {
   const version = JSON.parse(readFileSync(join(installationRoot, "package.json"), "utf8")).version;
   if (typeof version !== "string" || !version) throw new Error("Installed package version is missing");
   const templates = enumerateTemplates();
-  let seeded = 0, cleaned = 0;
+  let seeded = 0;
   for (const template of templates) {
     try { if (seedTemplate(template, version)) seeded++; }
     catch (error) { logger.error("team-updates", "seed failed", { path: template.relativePath, error: String(error) }); }
   }
-  for (const path of legacyRules) {
-    const absolute = join(getBossmodeDir(), "memory", "projects", ...path.split("/"));
-    if (!existsSync(absolute)) continue;
-    try { unlinkSync(absolute); cleaned++; logger.info("team-updates", "removed legacy rule file", { path }); }
-    catch (error) { logger.error("team-updates", "failed to remove legacy rule", { path, error: String(error) }); }
-  }
   const removedSkills = cleanupDeletedSkills(templates);
-  if (seeded || cleaned || removedSkills.length) logger.info("team-updates", "seeded missing builtin assets", { seeded, cleaned, removedSkills: removedSkills.length });
+  if (seeded || removedSkills.length) logger.info("team-updates", "seeded missing builtin assets", { seeded, removedSkills: removedSkills.length });
 }
 
 export const templateMetadataKeys = ["name", "description", "avatar", "tags", "model", "skills"] as const;

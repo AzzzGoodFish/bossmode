@@ -55,36 +55,9 @@ function splitModelRef(modelRef: string): { provider: string; modelId: string } 
   return idx > 0 ? { provider: normalized.slice(0, idx), modelId: normalized.slice(idx + 1) } : { provider: "anthropic", modelId: normalized };
 }
 
-function resolveModelLabel(modelRef: string): string {
-  const { provider, modelId } = splitModelRef(modelRef);
-  return `${provider}/${modelId}`;
-}
-
-interface RuntimeTransportSettings {
-  transport: PiTransportSetting;
-  websocketConnectTimeoutMs: number;
-  httpIdleTimeoutMs?: number;
-}
-
-function resolveRuntimeTransportSettings(): RuntimeTransportSettings {
-  // Transport behavior is fixed (runtime settings retired 2026-09-16): auto transport,
-  // 15s websocket connect timeout.
-  return { transport: "auto", websocketConnectTimeoutMs: 15000 };
-}
-
-function applyRuntimeTransportSettings(settingsManager: SettingsManager): RuntimeTransportSettings {
-  const settings = resolveRuntimeTransportSettings();
-  const overrides: Record<string, unknown> = {
-    transport: settings.transport,
-    websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs,
-  };
-  if (settings.httpIdleTimeoutMs !== undefined) overrides.httpIdleTimeoutMs = settings.httpIdleTimeoutMs;
-  settingsManager.applyOverrides(overrides as any);
-  return {
-    transport: settingsManager.getTransport() as PiTransportSetting,
-    websocketConnectTimeoutMs: settingsManager.getWebSocketConnectTimeoutMs() ?? settings.websocketConnectTimeoutMs,
-    httpIdleTimeoutMs: settingsManager.getHttpIdleTimeoutMs(),
-  };
+function applyRuntimeTransportSettings(settingsManager:SettingsManager){
+  settingsManager.applyOverrides({transport:"auto",websocketConnectTimeoutMs:15_000} as any);
+  return {transport:settingsManager.getTransport() as PiTransportSetting,websocketConnectTimeoutMs:settingsManager.getWebSocketConnectTimeoutMs()??15_000,httpIdleTimeoutMs:settingsManager.getHttpIdleTimeoutMs()};
 }
 
 function getSessionContextModel(sessionManager: SessionManager): { provider: string; modelId: string } | null {
@@ -351,7 +324,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (!found) throw new Error(`Model not found: ${modelRef}`);
     const model = this.credentials.bind(found, profile);
     await this.credentials.run(model, () => this.session.setModel(model));
-    this.runtimeParams.model = resolveModelLabel(modelRef);
+    this.runtimeParams.model = normalizeModelRef(modelRef);
     this.runtimeParams.credentialId = profile.id;
     this.runtimeParams.credentialName = profile.name;
   }

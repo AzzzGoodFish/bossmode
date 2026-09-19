@@ -543,7 +543,7 @@ function isLegacyOfficialBuiltinProviderProfile(profile: ModelCredentialProfile)
 }
 
 function isBuiltinProviderProfile(profile: ModelCredentialProfile): boolean {
-  return profile.profileKind === "builtin_provider" || isLegacyOfficialBuiltinProviderProfile(profile);
+  return profile.profileKind === "builtin_provider";
 }
 
 export function shouldUseSdkBuiltinCatalog(profile: ModelCredentialProfile): boolean {
@@ -618,6 +618,7 @@ export function normalizeLegacyCredentialImport(store: ModelCredentialStore, cat
       const legacy = profile.requestProfile as string;
       let next = legacy === "anthropic_claude_code_oauth" || legacy === "anthropic_proxy_claude_code"
         ? { ...profile, requestProfile: "standard" as const } : profile;
+      if (isLegacyOfficialBuiltinProviderProfile(next)) next = { ...next, profileKind: "builtin_provider" };
       if (vision) next = migrateCustomEndpointVisionInput(next, catalog);
       if (reasoning) next = migrateCustomEndpointReasoningDefault(next);
       return next;
@@ -792,14 +793,7 @@ export function updateCredentialSecret(id: string, provider: string, revision: n
     });
   }
 
-export function normalizeModelRef(modelRef: string): string {
-  const aliases: Record<string, string> = {
-    sonnet: "anthropic/claude-sonnet-4-6",
-    haiku: "anthropic/claude-haiku-4-5",
-    opus: "anthropic/claude-opus-4-6",
-  };
-  return aliases[modelRef.toLowerCase()] || modelRef;
-}
+export function normalizeModelRef(modelRef: string): string { return modelRef.trim(); }
 
 function modelOptionFromProfile(profile: ModelCredentialProfile, model: any): AvailableModelOption {
   const modelId = String(model.id);
