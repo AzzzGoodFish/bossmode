@@ -345,9 +345,8 @@ export function refreshContextUsage(roomId: string, memberId: string, options: R
   }
 }
 
-function emitAgentLocalEvent(sourceRef:string|null,memberRef:string,event:AgentHistoryEvent,identity?:{memberId:string;agentName:string}):void{
-  const member=getMember(memberRef),instance=instances.get(instanceKey(memberRef));
-  const memberId=identity?.memberId??instance?.memberId??member?.id??memberRef,agentName=identity?.agentName??instance?.agentName??member?.name??memberRef;
+function emitAgentLocalEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void{
+  const instance=instances.get(instanceKey(memberId)),agentName=instance?.agentName??getMember(memberId)?.name??memberId;
   processEvent(sourceRef,agentName,instanceKey(memberId),event as AgentStreamEvent,instance?.eventBuffer??[],memberId);
 }
 

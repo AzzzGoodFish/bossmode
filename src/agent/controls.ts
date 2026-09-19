@@ -16,7 +16,7 @@ export interface ControlServices {
   memberScopes(memberId: string): string[];
   clearSession(memberId: string): void;
   commitModelBinding(memberId: string, binding: { model: string; credentialId: string }): void;
-  emitEvent(sourceRef: string | null, memberId: string, event: AgentHistoryEvent, identity?: { memberId: string; agentName: string }): void;
+  emitEvent(sourceRef: string | null, memberId: string, event: AgentHistoryEvent): void;
   postSystemNotice(scopeId: string, message: string): void;
   publishStatus(scopeId: string, event: AgentStatusBroadcast): void;
   publishReset(scopeId: string, memberName: string, event: AgentStatusBroadcast): void;
@@ -258,7 +258,7 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
     const statusEvent = { type: "agent:status" as const, roomId: scope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     controlServices().publishReset(scope, agentName, statusEvent);
   }
-  controlServices().emitEvent(null, memberId, { type: "system", text: message }, { memberId, agentName });
+  controlServices().emitEvent(null, memberId, { type: "system", text: message });
   logger.info("agent", "memberSessionReset", { memberId, member: agentName });
   return { ok: true, message };
 }
