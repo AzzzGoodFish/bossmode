@@ -5,7 +5,7 @@
  *
  * Room scopes require ?memberId= (or ?member= name/id). DM scopes embed memberId.
  */
-import { addRoute, sendJson, parseBody } from "./index.js";
+import { addRoute, sendJson, parseBody } from "./http.js";
 import { parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
 import * as roomStore from "../chat/conversations.js";
 import { findMemberByName, getMember } from "../member/identity.js";

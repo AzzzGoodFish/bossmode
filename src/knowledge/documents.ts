@@ -16,7 +16,21 @@ import {
 import { join, dirname, sep, posix, extname, basename } from "node:path";
 
 import { logger } from "../kernel/logger.js";
-import type { KnowledgeEntry, KnowledgeTreeNode } from "../kernel/types.js";
+export interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  source: string;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface KnowledgeTreeNode {
+  path: string;
+  name: string;
+  kind: "file" | "folder";
+  title?: string;
+  children?: KnowledgeTreeNode[];
+}
 
 export type KnowledgeFileKind = "markdown" | "text" | "png";
 

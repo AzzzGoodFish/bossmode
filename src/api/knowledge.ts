@@ -4,8 +4,8 @@
 // ~/.bossmode/knowledge/docs/. There is no KB container concept.
 
 import { existsSync, statSync } from "node:fs";
-import { addRoute, sendJson, parseBody } from "./index.js";
-import * as knowledgeStore from "../knowledge/store.js";
+import { addRoute, sendJson, parseBody } from "./http.js";
+import * as knowledgeStore from "../knowledge/documents.js";
 import * as roomStore from "../chat/conversations.js";
 import { logger } from "../kernel/logger.js";
 

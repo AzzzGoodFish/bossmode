@@ -1,7 +1,7 @@
 import { readConfig, writeConfig } from "../config/settings.js";
 // MCP Settings API — Bossmode-managed pi-mcp-adapter config
 import { getDatabase } from "../data/database.js";
-import { addRoute, parseBody, sendJson } from "./index.js";
+import { addRoute, parseBody, sendJson } from "./http.js";
 
 import {
   restoreRedactedMcpConfig, writeMcpConfig, countMcpServers,

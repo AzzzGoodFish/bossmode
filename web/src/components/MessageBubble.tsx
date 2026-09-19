@@ -6,7 +6,6 @@ import { copyText } from "../utils/clipboard";
 import { Markdown } from "./Markdown";
 import type { RoomMessageAttachment } from "../api/client";
 import { splitMentionTokens, mentionNameSet, MENTION_PILL_CLASSES } from "../utils/mention-tokens";
-import { inferAttachmentPreviewType } from "../../../src/files/attachments";
 
 interface MessageBubbleProps {
   sender: string;
@@ -42,6 +41,12 @@ const ATTACHMENT_RE_M = /^Attachment: \[original filename: ([^\]]+)\]\(([^)]+)\)
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 const MARKDOWN_EXTS = new Set([".md", ".markdown"]);
 const HTML_EXTS = new Set([".html", ".htm"]);
+const TEXT_EXTS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".json", ".yaml", ".yml",
+  ".toml", ".xml", ".css", ".scss", ".sql", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cs",
+  ".rb", ".php", ".swift", ".kt", ".vue", ".ini", ".conf", ".cfg", ".env", ".diff", ".patch",
+  ".csv", ".tsv", ".log", ".proto", ".txt",
+]);
 
 function extOf(path: string): string {
   const idx = path.lastIndexOf(".");
@@ -49,13 +54,19 @@ function extOf(path: string): string {
 }
 
 function inferPreviewType(path: string): RoomMessageAttachment["previewType"] {
-  return inferAttachmentPreviewType(path);
+  const extension = extOf(path);
+  if (IMAGE_EXTS.has(extension)) return "image";
+  if (MARKDOWN_EXTS.has(extension)) return "markdown";
+  if (HTML_EXTS.has(extension)) return "html";
+  if (TEXT_EXTS.has(extension)) return "text";
+  return "download";
 }
 
 /** Build API URL for an attachment given roomId (or "dm:<memberId>" for DM scope). Falls back to legacy roomId-from-path. */
 function attachmentUrl(path: string, roomId?: string): string {
   const filename = path.split("/").pop() || "";
   if (roomId?.startsWith("dm:")) return `/api/dm/${encodeURIComponent(roomId.slice(3))}/attachments/${filename}`;
+  if (roomId?.startsWith("mm:")) return `/api/member-chats/${encodeURIComponent(roomId)}/attachments/${filename}`;
   if (roomId) return `/api/rooms/${roomId}/attachments/${filename}`;
   const roomMatch = path.match(/\/rooms\/([^/]+)\//);
   if (roomMatch) return `/api/rooms/${roomMatch[1]}/attachments/${filename}`;

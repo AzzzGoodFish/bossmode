@@ -7,7 +7,7 @@ import { updateProfileForMember, InvalidProfileError } from "../member/profile.j
  * 0.20 Members / Contacts / DM REST surface (WS-A).
  * Contract §2.1 / §2.2 partial (global member ids on rooms stamped by migration).
  */
-import { addRoute, sendJson, parseBody } from "./index.js";
+import { addRoute, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { createMember } from "../app/member-actions.js";
@@ -103,119 +103,6 @@ function userLoginName(): string {
     return "";
   }
 }
-
-// ── Chats (unified conversation list) ──
-
-addRoute("GET", "/api/chats", async (_req, res) => {
-  try {
-    const members = listMembers();
-    const rooms = roomStore.listRooms();
-    const login = userLoginName();
-    const chats: Array<{
-      scopeId: string;
-      kind: "dm" | "room";
-      title: string;
-      lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
-      unreadCount: number;
-      mentioned: boolean;
-      status: string;
-    }> = [];
-
-    let getScopeLiveStatus: ((scopeId: string) => string) | null = null;
-    try {
-      const am = await import("../app/member-actions.js");
-      getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
-    } catch {
-      getScopeLiveStatus = () => "idle";
-    }
-
-    for (const m of members) {
-      const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
-      const msgs = readAllDmMessages(m.id);
-      const last = msgs[msgs.length - 1];
-      const cursor = getUserReadCursor(scopeId);
-      const { unreadCount, mentioned } = countUserUnreadAndMention(
-        msgs,
-        cursor?.messageId ?? null,
-        cursor?.seq ?? null,
-        login,
-      );
-      const live = getScopeLiveStatus?.(scopeId) || "idle";
-      chats.push({
-        scopeId,
-        kind: "dm",
-        title: m.name,
-        lastMessage: summarizeMessage(last),
-        unreadCount,
-        mentioned,
-        status: live === "inactive" ? "idle" : live,
-      });
-    }
-
-    for (const room of rooms) {
-      const scopeId = scopeIdOf({ kind: "room", roomId: room.id });
-      const msgs = messageStore.readAllMessages(room.id);
-      const last = msgs[msgs.length - 1];
-      const cursor = getUserReadCursor(scopeId);
-      const { unreadCount, mentioned } = countUserUnreadAndMention(
-        msgs,
-        cursor?.messageId ?? null,
-        cursor?.seq ?? null,
-        login,
-      );
-      const live = getScopeLiveStatus?.(scopeId) || "idle";
-      chats.push({
-        scopeId,
-        kind: "room",
-        title: room.name,
-        lastMessage: summarizeMessage(last),
-        unreadCount,
-        mentioned,
-        status: live === "inactive" ? "idle" : live,
-      });
-    }
-
-    chats.sort((a, b) => (b.lastMessage?.ts || 0) - (a.lastMessage?.ts || 0));
-    sendJson(res, 200, { chats });
-  } catch (err) {
-    logger.error("members-api", "chats failed", { error: String(err) });
-    sendJson(res, 500, { error: "internal", message: String(err) });
-  }
-});
-
-/** Mark a conversation as read for the human user (Chats unread source of truth). */
-addRoute("POST", "/api/conversations/:scope/read", async (req, res, params) => {
-  try {
-    const scopeId = decodeURIComponent(params.scope);
-    if (!parseScopeId(scopeId)) {
-      sendJson(res, 400, { error: "scope_not_found", message: "invalid scope" });
-      return;
-    }
-    const body = (await parseBody(req)) as { messageId?: string | null; seq?: number | null };
-    // Default: advance to latest message in that scope
-    let messageId = body.messageId;
-    let seq = body.seq;
-    if (messageId === undefined && seq === undefined) {
-      const ref = parseScopeId(scopeId)!;
-      if (ref.kind === "dm") {
-        const msgs = readAllDmMessages(ref.memberId);
-        const last = msgs[msgs.length - 1];
-        messageId = last?.id ?? null;
-        seq = typeof last?.seq === "number" ? last.seq : null;
-      } else {
-        const msgs = messageStore.readAllMessages(ref.roomId);
-        const last = msgs[msgs.length - 1];
-        messageId = last?.id ?? null;
-        seq = typeof last?.seq === "number" ? last.seq : null;
-      }
-    }
-    const cursor = setUserReadCursor(scopeId, { messageId: messageId ?? null, seq: seq ?? null });
-    sendJson(res, 200, { scopeId, cursor });
-  } catch (err) {
-    const msg = String((err as any)?.message || err);
-    sendJson(res, msg === "scope_not_found" ? 400 : 500, { error: msg === "scope_not_found" ? "scope_not_found" : "internal", message: msg });
-  }
-});
 
 // ── Contacts (directory) ──
 
@@ -677,75 +564,7 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
 
 
 
-// ── DM messages ──
-
-addRoute("GET", "/api/dm/:memberId/messages", async (req, res, params) => {
-  try {
-    const m = resolveMemberRef(params.memberId);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const url = new URL(req.url || "", "http://localhost");
-    const before = url.searchParams.get("before");
-    const around = url.searchParams.get("around");
-    const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 1), 500);
-    let messages = readAllDmMessages(m.id);
-    if (around) {
-      // Jump window: center on the referenced message (id or seq).
-      const idx = messages.findIndex((msg) => msg.id === around || String(msg.seq) === around);
-      if (idx >= 0) {
-        const half = Math.floor(Math.min(limit, 100) / 2);
-        const start = Math.max(0, idx - half);
-        const end = Math.min(messages.length, idx + half + 1);
-        messages = messages.slice(start, end);
-      } else {
-        messages = [];
-      }
-    } else if (before) {
-      const idx = messages.findIndex((msg) => msg.id === before || String(msg.seq) === before);
-      if (idx > 0) messages = messages.slice(0, idx);
-      if (messages.length > limit) messages = messages.slice(-limit);
-    } else if (messages.length > limit) {
-      messages = messages.slice(-limit);
-    }
-    sendJson(res, 200, { messages });
-  } catch (err) {
-    sendJson(res, 500, { error: "internal", message: String(err) });
-  }
-});
-
-addRoute("POST", "/api/dm/:memberId/messages", async (req, res, params) => {
-  try {
-    const m = resolveMemberRef(params.memberId);
-    if (!m) {
-      sendJson(res, 404, { error: "not_found", message: "Member not found" });
-      return;
-    }
-    const body = (await parseBody(req)) as { text?: string; content?: string; replyTo?: { seq?: number }; attachments?: unknown };
-    const text = (body.text ?? body.content ?? "").toString();
-    if (!text.trim() && !body.attachments) {
-      sendJson(res, 400, { error: "empty", message: "text is required" });
-      return;
-    }
-    // Quote reply in DM scope (plan-reply-to-v1): resolve seq → stable messageId anchor.
-    let replyTo: { seq: number; messageId: string } | undefined;
-    if (body.replyTo !== undefined && body.replyTo !== null) {
-      const seq = Number(body.replyTo.seq);
-      if (!Number.isFinite(seq)) { sendJson(res, 400, { error: "replyTo.seq must be a number" }); return; }
-      const target = readAllDmMessages(m.id).find((msg) => msg.seq === seq);
-      if (!target) { sendJson(res, 404, { error: `Reply target not found: msg:#${seq}` }); return; }
-      replyTo = { seq, messageId: target.id };
-    }
-    const message = postMessage(`dm:${m.id}`,"user",text,[],{
-      ...(replyTo ? { replyTo } : {}),
-      ...(Array.isArray(body.attachments) ? { attachments: body.attachments as any } : {}),
-    });
-    sendJson(res, 200, { message });
-  } catch (err) {
-    sendJson(res, 500, { error: "internal", message: String(err) });
-  }
-});
+// ── DM session ──
 
 addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
   const m = resolveMemberRef(params.memberId);

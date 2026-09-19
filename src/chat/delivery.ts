@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type JsonValue } from "../kernel/json.js";
+import { stripCodeSegments } from "../kernel/markdown.js";
 import { getDatabase, type Database } from "../data/database.js";
 import {
   conversationMember,
@@ -308,6 +309,29 @@ function actor(id: string): DeliveryActor {
   return { actorKey: id, memberId: conversationMember(id, true) ? id : null };
 }
 
+/** Literal current-name mentions only; code spans/blocks never activate. */
+export function parseMentions(content: string, members: Array<{ id: string; name: string }>): { labels: string[]; memberIds: string[] } {
+  const plain = stripCodeSegments(content);
+  const candidates = [...new Set([...members.map((member) => member.name), "all"])]
+    .filter(Boolean).sort((a, b) => b.length - a.length);
+  const labels: string[] = [];
+  for (let index = 0; index < plain.length; index++) {
+    if (plain[index] !== "@") continue;
+    const name = candidates.find((candidate) => {
+      if (!plain.startsWith(candidate, index + 1)) return false;
+      const next = plain[index + 1 + candidate.length];
+      return !next || !/[\p{L}\p{N}\p{M}_.-]/u.test(next);
+    });
+    if (name) { labels.push(name); index += name.length; }
+  }
+  const unique = [...new Set(labels)];
+  if (unique.includes("all")) return { labels: ["all"], memberIds: members.map((member) => member.id) };
+  return {
+    labels: unique,
+    memberIds: unique.flatMap((name) => members.filter((member) => member.name === name).map((member) => member.id)),
+  };
+}
+
 /** Append one message, freeze routing/reply/context facts, and return agent admissions.
  * The caller invokes agent acceptance for each admission in this same outer SQL
  * transaction, then calls confirmChatAdmission with the returned input id. */
@@ -334,7 +358,11 @@ export function appendMessageWithAdmissions(
     };
     const prepared = JSON.parse(JSON.stringify(input)) as MessageInput;
     if (!prepared.type && ref.kind === "room" && prepared.mentionMemberIds === undefined) {
-      prepared.mentionMemberIds = ids(undefined, prepared.mentions);
+      if (prepared.mentions.length === 0) {
+        const detected = parseMentions(prepared.content, getRoomMembers(ref.roomId));
+        prepared.mentions = detected.labels;
+        prepared.mentionMemberIds = detected.memberIds;
+      } else prepared.mentionMemberIds = ids(undefined, prepared.mentions);
     }
     if (prepared.needResponseMemberIds === undefined && prepared.needResponse !== undefined) {
       prepared.needResponseMemberIds = ids(undefined, prepared.needResponse);
