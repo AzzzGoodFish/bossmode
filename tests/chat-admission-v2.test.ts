@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { assertMemberScopeAccess, ensureDmScope, ensureMmScope, storeRoom } from "../src/chat/conversations.js";
-import { appendMessageWithAdmissions, confirmChatAdmission, repairPendingChatAdmission } from "../src/chat/delivery.js";
+import { appendMessageWithAdmissions, confirmChatAdmission, listPendingChatAdmissions, repairPendingChatAdmission } from "../src/chat/delivery.js";
 import { getMemberCursor } from "../src/chat/cursors.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
@@ -47,11 +47,13 @@ describe("chat delivery v2", () => {
     const pending = appendMessageWithAdmissions(fixture.db, "room:rm_test", {
       sender: "user", content: "@One pending", mentions: ["One"], mentionMemberIds: ["mem_one"],
     });
+    expect(listPendingChatAdmissions(fixture.db)).toEqual(pending.admissions);
     const repaired = repairPendingChatAdmission(fixture.db, "room:rm_test", pending.message.id, "mem_one");
     expect(repaired).toEqual(pending.admissions[0]);
     const inputId = enqueue(fixture, repaired!);
     confirmChatAdmission(fixture.db, repaired!.chatToken, inputId);
     expect(repairPendingChatAdmission(fixture.db, "room:rm_test", pending.message.id, "mem_one")).toBeNull();
+    expect(listPendingChatAdmissions(fixture.db)).toEqual([]);
   });
 
   it("prepares DM and member-chat inputs without room unread context", () => {

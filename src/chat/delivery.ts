@@ -419,6 +419,18 @@ export function appendMessageWithAdmissions(
 /** Narrow repair entry: only an explicit durable pending admission can be
  * retried. Historical captures without this marker and confirmed/terminal work
  * are never reconstructed from chat history. */
+export function listPendingChatAdmissions(db: Database): PreparedChatAdmission[] {
+  const rows = db.all<AdmissionRow & { target_member_id: string; scope_kind: "room" | "dm" | "mm" }>(`SELECT a.*,
+    d.target_member_id, s.kind AS scope_kind FROM chat_admissions a
+    JOIN captured_deliveries d ON d.scope_id=a.scope_id AND d.message_id=a.message_id
+      AND d.target_actor_key=a.target_actor_key AND d.delivery_kind=a.delivery_kind
+    JOIN scopes s ON s.id=a.scope_id
+    WHERE a.status='pending' AND d.target_member_id IS NOT NULL
+    ORDER BY a.opened_at, a.idempotency_key`);
+  return rows.map((row) => admissionFromRow(row, row.target_member_id,
+    row.scope_kind === "room" ? `room:${row.scope_id}` : row.scope_id));
+}
+
 export function repairPendingChatAdmission(
   db: Database,
   sourceRef: string,
