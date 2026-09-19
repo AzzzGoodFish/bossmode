@@ -146,25 +146,23 @@ function insert(db: Database, scopeId: string, message: Message): void {
  * records the committed message snapshot in the generic outbox. */
 export function appendMessageInTransaction(db: Database, scope: string, input: MessageInput): Message {
   const scopeId = storageScopeId(scope);
-  return db.transaction((tx) => {
-    const seq = tx.get<{ next_seq: number }>("SELECT next_seq FROM scope_sequences WHERE scope_id=?", scopeId)?.next_seq ?? 1;
-    const message: Message = {
-      ...visibleMessage(input),
-      id: `msg-${randomUUID().slice(0, 8)}`,
-      seq,
-      ts: Date.now(),
-    };
-    insert(tx, scopeId, message);
-    const payload = JSON.parse(JSON.stringify({ messageId: message.id, message })) as JsonValue;
-    enqueueOutbox(tx, {
-      kind: "message",
-      scopeId: parseConversation(scope)!.scopeId,
-      dedupeKey: `message:${scopeId}:${message.id}`,
-      payload,
-      createdAt: message.ts,
-    });
-    return message;
+  const seq = db.get<{ next_seq: number }>("SELECT next_seq FROM scope_sequences WHERE scope_id=?", scopeId)?.next_seq ?? 1;
+  const message: Message = {
+    ...visibleMessage(input),
+    id: `msg-${randomUUID().slice(0, 8)}`,
+    seq,
+    ts: Date.now(),
+  };
+  insert(db, scopeId, message);
+  const payload = JSON.parse(JSON.stringify({ messageId: message.id, message })) as JsonValue;
+  enqueueOutbox(db, {
+    kind: "message",
+    scopeId: parseConversation(scope)!.scopeId,
+    dedupeKey: `message:${scopeId}:${message.id}`,
+    payload,
+    createdAt: message.ts,
   });
+  return message;
 }
 
 export type MessageSink = (sourceRef: string, message: Message) => void;
