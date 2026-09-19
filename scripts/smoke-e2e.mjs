@@ -437,7 +437,7 @@ async function phaseRestart() {
   }, 60000, "queue settle (no pending/dispatched)");
   const dbq = new DatabaseSync(path.join(DIR, "bossmode.db"), { readOnly: true });
   const unavailable = dbq.prepare("SELECT COUNT(*) n FROM queued_inputs WHERE diagnosis LIKE '%member unavailable%'").get().n;
-  const r1Row = dbq.prepare("SELECT status, outcome FROM queued_inputs WHERE message_id=?").get(r1Msg.id);
+  const r1Row = dbq.prepare("SELECT status, outcome FROM queued_inputs WHERE EXISTS (SELECT 1 FROM json_each(payload_json,'$.replySources') WHERE value=?)").get(r1Msg.id);
   dbq.close();
   check("queueGroups", groups);
   check("queueMemberUnavailable", unavailable);

@@ -24,7 +24,7 @@ export function wireMemberConfigPatches(): () => void {
   return () => setGlobalConfigPatchObserver(undefined);
 }
 
-import { assertMemberScopeAccess, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, mmScopeIdOf } from "../chat/conversations.js";
+import { assertMemberScopeAccess, chatScopeAssetRoots, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, parseMmScopeId } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef } from "../member/identity.js";
 export function wireConversationMembers(): () => void {
   return connectConversationMembers(readMemberIdentity);
@@ -39,8 +39,10 @@ import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiv
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
 // truth ("记录自动成为沟通"). Known limit: bash-driven writes are not detected (args are opaque).
-import { documentsRoot } from "../files/layout.js";
+import { documentsRoot, knowledgeRoot } from "../files/layout.js";
+import { displayFilename, importAttachments, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
 import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve, sep, relative, isAbsolute } from "node:path";
 
 import { logger } from "../kernel/logger.js";
@@ -145,7 +147,7 @@ export async function wireApiRoutes(): Promise<void> {
   ]);
 }
 import { configureAgentToolHost } from "../agent/tools.js";
-import { pageMessages, searchMessages, setMessageSink, type MessageInput } from "../chat/messages.js";
+import { pageMessages, searchMessages, setMessageSink } from "../chat/messages.js";
 import { parseMentions } from "../chat/delivery.js";
 import { updateProfileForMember } from "../member/profile.js";
 import { createWorkspace, readWorkspaces, removeWorkspace, useWorkspace } from "../member/workspaces.js";
@@ -196,11 +198,19 @@ async function executeAgentHostTool(input:{tool:string;params:Record<string,unkn
   }
   if(tool==="chat_send"){
     const target=resolveToolChat(memberId,currentSourceRef,params.to),message=String(params.message??"");
-    if(Array.isArray(params.attachments)&&params.attachments.length)return {ok:false,error:"Attachments are temporarily unavailable"};
-    if(!message.trim())return {ok:false,error:"message must be a non-empty string"};
+    const paths=Array.isArray(params.attachments)?params.attachments.map(String):[];
+    if(!message.trim()&&!paths.length)return {ok:false,error:"message must be a non-empty string"};
     const roomId=target.startsWith("room:")?target.slice(5):null;
     const mentions=roomId?parseMentions(message,roomStore.getRoomMembers(roomId)): {labels:[],memberIds:[]};
-    const saved=commitChatMessage(target,{sender:member.name,senderMemberId:memberId,content:message,mentions:mentions.labels,mentionMemberIds:mentions.memberIds});
+    const attachments:RoomMessageAttachment[]=[];
+    if(paths.length){
+      const pair=parseMmScopeId(target);
+      const location:AttachmentLocation=roomId?{kind:"room",roomId}:pair?{kind:"mm",memberIds:pair}:{kind:"dm",memberId:target.slice(3)};
+      const outcomes=await importAttachments(paths,location,[...chatScopeAssetRoots(target),tmpdir(),knowledgeRoot()]);
+      const errors=outcomes.filter(result=>!result.ok);if(errors.length)return {ok:false,error:`Attachment failed: ${errors.map(result=>`${result.path}: ${result.error}`).join("; ")}`};
+      for(const stored of outcomes)if(stored.ok){const originalFilename=displayFilename(stored.originalFilename);attachments.push({id:stored.storedFilename,storedFilename:stored.storedFilename,originalFilename,size:stored.size,previewType:inferAttachmentPreviewType(stored.storedFilename||originalFilename)});}
+    }
+    const saved=commitChatMessage(target,{sender:member.name,senderMemberId:memberId,content:message,mentions:mentions.labels,mentionMemberIds:mentions.memberIds,attachments});
     return {ok:true,messageId:saved.id,sourceRef:target};
   }
   if(tool==="chat_read"){
@@ -214,9 +224,28 @@ async function executeAgentHostTool(input:{tool:string;params:Record<string,unkn
   }
   if(tool==="chat_list"){
     const rooms=listRoomsForMember(memberId).map(room=>({type:"room",id:`room:${room.id}`,name:room.name,description:room.description??""}));
-    const chats=[{type:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms];
+    const mm=roomStore.listMmScopesForMember(memberId).map(id=>{const peer=parseMmScopeId(id)?.find(value=>value!==memberId),name=peer?(getMember(peer)?.name??peer):"member";return {type:"mm",id,name:`Private chat with ${name}`,description:""};});
+    const chats=[{type:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms,...mm];
     const query=String(params.query??"").toLowerCase(),filtered=query?chats.filter(chat=>`${chat.id} ${chat.name} ${chat.description}`.toLowerCase().includes(query)):chats;
     const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,chats:filtered.slice(offset,offset+limit),total:filtered.length};
+  }
+  if(tool==="chat_info"){
+    const target=resolveToolChat(memberId,currentSourceRef,params.chat),pair=parseMmScopeId(target);
+    if(target.startsWith("dm:"))return {ok:true,chat:{id:target,type:"dm",name:"user"}};
+    if(pair){const peer=pair.find(id=>id!==memberId)!;return {ok:true,chat:{id:target,type:"mm",name:`Private chat with ${getMember(peer)?.name??peer}`,counterpart:peer}};}
+    const room=roomStore.getRoom(target.slice(5))!;return {ok:true,chat:{id:target,type:"room",name:room.name,description:room.description??"",members:roomStore.getRoomMembers(room.id).map(item=>({id:item.id,name:item.name}))}};
+  }
+  if(tool==="chat_create"){
+    const name=String(params.name??"").trim();if(!name)return {ok:false,error:"name is required"};
+    const ids=[...new Set([memberId,...(Array.isArray(params.members)?params.members.map(String):[])])];const missing=ids.filter(id=>!getMember(id));if(missing.length)return {ok:false,error:`Unknown member id: ${missing.join(", ")}`};
+    try{const room=roomStore.createRoom(name,undefined,ids,undefined,{promptLeaderMemberId:memberId,description:String(params.description??"").trim()});return {ok:true,chat:{id:`room:${room.id}`,type:"room",name:room.name}};}catch(error){return {ok:false,error:(error as Error).message};}
+  }
+  if(tool==="chat_edit"){
+    const target=resolveToolChat(memberId,currentSourceRef,params.chat);if(!target.startsWith("room:"))return {ok:false,error:"chat_edit edits group chats only"};const roomId=target.slice(5);
+    if(typeof params.name==="string"&&params.name.trim())roomStore.updateRoomName(roomId,params.name.trim());if(typeof params.description==="string")roomStore.updateRoomDescription(roomId,params.description.trim());
+    const added:string[]=[],removed:string[]=[];for(const id of Array.isArray(params.add_members)?params.add_members.map(String):[]){const item=getMember(id);if(item&&roomStore.inviteGlobalMember(roomId,{id:item.id,name:item.name,agentTemplate:item.agentTemplate||"general"}).ok)added.push(item.name);}
+    for(const id of Array.isArray(params.remove_members)?params.remove_members.map(String):[]){if(id===memberId)continue;const item=getMember(id);if(item&&roomStore.removeRoomMemberByRef(roomId,item.name,{globalMemberId:item.id}).ok)removed.push(item.name);}
+    const room=roomStore.getRoom(roomId)!;return {ok:true,chat:{id:target,type:"room",name:room.name},added,removed};
   }
   if(tool==="member_list"){
     const query=String(params.query??"").toLowerCase();let members=listMembers().map(item=>({id:item.id,name:item.name,description:item.title??""}));if(query)members=members.filter(item=>`${item.id} ${item.name} ${item.description}`.toLowerCase().includes(query));const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,members:members.slice(offset,offset+limit),total:members.length};
