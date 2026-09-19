@@ -9,7 +9,7 @@ import { importLegacyConversations } from "../../src/app/upgrade/conversations.j
 import {readMessages,appendMessageInTransaction} from "../../src/chat/messages.js";
 import {readArchivedMessages} from "../../src/chat/archives.js";
 import {getUserReadCursor} from "../../src/chat/cursors.js";
-import { readStoredRoom } from "../../src/chat/conversations.js";
+import { getRoom } from "../../src/chat/conversations.js";
 import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
@@ -38,7 +38,7 @@ it("preserves room/DM facts, explicit empty rosters and independent cursors (ret
   "user-read-cursors.json":JSON.stringify({"room:room-one":{messageId:message.id,seq:3,updatedAt:10}}),
  });
  const consumed=await importLegacyConversations(ctx,entries);expect(consumed.size).toBe(entries.length);
- expect(readStoredRoom(room.id, ctx.db)).toMatchObject(room);
+ expect(getRoom(room.id,ctx.db)).toMatchObject({id:room.id,name:room.name,memberIds:[],createdAt:room.createdAt});
  expect(readMessages(room.id,ctx.db)).toEqual([message]);expect(readMessages("dm:mem_one",ctx.db)[0].id).toBe("dm-message");
  // Topic feature retired (fish #19358): topic sources are consumed, never imported.
  expect(ctx.db.get("SELECT 1 FROM scopes WHERE kind='topic'")).toBeUndefined();
@@ -49,7 +49,7 @@ it("preserves room/DM facts, explicit empty rosters and independent cursors (ret
  expect(readdirSync(join(root!,"archive")).some((n)=>n.startsWith("task-retirement-"))).toBe(true);
  expect(getUserReadCursor(room.id,ctx.db)?.updatedAt).toBe(10);
  expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
- expect(appendMessageInTransaction(ctx.db,room.id,{sender:"user",content:"next",mentions:[]}).seq).toBe(20);
+ expect(appendMessageInTransaction(ctx.db,`room:${room.id}`,{sender:"user",content:"next",mentions:[]}).seq).toBe(20);
 });
 it("retains original nonblank event order, unknown event kinds and archived messages without activation",async()=>{
  const events=[{type:"agent_start",ts:1},{type:"message_delta",value:"retained"},{type:"agent_end",ts:4}];

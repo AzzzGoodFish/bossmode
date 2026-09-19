@@ -1,11 +1,6 @@
 import type { Database } from "../data/database.js";
 import { getAttachmentPath, type AttachmentLocation } from "../files/attachments.js";
-import {
-  conversationMember,
-  getRoom,
-  parseConversation,
-  type ConversationIdentity,
-} from "./conversations.js";
+import { attachmentLocation, conversationMember, getRoom, parseConversation, type ConversationIdentity } from "./conversations.js";
 import { getMemberCursor, type MemberCursorConfirmation } from "./cursors.js";
 import { isSystemNoticeHiddenFromMembers, messagesSince, readMessage, type Message } from "./messages.js";
 
@@ -23,7 +18,6 @@ export interface UnreadSummary {
 export interface ChatContextSnapshot {
   sourceRef: string;
   kind: ConversationIdentity["kind"];
-  targetMember: { id: string; name: string };
   chatName: string;
   trigger: Message;
   replyTarget: Message | null;
@@ -37,12 +31,6 @@ export interface PreparedAgentInput {
   prompt: string;
   trigger: "chat-message";
   replySources: string[];
-}
-
-function attachmentLocation(ref: ConversationIdentity): AttachmentLocation {
-  if (ref.kind === "room") return { kind: "room", roomId: ref.roomId };
-  if (ref.kind === "dm") return { kind: "dm", memberId: ref.memberId };
-  return { kind: "mm", memberIds: ref.memberIds };
 }
 
 function ownMessage(message: Message, memberId: string, memberName: string): boolean {
@@ -122,7 +110,6 @@ export function captureChatContext(
   return {
     sourceRef: ref.scopeId,
     kind: ref.kind,
-    targetMember: { id: input.memberId, name: identity.name },
     chatName,
     trigger: structuredClone(trigger),
     replyTarget: replyTarget ? structuredClone(replyTarget) : null,

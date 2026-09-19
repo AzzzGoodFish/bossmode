@@ -1,7 +1,7 @@
 import { MemberName } from "./MemberName";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Search, X } from "lucide-react";
-import type { MessageSearchResult, RoomMessage } from "../api/client";
+import type { MessageSearchHit, MessageSearchResult } from "../api/client";
 import { searchMessages } from "../api/client";
 
 interface MessageSearchBarProps {
@@ -165,7 +165,7 @@ export function MessageSearchBar({ roomId, members, onJumpToMessage, onClose }: 
   );
 }
 
-function MessageResult({ msg, query, onJump }: { msg: RoomMessage; query: string; onJump: () => void }) {
+function MessageResult({ msg, query, onJump }: { msg: MessageSearchHit; query: string; onJump: () => void }) {
   const preview = msg.content.slice(0, 120) + (msg.content.length > 120 ? "…" : "");
   return (
     <button

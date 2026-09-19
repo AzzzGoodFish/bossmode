@@ -3,7 +3,7 @@ import { canonicalJson, type JsonValue } from "../kernel/json.js";
 import { getDatabase, type Database } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { handleAgentEvent as processEvent, type AgentHistoryEvent } from "./events.js";
-import type { AgentMemberConfig, AgentStreamEvent } from "./types.js";
+import type { AgentMemberConfig, AgentPromptSnapshot, AgentStreamEvent } from "./types.js";
 import {
   formatRuntimeErrorMessage, instanceKey, instances, isMemberConfigured,
   memberRuntimeAllowed, memberUnconfiguredMessage, runtimeIsStopping,
@@ -219,7 +219,7 @@ export interface SchedulerServices {
   authorizeExecution(memberId:string,sourceRef:string|null):boolean;
   postSystemNotice(sourceRef:string,text:string):void;
   emitEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void;
-  refreshProfileSources(instance:AgentInstance):void;
+  loadProfileSources(memberId:string):{agentName:string;compiled:AgentPromptSnapshot};
   applyPendingControls(instance:AgentInstance,trigger:string):void;
   interruptAccepted(instance:AgentInstance,sourceRef:string):void;
   flushPendingReload(instance:AgentInstance):void;
@@ -327,7 +327,7 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
   try{
     if(trigger!=="length_continuation")schedulerServices().emitEvent(sourceRef,instance.memberId,{type:"user_prompt",text:message,trigger});
-    if(instance.profilePromptDirty){schedulerServices().refreshProfileSources(instance);instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;}
+    if(instance.profilePromptDirty){const sources=schedulerServices().loadProfileSources(instance.memberId);instance.agentName=sources.agentName;instance.sessionSources.compiled=sources.compiled;instance.handle.refreshPrompt(sources.compiled);instance.profilePromptDirty=false;}
     await instance.handle.prompt(message,{beforeDispatch:event=>{
       if(!schedulerServices().authorizeExecution(instance.memberId,sourceRef))throw new ExecutionAuthorizationRevokedError();
       if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
@@ -377,6 +377,10 @@ export function dispatchSdkExecution(memberId:string,sourceRef:string|null,opera
  * continuation, compaction, unexpected exit, queued-input draining) cannot
  * drift between scopes.
  */
+export function recordMemberRuntimeEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void{
+  const key=instanceKey(memberId),instance=instances.get(key);
+  processEvent(sourceRef,memberId,key,event as AgentStreamEvent,instance?.eventBuffer??[],memberId);
+}
 export function wireInstanceEvents(instance: AgentInstance): void {
   const key = instanceKey(instance.memberId), memberId = instance.memberId;
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {

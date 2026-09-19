@@ -12,8 +12,8 @@ import { importArchivedMessage, recordMessageArchive, saveArchiveSummary, type A
 import { setDmMemberCursor, setMemberCursor, setUserReadCursor, type UserReadCursor } from "../../chat/cursors.js";
 import { importMessage, importMessageNextSequence, type Message } from "../../chat/messages.js";
 export function retiredTopicScope(scope:string|undefined):boolean{return !!scope&&scope.startsWith("topic:");}
-export function ensureImportedScope(db:Database,input:string,_roomHint?:string):string{
- const ref=parseConversation(input);if(!ref)throw new Error(`Invalid execution scope: ${input}`);
+export function ensureImportedScope(db:Database,input:string,roomHint?:string):string{
+ const ref=parseConversation(input)??(roomHint===input?parseConversation(`room:${roomHint}`):null);if(!ref)throw new Error(`Invalid execution scope: ${input}`);
  const id=storageScopeId(ref.scopeId);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;
  if(ref.kind==="room")db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,'room',?,NULL)",id,ref.roomId);
  else if(ref.kind==="dm")db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,'dm',NULL,?)",id,ref.memberId);

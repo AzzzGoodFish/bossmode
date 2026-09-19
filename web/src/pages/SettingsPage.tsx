@@ -11,9 +11,6 @@ import {
   updateModelCatalogSettings,
   refreshModelCatalog,
   discoverModelCredentialModels,
-  startOAuthLoginJob,
-  submitOAuthLoginJobInput,
-  cancelOAuthLoginJob,
   getModelProviderCatalog,
   connectModelProviderApiKey,
   startOAuthConnection,
@@ -740,7 +737,9 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const startOAuth = async () => {
     setOauthBusy(true);
     try {
-      const job = await startOAuthLoginJob({ profileId: profile?.id, providerId: form.oauthProviderId, profile: form });
+      const job = await startOAuthConnection({
+        profileId: profile?.id, providerId: form.oauthProviderId || "", name: form.name, requestProfile: "standard",
+      });
       setOauthJob(job);
     } catch (err) { console.error("Failed to start OAuth sign-in", err); toast(userActionError("start sign-in"), "error"); }
     finally { setOauthBusy(false); }
@@ -750,7 +749,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
     setOauthBusy(true);
     setOauthInputError("");
     try {
-      await submitOAuthLoginJobInput(oauthJob.id, value);
+      await submitOAuthConnectionInput(oauthJob.id, value);
     } catch (err) {
       console.error("Failed to submit OAuth input", err);
       // Authored validation messages (pre-parse / state mismatch) show inline
@@ -763,7 +762,7 @@ function CredentialProfileSheet({ profile, onClose, onSaved }: { profile: Public
   const cancelOAuth = async () => {
     if (!oauthJob) return;
     setOauthBusy(true);
-    try { setOauthJob(await cancelOAuthLoginJob(oauthJob.id)); }
+    try { setOauthJob(await cancelOAuthConnection(oauthJob.id)); }
     catch (err) { console.error("Failed to cancel OAuth sign-in", err); toast(userActionError("cancel sign-in"), "error"); }
     finally { setOauthBusy(false); }
   };

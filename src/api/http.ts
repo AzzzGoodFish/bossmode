@@ -3,6 +3,13 @@ import { logger } from "../kernel/logger.js";
 import { login, requireAuth } from "./auth.js";
 
 export type RouteHandler = (request: IncomingMessage, response: ServerResponse, params: Record<string, string>) => Promise<void>;
+export class HttpError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+export async function requestValue<T>(action: () => T | Promise<T>, status = 400, code = "invalid_request"): Promise<T> {
+  try { return await action(); }
+  catch (error) { throw error instanceof HttpError ? error : new HttpError(status, code, error instanceof Error ? error.message : String(error)); }
+}
 interface Route { method: string; pattern: RegExp; paramNames: string[]; handler: RouteHandler }
 const routes: Route[] = [];
 
@@ -82,8 +89,9 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     try { await route.handler(request, response, params); }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error("api", `${method} ${path}`, { error: message });
-      sendJson(response, 500, { error: message || "Internal server error" });
+      if (!(error instanceof HttpError) || error.status >= 500) logger.error("api", `${method} ${path}`, { error: message });
+      const status = error instanceof HttpError ? error.status : 500;
+      sendJson(response, status, { error: error instanceof HttpError ? error.code : "internal", message: message || "Internal server error" });
     }
     return true;
   }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { instances, instanceKey, type AgentInstance } from "../src/agent/instance.js";
 import {
@@ -53,12 +53,13 @@ function admission(fixture: ReturnType<typeof coreFixture>, key: string, sourceR
 function wire(options: {
   authorize: (sourceRef: string | null) => boolean;
   build: () => Promise<AgentInstance | null>;
+  loadProfileSources?:()=>{agentName:string;compiled:{agentPrompt:string;appendSystemPrompt:string[]}};
 }) {
   configureScheduler({
     buildSession: options.build,
     memberConfig: () => ({ id: "mem_auth", name: "Auth", agent: "general", runtime: "fake" } as AgentMemberConfig),
     authorizeExecution: (_memberId, sourceRef) => options.authorize(sourceRef),
-    postSystemNotice() {}, emitEvent() {}, refreshProfileSources() {}, applyPendingControls() {},
+    postSystemNotice() {}, emitEvent() {}, loadProfileSources() { if(!options.loadProfileSources)throw new Error("unexpected profile refresh");return options.loadProfileSources(); }, applyPendingControls() {},
     interruptAccepted() {}, flushPendingReload() {}, reloadSession: async () => ({ queued: false, rebuilt: false }),
     hasPendingReply: () => false, dismissReplies() {},
   });
@@ -137,6 +138,16 @@ describe("execution authorization boundaries v2", () => {
     ]);
     expect(instances.get(instanceKey("mem_auth"))).toBe(instance);
     expect(instance.activeSourceRef).toBeNull();
+  });
+
+  it("refreshes dirty runtime profile state inside the scheduler",async()=>{
+    const fixture=setup(),instance=fakeInstance(async(message,options)=>options?.beforeDispatch?.({attemptId:`attempt:${message}`,dispatchIndex:0,message}));
+    const refreshPrompt=vi.fn();instance.handle.refreshPrompt=refreshPrompt;instance.profilePromptDirty=true;instances.set(instanceKey("mem_auth"),instance);
+    const compiled={agentPrompt:"new identity",appendSystemPrompt:["new resources"]};
+    wire({authorize:()=>true,build:async()=>instance,loadProfileSources:()=>({agentName:"Renamed",compiled})});
+    await wakeAgent("mem_auth",admission(fixture,"profile-refresh","dm:mem_auth"));
+    expect(instance).toMatchObject({agentName:"Renamed",profilePromptDirty:false,sessionSources:{compiled}});
+    expect(refreshPrompt).toHaveBeenCalledWith(compiled);
   });
 
   it("rechecks inside beforeDispatch so revoked work has no provider dispatch receipt", async () => {

@@ -111,26 +111,13 @@ export async function getMembers(): Promise<RoomContact[]> {
   return result.members;
 }
 
-export async function getMember(id: string): Promise<MemberInfo> {
-  return apiFetch(`/api/members/${id}`);
-}
-
-export async function createMember(data: Omit<MemberInfo, "id">): Promise<MemberInfo> {
-  return apiFetch("/api/members", { method: "POST", body: JSON.stringify(data) });
-}
-
-
 export async function getRoomMembers(roomId: string): Promise<MemberInfo[]> {
   return apiFetch(`/api/rooms/${roomId}/members`);
 }
 
 
-export async function deleteMemberApi(id: string): Promise<void> {
-  await apiFetch(`/api/members/${id}`, { method: "DELETE" });
-}
-
 export async function getMemberTokenUsage(id: string, roomId?: string): Promise<{ totalTokens: number }> {
-  const query = roomId ? `?roomId=${encodeURIComponent(roomId)}` : "";
+  const query = roomId ? `?scope=${encodeURIComponent(`room:${roomId}`)}` : "";
   return apiFetch(`/api/members/${id}/token-usage${query}`);
 }
 
@@ -144,13 +131,7 @@ export interface MemberStats {
 }
 
 export async function getMemberStats(id: string, roomId: string): Promise<MemberStats> {
-  return apiFetch(`/api/members/${id}/stats?roomId=${encodeURIComponent(roomId)}`);
-}
-
-export async function restartMember(id: string, roomId?: string): Promise<void> {
-  void roomId;
-  // ① B5: member-level restart — the old room query is ignored.
-  await memberAction(id, "restart");
+  return apiFetch(`/api/members/${id}/stats?scope=${encodeURIComponent(`room:${roomId}`)}`);
 }
 
 // -- Model Credentials --
@@ -376,32 +357,16 @@ export async function startOAuthConnection(data: StartOAuthConnectionRequest): P
   return apiFetch("/api/model-credential-profiles/oauth/start", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function startOAuthLoginJob(data: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string }): Promise<OAuthLoginJob> {
-  return apiFetch("/api/model-credential-profiles/oauth-login/start", { method: "POST", body: JSON.stringify(data) });
-}
-
 export async function getOAuthConnectionJob(id: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}`);
-}
-
-export async function getOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}`);
 }
 
 export async function submitOAuthConnectionInput(id: string, code: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
 }
 
-export async function submitOAuthLoginJobInput(id: string, code: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
-}
-
 export async function cancelOAuthConnection(id: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}/cancel`, { method: "POST" });
-}
-
-export async function cancelOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/cancel`, { method: "POST" });
 }
 
 export async function discoverModelCredentialModels(data: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
@@ -423,21 +388,6 @@ export async function getConfiguredModels(): Promise<AvailableModelOption[]> {
 // 0.8.0: single global namespace. No KB container; every document is a path
 // relative to ~/.bossmode/knowledge/docs/.
 
-/** Document summary from the list endpoint (no content). */
-export interface KnowledgeEntryInfo {
-  /** Document path, e.g. "bossmode/architecture/overview.md". Acts as the stable ID. */
-  id: string;
-  title: string;
-  source: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** Full document returned from read/update endpoints. */
-export interface KnowledgeEntry extends KnowledgeEntryInfo {
-  content: string;
-}
-
 /** Directory tree node for the file-explorer UI. */
 export interface KnowledgeTreeNode {
   path: string;
@@ -445,18 +395,6 @@ export interface KnowledgeTreeNode {
   kind: "file" | "folder";
   title?: string;
   children?: KnowledgeTreeNode[];
-}
-
-export async function getKnowledgeEntries(): Promise<KnowledgeEntryInfo[]> {
-  return apiFetch(`/api/knowledge/entries`);
-}
-
-export async function getKnowledgeTree(): Promise<KnowledgeTreeNode> {
-  return apiFetch(`/api/knowledge/tree`);
-}
-
-export async function getKnowledgeEntry(path: string): Promise<KnowledgeEntry> {
-  return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`);
 }
 
 async function apiFetchBlob(path: string): Promise<Blob> {
@@ -473,10 +411,6 @@ async function apiFetchBlob(path: string): Promise<Blob> {
     throw new Error(body.error || `HTTP ${res.status}`);
   }
   return res.blob();
-}
-
-export async function getKnowledgeRawBlob(path: string): Promise<Blob> {
-  return apiFetchBlob(`/api/knowledge/raw?path=${encodeURIComponent(path)}`);
 }
 
 export interface ArtifactPreviewData {
@@ -503,105 +437,19 @@ export async function getAttachmentRawBlob(roomId: string, filename: string): Pr
   return apiFetchBlob(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments/${encodeURIComponent(filename)}`);
 }
 
-export async function addKnowledgeEntry(
-  title: string, content: string, path?: string,
-): Promise<KnowledgeEntry> {
-  return apiFetch(`/api/knowledge/entries`, {
-    method: "POST",
-    body: JSON.stringify({ title, content, path }),
-  });
-}
-
-export async function updateKnowledgeEntry(
-  path: string, title: string, content: string,
-): Promise<KnowledgeEntry> {
-  return apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, {
-    method: "PUT",
-    body: JSON.stringify({ title, content }),
-  });
-}
-
-export async function uploadKnowledgePng(path: string, file: File): Promise<KnowledgeEntry> {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return apiFetch(`/api/knowledge/upload`, {
-    method: "POST",
-    body: JSON.stringify({ path, contentType: file.type || "image/png", dataBase64: btoa(binary) }),
-  });
-}
-
-export async function deleteKnowledgeEntry(path: string): Promise<void> {
-  await apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, { method: "DELETE" });
-}
-
-export interface MoveKnowledgeResult {
-  ok: boolean;
-  from: string;
-  to: string;
-  type: "file" | "folder";
-}
-
-export async function moveKnowledgeEntry(from: string, to: string): Promise<MoveKnowledgeResult> {
-  return apiFetch(`/api/knowledge/move`, {
-    method: "POST",
-    body: JSON.stringify({ from, to }),
-  });
-}
-
-export async function deleteKnowledgeFolder(path: string): Promise<void> {
-  await apiFetch(`/api/knowledge/entry?path=${encodeURIComponent(path)}`, { method: "DELETE" });
-}
-
-export async function batchMoveKnowledge(paths: string[], destination: string): Promise<{ moved: number; failed: string[] }> {
-  return apiFetch(`/api/knowledge/batch-move`, {
-    method: "POST",
-    body: JSON.stringify({ paths, destination }),
-  });
-}
-
-export async function batchDeleteKnowledge(paths: string[]): Promise<{ deleted: number; failed: string[] }> {
-  return apiFetch(`/api/knowledge/batch-delete`, {
-    method: "POST",
-    body: JSON.stringify({ paths }),
-  });
-}
-
 // -- Rooms --
-
-export interface RoomMemberRecord {
-  id: string;
-  roomId?: string;
-  name: string;
-  sourceAgent: string;
-  sourceMemberId?: string;
-  avatar?: string;
-  config?: {
-    model?: string;
-    credentialId?: string;
-    thinkingLevel?: string;
-    contextLimit?: number;
-    skills?: string[];
-    mcpServers?: string[];
-  };
-  createdAt: number;
-  updatedAt: number;
-}
 
 export interface Room {
   id: string;
   name: string;
   /** ⑤: room description — shown in chat_info / the room settings dialog. */
   description?: string;
-  cwd: string;
   members: string[];
-  /** 0.20: authoritative member composition — join via useGlobalMembers(). */
-  globalMemberIds?: string[];
+  memberIds: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
   createdAt: number;
-  /** Legacy. No longer injected into prompts or shown in Room Settings. */
+  /** Live status projection keyed by current member display name. */
   agentStatuses?: Record<string, string>;
 }
 
@@ -622,7 +470,7 @@ export async function createRoom(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; description?: string | null; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
+  patch: { name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",
@@ -638,13 +486,6 @@ export async function deleteRoom(id: string): Promise<void> {
   await apiFetch(`/api/rooms/${id}`, { method: "DELETE" });
 }
 
-export async function renameRoom(id: string, name: string): Promise<Room> {
-  return apiFetch(`/api/rooms/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-}
-
 export interface MemberActiveTool {
   name: string;
   label?: string;
@@ -658,10 +499,6 @@ export interface MemberActiveToolsResponse {
   sessionActive: boolean;
   tools: MemberActiveTool[];
   message?: string;
-}
-
-export async function getMemberActiveTools(roomId: string, memberRef: string): Promise<MemberActiveToolsResponse> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/tools`);
 }
 
 // -- Messages --
@@ -726,9 +563,17 @@ export interface TopicEventMeta {
   summary?: string;
 }
 
+export interface MessageSearchHit {
+  id: string;
+  seq?: number;
+  sender: string;
+  senderMemberId?: string;
+  content: string;
+  ts: number;
+}
 export interface MessageSearchResult {
   total: number;
-  messages: RoomMessage[];
+  messages: MessageSearchHit[];
 }
 
 export async function searchMessages(
@@ -772,43 +617,16 @@ export async function sendMessage(
   return result.message;
 }
 
-export async function resetAgentSession(
-  roomId: string,
-  agentName: string,
-): Promise<{ ok: true; message: string }> {
-  const scope = encodeURIComponent(`room:${roomId}`);
-  return apiFetch(`/api/conversations/${scope}/reset-session?member=${encodeURIComponent(agentName)}`, { method: "POST" });
-}
-
-// ── Mount-stale info ──
-
-export interface StaleInfo {
-  mounts?: { since: number; fields: string[] };
-  contract?: boolean;
-}
-
-export async function getAgentEvents(roomId: string, agentName: string): Promise<unknown[]> {
-  const scope = encodeURIComponent(`room:${roomId}`);
-  return apiFetch(`/api/conversations/${scope}/events?member=${encodeURIComponent(agentName)}`);
-}
-
 export interface PaginatedEvents {
   events: unknown[];
   total: number;
   hasMore: boolean;
 }
 
-export async function getAgentEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): Promise<PaginatedEvents> {
-  const params = new URLSearchParams({ member: agentName, limit: String(limit) });
+export async function getConversationEvents(scopeId: string, memberId: string, limit: number, before?: number): Promise<PaginatedEvents> {
+  const params = new URLSearchParams({ memberId, limit: String(limit) });
   if (before !== undefined) params.set("before", String(before));
-  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/events?${params}`);
-}
-
-/** Scope-addressed events (dm:<id> / room:<id>). */
-export async function getConversationEvents(scopeId: string, member: string, limit: number, before?: number): Promise<PaginatedEvents> {
-  const qs = new URLSearchParams({ member, limit: String(limit) });
-  if (before !== undefined) qs.set("before", String(before));
-  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/events?${qs}`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/events?${params}`);
 }
 
 export interface ActivityEventsPage {
@@ -829,17 +647,17 @@ export async function getMemberActivityEvents(
   beforeSeq?: number,
   types?: string[],
 ): Promise<ActivityEventsPage> {
-  const qs = new URLSearchParams({ limit: String(limit) });
+  const qs = new URLSearchParams({ scope: `room:${roomId}`, limit: String(limit) });
   if (beforeSeq !== undefined) qs.set("beforeSeq", String(beforeSeq));
   if (types && types.length) qs.set("types", types.join(","));
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(ref)}/events?${qs}`);
+  return apiFetch(`/api/members/${encodeURIComponent(ref)}/events?${qs}`);
 }
 
 /** ① B5: stop/compact/reset/restart target the member directly — no chat scope
  *  in the interface; the same call works from any chat or the member panel. */
 export async function memberAction(
   memberId: string,
-  action: "abort" | "compact" | "reset" | "restart",
+  action: "compact" | "reset" | "restart",
 ): Promise<{ ok?: boolean; action?: string; message?: string }> {
   return apiFetch(`/api/members/${encodeURIComponent(memberId)}/${action}`, {
     method: "POST",
@@ -863,71 +681,8 @@ export interface ContextUsageData {
   compacted?: boolean;
 }
 
-export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsageData> {
-  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?member=${encodeURIComponent(agentName)}`);
-}
-
-// -- Attachments --
-
-export interface UploadResult {
-  filename: string;
-  originalFilename: string;
-  /** Stored filename, kept as `path` for legacy caller compatibility. Never an absolute path. */
-  path: string;
-  size: number;
-  url: string;
-  previewType?: AttachmentPreviewType;
-}
-
-export async function uploadFile(roomId: string, file: File): Promise<UploadResult> {
-  const headers: Record<string, string> = {};
-  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-
-  const res = await fetch(
-    `${BASE_URL}/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments?filename=${encodeURIComponent(file.name)}`,
-    { method: "POST", headers, body: file },
-  );
-
-  if (res.status === 401) {
-    clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: "Upload failed" }));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
-
-  return res.json();
-}
-
-export type McpAvailabilityStatus = "unchecked" | "checking" | "available" | "unavailable" | "auth-required" | "invalid-config";
-
-export interface McpServerAvailability {
-  name: string;
-  status: McpAvailabilityStatus;
-  checkedAt?: number;
-  toolCount?: number;
-  resourceCount?: number;
-  error?: string;
-}
-
-export interface McpServerSummary {
-  name: string;
-  transport: "http" | "stdio" | "invalid";
-  assignedCount?: number;
-  availability?: McpServerAvailability;
-}
-
-export interface McpSettings {
-  enabled: boolean;
-  configPath: string;
-  configText: string;
-  serverCount: number;
-  servers?: McpServerSummary[];
-  availability?: Record<string, McpServerAvailability>;
-  sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
+export async function getAgentContextUsage(roomId: string, memberId: string): Promise<ContextUsageData> {
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?memberId=${encodeURIComponent(memberId)}`);
 }
 
 // -- Usage (token stats) --
@@ -1025,25 +780,6 @@ export async function getRoomUsage(
   const qs = q.toString();
   return apiFetch(`/api/rooms/${roomId}/usage${qs ? `?${qs}` : ""}`);
 }
-
-export async function getMcpSettings(): Promise<McpSettings> {
-  return apiFetch("/api/settings/mcp");
-}
-
-export async function updateMcpSettings(settings: { enabled?: boolean; configText?: string }): Promise<McpSettings> {
-  return apiFetch("/api/settings/mcp", {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
-}
-
-export async function checkMcpServers(server?: string, timeoutMs?: number): Promise<McpSettings & { results: McpServerAvailability[] }> {
-  return apiFetch("/api/settings/mcp/check", {
-    method: "POST",
-    body: JSON.stringify({ ...(server ? { server } : {}), ...(timeoutMs ? { timeoutMs } : {}) }),
-  });
-}
-
 
 // -- 0.20: Contacts / Members / DM / Chats (member-global model) --
 
@@ -1308,19 +1044,6 @@ export async function getConversationTools(scopeId: string, memberId: string): P
   return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/tools?memberId=${encodeURIComponent(memberId)}`);
 }
 
-export async function conversationMemberAction(
-  scopeId: string,
-  memberId: string,
-  action: "abort" | "reset-session" | "reload" | "compact",
-): Promise<{ ok?: boolean; action?: string; message?: string; reloaded?: boolean }> {
-  void scopeId;
-  // ① B5: kept as a thin member-level shim for older callers; new code uses
-  // memberAction directly.
-  if (action === "reset-session") return memberAction(memberId, "reset");
-  if (action === "reload") return { ok: false, message: "Reload retired — activation recompiles the latest prompt" };
-  return memberAction(memberId, action);
-}
-
 export async function patchGlobalMember(id: string, patch: Record<string, unknown>): Promise<{ member: MemberDetail }> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -1341,6 +1064,6 @@ export async function inviteRoomMember(roomId: string, memberId: string): Promis
   });
 }
 
-export async function removeRoomMember(roomId: string, memberRef: string): Promise<Room> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}`, { method: "DELETE" });
+export async function removeRoomMember(roomId: string, memberId: string): Promise<Room> {
+  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
 }

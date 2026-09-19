@@ -42,7 +42,7 @@ describe("null-source member controls v2", () => {
     const config = { id: live.memberId, name: live.agentName, agent: "general", runtime: "fake", model: "fake:model", credentialId: "cred" } as AgentMemberConfig;
     configureScheduler({
       buildSession: async () => live, memberConfig: () => config, authorizeExecution: () => true,
-      postSystemNotice() {}, emitEvent() {}, refreshProfileSources() {}, applyPendingControls() {}, interruptAccepted() {},
+      postSystemNotice() {}, emitEvent() {}, loadProfileSources() { throw new Error("unexpected profile refresh"); }, applyPendingControls() {}, interruptAccepted() {},
       flushPendingReload() {}, reloadSession: async () => ({ queued: false, rebuilt: false }),
       hasPendingReply: () => false, dismissReplies() {},
     });

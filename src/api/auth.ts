@@ -47,10 +47,3 @@ export function requireAuth(headers: Record<string, string | string[] | undefine
   const token = extractToken(headers);
   return !!token && validateToken(token);
 }
-export function getSessionExpiresAtForTests(token: string): number | null {
-  return getDatabase().get<{ expires_at: number }>("SELECT expires_at FROM auth_sessions WHERE token_hash=?", hashAuthToken(token))?.expires_at ?? null;
-}
-export function setSessionRemainingForTests(token: string, remainingMs: number): void {
-  if (getSessionExpiresAtForTests(token) !== null) importAuthSession(hashAuthToken(token), Date.now() + remainingMs);
-}
-export function clearSessionsForTests(): void { getDatabase().run("DELETE FROM auth_sessions"); }

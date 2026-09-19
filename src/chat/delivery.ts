@@ -6,7 +6,6 @@ import {
   conversationMember,
   getRoomMembers,
   parseConversation,
-  parseMmScopeId,
   storageScopeId,
 } from "./conversations.js";
 import { captureChatContext, renderChatInput, type PreparedAgentInput } from "./context.js";
@@ -17,7 +16,6 @@ export type DeliveryKind = "ordinary" | "dm";
 export interface DeliveryActor { actorKey: string; memberId: string | null }
 export interface CapturedDeliverySnapshot {
   message: { [key: string]: JsonValue };
-  context: JsonValue;
   origin: "user" | "member" | "system" | "unresolved";
   messageType: "chat" | "task_event" | "knowledge_event" | "notification";
   senderActorKey: string | null;
@@ -27,8 +25,6 @@ export interface CapturedDeliverySnapshot {
 }
 export interface CapturedMessage { scopeId: string; messageId: string; snapshot: CapturedDeliverySnapshot }
 export interface DeliveryKey { scopeId: string; messageId: string; targetActorKey: string; deliveryKind: DeliveryKind }
-export interface AcceptedDelivery extends DeliveryKey { targetMemberId: string | null; acceptedAt: number }
-
 export interface ChatAdmissionToken extends DeliveryKey {
   sourceRef: string;
   idempotencyKey: string;
@@ -115,25 +111,22 @@ function captureJson(capture: CapturedMessage): string {
   return canonicalJson(value, "Invalid delivery JSON");
 }
 
-export function captureMessage(db: Database, capture: CapturedMessage, at: number): { inserted: boolean; capture: CapturedMessage } {
+function captureMessage(db: Database, capture: CapturedMessage, at: number): void {
   timestamp(at);
   const snapshotJson = captureJson(capture);
-  return db.transaction((tx) => {
-    const scope = tx.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", capture.scopeId);
-    if (!scope) throw new Error("Captured delivery scope does not exist");
-    if (scope.kind === "dm" ? capture.snapshot.targets.ordinary.length > 0 : capture.snapshot.targets.dm.length > 0) {
-      throw new Error("Delivery kind does not match scope");
-    }
-    const old = tx.get<{ snapshot_json: string }>(
-      "SELECT snapshot_json FROM delivery_captures WHERE scope_id=? AND message_id=?", capture.scopeId, capture.messageId,
-    );
-    if (old && old.snapshot_json !== snapshotJson) throw new Error("Conflicting captured message identity");
-    if (!old) tx.run(
-      "INSERT INTO delivery_captures(scope_id,message_id,snapshot_json,captured_at) VALUES(?,?,?,?)",
-      capture.scopeId, capture.messageId, snapshotJson, at,
-    );
-    return { inserted: !old, capture: { ...capture, snapshot: JSON.parse(snapshotJson) as CapturedDeliverySnapshot } };
-  });
+  const scope = db.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", capture.scopeId);
+  if (!scope) throw new Error("Captured delivery scope does not exist");
+  if (scope.kind === "dm" ? capture.snapshot.targets.ordinary.length > 0 : capture.snapshot.targets.dm.length > 0) {
+    throw new Error("Delivery kind does not match scope");
+  }
+  const old = db.get<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM delivery_captures WHERE scope_id=? AND message_id=?", capture.scopeId, capture.messageId,
+  );
+  if (old && old.snapshot_json !== snapshotJson) throw new Error("Conflicting captured message identity");
+  if (!old) db.run(
+    "INSERT INTO delivery_captures(scope_id,message_id,snapshot_json,captured_at) VALUES(?,?,?,?)",
+    capture.scopeId, capture.messageId, snapshotJson, at,
+  );
 }
 
 export function readCapture(scope: string, messageId: string, db: Database = getDatabase()): CapturedMessage | null {
@@ -144,29 +137,19 @@ export function readCapture(scope: string, messageId: string, db: Database = get
   return row ? { scopeId, messageId, snapshot: JSON.parse(row.snapshot_json) as CapturedDeliverySnapshot } : null;
 }
 
-export function readDelivery(key: DeliveryKey, db: Database = getDatabase()): AcceptedDelivery | null {
-  return db.get<AcceptedDelivery>(`SELECT scope_id AS scopeId,message_id AS messageId,target_actor_key AS targetActorKey,
-    target_member_id AS targetMemberId,delivery_kind AS deliveryKind,accepted_at AS acceptedAt
-    FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(key)) ?? null;
-}
-
-function acceptDelivery(db: Database, key: DeliveryKey, snapshot: CapturedDeliverySnapshot, at: number): { inserted: boolean; delivery: AcceptedDelivery } {
-  return db.transaction((tx) => {
-    const stored = captureMessage(tx, { scopeId: key.scopeId, messageId: key.messageId, snapshot }, at).capture;
-    const target = stored.snapshot.targets[key.deliveryKind].find((actor) => actor.actorKey === key.targetActorKey);
-    if (!target) throw new Error("Delivery actor is not a captured target");
-    const scope = tx.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", key.scopeId);
-    if ((scope?.kind === "dm") !== (key.deliveryKind === "dm")) throw new Error("Delivery kind does not match scope");
-    const old = readDelivery(key, tx);
-    if (old) return { inserted: false, delivery: old };
-    tx.run(`INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at)
-      VALUES(?,?,?,?,?,?)`, ...keyParams(key), target.memberId, at);
-    return { inserted: true, delivery: readDelivery(key, tx)! };
-  });
+function acceptDelivery(db: Database, key: DeliveryKey, snapshot: CapturedDeliverySnapshot, at: number): boolean {
+  const target = snapshot.targets[key.deliveryKind].find(actor => actor.actorKey === key.targetActorKey);
+  if (!target) throw new Error("Delivery actor is not a captured target");
+  const scope = db.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", key.scopeId);
+  if ((scope?.kind === "dm") !== (key.deliveryKind === "dm")) throw new Error("Delivery kind does not match scope");
+  if (db.get("SELECT 1 FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?", ...keyParams(key))) return false;
+  db.run(`INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at)
+    VALUES(?,?,?,?,?,?)`, ...keyParams(key), target.memberId, at);
+  return true;
 }
 
 function openReplies(db: Database, capture: CapturedMessage, at: number): void {
-  const value = captureMessage(db, capture, at).capture.snapshot;
+  const value = capture.snapshot;
   if (value.messageType !== "chat" || value.needResponse?.length === 0) return;
   const targets = new Map([...value.targets.ordinary, ...value.targets.dm].map((actor) => [actor.actorKey, actor]));
   const requiredActors = value.origin === "user"
@@ -283,7 +266,7 @@ function prepareAdmission(
   let row = db.get<AdmissionRow>(`SELECT * FROM chat_admissions
     WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(key));
   if (!row) {
-    if (!accepted.inserted) throw new Error("Historical captured delivery is not repairable without a pending admission");
+    if (!accepted) throw new Error("Historical captured delivery is not repairable without a pending admission");
     const replyExpected = Boolean(db.get(`SELECT 1 FROM reply_obligations
       WHERE scope_id=? AND message_id=? AND actor_key=? AND settled_at IS NULL AND ${ACTIVE_REPLY}`,
     capture.scopeId, capture.messageId, target.actorKey));
@@ -344,76 +327,73 @@ export function appendMessageWithAdmissions(
   if (!ref) throw new Error(`Invalid chat source: ${source}`);
   const sourceRef = ref.scopeId;
   const scopeId = storageScopeId(sourceRef);
-  return db.transaction((tx) => {
-    let roster: Array<{ id: string; name: string }> | undefined;
-    const ids = (provided: string[] | undefined, names: string[] | undefined): string[] => {
-      if (provided !== undefined) return [...new Set(provided)];
-      if (!names?.length) return [];
-      if (!roster) {
-        const owner = ref.kind === "dm" ? conversationMember(ref.memberId, true) : null;
-        roster = ref.kind === "room" ? getRoomMembers(ref.roomId) : owner ? [owner] : [];
-      }
-      if (names.includes("all")) return roster.map((member) => member.id);
-      return [...new Set(names.flatMap((name) => roster!.filter((member) => member.name === name).map((member) => member.id)))];
-    };
-    const prepared = JSON.parse(JSON.stringify(input)) as MessageInput;
-    if (!prepared.type && ref.kind === "room" && prepared.mentionMemberIds === undefined) {
-      if (prepared.mentions.length === 0) {
-        const detected = parseMentions(prepared.content, getRoomMembers(ref.roomId));
-        prepared.mentions = detected.labels;
-        prepared.mentionMemberIds = detected.memberIds;
-      } else prepared.mentionMemberIds = ids(undefined, prepared.mentions);
+  let roster: Array<{ id: string; name: string }> | undefined;
+  const ids = (provided: string[] | undefined, names: string[] | undefined): string[] => {
+    if (provided !== undefined) return [...new Set(provided)];
+    if (!names?.length) return [];
+    if (!roster) {
+      const owner = ref.kind === "dm" ? conversationMember(ref.memberId, true) : null;
+      roster = ref.kind === "room" ? getRoomMembers(ref.roomId) : owner ? [owner] : [];
     }
-    if (prepared.needResponseMemberIds === undefined && prepared.needResponse !== undefined) {
-      prepared.needResponseMemberIds = ids(undefined, prepared.needResponse);
+    if (names.includes("all")) return roster.map((member) => member.id);
+    return [...new Set(names.flatMap((name) => roster!.filter((member) => member.name === name).map((member) => member.id)))];
+  };
+  const prepared = JSON.parse(JSON.stringify(input)) as MessageInput;
+  if (!prepared.type && ref.kind === "room" && prepared.mentionMemberIds === undefined) {
+    if (prepared.mentions.length === 0) {
+      const detected = parseMentions(prepared.content, getRoomMembers(ref.roomId));
+      prepared.mentions = detected.labels;
+      prepared.mentionMemberIds = detected.memberIds;
+    } else prepared.mentionMemberIds = ids(undefined, prepared.mentions);
+  }
+  if (prepared.needResponseMemberIds === undefined && prepared.needResponse !== undefined) {
+    prepared.needResponseMemberIds = ids(undefined, prepared.needResponse);
+  }
+  const message = appendMessageInTransaction(db, sourceRef, prepared);
+  const sender = message.senderMemberId ? actor(message.senderMemberId) : null;
+  const origin: CapturedDeliverySnapshot["origin"] = sender ? "member" :
+    message.sender === "user" ? "user" : message.sender === "system" ? "system" : "unresolved";
+  const messageType: CapturedDeliverySnapshot["messageType"] = message.type === "task_event" ? "task_event" :
+    message.type === "knowledge_event" ? "knowledge_event" : message.type ? "notification" : "chat";
+  const targets: CapturedDeliverySnapshot["targets"] = { ordinary: [], dm: [] };
+  if (messageType === "chat") {
+    if (ref.kind === "dm" && origin === "user") targets.dm = [actor(ref.memberId)];
+    else if (ref.kind === "mm" && sender) {
+      const other = ref.memberIds.find(id => id !== sender.memberId);
+      if (other) targets.ordinary = [actor(other)];
+    } else if (ref.kind === "room") {
+      targets.ordinary = ids(message.mentionMemberIds, message.mentions)
+        .filter((id) => id !== sender?.actorKey).map(actor);
     }
-    const message = appendMessageInTransaction(tx, sourceRef, prepared);
-    const sender = message.senderMemberId ? actor(message.senderMemberId) : null;
-    const origin: CapturedDeliverySnapshot["origin"] = sender ? "member" :
-      message.sender === "user" ? "user" : message.sender === "system" ? "system" : "unresolved";
-    const messageType: CapturedDeliverySnapshot["messageType"] = message.type === "task_event" ? "task_event" :
-      message.type === "knowledge_event" ? "knowledge_event" : message.type ? "notification" : "chat";
-    const targets: CapturedDeliverySnapshot["targets"] = { ordinary: [], dm: [] };
-    if (messageType === "chat") {
-      if (ref.kind === "dm" && origin === "user") targets.dm = [actor(ref.memberId)];
-      else if (ref.kind === "mm" && sender) {
-        const other = parseMmScopeId(sourceRef)?.find((id) => id !== sender.memberId);
-        if (other) targets.ordinary = [actor(other)];
-      } else if (ref.kind === "room") {
-        targets.ordinary = ids(message.mentionMemberIds, message.mentions)
-          .filter((id) => id !== sender?.actorKey).map(actor);
-      }
+  }
+  const needResponse = message.needResponseMemberIds !== undefined || message.needResponse !== undefined
+    ? ids(message.needResponseMemberIds, message.needResponse).map(actor) : null;
+  const capture: CapturedMessage = {
+    scopeId,
+    messageId: message.id,
+    snapshot: {
+      message: JSON.parse(JSON.stringify(message)) as { [key: string]: JsonValue },
+      origin,
+      messageType,
+      senderActorKey: sender?.actorKey ?? null,
+      senderMemberId: sender?.memberId ?? null,
+      targets,
+      needResponse,
+    },
+  };
+  captureMessage(db, capture, message.ts);
+  openReplies(db, capture, message.ts);
+  if (origin === "member" && messageType === "chat" && sender) {
+    settleOwnReply({ scopeId, replyMessageId: message.id, actorKey: sender.actorKey, selection: { mode: "all-pending" } }, message.ts, db);
+  }
+  const admissions: PreparedChatAdmission[] = [];
+  for (const kind of ["ordinary", "dm"] as const) {
+    for (const target of targets[kind]) {
+      const admission = prepareAdmission(db, sourceRef, capture, target, kind, message.ts);
+      if (admission) admissions.push(admission);
     }
-    const needResponse = message.needResponseMemberIds !== undefined || message.needResponse !== undefined
-      ? ids(message.needResponseMemberIds, message.needResponse).map(actor) : null;
-    const capture: CapturedMessage = {
-      scopeId,
-      messageId: message.id,
-      snapshot: {
-        message: JSON.parse(JSON.stringify(message)) as { [key: string]: JsonValue },
-        context: {},
-        origin,
-        messageType,
-        senderActorKey: sender?.actorKey ?? null,
-        senderMemberId: sender?.memberId ?? null,
-        targets,
-        needResponse,
-      },
-    };
-    captureMessage(tx, capture, message.ts);
-    openReplies(tx, capture, message.ts);
-    if (origin === "member" && messageType === "chat" && sender) {
-      settleOwnReply({ scopeId, replyMessageId: message.id, actorKey: sender.actorKey, selection: { mode: "all-pending" } }, message.ts, tx);
-    }
-    const admissions: PreparedChatAdmission[] = [];
-    for (const kind of ["ordinary", "dm"] as const) {
-      for (const target of targets[kind]) {
-        const admission = prepareAdmission(tx, sourceRef, capture, target, kind, message.ts);
-        if (admission) admissions.push(admission);
-      }
-    }
-    return { message, admissions };
-  });
+  }
+  return { message, admissions };
 }
 
 /** Narrow repair entry: only an explicit durable pending admission can be
@@ -458,18 +438,16 @@ export function confirmChatAdmission(
 ): { confirmed: boolean; cursorConfirmed: boolean } {
   if (!Number.isSafeInteger(inputId) || inputId < 1) throw new Error("Invalid agent input id");
   timestamp(confirmedAt);
-  return db.transaction((tx) => {
-    const row = tx.get<AdmissionRow>(`SELECT * FROM chat_admissions
-      WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(token));
-    if (!row || row.idempotency_key !== token.idempotencyKey) throw new Error("Unknown or conflicting chat admission");
-    if (row.status === "confirmed") {
-      if (row.input_id !== inputId) throw new Error("Conflicting agent input receipt");
-      return { confirmed: false, cursorConfirmed: false };
-    }
-    tx.run(`UPDATE chat_admissions SET status='confirmed',input_id=?,confirmed_at=?
-      WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=? AND status='pending'`,
-    inputId, confirmedAt, ...keyParams(token));
-    const cursorConfirmed = token.cursor ? confirmMemberCursor(token.cursor, tx) : false;
-    return { confirmed: true, cursorConfirmed };
-  });
+  const row = db.get<AdmissionRow>(`SELECT * FROM chat_admissions
+    WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(token));
+  if (!row || row.idempotency_key !== token.idempotencyKey) throw new Error("Unknown or conflicting chat admission");
+  if (row.status === "confirmed") {
+    if (row.input_id !== inputId) throw new Error("Conflicting agent input receipt");
+    return { confirmed: false, cursorConfirmed: false };
+  }
+  db.run(`UPDATE chat_admissions SET status='confirmed',input_id=?,confirmed_at=?
+    WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=? AND status='pending'`,
+  inputId, confirmedAt, ...keyParams(token));
+  const cursorConfirmed = token.cursor ? confirmMemberCursor(token.cursor, db) : false;
+  return { confirmed: true, cursorConfirmed };
 }

@@ -108,6 +108,14 @@ function describeEntry(rel: string, content: string, source = "user"): Knowledge
   const stat = statSync(absDocPath(rel));
   return { id: rel, title: deriveTitleFromContent(content, rel), content, source, createdAt: stat.ctimeMs, updatedAt: stat.mtimeMs };
 }
+function documentFile(path: string, textOnly = false): { rel: string; abs: string } | null {
+  try {
+    const rel = normalizeDocPath(path);
+    if (!isAllowedFile(rel) || (textOnly && !isTextFile(rel))) return null;
+    const abs = absDocPath(rel);
+    return existsSync(abs) && statSync(abs).isFile() ? { rel, abs } : null;
+  } catch { return null; }
+}
 
 // -- Document tree --
 
@@ -161,37 +169,29 @@ export function listEntries(): KnowledgeEntry[] {
 }
 
 export function getEntry(entryId: string): KnowledgeEntry | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isAllowedFile(rel) || !isTextFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return null;
+  const file = documentFile(entryId, true);
+  if (!file) return null;
+  try { return describeEntry(file.rel, readFileSync(file.abs, "utf-8")); }
+  catch { return null; }
+}
+
+export function getPathType(path: string): "file" | "folder" | null {
   try {
-    const content = readFileSync(abs, "utf-8");
-    return describeEntry(rel, content);
+    const stat = statSync(absDocPath(normalizeDocPath(path)));
+    return stat.isDirectory() ? "folder" : stat.isFile() ? "file" : null;
   } catch { return null; }
 }
 
 export function getRawEntry(entryId: string): { path: string; contentType: string; data: Buffer } | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isAllowedFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  return { path: rel, contentType: contentTypeForPath(rel), data: readFileSync(abs) };
+  const file = documentFile(entryId);
+  return file ? { path: file.rel, contentType: contentTypeForPath(file.rel), data: readFileSync(file.abs) } : null;
 }
 
 /**
  * Write/overwrite a text document. If no extension is provided, `.md` is appended.
  * Creates intermediate directories. Frontmatter is not injected or parsed.
  */
-export function addEntry(
-  title: string,
-  content: string,
-  source: string,
-  path?: string,
-  _extraFrontmatter?: Record<string, string>,
-): KnowledgeEntry {
+export function addEntry(title: string, content: string, source: string, path?: string): KnowledgeEntry {
   ensureDocsRoot();
 
   const rel = path
@@ -205,19 +205,11 @@ export function addEntry(
   return describeEntry(rel, content, source);
 }
 
-export function updateEntry(
-  entryId: string,
-  _title: string,
-  content: string,
-  _extraFrontmatter?: Record<string, string>,
-): KnowledgeEntry | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isTextFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return null;
-  writeFileSync(abs, content, "utf-8");
-  return describeEntry(rel, content);
+export function updateEntry(entryId: string, content: string): KnowledgeEntry | null {
+  const file = documentFile(entryId, true);
+  if (!file) return null;
+  writeFileSync(file.abs, content, "utf-8");
+  return describeEntry(file.rel, content);
 }
 
 export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
@@ -235,93 +227,38 @@ export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
   return describeEntry(rel, "");
 }
 
-export function deleteEntry(entryId: string): boolean {
+export type PathMutation =
+  | { ok: true; type: "file" | "folder"; from: string; to?: string }
+  | { ok: false; error: string };
+
+export function movePath(fromPath: string, toPath: string): PathMutation {
+  let from: string, to: string;
+  try { from = normalizeDocPath(fromPath); to = normalizeDocPath(toPath); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  const source = getPathType(from);
+  if (!source) return { ok: false, error: "Source not found" };
+  if (getPathType(to) === "folder") to = `${to}/${basename(from)}`;
+  if (source === "file") to = ensureMoveExtension(from, to);
+  if ((source === "file" && (!isAllowedFile(from) || !isAllowedFile(to))) ||
+    (source === "folder" && (to === from || to.startsWith(`${from}/`)))) {
+    return { ok: false, error: source === "file" ? "Unsupported document type" : "Cannot move folder into itself or its subfolder" };
+  }
+  const sourcePath = absDocPath(from), destination = absDocPath(to);
+  if (existsSync(destination) && from !== to) return { ok: false, error: "Destination already exists" };
+  mkdirSync(dirname(destination), { recursive: true });
+  renameSync(sourcePath, destination);
+  cleanupEmptyParentDirs(dirname(sourcePath));
+  return { ok: true, type: source, from, to };
+}
+
+export function deletePath(path: string): PathMutation {
   let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return false; }
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return false;
-  unlinkSync(abs);
-  cleanupEmptyParentDirs(dirname(abs));
-  return true;
-}
-
-/** Move/rename a document. Updates timestamps. */
-export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
-  let fromRel: string, toRel: string;
-  try {
-    fromRel = normalizeDocPath(fromId);
-    toRel = ensureMoveExtension(fromRel, normalizeDocPath(toId));
-  } catch { return null; }
-  if (!isAllowedFile(fromRel) || !isAllowedFile(toRel)) return null;
-  const fromAbs = absDocPath(fromRel);
-  const toAbs = absDocPath(toRel);
-  if (!existsSync(fromAbs)) return null;
-  if (existsSync(toAbs) && fromRel !== toRel) return null; // don't overwrite
-  mkdirSync(dirname(toAbs), { recursive: true });
-  renameSync(fromAbs, toAbs);
-  cleanupEmptyParentDirs(dirname(fromAbs));
-  return isTextFile(toRel) ? getEntry(toRel) : describeEntry(toRel, "");
-}
-
-export function moveFolder(
-  fromPath: string,
-  toPath: string,
-): { ok: boolean; movedFiles: Array<[string, string]>; error?: string } {
-  let fromRel: string, toRel: string;
-  try {
-    fromRel = normalizeDocPath(fromPath);
-    toRel = normalizeDocPath(toPath);
-  } catch (err: any) {
-    return { ok: false, movedFiles: [], error: String(err?.message || err) };
-  }
-
-  if (toRel === fromRel || toRel.startsWith(`${fromRel}/`)) {
-    return { ok: false, movedFiles: [], error: "Cannot move folder into itself or its subfolder" };
-  }
-
-  const fromAbs = absDocPath(fromRel);
-  const toAbs = absDocPath(toRel);
-  if (!existsSync(fromAbs) || !statSync(fromAbs).isDirectory()) {
-    return { ok: false, movedFiles: [], error: "Source folder not found" };
-  }
-  if (existsSync(toAbs)) {
-    return { ok: false, movedFiles: [], error: "Destination already exists" };
-  }
-
-  mkdirSync(dirname(toAbs), { recursive: true });
-  renameSync(fromAbs, toAbs);
-
-  const movedFiles: Array<[string, string]> = [];
-  for (const newPath of collectDocPathsInFolder(toAbs, toRel)) {
-    const suffix = newPath.startsWith(`${toRel}/`) ? newPath.slice(toRel.length + 1) : "";
-    const oldPath = suffix ? `${fromRel}/${suffix}` : fromRel;
-    movedFiles.push([oldPath, newPath]);
-  }
-
-  cleanupEmptyParentDirs(dirname(fromAbs));
-  return { ok: true, movedFiles };
-}
-
-export function deleteFolder(
-  folderPath: string,
-): { ok: boolean; deletedCount: number; deletedPaths: string[] } {
-  let rel: string;
-  try {
-    rel = normalizeDocPath(folderPath);
-  } catch {
-    return { ok: false, deletedCount: 0, deletedPaths: [] };
-  }
-
-  const abs = absDocPath(rel);
-  if (!existsSync(abs) || !statSync(abs).isDirectory()) {
-    return { ok: false, deletedCount: 0, deletedPaths: [] };
-  }
-
-  const deletedPaths = collectDocPathsInFolder(abs, rel);
-  rmSync(abs, { recursive: true, force: true });
-  cleanupEmptyParentDirs(dirname(abs));
-
-  return { ok: true, deletedCount: deletedPaths.length, deletedPaths };
+  try { rel = normalizeDocPath(path); } catch { return { ok: false, error: "Document not found" }; }
+  const type = getPathType(rel), absolute = absDocPath(rel);
+  if (!type || (type === "file" && !isAllowedFile(rel))) return { ok: false, error: "Document not found" };
+  if (type === "folder") rmSync(absolute, { recursive: true, force: true }); else unlinkSync(absolute);
+  cleanupEmptyParentDirs(dirname(absolute));
+  return { ok: true, type, from: rel };
 }
 
 // -- Helpers --
@@ -337,6 +274,17 @@ function ensureMoveExtension(fromPath: string, toPath: string): string {
   return `${toPath}${ext}`;
 }
 
+function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
+  let entries: Dirent[];
+  try { entries = readdirSync(absFolder, { withFileTypes: true }) as Dirent[]; } catch { return []; }
+  return entries.flatMap(entry => {
+    if (entry.name.startsWith(".")) return [];
+    const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return collectDocPathsInFolder(join(absFolder, entry.name), rel);
+    return entry.isFile() && isAllowedFile(rel) ? [toPosix(rel)] : [];
+  });
+}
+
 function cleanupEmptyParentDirs(startDir: string): void {
   try {
     const root = docsRoot();
@@ -350,17 +298,6 @@ function cleanupEmptyParentDirs(startDir: string): void {
   } catch {
     // best-effort cleanup only
   }
-}
-
-function collectDocPathsInFolder(absFolder: string, relPrefix: string): string[] {
-  let entries: Dirent[];
-  try { entries = readdirSync(absFolder, { withFileTypes: true }) as Dirent[]; } catch { return []; }
-  return entries.flatMap(entry => {
-    if (entry.name.startsWith(".")) return [];
-    const rel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) return collectDocPathsInFolder(join(absFolder, entry.name), rel);
-    return entry.isFile() && isAllowedFile(rel) ? [toPosix(rel)] : [];
-  });
 }
 
 export function slugify(input: string): string {

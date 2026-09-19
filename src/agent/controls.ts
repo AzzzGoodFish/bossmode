@@ -55,6 +55,10 @@ export function getMemberBusyState(memberId:string):{busy:boolean;reason?:string
   const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;return reason?{busy:true,reason}:{busy:false};
 }
 export function getAgentContextUsage(memberId:string):ContextUsage|null{return contextUsageCache.get(instanceKey(memberId))??null;}
+export async function refreshAgentContextUsage(memberId:string):Promise<ContextUsage|null>{
+  const key=instanceKey(memberId),instance=instances.get(key);if(!instance)return null;
+  const usage=await instance.handle.getContextUsage();if(!usage||instances.get(key)!==instance)return null;contextUsageCache.set(key,usage);return usage;
+}
 export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:MemberActiveToolInfo[];message?:string}{
   const handle=instances.get(instanceKey(memberId))?.handle;if(!handle)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }

@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { logger } from "../kernel/logger.js";
 import { checkPath } from "../kernel/path.js";
 import { memberChatDir, memberDir, roomDir } from "./layout.js";
+import { locateReadableFile, type LocatedFile } from "./io.js";
 
 export type AttachmentPreviewType = "image" | "markdown" | "html" | "text" | "download";
 
@@ -123,15 +124,6 @@ export async function storeAttachment(
   return { storedFilename, originalFilename, absolutePath, size };
 }
 
-export function copyAttachment(
-  sourceAbsolutePath: string,
-  location: AttachmentLocation,
-  originalFilename = basename(sourceAbsolutePath),
-  maxSize = MAX_UPLOAD_SIZE,
-): Promise<StoredAttachment> {
-  return storeAttachment(createReadStream(sourceAbsolutePath), location, originalFilename, maxSize);
-}
-
 /** Validate local paths against host-authorized roots, then copy each file into one attachment store. */
 export async function importAttachments(
   paths: string[], location: AttachmentLocation, allowedRoots: string[], maxSize = MAX_UPLOAD_SIZE,
@@ -147,7 +139,8 @@ export async function importAttachments(
       continue;
     }
     try {
-      outcomes.push({ ok: true, ...await copyAttachment(check.absolutePath, location, basename(check.absolutePath), maxSize) });
+      outcomes.push({ ok: true, ...await storeAttachment(
+        createReadStream(check.absolutePath), location, basename(check.absolutePath), maxSize) });
     } catch (error) {
       outcomes.push({ ok: false, path, error: error instanceof Error ? error.message : String(error) });
     }
@@ -159,7 +152,14 @@ export function getAttachmentPath(location: AttachmentLocation, storedFilename: 
   return join(attachmentDirectory(location), safeStoredFilename(storedFilename));
 }
 
+export function locateAttachment(location: AttachmentLocation, storedFilename: string, maxSizeBytes?: number): LocatedFile {
+  try {
+    return locateReadableFile([getAttachmentPath(location, storedFilename)], [attachmentDirectory(location)], maxSizeBytes);
+  } catch (error) {
+    return { ok: false, code: "invalid", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function attachmentExists(location: AttachmentLocation, storedFilename: string): boolean {
-  try { return existsSync(getAttachmentPath(location, storedFilename)); }
-  catch { return false; }
+  return locateAttachment(location, storedFilename).ok;
 }

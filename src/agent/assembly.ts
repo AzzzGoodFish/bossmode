@@ -44,10 +44,10 @@ function memberSnapshot(memberId: string): AgentMemberSnapshot | null {
   if (!memberSnapshotSource) throw new Error("Member snapshot source is not connected");
   return memberSnapshotSource(memberId);
 }
-export function compileForMember(memberId: string): AgentMemberSnapshot["prompt"] {
-  const snapshot = memberSnapshot(memberId);
-  if (!snapshot) throw new Error(`Member not found: ${memberId}`);
-  return snapshot.prompt;
+export function loadMemberProfileSources(memberId:string):{agentName:string;compiled:AgentMemberSnapshot["prompt"]}{
+  const snapshot=memberSnapshot(memberId);
+  if(!snapshot)throw new Error(`Member not found: ${memberId}`);
+  return {agentName:snapshot.config.name,compiled:snapshot.prompt};
 }
 
 export function getRuntime():AgentRuntime|null{return runtime;}

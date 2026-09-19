@@ -27,7 +27,7 @@ export class Database {
   constructor(
     private readonly connection: DatabaseSync,
     readonly path: string,
-    private readonly onPostCommitError: (error: unknown) => void = () => console.warn("Database post-commit observer failed"),
+    private readonly onPostCommitError: (error: unknown) => void = (error) => console.warn("Database post-commit observer failed", error),
   ) {}
 
   /** Notifications/cache changes only; durable delivery belongs in the outbox.

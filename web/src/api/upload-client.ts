@@ -2,13 +2,11 @@
 // (fetch API doesn't support upload progress events)
 
 export interface UploadResult {
-  filename: string;
+  storedFilename: string;
   originalFilename: string;
-  /** Stored filename, kept as `path` for legacy caller compatibility. Never an absolute path. */
-  path: string;
   size: number;
   url: string;
-  previewType?: "image" | "markdown" | "html" | "download";
+  previewType?: "image" | "markdown" | "html" | "text" | "download";
 }
 
 export interface UploadOptions {

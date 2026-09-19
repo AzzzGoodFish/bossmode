@@ -21,6 +21,42 @@ function rawRequest(port: number, method: string, path: string, token: string, b
   });
 }
 
+it("manages room membership and settings with stable member IDs", async () => {
+  const test = await createTestServer();
+  try {
+    const token = await login(test.port);
+    const createMember = async (name: string): Promise<string> => {
+      const response = await jsonRequest(test.port, "POST", "/api/members", { token, body: { name } });
+      expect(response.status).toBe(200);
+      return JSON.parse(response.body).member.memberId;
+    };
+    const leader = await createMember("room-leader");
+    const invited = await createMember("room-invited");
+    const created = await jsonRequest(test.port, "POST", "/api/rooms", {
+      token, body: { name: "Initial", memberIds: [leader], leaderMemberId: leader },
+    });
+    expect(created.status).toBe(200);
+    const roomId = JSON.parse(created.body).id as string;
+
+    const patched = await jsonRequest(test.port, "PATCH", `/api/rooms/${roomId}`, {
+      token, body: { name: "Renamed", description: "Canonical room", docsPath: "project/docs" },
+    });
+    expect(JSON.parse(patched.body)).toMatchObject({
+      id: roomId, name: "Renamed", description: "Canonical room", docsPath: "project/docs/", memberIds: [leader],
+    });
+    const added = await jsonRequest(test.port, "POST", `/api/rooms/${roomId}/members`, {
+      token, body: { memberId: invited },
+    });
+    expect(JSON.parse(added.body).memberIds).toEqual([leader, invited]);
+    const removed = await jsonRequest(test.port, "DELETE", `/api/rooms/${roomId}/members/${invited}`, { token });
+    expect(JSON.parse(removed.body).memberIds).toEqual([leader]);
+    expect((await jsonRequest(test.port, "DELETE", `/api/rooms/${roomId}`, { token })).status).toBe(200);
+    expect((await jsonRequest(test.port, "GET", `/api/rooms/${roomId}`, { token })).status).toBe(404);
+  } finally {
+    await new Promise<void>((resolve) => test.server.close(() => resolve()));
+  }
+});
+
 it("reads room, DM and member chat facts through one conversation API", async () => {
   const test = await createTestServer();
   try {

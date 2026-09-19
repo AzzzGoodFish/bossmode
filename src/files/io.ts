@@ -1,6 +1,8 @@
-import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, renameSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, parse, join } from "node:path";
+import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, readFileSync, renameSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, parse, join, sep } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { checkPath } from "../kernel/path.js";
 
 /** Ensure a directory exists without consulting application configuration or SQL. */
 export function ensureDirectory(path: string): void {
@@ -115,6 +117,63 @@ export function moveDurably(source: string, destination: string): void {
   renameSync(source, destination);
   syncPath(dirname(source));
   if (dirname(source) !== dirname(destination)) syncPath(dirname(destination));
+}
+
+export type DirectoryListing =
+  | { ok: true; path: string; parent: string | null; segments: Array<{ name: string; path: string }>; dirs: Array<{ name: string; path: string }>; truncated: boolean }
+  | { ok: false; code: "outside" | "not_found" | "not_directory"; error: string };
+
+export function browseDirectories(root: string, requested = root, limit = 200): DirectoryListing {
+  let boundary: string;
+  try { boundary = realpathSync(root); }
+  catch { return { ok: false, code: "not_found", error: "Directory not found" }; }
+  const expanded = requested.replace(/^~(\/|$)/, boundary + "$1");
+  const unresolved = resolve(expanded);
+  if (!existsSync(unresolved)) return { ok: false, code: "not_found", error: "Directory not found" };
+  const path = realpathSync(unresolved), rel = relative(boundary, path);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return { ok: false, code: "outside", error: "Path must be within home directory" };
+  }
+  if (!statSync(path).isDirectory()) return { ok: false, code: "not_directory", error: "Path is not a directory" };
+  const all = readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory())
+    .map(entry => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
+  const segments = [{ name: boundary.slice(dirname(boundary).length + 1) || boundary, path: boundary }];
+  let cursor = boundary;
+  for (const part of rel.split(sep).filter(Boolean)) { cursor = join(cursor, part); segments.push({ name: part, path: cursor }); }
+  return { ok: true, path, parent: path === boundary ? null : dirname(path), segments, dirs: all.slice(0, limit), truncated: all.length > limit };
+}
+
+export type LocatedFile =
+  | { ok: true; path: string; size: number }
+  | { ok: false; code: "not_found" | "invalid"; error: string };
+
+/** Resolve the first existing candidate under an allowlisted real root. */
+export function locateReadableFile(candidates: string[], allowedRoots: string[], maxSizeBytes?: number): LocatedFile {
+  const roots = allowedRoots.flatMap(root => { try { return [realpathSync(root)]; } catch { return []; } });
+  for (const candidate of [...new Set(candidates)]) {
+    if (!existsSync(candidate)) continue;
+    const checked = checkPath(candidate, { allowedPrefixes: roots, maxSizeBytes });
+    if (!checked.ok) return { ok: false, code: "invalid", error: checked.error };
+    return { ok: true, path: checked.absolutePath, size: checked.size };
+  }
+  return { ok: false, code: "not_found", error: "File not found" };
+}
+
+export function readFileBytes(path: string): Buffer { return readFileSync(path); }
+export function openFileStream(path: string) { return createReadStream(path); }
+
+/** Create one private temporary text file without changing shared temp-directory permissions. */
+export function writeTemporaryText(
+  content: string,
+  prefix = "bossmode",
+  extension = ".txt",
+): string {
+  const safePrefix = prefix.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  if (!safePrefix) throw new Error("Temporary file prefix is required");
+  if (!/^\.[A-Za-z0-9]+$/.test(extension)) throw new Error("Invalid temporary file extension");
+  const path = join(tmpdir(), `${safePrefix}-${randomUUID().slice(0, 8)}${extension}`);
+  writeFileSync(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  return path;
 }
 
 /** Presence hint only; inaccessible entries do not become readable through this inspection. */

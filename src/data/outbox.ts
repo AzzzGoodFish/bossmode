@@ -42,7 +42,7 @@ function decode<T extends JsonValue>(row: OutboxRow): OutboxRecord<T> {
 export function enqueueOutbox<T extends JsonValue>(
   db: Database,
   input: { kind: string; scopeId?: string | null; dedupeKey: string; payload: T; createdAt?: number },
-): { inserted: boolean; record: OutboxRecord<T> } {
+): void {
   required(input.kind, "kind");
   required(input.dedupeKey, "dedupe key");
   const createdAt = input.createdAt ?? Date.now();
@@ -54,16 +54,13 @@ export function enqueueOutbox<T extends JsonValue>(
     if (old.kind !== input.kind || old.scope_id !== scopeId || old.payload_json !== payloadJson || old.created_at !== createdAt) {
       throw new Error(`Conflicting outbox identity: ${input.dedupeKey}`);
     }
-    return { inserted: false, record: decode<T>(old) };
+    return;
   }
   db.run(
     "INSERT INTO outbox(kind,scope_id,dedupe_key,payload_json,created_at) VALUES(?,?,?,?,?)",
     input.kind, scopeId, input.dedupeKey, payloadJson, createdAt,
   );
-  return {
-    inserted: true,
-    record: decode<T>(db.get<OutboxRow>("SELECT * FROM outbox WHERE dedupe_key=?", input.dedupeKey)!),
-  };
+
 }
 
 /** Atomically claim a bounded retry batch. A crash leaves it pending; the next
@@ -76,22 +73,14 @@ export function claimOutbox<T extends JsonValue = JsonValue>(
 ): OutboxRecord<T>[] {
   required(kind, "kind");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5000) throw new Error("Invalid outbox claim limit");
-  return db.transaction((tx) => {
-    const rows = tx.all<OutboxRow>(
-      "SELECT * FROM outbox WHERE kind=? AND delivered_at IS NULL ORDER BY id LIMIT ?",
-      kind, limit,
-    );
-    for (const row of rows) tx.run("UPDATE outbox SET attempts=attempts+1 WHERE id=? AND delivered_at IS NULL", row.id);
-    return rows.map((row) => decode<T>({ ...row, attempts: row.attempts + 1 }));
-  });
+  return db.transaction(tx => tx.all<OutboxRow>(`UPDATE outbox SET attempts=attempts+1 WHERE id IN
+    (SELECT id FROM outbox WHERE kind=? AND delivered_at IS NULL ORDER BY id LIMIT ?) RETURNING *`, kind, limit)
+    .sort((a, b) => a.id - b.id).map(row => decode<T>(row)));
 }
 
 export function completeOutbox(id: number, completedAt = Date.now(), db: Database = getDatabase()): boolean {
   if (!Number.isSafeInteger(id) || id < 1) throw new Error("Invalid outbox id");
   if (!Number.isSafeInteger(completedAt) || completedAt < 0) throw new Error("Invalid outbox completion timestamp");
-  const pending = db.get<{ id: number }>("SELECT id FROM outbox WHERE id=? AND delivered_at IS NULL", id);
-  if (!pending) return false;
-  db.run("UPDATE outbox SET delivered_at=? WHERE id=? AND delivered_at IS NULL", completedAt, id);
-  return true;
+  return Boolean(db.get("UPDATE outbox SET delivered_at=? WHERE id=? AND delivered_at IS NULL RETURNING id", completedAt, id));
 }
 

@@ -97,9 +97,9 @@ export function Main({
   const globalMembers = useGlobalMembers();
 
   const displayMemberInfos = useMemo(() => {
-    // 0.20: compose from room.globalMemberIds + contacts (roomMembers array is being removed — G3 debt ②).
-    if (room?.globalMemberIds?.length) {
-      return room.globalMemberIds.map((gid) => {
+    // 0.20: compose from room.memberIds + contacts (roomMembers array is being removed — G3 debt ②).
+    if (room?.memberIds?.length) {
+      return room.memberIds.map((gid) => {
         const c = globalMembers.get(gid);
         return {
           id: gid,

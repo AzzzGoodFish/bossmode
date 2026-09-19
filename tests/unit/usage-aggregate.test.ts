@@ -29,7 +29,7 @@ describe("app usage reports",()=>{
   it("joins member and room metadata, filters, and zero-fills reports",()=>{
     const fixture=coreFixture();fixtures.push(fixture);
     fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)","mem_a","Alice","alice","developer","{}",1,1);
-    const room=createRoom("Room A",undefined,[],[]);
+    const room=createRoom("Room A",[]);
     appendMemberEvent({id:"usage-a",memberId:"mem_a",sourceRef:`room:${room.id}`,event:{
       type:"message_end",ts:Date.UTC(2026,6,24),model:"a/x",usage:{inputTokens:30,outputTokens:2,cacheRead:10,cacheWrite:0,cost:0.5},
     } as any});

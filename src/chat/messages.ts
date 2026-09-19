@@ -5,6 +5,7 @@ import { logger } from "../kernel/logger.js";
 import type { JsonValue } from "../kernel/json.js";
 import type { RoomMessageAttachment } from "../files/attachments.js";
 import { parseConversation, storageScopeId } from "./conversations.js";
+import { getUserReadCursor } from "./cursors.js";
 
 export interface Message {
   id: string;
@@ -29,18 +30,44 @@ export interface Message {
 
 export type MessageInput = Omit<Message, "id" | "ts" | "seq">;
 export interface MessagePageOptions { limit?: number; before?: string; around?: string; fromSeq?: number }
+export interface MemberMessageReplyView {
+  seq: number;
+  messageId: string;
+  sender?: string;
+  excerpt?: string;
+  unavailable?: boolean;
+}
+export type MemberMessageView = Omit<Message, "replyTo"> & { replyTo?: MemberMessageReplyView };
+export interface MessageQueryOptions {
+  fromSeq?: number;
+  aroundSeq?: number;
+  beforeTs?: number;
+  afterTs?: number;
+  limit?: number;
+}
 export interface MessageSearchOptions {
   query?: string;
   from?: string;
   fromMemberId?: string;
   after?: number;
   before?: number;
-  type?: string;
-  aroundSeq?: number;
   offset?: number;
   limit?: number;
 }
-export interface MessageSearchResult { total: number; messages: Message[] }
+export interface MessageSearchHit {
+  id: string;
+  seq?: number;
+  sender: string;
+  senderMemberId?: string;
+  content: string;
+  ts: number;
+}
+export interface MessageSearchResult { total: number; messages: MessageSearchHit[] }
+export interface ConversationListState {
+  lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
+  unreadCount: number;
+  mentioned: boolean;
+}
 
 type MessageListField = "mentions" | "mentionMemberIds" | "needResponse" | "needResponseMemberIds";
 const LISTS: Record<MessageListField, readonly ["mention" | "response", "label" | "id"]> = {
@@ -64,19 +91,9 @@ interface MessageRow {
 }
 
 const RUNTIME_FAILURE_LIMIT = 300;
-const RUNTIME_FAILURE_PATTERNS = [
-  /^Member "[^"]+" request failed\./,
-  /^Member "[^"]+" error:/,
-  /^Member "[^"]+" runtime ended unexpectedly/,
-  /^Member "[^"]+" model credential is no longer available\./,
-  /^Failed to create member "[^"]+":/,
-  /^Failed to activate member "[^"]+":/,
-  /^Failed to switch model for "[^"]+":/,
-  /^Failed to switch thinking level for "[^"]+":/,
-  /^Failed to refresh model credential for "[^"]+":/,
-];
+const RUNTIME_FAILURE = /^(?:Member "[^"]+" (?:request failed\.|error:|runtime ended unexpectedly|model credential is no longer available\.)|Failed to (?:create member "[^"]+"|activate member "[^"]+"|switch model for "[^"]+"|switch thinking level for "[^"]+"|refresh model credential for "[^"]+"):)/;
 function visibleMessage<T extends { sender: string; content: string }>(message: T): T {
-  if (message.sender !== "system" || !RUNTIME_FAILURE_PATTERNS.some((pattern) => pattern.test(message.content))) return message;
+  if (message.sender !== "system" || !RUNTIME_FAILURE.test(message.content)) return message;
   const characters = Array.from(message.content);
   return characters.length <= RUNTIME_FAILURE_LIMIT ? message : {
     ...message,
@@ -110,6 +127,26 @@ function hydrate(db: Database, row: MessageRow): Message {
   );
   if (reply) result.replyTo = { messageId: reply.target_id, seq: reply.target_seq };
   return visibleMessage(result);
+}
+
+const MEMBER_VISIBLE_SQL = "(sender<>'system' OR type IN ('task_event','knowledge_event'))";
+function replyExcerpt(content: string): string {
+  const oneLine = content.replace(/\s+/g, " ").trim();
+  return oneLine.length <= 200 ? oneLine : `${oneLine.slice(0, 199)}…`;
+}
+function projectMemberMessage(db: Database, scopeId: string, message: Message): MemberMessageView {
+  if (!message.replyTo) return message;
+  const targetRow = db.get<MessageRow>("SELECT * FROM messages WHERE scope_id=? AND id=?", scopeId, message.replyTo.messageId);
+  const target = targetRow ? hydrate(db, targetRow) : null;
+  return {
+    ...message,
+    replyTo: {
+      ...message.replyTo,
+      ...(target && !isSystemNoticeHiddenFromMembers(target)
+        ? { sender: target.sender, excerpt: replyExcerpt(target.content) }
+        : { unavailable: true }),
+    },
+  };
 }
 
 export function validateMessage(message: Message): void {
@@ -158,25 +195,23 @@ function insert(db: Database, scopeId: string, message: Message): void {
  * records the committed message snapshot in the generic outbox. */
 export function appendMessageInTransaction(db: Database, scope: string, input: MessageInput): Message {
   const scopeId = storageScopeId(scope);
-  return db.transaction((tx) => {
-    const seq = tx.get<{ next_seq: number }>("SELECT next_seq FROM scope_sequences WHERE scope_id=?", scopeId)?.next_seq ?? 1;
-    const message: Message = {
-      ...visibleMessage(input),
-      id: `msg-${randomUUID().slice(0, 8)}`,
-      seq,
-      ts: Date.now(),
-    };
-    insert(tx, scopeId, message);
-    const payload = JSON.parse(JSON.stringify({ messageId: message.id, message })) as JsonValue;
-    enqueueOutbox(tx, {
-      kind: "message",
-      scopeId: parseConversation(scope)!.scopeId,
-      dedupeKey: `message:${scopeId}:${message.id}`,
-      payload,
-      createdAt: message.ts,
-    });
-    return message;
+  const seq = db.get<{ next_seq: number }>("SELECT next_seq FROM scope_sequences WHERE scope_id=?", scopeId)?.next_seq ?? 1;
+  const message: Message = {
+    ...visibleMessage(input),
+    id: `msg-${randomUUID().slice(0, 8)}`,
+    seq,
+    ts: Date.now(),
+  };
+  insert(db, scopeId, message);
+  const payload = JSON.parse(JSON.stringify({ messageId: message.id, message })) as JsonValue;
+  enqueueOutbox(db, {
+    kind: "message",
+    scopeId: parseConversation(scope)!.scopeId,
+    dedupeKey: `message:${scopeId}:${message.id}`,
+    payload,
+    createdAt: message.ts,
   });
+  return message;
 }
 
 export type MessageSink = (sourceRef: string, message: Message) => void;
@@ -238,6 +273,50 @@ export function readMessages(scope: string, db: Database = getDatabase()): Messa
   return db.all<MessageRow>("SELECT * FROM messages WHERE scope_id=? ORDER BY position", scopeId).map((row) => hydrate(db, row));
 }
 
+export function countUserUnreadAndMention(
+  messages: Message[],
+  cursorId: string | null,
+  cursorSeq: number | null,
+  login: string,
+): Pick<ConversationListState, "unreadCount" | "mentioned"> {
+  let start = 0;
+  if (cursorSeq !== null) {
+    const found = messages.findIndex((message) => typeof message.seq === "number" && message.seq > cursorSeq);
+    start = found < 0 ? messages.length : found;
+  } else if (cursorId) {
+    const found = messages.findIndex((message) => message.id === cursorId);
+    start = found < 0 ? 0 : found + 1;
+  }
+  const visible = messages.slice(start).filter((message) =>
+    message.sender !== "user" && message.sender !== "system" && !message.type);
+  const needle = login ? `@${login}` : "";
+  return {
+    unreadCount: visible.length,
+    mentioned: Boolean(needle && visible.some((message) => message.content.includes(needle))),
+  };
+}
+
+/** Canonical chat-list read model. Cursor windowing and unread eligibility stay in
+ * chat; HTTP consumers only add labels and transport/runtime projections. */
+export function readConversationListState(
+  scope: string,
+  login: string,
+  db: Database = getDatabase(),
+): ConversationListState {
+  const messages = readMessages(scope, db);
+  const cursor = getUserReadCursor(scope, db);
+  const last = messages.at(-1);
+  return {
+    lastMessage: last ? {
+      sender: last.sender,
+      ...(last.senderMemberId ? { senderMemberId: last.senderMemberId } : {}),
+      text: last.content.replace(/\s+/g, " ").trim().slice(0, 140),
+      ts: last.ts,
+    } : null,
+    ...countUserUnreadAndMention(messages, cursor?.messageId ?? null, cursor?.seq ?? null, login),
+  };
+}
+
 export function messagesSince(scope: string, cursor: string | null, db: Database = getDatabase()): Message[] {
   const scopeId = storageScopeId(scope);
   const position = cursor ? db.get<{ position: number }>(
@@ -261,6 +340,53 @@ function around(db: Database, scopeId: string, position: number, limit: number):
   ).map((row) => hydrate(db, row));
 }
 
+/** Member-facing ordered query. Sequence anchors are sequence numbers, time
+ * bounds are epoch milliseconds, and the returned window excludes hidden
+ * system notices before limit/ordering are applied. */
+export function queryMessages(
+  scope: string,
+  options: MessageQueryOptions = {},
+  db: Database = getDatabase(),
+): MemberMessageView[] {
+  if (options.fromSeq !== undefined && (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0)) throw new Error("Invalid fromSeq");
+  if (options.aroundSeq !== undefined && (!Number.isSafeInteger(options.aroundSeq) || options.aroundSeq < 1)) throw new Error("Invalid aroundSeq");
+  if (options.fromSeq !== undefined && options.aroundSeq !== undefined) throw new Error("fromSeq and aroundSeq are mutually exclusive");
+  if (options.beforeTs !== undefined && !Number.isFinite(options.beforeTs)) throw new Error("Invalid beforeTs");
+  if (options.afterTs !== undefined && !Number.isFinite(options.afterTs)) throw new Error("Invalid afterTs");
+  const scopeId = storageScopeId(scope);
+  const limit = Math.max(1, Math.min(Number.isFinite(options.limit) ? Math.floor(options.limit!) : 50, 500));
+  const params: unknown[] = [scopeId];
+  let where = `scope_id=? AND ${MEMBER_VISIBLE_SQL}`;
+  if (options.afterTs !== undefined) { where += " AND ts>=?"; params.push(options.afterTs); }
+  if (options.beforeTs !== undefined) { where += " AND ts<?"; params.push(options.beforeTs); }
+  let rows: MessageRow[];
+  if (options.aroundSeq !== undefined) {
+    const target = db.get<{ position: number }>(
+      `SELECT position FROM messages WHERE ${where} AND seq=?`, ...params, options.aroundSeq,
+    );
+    if (!target) return [];
+    const preceding = db.all<{ position: number }>(
+      `SELECT position FROM messages WHERE ${where} AND position<? ORDER BY position DESC LIMIT ?`,
+      ...params, target.position, Math.floor((limit - 1) / 2),
+    ).reverse();
+    const start = preceding[0]?.position ?? target.position;
+    rows = db.all<MessageRow>(
+      `SELECT * FROM messages WHERE ${where} AND position>=? ORDER BY position LIMIT ?`,
+      ...params, start, limit,
+    );
+  } else if (options.fromSeq !== undefined) {
+    rows = db.all<MessageRow>(
+      `SELECT * FROM messages WHERE ${where} AND seq>? ORDER BY position LIMIT ?`,
+      ...params, options.fromSeq, limit,
+    );
+  } else {
+    rows = db.all<MessageRow>(
+      `SELECT * FROM messages WHERE ${where} ORDER BY position DESC LIMIT ?`, ...params, limit,
+    ).reverse();
+  }
+  return rows.map((row) => projectMemberMessage(db, scopeId, hydrate(db, row)));
+}
+
 export function pageMessages(scope: string, options: MessagePageOptions = {}, db: Database = getDatabase()): Message[] {
   const scopeId = storageScopeId(scope);
   const limit = Math.max(1, Math.min(options.limit ?? 100, 500));
@@ -278,40 +404,45 @@ export function pageMessages(scope: string, options: MessagePageOptions = {}, db
     }
   }
   if (options.fromSeq !== undefined) {
-    const first = db.get<{ position: number }>(
-      `SELECT position FROM messages WHERE ${where} AND seq>? ORDER BY position LIMIT 1`,
-      ...params, options.fromSeq,
-    );
-    if (!first) return [];
-    where += " AND position>=?";
-    params.push(first.position);
+    return db.all<MessageRow>(
+      `SELECT * FROM messages WHERE ${where} AND seq>? ORDER BY position LIMIT ?`, ...params, options.fromSeq, limit,
+    ).map(row => hydrate(db, row));
   }
-  return db.all<MessageRow>(
-    `SELECT * FROM messages WHERE ${where} ORDER BY position DESC LIMIT ?`,
-    ...params, limit,
-  ).reverse().map((row) => hydrate(db, row));
+  return db.all<MessageRow>(`SELECT * FROM messages WHERE ${where} ORDER BY position DESC LIMIT ?`, ...params, limit)
+    .reverse().map(row => hydrate(db, row));
 }
 
 export function searchMessages(scope: string, options: MessageSearchOptions = {}, db: Database = getDatabase()): MessageSearchResult {
   const scopeId = storageScopeId(scope);
-  if (options.aroundSeq !== undefined) {
-    const row = db.get<{ position: number }>("SELECT position FROM messages WHERE scope_id=? AND seq=?", scopeId, options.aroundSeq);
-    return row ? { total: 1, messages: around(db, scopeId, row.position, Math.max(1, Math.min(options.limit ?? 30, 500))) } : { total: 0, messages: [] };
-  }
   const params: unknown[] = [scopeId];
-  let where = "scope_id=?";
+  let where = `scope_id=? AND ${MEMBER_VISIBLE_SQL}`;
   if (options.query) { where += " AND instr(content_lower,?)>0"; params.push(options.query.toLowerCase()); }
   for (const [column, operator, value] of [
     ["sender", "=", options.from], ["sender_member_id", "=", options.fromMemberId],
-    ["ts", ">=", options.after], ["ts", "<", options.before], ["type", "=", options.type],
+    ["ts", ">=", options.after], ["ts", "<", options.before],
   ] as const) {
-    if (value !== undefined && value !== "") { where += ` AND ${column}${operator}?`; params.push(value); }
+    if (value !== undefined && value !== "" && (typeof value !== "number" || Number.isFinite(value))) {
+      where += ` AND ${column}${operator}?`; params.push(value);
+    }
   }
   const total = db.get<{ n: number }>(`SELECT COUNT(*) n FROM messages WHERE ${where}`, ...params)!.n;
   const rows = db.all<MessageRow>(
     `SELECT * FROM messages WHERE ${where} ORDER BY ts DESC,position ASC LIMIT ? OFFSET ?`,
     ...params, Math.max(1, Math.min(options.limit ?? 50, 500)), Math.max(0, options.offset ?? 0),
   );
-  return { total, messages: rows.map((row) => hydrate(db, row)) };
+  return {
+    total,
+    messages: rows.map((row) => {
+      const message = hydrate(db, row);
+      return {
+        id: message.id,
+        ...(message.seq !== undefined ? { seq: message.seq } : {}),
+        sender: message.sender,
+        ...(message.senderMemberId ? { senderMemberId: message.senderMemberId } : {}),
+        content: replyExcerpt(message.content),
+        ts: message.ts,
+      };
+    }),
+  };
 }
 

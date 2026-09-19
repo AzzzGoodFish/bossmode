@@ -31,7 +31,22 @@ export const PARAM_DESCRIPTIONS = {
   listQuery: "Keyword filter.",
   listLimit: "Max entries to return (default 50).",
   listOffset: "Skip this many entries (for paging).",
-  chatDescription: "Description text (≤2000 characters); an empty string clears it.",
+  chatTo: "Target chat id or name; your private chat with the user is \"dm:<your member id>\" (or \"user\").",
+  chatMessage: "Message to post. @name activates that member (exact match required; a plain name never activates).",
+  chatAttachments: "Local file paths to attach. Files are copied into that chat's attachment store.",
+  chatName: "Group chat name.",
+  chatDescription: "Group chat description (≤2000 characters); an empty string clears it.",
+  workspaceRegistrationId: "Workspace id — letters, digits, dot, dash, underscore.",
+  workspaceTargetId: "Workspace id (see workspace_list).",
+  workspaceDescription: "Short human-readable description.",
+  filePath: "File path — relative paths resolve against the selected workspace.",
+  fileOffset: "Line number to start from (1-indexed).",
+  fileLimit: "Maximum lines to read (default 2000).",
+  fileContent: "Full file content to write.",
+  terminalId: "Terminal id from terminal_create / terminal_list.",
+  terminalExecId: "Exec id (for example, e3).",
+  terminalFromLine: "First absolute line number to read.",
+  terminalToLine: "Last absolute line number to read.",
   createMembers: "Member ids to include; the creator is always included.",
   addMembers: "Member ids to add.",
   removeMembers: "Member ids to remove (history and memory are retained).",
@@ -41,10 +56,10 @@ export const PARAM_DESCRIPTIONS = {
   gatewayTool: "Capability name from action \"list\".",
   gatewayArgs: "Arguments object for the capability.",
 } as const;
-const PARAMETER_ALIASES:Record<string,string>={workspace:"workspaceId",host:"sshHost",port:"sshPort",user:"sshUser",keyPath:"sshKeyPath",root:"sshRoot",name:"profileName",description:"profileDescription",members:"createMembers",add_members:"addMembers",remove_members:"removeMembers",action:"gatewayAction",tool:"gatewayTool",args:"gatewayArgs",cwd:"terminalCwd",command:"terminalCommand",keys:"terminalKeys",blockSeconds:"terminalBlockSeconds"};
-function parameterSchema(spec=""):TSchema{
+const PARAMETER_ALIASES:Record<string,string>={workspace:"workspaceId",host:"sshHost",port:"sshPort",user:"sshUser",keyPath:"sshKeyPath",root:"sshRoot",chat:"chatRef",member:"memberRef",members:"createMembers",add_members:"addMembers",remove_members:"removeMembers",action:"gatewayAction",tool:"gatewayTool",args:"gatewayArgs",cwd:"terminalCwd",command:"terminalCommand",keys:"terminalKeys",blockSeconds:"terminalBlockSeconds"};
+function parameterSchema(spec="",aliases:Record<string,string>={}):TSchema{
   const descriptions=PARAM_DESCRIPTIONS as Record<string,string>;
-  const properties=Object.fromEntries(spec?spec.split(" ").map(field=>{const [raw,kind]=field.split(":"),optional=raw!.endsWith("?"),name=optional?raw!.slice(0,-1):raw!,description=descriptions[PARAMETER_ALIASES[name]??name]??name;
+  const properties=Object.fromEntries(spec?spec.split(" ").map(field=>{const [raw,kind]=field.split(":"),optional=raw!.endsWith("?"),name=optional?raw!.slice(0,-1):raw!,description=descriptions[aliases[name]??PARAMETER_ALIASES[name]??name]??name;
     let value:TSchema=kind==="n"?Type.Number({description}):kind==="as"?Type.Array(Type.String(),{description}):kind==="any"?Type.Any({description}):kind==="edits"?Type.Array(Type.Object({oldText:Type.String(),newText:Type.String()})):Type.String({description});
     if(optional)value=Type.Optional(value);return [name,value];}):[]);
   return Type.Object(properties,{additionalProperties:false});
@@ -59,12 +74,12 @@ export interface GatewayToolSpec {
 const gatewaySpec=(name:string,label:string,description:string,parameters:TSchema,example:Record<string,unknown>):GatewayToolSpec=>({name,label,description,parameters,example});
 export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   gatewaySpec("chat_info","Chat Info",`One chat's details: name, description, and members (group chat) or counterpart (private chat). chat is an id or name.`,parameterSchema("chat:s"),{ chat: "user" }),
-  gatewaySpec("chat_create","Chat Create",`Create a group chat: name, optional description, initial members (creator included). Private chats need no creation — chat_send opens one directly.`,parameterSchema("name:s description?:s members?:as"),{ name: "<group chat name>" }),
-  gatewaySpec("chat_edit","Chat Edit",`Edit a group chat: rename, update description, add or remove members by member id. Removing a member stops deliveries to them; history and memory are retained. chat is an id or name.`,parameterSchema("chat:s name?:s description?:s add_members?:as remove_members?:as"),{ chat: "<chat id or name>", name: "<new name>" }),
-  gatewaySpec("member_list","Member List",`List members: id, name, description. query filters by keyword; limit (default 50) and offset page through the list.`,parameterSchema("query?:s limit?:n offset?:n"),{}),
+  gatewaySpec("chat_create","Chat Create",`Create a group chat: name, optional description, initial members (creator included). Private chats need no creation — chat_send opens one directly.`,parameterSchema("name:s description?:s members?:as",{name:"chatName",description:"chatDescription"}),{ name: "<group chat name>" }),
+  gatewaySpec("chat_edit","Chat Edit",`Edit a group chat: rename, update description, add or remove members by member id. Removing a member stops deliveries to them; history and memory are retained. chat is an id or name.`,parameterSchema("chat:s name?:s description?:s add_members?:as remove_members?:as",{name:"chatName",description:"chatDescription"}),{ chat: "<chat id or name>", name: "<new name>" }),
+  gatewaySpec("member_list","Member List",`List members: id, name, description. query filters by keyword; limit (default 50) and offset page through the list.`,parameterSchema("query?:s limit?:n offset?:n",{query:"listQuery",limit:"listLimit",offset:"listOffset"}),{}),
   gatewaySpec("member_info","Member Info",`One member's name, description and current status. member is a name or id. Read-only: never activates or notifies.`,parameterSchema("member:s"),{ member: "<member name or id>" }),
   gatewaySpec("profile_read","Profile Read",`Read your own profile: name, description and member id.`,parameterSchema(""),{}),
-  gatewaySpec("profile_update","Profile Update",`Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`,parameterSchema("name?:s description?:s"),{ description: "<your description>" }),
+  gatewaySpec("profile_update","Profile Update",`Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`,parameterSchema("name?:s description?:s",{name:"profileName",description:"profileDescription"}),{ description: "<your description>" }),
 ];
 export interface DirectToolSpec {
   name: string;
@@ -77,7 +92,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   directSpec("chat_send","Chat Send",`Send a message to one chat.
 - to (required): target chat — id or name; your private chat with the user is "dm:<your member id>" (or "user"). Private chats need no prior creation.
 - message (required): text content.
-- attachments (optional): local file paths, copied into that chat's attachment store.`,parameterSchema("to:s message:s attachments?:as")),
+- attachments (optional): local file paths, copied into that chat's attachment store.`,parameterSchema("to:s message:s attachments?:as",{to:"chatTo",message:"chatMessage",attachments:"chatAttachments"})),
   directSpec("chat_read","Chat Read",`Read an ordered window of messages from one chat.
 
 - chat (required): chat id or name — see chat_list.
@@ -92,21 +107,21 @@ chat_search locates messages; read opens the context — feed a hit's seq to aro
 - from / before / after / limit narrow the search.
 
 search locates; read opens the context — feed a hit's seq to chat_read around_seq or from_seq.`,parameterSchema("chat:s query:s from?:s before?:s after?:s limit?:n")),
-  directSpec("chat_list","Chat List",`List the chats you participate in: type, name, id (and description). query filters by keyword; limit (default 50) and offset page through the list.`,parameterSchema("query?:s limit?:n offset?:n")),
+  directSpec("chat_list","Chat List",`List the chats you participate in: type, name, id (and description). query filters by keyword; limit (default 50) and offset page through the list.`,parameterSchema("query?:s limit?:n offset?:n",{query:"listQuery",limit:"listLimit",offset:"listOffset"})),
   directSpec("bossmode","Bossmode",`Bossmode capabilities beyond the hot tools. \`list\` what is available, \`describe\` one capability's parameters, then \`call\` it with \`args\`. The hot tools (chat_send, chat_read, chat_search, chat_list) are registered directly — call them directly, not through here.`,parameterSchema("action:s tool?:s args?:any")),
   directSpec("workspace_list","Workspace List",`List your workspaces with the active one marked.`,parameterSchema("")),
-  directSpec("workspace_create","Workspace Create",`Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`,parameterSchema("id:s host:s user:s port?:n keyPath?:s root?:s description?:s")),
-  directSpec("workspace_use","Workspace Use",`Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`,parameterSchema("id:s")),
-  directSpec("workspace_remove","Workspace Remove",`Remove a workspace by id. The builtin original workspace cannot be removed.`,parameterSchema("id:s")),
-  directSpec("read","Read File",`Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s offset?:n limit?:n workspace?:s")),
-  directSpec("write","Write File",`Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s content:s workspace?:s")),
-  directSpec("edit","Edit File",`Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s edits:edits workspace?:s")),
-  directSpec("terminal_create","Terminal Create",`Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`,parameterSchema("name?:s workspace?:s cwd?:s")),
-  directSpec("terminal_exec","Terminal Exec",`Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,parameterSchema("terminalId:s command?:s keys?:s blockSeconds?:n")),
-  directSpec("terminal_read","Terminal Read",`Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`,parameterSchema("terminalId:s exec?:s fromLine?:n toLine?:n")),
-  directSpec("terminal_wait","Terminal Wait",`Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion.`,parameterSchema("terminalId:s exec:s blockSeconds?:n")),
+  directSpec("workspace_create","Workspace Create",`Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`,parameterSchema("id:s host:s user:s port?:n keyPath?:s root?:s description?:s",{id:"workspaceRegistrationId",description:"workspaceDescription"})),
+  directSpec("workspace_use","Workspace Use",`Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`,parameterSchema("id:s",{id:"workspaceTargetId"})),
+  directSpec("workspace_remove","Workspace Remove",`Remove a workspace by id. The builtin original workspace cannot be removed.`,parameterSchema("id:s",{id:"workspaceTargetId"})),
+  directSpec("read","Read File",`Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s offset?:n limit?:n workspace?:s",{path:"filePath",offset:"fileOffset",limit:"fileLimit"})),
+  directSpec("write","Write File",`Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s content:s workspace?:s",{path:"filePath",content:"fileContent"})),
+  directSpec("edit","Edit File",`Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s edits:edits workspace?:s",{path:"filePath"})),
+  directSpec("terminal_create","Terminal Create",`Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`,parameterSchema("name?:s workspace?:s cwd?:s",{name:"terminalName"})),
+  directSpec("terminal_exec","Terminal Exec",`Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,parameterSchema("terminalId:s command?:s keys?:s blockSeconds?:n",{terminalId:"terminalId"})),
+  directSpec("terminal_read","Terminal Read",`Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`,parameterSchema("terminalId:s exec?:s fromLine?:n toLine?:n",{terminalId:"terminalId",exec:"terminalExecId",fromLine:"terminalFromLine",toLine:"terminalToLine"})),
+  directSpec("terminal_wait","Terminal Wait",`Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion.`,parameterSchema("terminalId:s exec:s blockSeconds?:n",{terminalId:"terminalId",exec:"terminalExecId",blockSeconds:"terminalWaitBlockSeconds"})),
   directSpec("terminal_list","Terminal List",`List your terminals with running exec, alive state, and buffered line counts.`,parameterSchema("")),
-  directSpec("terminal_close","Terminal Close",`Close a terminal and kill its process. Running commands receive a close signal.`,parameterSchema("terminalId:s")),
+  directSpec("terminal_close","Terminal Close",`Close a terminal and kill its process. Running commands receive a close signal.`,parameterSchema("terminalId:s",{terminalId:"terminalId"})),
   directSpec("reload","Reload",`Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`,parameterSchema("")),
 ];
 function senderDisplayName(sender: string): string {
@@ -125,7 +140,7 @@ export interface QueryRow {
   content: string;
   ts?: number;
   replyTo?: QueryRowReplyTo;
-  attachments?: Array<{ originalFilename: string; path: string }>;
+  attachments?: Array<{ originalFilename: string; path?: string; unavailable?: boolean }>;
 }
 function replyToLine(replyTo: QueryRowReplyTo): string {
   if (replyTo.unavailable || !replyTo.sender || !replyTo.excerpt) {
@@ -135,9 +150,9 @@ function replyToLine(replyTo: QueryRowReplyTo): string {
 }
 
 function attachmentLines(attachments: QueryRow["attachments"]): string[] {
-  return (attachments || []).map(
-    (a) => `Attachment: [original filename: ${a.originalFilename}](${a.path})`,
-  );
+  return (attachments || []).map(a=>a.unavailable||!a.path
+    ?`Attachment unavailable: ${a.originalFilename}`
+    :`Attachment: [original filename: ${a.originalFilename}](${a.path})`);
 }
 
 /** Render one row as the member sees it: header + reply quote + content + attachments. */
