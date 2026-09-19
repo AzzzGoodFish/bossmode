@@ -1,10 +1,10 @@
-import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../../src/app/member-actions.js";
+import {loadAgentMemberSnapshot} from "../../src/app/member-actions.js";
 
 /** Real HTTP/WS routes with explicit SQL fixtures; only model execution is mocked. */
 import { beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import { coreFixture } from "./core-fixture.js";
-import type { Room } from "../../src/kernel/types.js";
+import type {Room} from "../../src/chat/conversations.js";
 
 const TEST_PASSWORD = "testpass";
 const TEST_USERNAME = "testuser";
@@ -13,7 +13,6 @@ if (!process.env.BOSSMODE_TEST_ROOT || !TEST_BOSSMODE_DIR) throw new Error("HTTP
 const servers = new Set<TestServer>();
 let storage: ReturnType<typeof coreFixture>;
 let stopProfiles: (() => void) | undefined;
-let stopConfigPatches: (() => void) | undefined;
 export function getTestBossmodeDir(): string { return TEST_BOSSMODE_DIR!; }
 export function getTestWorkspace() {
   if (!storage) throw new Error("Test workspace has not been initialized");
@@ -25,14 +24,12 @@ export function setupTestWorkspace(): void {
   beforeAll(async () => {
     storage = coreFixture(TEST_BOSSMODE_DIR);
     stopProfiles = (await import("../../src/app/wire.js")).wireMemberProfiles();
-    stopConfigPatches = (await import("../../src/app/wire.js")).wireMemberConfigPatches();
     const { getDefaultConfig, writeConfig } = await import("../../src/config/settings.js");
     const { hashPassword } = await import("../../src/api/auth.js");
     writeConfig({ ...getDefaultConfig(), auth: { username: TEST_USERNAME, passwordHash: hashPassword(TEST_PASSWORD) } });
   });
   afterAll(async () => {
     stopProfiles?.();
-    stopConfigPatches?.();
     const errors: unknown[] = [];
     for (const server of [...servers]) try { await closeTestServer(server); } catch (error) { errors.push(error); }
     try { const { shutdownAll } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") }); await shutdownAll(); } catch (error) { errors.push(error); }
@@ -106,17 +103,9 @@ export async function createTestServer(): Promise<TestServer> {
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/http.js");
   const { createWebSocketServer } = await import("../../src/app/ws.js");
-  const { initializeMemberRuntime } = await import("../../src/app/member-actions.js");
-  const { RuntimeRegistry } = await import("../../src/agent/types.js");
-  const { MockRuntime } = await import("./mock-runtime.js");
-
-  // Initialize mock runtime for tests
-  const registry = new RuntimeRegistry();
-  registry.register(new MockRuntime());
-  registry.register(new MockRuntime("pi-cli"));
-  initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
-
-  const wiring = await import("../../src/app/wire.js");
+  const {MockRuntime}=await import("./mock-runtime.js");
+  const wiring=await import("../../src/app/wire.js");
+  wiring.initializeMemberRuntime(new MockRuntime("pi-cli"),loadAgentMemberSnapshot);
   await wiring.wireApiRoutes();
   const stopChat = wiring.wireChatHttp();
   const stopMemberHttp = wiring.wireMemberHttp();

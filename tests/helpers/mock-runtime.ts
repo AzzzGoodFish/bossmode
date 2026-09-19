@@ -7,8 +7,8 @@ import type {
   AgentHandle,
   AgentStreamEvent,
   CreateAgentOpts,
-  RuntimeCapabilities,
-  RuntimeDetectResult,
+  ContextUsage,
+  MemberActiveToolInfo,
 } from "../../src/agent/types.js";
 
 // Mutable mock state — tests can reassign via setMockPromptFn etc.
@@ -70,6 +70,14 @@ export class MockAgentHandle implements AgentHandle {
     return { aborted: false };
   }
 
+
+  async setModel():Promise<void>{}
+  async refreshModelRegistry():Promise<void>{}
+  setThinkingLevel():void{}
+  async getContextUsage():Promise<ContextUsage|null>{return null;}
+  refreshPrompt():void{}
+  getActiveTools():MemberActiveToolInfo[]{return [];}
+
   abort(): void {
     mockAbortFn();
   }
@@ -99,16 +107,7 @@ export class MockAgentHandle implements AgentHandle {
 
 export class MockRuntime implements AgentRuntime {
   readonly name: string;
-  readonly capabilities: RuntimeCapabilities = {
-    streaming: true,
-    toolEvents: true,
-    thinking: false,
-    usage: false,
-    dynamicModel: false,
-    dynamicThinking: false,
-    permissionControl: false,
-    sessionResume: false,
-  };
+
 
   private handles: MockAgentHandle[] = [];
   private owners = new WeakMap<MockAgentHandle,string>();
@@ -117,9 +116,7 @@ export class MockRuntime implements AgentRuntime {
     this.name = name;
   }
 
-  async detect(): Promise<RuntimeDetectResult> {
-    return { available: true, version: "mock-1.0", path: "/mock" };
-  }
+
 
   async createAgent(_opts: CreateAgentOpts): Promise<AgentHandle> {
     const handle = new MockAgentHandle();
