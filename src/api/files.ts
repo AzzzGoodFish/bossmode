@@ -1,7 +1,7 @@
-import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
-import { attachmentLocation, getRoom, resolveConversation, roomMemberAssetRoots } from "../chat/conversations.js";
+import { attachmentLocation, resolveConversation } from "../chat/conversations.js";
 import {
   attachmentExists,
   getAttachmentPath,
@@ -9,8 +9,8 @@ import {
   storeAttachment,
   type AttachmentLocation,
 } from "../files/attachments.js";
-import { checkPath } from "../kernel/path.js";
-import * as knowledgeStore from "../knowledge/documents.js";
+import { openFileStream } from "../files/io.js";
+import { readArtifactPreview, resolveArtifact } from "../app/artifact-actions.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
 const HOME = homedir();
@@ -73,7 +73,7 @@ function download(response: Parameters<typeof sendJson>[0], location: Attachment
   const path = getAttachmentPath(location, filename);
   response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": statSync(path).size,
     "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" });
-  createReadStream(path).pipe(response);
+  openFileStream(path).pipe(response);
 }
 function preview(response: Parameters<typeof sendJson>[0], scopeId: string, location: AttachmentLocation, filename: string): void {
   if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
@@ -101,57 +101,21 @@ addRoute("GET", "/api/conversations/:scope/attachments/:filename/preview", async
   preview(response, target.scopeId, target.location, params.filename);
 });
 
-type ArtifactType = "md" | "html" | "image" | "text";
-function artifactType(path: string): ArtifactType | null {
-  const type = inferAttachmentPreviewType(path);
-  return type === "download" ? null : type === "markdown" ? "md" : type;
-}
-function real(path: string): string | null { try { return realpathSync(path); } catch { return null; } }
-function resolveArtifact(roomId: string, originalPath: string): { path: string; type: ArtifactType; size: number; normalized: string } | { error: string; status: number } {
-  if (!originalPath) return { error: "path query parameter is required", status: 400 };
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(originalPath)) return { error: "Remote URLs are not previewable", status: 400 };
-  const normalized = originalPath.trim().replace(/^docs\//, "");
-  const type = artifactType(normalized);
-  if (!type) return { error: `Unsupported artifact type: ${originalPath}`, status: 400 };
-  const roots = roomMemberAssetRoots(roomId);
-  const allowed = [real(knowledgeStore._internal.docsRoot()), ...roots.map(real)].filter((value): value is string => Boolean(value));
-  const candidates = [knowledgeStore._internal.absDocPath(normalized), ...roots.map((root) => resolve(root, originalPath))];
-  if (originalPath.startsWith("/")) candidates.push(originalPath);
-  for (const candidate of [...new Set(candidates)]) {
-    if (!existsSync(candidate)) continue;
-    const checked = checkPath(candidate, { allowedPrefixes: allowed, maxSizeBytes: MAX_PREVIEW_BYTES });
-    if (!checked.ok) return { error: checked.error, status: 400 };
-    return { path: checked.absolutePath, size: checked.size, type, normalized };
-  }
-  return { error: `Artifact not found: ${originalPath}`, status: 404 };
-}
 addRoute("GET", "/api/rooms/:id/artifact-raw", async (request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
   const original = requestUrl(request).searchParams.get("path")?.trim() || "";
   const artifact = resolveArtifact(params.id, original);
-  if ("error" in artifact) return sendJson(response, artifact.status, { error: artifact.error });
+  if (!artifact.ok) return sendJson(response, artifact.status, { error: artifact.error });
   response.writeHead(200, {
     "Content-Type": mime(artifact.path), "Content-Length": artifact.size,
     "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
   });
-  createReadStream(artifact.path).pipe(response);
+  openFileStream(artifact.path).pipe(response);
 });
 addRoute("GET", "/api/rooms/:id/artifact-preview", async (request, response, params) => {
-  if (!getRoom(params.id)) return sendJson(response, 404, { error: "Room not found" });
   const original = requestUrl(request).searchParams.get("path")?.trim() || "";
-  const normalized = original.replace(/^docs\//, "");
-  const type = artifactType(normalized);
-  if (type && type !== "image") {
-    const entry = knowledgeStore.getEntry(normalized);
-    if (entry) return sendJson(response, 200, { type, originalPath: original, path: entry.id, title: entry.title, content: entry.content });
-  }
-  const artifact = resolveArtifact(params.id, original);
-  if ("error" in artifact) return sendJson(response, artifact.status, { error: artifact.error });
-  sendJson(response, 200, {
-    type: artifact.type,
-    originalPath: original,
-    path: artifact.normalized,
-    title: artifact.normalized.split(/[\\/]/).pop() || artifact.normalized,
-    content: artifact.type === "image" ? `data:${mime(artifact.path)};base64,${readFileSync(artifact.path).toString("base64")}` : readFileSync(artifact.path, "utf8"),
-  });
+  const artifact = readArtifactPreview(params.id, original);
+  if (!artifact.ok) return sendJson(response, artifact.status, { error: artifact.error });
+  const { ok: _ok, content, ...preview } = artifact;
+  sendJson(response, 200, { ...preview,
+    content: Buffer.isBuffer(content) ? `data:${mime(artifact.path)};base64,${content.toString("base64")}` : content });
 });
