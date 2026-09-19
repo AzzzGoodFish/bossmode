@@ -1,6 +1,7 @@
-import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, renameSync } from "node:fs";
+import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, readFileSync, renameSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, parse, join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
+import { checkPath } from "../kernel/path.js";
 
 /** Ensure a directory exists without consulting application configuration or SQL. */
 export function ensureDirectory(path: string): void {
@@ -116,6 +117,25 @@ export function moveDurably(source: string, destination: string): void {
   syncPath(dirname(source));
   if (dirname(source) !== dirname(destination)) syncPath(dirname(destination));
 }
+
+export type LocatedFile =
+  | { ok: true; path: string; size: number }
+  | { ok: false; code: "not_found" | "invalid"; error: string };
+
+/** Resolve the first existing candidate under an allowlisted real root. */
+export function locateReadableFile(candidates: string[], allowedRoots: string[], maxSizeBytes?: number): LocatedFile {
+  const roots = allowedRoots.flatMap(root => { try { return [realpathSync(root)]; } catch { return []; } });
+  for (const candidate of [...new Set(candidates)]) {
+    if (!existsSync(candidate)) continue;
+    const checked = checkPath(candidate, { allowedPrefixes: roots, maxSizeBytes });
+    if (!checked.ok) return { ok: false, code: "invalid", error: checked.error };
+    return { ok: true, path: checked.absolutePath, size: checked.size };
+  }
+  return { ok: false, code: "not_found", error: "File not found" };
+}
+
+export function readFileBytes(path: string): Buffer { return readFileSync(path); }
+export function openFileStream(path: string) { return createReadStream(path); }
 
 /** Presence hint only; inaccessible entries do not become readable through this inspection. */
 export function directoryHasReadableEntries(directory: string): boolean {

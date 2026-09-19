@@ -1,0 +1,39 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { locateReadableFile, readFileBytes } from "../../src/files/io.js";
+
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+function temporary(name: string): string { const root = mkdtempSync(join(tmpdir(), name)); roots.push(root); return root; }
+
+describe("generic allowlisted file reads", () => {
+  it("selects the first existing regular file and reports its canonical size", () => {
+    const root = temporary("bossmode-files-root-");
+    const file = join(root, "artifact.md");
+    writeFileSync(file, "hello");
+    const result = locateReadableFile([join(root, "missing.md"), file], [root], 10);
+    expect(result).toEqual({ ok: true, path: file, size: 5 });
+    if (result.ok) expect(readFileBytes(result.path).toString("utf8")).toBe("hello");
+  });
+
+  it("rejects existing files and symlink targets outside the allowed roots", () => {
+    const root = temporary("bossmode-files-root-");
+    const outside = temporary("bossmode-files-outside-");
+    const secret = join(outside, "secret.txt");
+    writeFileSync(secret, "secret");
+    expect(locateReadableFile([secret], [root])).toMatchObject({ ok: false, code: "invalid" });
+    const link = join(root, "link.txt");
+    symlinkSync(secret, link);
+    expect(locateReadableFile([link], [root])).toMatchObject({ ok: false, code: "invalid" });
+  });
+
+  it("distinguishes missing candidates from invalid and oversized files", () => {
+    const root = temporary("bossmode-files-root-");
+    expect(locateReadableFile([join(root, "missing")], [root])).toEqual({ ok: false, code: "not_found", error: "File not found" });
+    const large = join(root, "large.txt");
+    writeFileSync(large, "12345");
+    expect(locateReadableFile([large], [root], 4)).toMatchObject({ ok: false, code: "invalid" });
+  });
+});
