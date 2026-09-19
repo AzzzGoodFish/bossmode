@@ -3,9 +3,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Square, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import {
-  abortMember, getRoomMembers, getConfiguredModels, getAgentEventsPaginated, getToken,
-  getMemberStats, getMemberActiveTools,
-  getMemberScopedStats, getConversationTools, sendDmMessage, removeRoomMember,
+  abortMember, getRoomMembers, getConfiguredModels, getConversationEvents, getToken,
+  getMemberStats, sendDmMessage, removeRoomMember,
   type MemberInfo, type AvailableModelOption, type ContextUsageData, type MemberProfileDoc, type MemberSkillEntry, type MemberStats, type MemberActiveTool,
 } from "../api/client";
 import { useMemberFloat } from "./member-float";
@@ -133,13 +132,15 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onMem
   // per member and merged into turn blocks at render. Same visibility filter
   // as the member Activity tab (isActivityStreamEvent).
   const loadFeedEvents = useCallback(async (name: string) => {
+    const memberId = memberInfos[name]?.id;
+    if (!memberId) return;
     try {
-      const result = await getAgentEventsPaginated(roomId, name, FEED_PAGE_SIZE);
+      const result = await getConversationEvents(`room:${roomId}`, memberId, FEED_PAGE_SIZE);
       setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter((e) => isActivityStreamEvent(e) || e.type === "message_start").slice(-FEED_PAGE_SIZE) }));
     } catch (err) {
       console.error("Failed to load agent activity:", err);
     }
-  }, [roomId]);
+  }, [roomId, memberInfos]);
 
   useEffect(() => {
     if (!eventWatchId) return;

@@ -642,10 +642,6 @@ export interface MemberActiveToolsResponse {
   message?: string;
 }
 
-export async function getMemberActiveTools(roomId: string, memberRef: string): Promise<MemberActiveToolsResponse> {
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(memberRef)}/tools`);
-}
-
 // -- Messages --
 
 export interface KnowledgeEventMeta {
@@ -754,43 +750,16 @@ export async function sendMessage(
   return result.message;
 }
 
-export async function resetAgentSession(
-  roomId: string,
-  agentName: string,
-): Promise<{ ok: true; message: string }> {
-  const scope = encodeURIComponent(`room:${roomId}`);
-  return apiFetch(`/api/conversations/${scope}/reset-session?member=${encodeURIComponent(agentName)}`, { method: "POST" });
-}
-
-// ── Mount-stale info ──
-
-export interface StaleInfo {
-  mounts?: { since: number; fields: string[] };
-  contract?: boolean;
-}
-
-export async function getAgentEvents(roomId: string, agentName: string): Promise<unknown[]> {
-  const scope = encodeURIComponent(`room:${roomId}`);
-  return apiFetch(`/api/conversations/${scope}/events?member=${encodeURIComponent(agentName)}`);
-}
-
 export interface PaginatedEvents {
   events: unknown[];
   total: number;
   hasMore: boolean;
 }
 
-export async function getAgentEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): Promise<PaginatedEvents> {
-  const params = new URLSearchParams({ member: agentName, limit: String(limit) });
+export async function getConversationEvents(scopeId: string, memberId: string, limit: number, before?: number): Promise<PaginatedEvents> {
+  const params = new URLSearchParams({ memberId, limit: String(limit) });
   if (before !== undefined) params.set("before", String(before));
-  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/events?${params}`);
-}
-
-/** Scope-addressed events (dm:<id> / room:<id>). */
-export async function getConversationEvents(scopeId: string, member: string, limit: number, before?: number): Promise<PaginatedEvents> {
-  const qs = new URLSearchParams({ member, limit: String(limit) });
-  if (before !== undefined) qs.set("before", String(before));
-  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/events?${qs}`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/events?${params}`);
 }
 
 export interface ActivityEventsPage {
@@ -811,10 +780,10 @@ export async function getMemberActivityEvents(
   beforeSeq?: number,
   types?: string[],
 ): Promise<ActivityEventsPage> {
-  const qs = new URLSearchParams({ limit: String(limit) });
+  const qs = new URLSearchParams({ scope: `room:${roomId}`, limit: String(limit) });
   if (beforeSeq !== undefined) qs.set("beforeSeq", String(beforeSeq));
   if (types && types.length) qs.set("types", types.join(","));
-  return apiFetch(`/api/rooms/${roomId}/members/${encodeURIComponent(ref)}/events?${qs}`);
+  return apiFetch(`/api/members/${encodeURIComponent(ref)}/events?${qs}`);
 }
 
 /** ① B5: stop/compact/reset/restart target the member directly — no chat scope
@@ -845,8 +814,8 @@ export interface ContextUsageData {
   compacted?: boolean;
 }
 
-export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsageData> {
-  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?member=${encodeURIComponent(agentName)}`);
+export async function getAgentContextUsage(roomId: string, memberId: string): Promise<ContextUsageData> {
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?memberId=${encodeURIComponent(memberId)}`);
 }
 
 // -- Attachments --
@@ -882,34 +851,6 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   }
 
   return res.json();
-}
-
-export type McpAvailabilityStatus = "unchecked" | "checking" | "available" | "unavailable" | "auth-required" | "invalid-config";
-
-export interface McpServerAvailability {
-  name: string;
-  status: McpAvailabilityStatus;
-  checkedAt?: number;
-  toolCount?: number;
-  resourceCount?: number;
-  error?: string;
-}
-
-export interface McpServerSummary {
-  name: string;
-  transport: "http" | "stdio" | "invalid";
-  assignedCount?: number;
-  availability?: McpServerAvailability;
-}
-
-export interface McpSettings {
-  enabled: boolean;
-  configPath: string;
-  configText: string;
-  serverCount: number;
-  servers?: McpServerSummary[];
-  availability?: Record<string, McpServerAvailability>;
-  sources?: Array<{ id: string; label: string; path: string; exists: boolean; serverCount: number }>;
 }
 
 // -- Usage (token stats) --
@@ -1007,25 +948,6 @@ export async function getRoomUsage(
   const qs = q.toString();
   return apiFetch(`/api/rooms/${roomId}/usage${qs ? `?${qs}` : ""}`);
 }
-
-export async function getMcpSettings(): Promise<McpSettings> {
-  return apiFetch("/api/settings/mcp");
-}
-
-export async function updateMcpSettings(settings: { enabled?: boolean; configText?: string }): Promise<McpSettings> {
-  return apiFetch("/api/settings/mcp", {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
-}
-
-export async function checkMcpServers(server?: string, timeoutMs?: number): Promise<McpSettings & { results: McpServerAvailability[] }> {
-  return apiFetch("/api/settings/mcp/check", {
-    method: "POST",
-    body: JSON.stringify({ ...(server ? { server } : {}), ...(timeoutMs ? { timeoutMs } : {}) }),
-  });
-}
-
 
 // -- 0.20: Contacts / Members / DM / Chats (member-global model) --
 

@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import {
-  getMemberActiveTools, getConversationTools,
+  getConversationTools,
   type AvailableModelOption, type ContextUsageData,
   type MemberActiveTool,
   type MemberSkillEntry, type MemberStats,
@@ -368,15 +368,9 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
     setLoading(true);
     setError(false);
     try {
-      if (dmScope) {
-        const data = await getConversationTools(dmScope.scopeId, dmScope.memberId);
-        setSessionActive(!!data.live?.sessionActive);
-        setTools(Array.isArray(data.live?.tools) ? data.live!.tools : []);
-      } else {
-        const data = await getMemberActiveTools(roomId, memberRef);
-        setSessionActive(!!data.sessionActive);
-        setTools(Array.isArray(data.tools) ? data.tools : []);
-      }
+      const data = await getConversationTools(dmScope?.scopeId || `room:${roomId}`, dmScope?.memberId || memberRef);
+      setSessionActive(!!data.live?.sessionActive);
+      setTools(Array.isArray(data.live?.tools) ? data.live!.tools : []);
     } catch {
       setError(true);
       setSessionActive(false);

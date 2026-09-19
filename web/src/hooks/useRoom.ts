@@ -34,11 +34,12 @@ export function useRoom(roomId: string | null) {
     if (!roomId || !room) return;
 
     const results = await Promise.allSettled(
-      room.members
-        .filter((name) => !unsupportedAgents.current.has(name))
-        .map(async (name) => {
-          const data = await getAgentContextUsage(roomId, name);
-          if (!data.supported) unsupportedAgents.current.add(name);
+      room.memberIds
+        .map((memberId, index) => ({ memberId, name: room.members[index] || memberId }))
+        .filter(({ memberId }) => !unsupportedAgents.current.has(memberId))
+        .map(async ({ memberId, name }) => {
+          const data = await getAgentContextUsage(roomId, memberId);
+          if (!data.supported) unsupportedAgents.current.add(memberId);
           return { name, data };
         }),
     );
