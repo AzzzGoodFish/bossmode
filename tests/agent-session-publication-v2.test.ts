@@ -5,7 +5,7 @@ import {
   closeRuntimeAdmission, instances, openRuntimeAdmission, pendingCreations,
   sessionPublishOwners,
 } from "../src/agent/instance.js";
-import { RuntimeRegistry, type AgentHandle, type AgentMemberSnapshot, type AgentRuntime, type CreateAgentOpts } from "../src/agent/types.js";
+import { type AgentHandle, type AgentMemberSnapshot, type AgentRuntime, type CreateAgentOpts } from "../src/agent/types.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
 afterEach(() => {
@@ -20,8 +20,8 @@ function setup() {
     "mem_build", "Builder", "builder", "general", "{}", 1, 1,
   );
   const snapshot: AgentMemberSnapshot = {
-    config: { id: "mem_build", name: "Builder", agent: "general", runtime: "controlled", model: "fake:model", credentialId: "cred" },
-    prompt: { agentPrompt: "role", envPrompt: "env", appendSystemPrompt: [], contractFingerprint: "fp" },
+    config:{id:"mem_build",name:"Builder",model:"fake:model",credentialId:"cred",thinkingLevel:"off"},
+    prompt:{agentPrompt:"role",appendSystemPrompt:[],contractFingerprint:"fp"},
     resources: { skillNames: [], skillPaths: [], extensionPaths: [], mcp: { adapterPath: "", runtimeDir: "/tmp", config: {}, serverNames: [] } },
     workspaceRoot: "/tmp",
   };
@@ -31,8 +31,8 @@ function setup() {
 function handle() {
   const destroyAndWait = vi.fn(async () => {});
   const value: AgentHandle = {
-    isWorking: false, prompt: async () => {}, compact: async () => ({ aborted: false }),
-    abort() {}, destroy() {}, destroyAndWait, waitForIdle: async () => {}, subscribe: () => () => {},
+    prompt:async()=>{},compact:async()=>({aborted:false}),abort(){},destroy(){},destroyAndWait,waitForIdle:async()=>{},subscribe:()=>()=>{},
+    setModel:async()=>{},refreshModelRegistry:async()=>{},setThinkingLevel(){},getContextUsage:async()=>null,refreshPrompt(){},getActiveTools:()=>[],
   };
   return { value, destroyAndWait };
 }
@@ -40,8 +40,7 @@ function handle() {
 function controlledRuntime(createAgent: (opts: CreateAgentOpts) => Promise<AgentHandle>): AgentRuntime {
   return {
     name: "controlled",
-    capabilities: { streaming: true, toolEvents: true, thinking: false, usage: false, dynamicModel: false, dynamicThinking: false, permissionControl: false, sessionResume: true, contextUsage: false },
-    detect: async () => ({ available: true }), createAgent,
+    createAgent,
     shutdownMember: async () => {}, shutdownAll: async () => {},
   };
 }
@@ -59,9 +58,8 @@ describe("session publication gates v2", () => {
       opts.onSessionChanged?.({ sessionId: "sid", sessionFile: "/tmp/final-session.jsonl" });
       return runtimeHandle.value;
     });
-    const registry = new RuntimeRegistry(); registry.register(runtime);
-    const saveSession = vi.fn();
-    configureAssembly(registry, () => snapshot, { saveSession });
+    const saveSession=vi.fn();
+    configureAssembly(runtime,()=>snapshot,{saveSession});
 
     const building = buildMemberAgentSession("mem_build");
     await entered;
@@ -86,9 +84,8 @@ describe("session publication gates v2", () => {
       opts.onSessionChanged?.({ sessionFile: "/tmp/stale.jsonl" });
       return runtimeHandle.value;
     });
-    const registry = new RuntimeRegistry(); registry.register(runtime);
-    const saveSession = vi.fn();
-    configureAssembly(registry, () => snapshot, { saveSession });
+    const saveSession=vi.fn();
+    configureAssembly(runtime,()=>snapshot,{saveSession});
 
     const building = buildMemberAgentSession("mem_build");
     await entered;

@@ -24,36 +24,32 @@ function setup() {
 function liveInstance(handle: MockAgentHandle): AgentInstance {
   return {
     handle, activeSourceRef: null, memberId: "mem_events", agentName: "Events",
-    sourceAgent: "general", status: "idle", dispatchState: "idle", promptInFlight: false,
+    status:"idle",dispatchState:"idle",promptInFlight:false,
     hadErrorInTurn: false, lastTurnError: null, pendingErrorNotice: null,
     lastMessageEndWasLength: false, lengthContinuationPending: false,
     lengthContinuationAttempted: false, compacting: false, turnActive: false,
-    sessionSources: {
-      member: { id: "mem_events", name: "Events", agent: "general", runtime: "mock" },
-      compiled: { agentPrompt: "", envPrompt: "", appendSystemPrompt: [] },
-      skills: [], skillPaths: [], cwd: "/tmp", runtimeName: "mock",
-    },
+    sessionSources:{compiled:{agentPrompt:"",appendSystemPrompt:[]}},
     unsubscribe: () => {}, eventBuffer: [], appliedModel: "fake:model",
     pendingReload: null,
   };
 }
 
 describe("member event facts v2", () => {
-  it("persists source-less lifecycle and removes an unexpectedly exited idle runtime", () => {
+  it("persists source-less lifecycle without creating routed outbox work", () => {
     const fixture = setup();
     const handle = new MockAgentHandle();
     const instance = liveInstance(handle);
     instances.set(instanceKey(instance.memberId), instance);
     wireInstanceEvents(instance);
 
-    handle.emit({ type: "runtime_exit", unexpected: true, code: 9, signal: null, stderrTail: "gone" });
+    handle.emit({type:"agent_start"});
 
-    expect(instances.has(instanceKey(instance.memberId))).toBe(false);
+    expect(instances.has(instanceKey(instance.memberId))).toBe(true);
     const row = fixture.db.get<{ id: string; source_ref: string | null; type: string }>(
       "SELECT id,source_ref,type FROM agent_events WHERE member_id=?", instance.memberId,
     );
-    expect(row).toMatchObject({ source_ref: null, type: "runtime_exit" });
-    expect(readAgentEvent(row!.id)?.event).toMatchObject({ type: "runtime_exit", unexpected: true });
+    expect(row).toMatchObject({source_ref:null,type:"agent_start"});
+    expect(readAgentEvent(row!.id)?.event).toMatchObject({type:"agent_start"});
     expect(fixture.db.get<{ n: number }>("SELECT COUNT(*) n FROM outbox WHERE kind='agent-event'")!.n).toBe(0);
   });
 

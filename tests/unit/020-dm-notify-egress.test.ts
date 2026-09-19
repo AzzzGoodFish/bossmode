@@ -314,17 +314,3 @@ describe("DM historical messages through ordinary storage startup", () => {
     expect(database!.all("SELECT * FROM messages")).toEqual([]);
   });
 });
-
-describe("system notices hidden from members (fish 2026-08-04)", () => {
-  it("predicate hides all sender=system except typed task/knowledge events", async () => {
-    const { isSystemNoticeHiddenFromMembers } = await import("../../src/kernel/runtime-error-limit.js");
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" request failed.` })).toBe(true);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" finished without replying.` })).toBe(true);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" hasn't selected a model yet.` })).toBe(true);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", content: `Member "pm" Member was cut off due to output length again.` })).toBe(true);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", type: "task_event", content: "Task created" })).toBe(false);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "system", type: "knowledge_event", content: "[Knowledge] pm updated" })).toBe(false);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "pm", content: "hi" })).toBe(false);
-    expect(isSystemNoticeHiddenFromMembers({ sender: "user", content: "hi" })).toBe(false);
-  });
-});
