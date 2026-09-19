@@ -250,8 +250,8 @@ function memberScopeAllowsExecution(scopeValue: string, memberId: string): boole
 
 export function getScopeLiveStatus(scopeId:ScopeId):"idle"|"working"|"inactive"{
   const ref=parseScopeId(scopeId);if(!ref)return "inactive";
-  if(ref.kind==="dm")return getAgentStatus(scopeId,ref.memberId);
-  const statuses=roomStore.getRoomMembers(ref.roomId).map(member=>getAgentStatus(ref.roomId,member.id));
+  if(ref.kind==="dm")return getAgentStatus(ref.memberId);
+  const statuses=roomStore.getRoomMembers(ref.roomId).map(member=>getAgentStatus(member.id));
   return statuses.includes("working")?"working":statuses.some(status=>status!=="inactive")?"idle":"inactive";
 }
 
@@ -273,24 +273,15 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.compiled = compiled;
 }
 
-export function getAgentStatus(roomId:string,memberRef:string):AgentStatus{
-  const member=resolveRoomMember(roomId,memberRef),instance=instances.get(instanceKey(member?.id||memberRef));return instance?.status??"inactive";
+export function getAgentStatus(memberId:string):AgentStatus{return instances.get(instanceKey(memberId))?.status??"inactive";}
+export function getMemberBusyState(memberId:string):{busy:boolean;reason?:string}{
+  const key=instanceKey(memberId),instance=instances.get(key);if(pendingCreations.has(key))return {busy:true,reason:"pending_creation"};if(!instance)return {busy:false};
+  const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;return reason?{busy:true,reason}:{busy:false};
 }
-export function getMemberBusyState(roomId:string,memberRef:string):{busy:boolean;reason?:string}{
-  const member=resolveRoomMember(roomId,memberRef),key=instanceKey(member?.id||memberRef),instance=instances.get(key);
-  if(pendingCreations.has(key))return {busy:true,reason:"pending_creation"};
-  if(!instance)return {busy:false};
-  const reason=instance.status==="working"?"working":instance.dispatchState!=="idle"?instance.dispatchState:instance.promptInFlight?"prompt_in_flight":undefined;
-  return reason?{busy:true,reason}:{busy:false};
-}
-export function getRoomAgentStatuses(roomId:string):Record<string,AgentStatus>{return Object.fromEntries(roomStore.getRoomMembers(roomId).map(member=>[member.name,getAgentStatus(roomId,member.id)]));}
-export function getAgentContextUsage(roomId:string,memberRef:string):ContextUsage|null{
-  const member=resolveRoomMember(roomId,memberRef);return contextUsageCache.get(instanceKey(member?.id||memberRef))??null;
-}
-export function getMemberActiveTools(roomId:string,memberRef:string):{sessionActive:boolean;tools:Array<{name:string;label?:string;description:string;parameters:unknown;source:string}>;message?:string}{
-  const member=resolveRoomMember(roomId,memberRef),handle=instances.get(instanceKey(member?.id||memberRef))?.handle;
-  if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};
-  return {sessionActive:true,tools:handle.getActiveTools()||[]};
+export function getRoomAgentStatuses(roomId:string):Record<string,AgentStatus>{return Object.fromEntries(roomStore.getRoomMembers(roomId).map(member=>[member.name,getAgentStatus(member.id)]));}
+export function getAgentContextUsage(memberId:string):ContextUsage|null{return contextUsageCache.get(instanceKey(memberId))??null;}
+export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:Array<{name:string;label?:string;description:string;parameters:unknown;source:string}>;message?:string}{
+  const handle=instances.get(instanceKey(memberId))?.handle;if(!handle?.getActiveTools)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }
 
 interface RefreshContextUsageOptions {
@@ -301,10 +292,8 @@ interface RefreshContextUsageOptions {
   retryDelayMs?: number;
 }
 
-function refreshContextUsageOnce(roomId: string, memberRef: string, options: RefreshContextUsageOptions = {}): void {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  const agentName = member?.name || memberRef;
+function refreshContextUsageOnce(roomId: string, memberId: string, options: RefreshContextUsageOptions = {}): void {
+  const agentName = getMember(memberId)?.name || memberId;
   const key = instanceKey(memberId);
   const instance = instances.get(key);
   if (!instance?.handle.getContextUsage) return;
@@ -341,39 +330,25 @@ function refreshContextUsageOnce(roomId: string, memberRef: string, options: Ref
 }
 
 /** Proactively refresh context usage cache (called on agent_end / compaction_end). Fire-and-forget, non-blocking. */
-export function refreshContextUsage(roomId: string, memberRef: string, options: RefreshContextUsageOptions = {}): void {
-  refreshContextUsageOnce(roomId, memberRef, options);
+export function refreshContextUsage(roomId: string, memberId: string, options: RefreshContextUsageOptions = {}): void {
+  refreshContextUsageOnce(roomId, memberId, options);
   const retries = Math.max(0, options.retries || 0);
   const delay = Math.max(0, options.retryDelayMs || 0);
   for (let i = 1; i <= retries; i += 1) {
     const timer = setTimeout(() => {
       // A retry can fire after teardown (shutdown, test isolation): drop it
       // instead of letting the storage access escape as an unhandled error.
-      try { refreshContextUsageOnce(roomId, memberRef, options); }
+      try { refreshContextUsageOnce(roomId, memberId, options); }
       catch { /* runtime torn down — drop the retry */ }
     }, delay * i);
     (timer as { unref?: () => void }).unref?.();
   }
 }
 
-function emitAgentLocalEvent(
-  sourceRef: string | null,
-  memberRef: string,
-  event: AgentHistoryEvent,
-  identity?: { memberId: string; agentName: string },
-): void {
-  const scopedMember = sourceRef?.startsWith("dm:") ? getMember(memberRef) : null;
-  const roomId = sourceRef ? chatTargetOf(sourceRef) : null;
-  const member = identity ? undefined : scopedMember ?? (roomId ? roomStore.resolveRoomMemberRef(roomId, memberRef) : undefined);
-  // Prefer live instance identity, then the global member record for DM.
-  const keyHint = instanceKey(member?.id || memberRef);
-  const instance = instances.get(keyHint);
-  const memberId = identity?.memberId || member?.id || instance?.memberId || memberRef;
-  const agentName = identity?.agentName || member?.name || instance?.agentName || memberRef;
-  // Use the same authoritative, commit-safe event/outbox path as SDK events.
-  // Failed persistence is not a successful activity notification.
-  processEvent(sourceRef,agentName,keyHint,event as AgentStreamEvent,instance?.eventBuffer ?? [],memberId);
-
+function emitAgentLocalEvent(sourceRef:string|null,memberRef:string,event:AgentHistoryEvent,identity?:{memberId:string;agentName:string}):void{
+  const member=getMember(memberRef),instance=instances.get(instanceKey(memberRef));
+  const memberId=identity?.memberId??instance?.memberId??member?.id??memberRef,agentName=identity?.agentName??instance?.agentName??member?.name??memberRef;
+  processEvent(sourceRef,agentName,instanceKey(memberId),event as AgentStreamEvent,instance?.eventBuffer??[],memberId);
 }
 
 // -- Instance management --
