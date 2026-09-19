@@ -57,6 +57,24 @@ describe("member event facts v2", () => {
     expect(fixture.db.get<{ n: number }>("SELECT COUNT(*) n FROM outbox WHERE kind='agent-event'")!.n).toBe(0);
   });
 
+  it("rebuilds historical activity in logical sequence without inventing missing event time", () => {
+    const fixture = setup();
+    const imported = (id: string, sourceSeq: number, event: any, factTs: number) => importHistoricalEvent(fixture.db, {
+      id, sourceKey: "room:rm_legacy", ownerKey: "legacy-owner", sourceSeq,
+      memberId: "mem_events", sourceRef: "room:rm_legacy", event, ts: factTs,
+    });
+    imported("legacy-start-1", 1, { type: "agent_start", ts: 100 }, 100);
+    imported("legacy-start-2", 2, { type: "agent_start", ts: 50 }, 50);
+    imported("legacy-end", 3, { type: "agent_end", ts: 120 }, 120);
+    imported("legacy-missing-start", 4, { type: "agent_start" }, 200);
+    imported("legacy-missing-end", 5, { type: "agent_end", ts: 300 }, 300);
+
+    rebuildEventAggregates(fixture.db);
+
+    expect(readStats("mem_events").activeMs).toBe(70);
+    expect(readStats("mem_events").turns).toBe(2);
+  });
+
   it("keeps member statistics for null-source facts and routes only addressed facts", () => {
     const fixture = setup();
     appendMemberEvent({ id: "start", memberId: "mem_events", sourceRef: null, event: { type: "agent_start", ts: 1_000 } });

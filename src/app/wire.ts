@@ -30,10 +30,11 @@ export function wireConversationMembers(): () => void {
   return connectConversationMembers(readMemberIdentity);
 }
 
-import { setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
+import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
+import { abortAgent, abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { setStatusSink } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./server/ws.js";
-import { commitChatMessage, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
+import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getMemberInstances, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
 
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
@@ -133,14 +134,14 @@ export function _resetDedup(): void {
 /** Connect agent event facts to transports and chat ownership; the agent core stays subscriber-free. */
 import { connectChatHttpActions } from "../api/chats.js";
 import { connectMemberHttpActions } from "../api/members.js";
+import { connectUsageHttpQueries } from "../api/usage.js";
 
 /** Register HTTP route modules once during application startup, never per request. */
 export async function wireApiRoutes(): Promise<void> {
   await Promise.all([
     import("../api/members.js"), import("../api/chats.js"), import("../api/models.js"),
     import("../api/workspaces.js"), import("../api/files.js"), import("../api/knowledge.js"),
-    import("../api/usage.js"), import("../api/conversations.js"), import("../api/workforce.js"),
-    import("../api/mcp.js"),
+    import("../api/usage.js"),
   ]);
 }
 import { configureToolChatSender } from "../agent/tools/tools.js";
@@ -152,12 +153,35 @@ export function wireMemberHttp(): () => void {
       const prompt = previewMemberPrompt(memberId);
       return { text: prompt.fullPrompt, contractFingerprint: prompt.contractFingerprint };
     },
+    readStats,
+    readTokenTotal: memberTokenTotal,
+    readActivity: pageActivity,
+    readStatus: memberId => ({ instances: getMemberInstances(memberId) }),
+    stop: abortMember,
+    compact: compactMemberById,
+    reset: resetMemberSession,
+    restart: restartMember,
   });
+}
+
+export function wireUsageHttp(): () => void {
+  return connectUsageHttpQueries({ readUsageRows });
 }
 
 export function wireChatHttp(): () => void {
   const disconnectHttp = connectChatHttpActions({
     postMessage: commitChatMessage,
+    resetSession: (_sourceRef, memberId) => resetMemberSession(memberId),
+    abort: (sourceRef, memberId) => abortAgent(sourceRef, memberId),
+    compact: compactMember,
+    readContextUsage: (sourceRef, memberId) => getAgentContextUsage(sourceRef, memberId),
+    readEvents: (sourceRef, memberId, limit, before) => loadEventsPaginated(sourceRef, memberId, limit, before),
+    readTools: (sourceRef, memberId) => getMemberActiveTools(sourceRef, memberId),
+    readSession: (sourceRef, memberId) => ({
+      status: getAgentStatus(sourceRef, memberId),
+      busy: getMemberBusyState(sourceRef, memberId),
+      contextUsage: getAgentContextUsage(sourceRef, memberId),
+    }),
     scopeStatus: sourceRef => getScopeLiveStatus(sourceRef),
     roomStatuses: roomId => getRoomAgentStatuses(roomId),
   });

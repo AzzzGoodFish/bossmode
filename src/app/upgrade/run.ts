@@ -12,6 +12,7 @@ import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../data/schema.js
 import { importLegacyArchives, importLegacyDocuments, verifyActiveMemberAssets } from "./assets.js";
 import { importLegacyMembers, importLegacySettings, importLegacyExecution, importAgentTemplates } from "./records.js";
 import { importLegacyConversations } from "./conversations.js";
+import { rebuildEventAggregates } from "../../agent/events.js";
 import { archiveRetiredTasks, cleanupRetiredTopicSessionFiles, cleanupRetiredBackgroundSessionFiles, archiveRetiredScopeSessions, archiveLegacySharedMemory, cleanupMemberMemoryScopes, copyRoomPrinciplesToDescriptions } from "./retirements.js";
 
 
@@ -305,7 +306,10 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
   // archive before the core-task-retirement-v1 migration drops them.
   archiveRetiredData:(stagingDb,root)=>{archiveRetiredTasks(stagingDb,root);},
   importData:async ctx=>{
-   if(!ctx.legacy)return;
+   if(!ctx.legacy){
+    if(ctx.db.get("SELECT 1 FROM storage_meta WHERE key='event_aggregates_rebuild_required'")) rebuildEventAggregates(ctx.db);
+    return;
+   }
    const consumed=new Set<string>();const add=(paths:Iterable<string>)=>{for(const path of paths)consumed.add(path);};
    const members=importLegacyMembers(ctx,entries,memberAuthority(ctx));add(members.consumed);
    add(importLegacyArchives(ctx,entries));
@@ -327,6 +331,7 @@ export async function prepareCoreStorage(options:CoreStartupOptions){
    add(await importLegacyDocuments(ctx,entries,members.personas));
    const remaining=entries.filter(e=>!consumed.has(e.path));
    if(remaining.length)throw new Error(`Startup source adapter missing: ${remaining.map(e=>e.kind+":"+e.path).join(", ")}`);
+   if(ctx.db.get("SELECT 1 FROM storage_meta WHERE key='event_aggregates_rebuild_required'")) rebuildEventAggregates(ctx.db);
    ctx.db.run("INSERT INTO storage_meta(key,value) VALUES('core-import-source-count',?)",String(consumed.size));
   },
   validate:async ctx=>{

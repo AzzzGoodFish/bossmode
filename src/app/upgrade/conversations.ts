@@ -2,7 +2,7 @@ import { type Database } from "../../data/database.js";
 import { executionScopeId } from "../../data/repositories/execution-identity.js";
 import { type LegacySourceEntry, type UpgradeImportContext, readLegacyJson, readLegacyJsonl, readLegacyEventJsonl } from "./inventory.js";
 import { createHash } from "node:crypto";
-import { requireObject } from "../../kernel/json.js";
+import { canonicalJson, requireObject } from "../../kernel/json.js";
 import { isDeepStrictEqual } from "node:util";
 import { importHistoricalEvent, readAgentEvent, type AgentHistoryEvent, rebuildEventAggregates } from "../../agent/events.js";
 import { readFileSync } from "node:fs";
@@ -47,14 +47,6 @@ interface ImportEventSource {
  entry:LegacySourceEntry;owner:string;memberId:string|null;rows:ImportEventRow[];
 }
 
-interface EventOccurrence {
- path:string;ordinal:number;eventId:string;proof:string|null;
- scopeId:string;ownerKey:string;memberId:string|null;
- sourceScopeId:string;sourceOwnerKey:string|null;sourceTimestamp:number;mtimeMs:number;
-}
-
-const occurrencePrefix="legacy-event-occurrence-v1:";
-
 function sourceHash(path:string):string{return createHash("sha256").update(path).digest("hex");}
 
 function eventSource(entry:LegacySourceEntry,options:LegacyConversationImportOptions):ImportEventSource{
@@ -70,7 +62,7 @@ function eventSource(entry:LegacySourceEntry,options:LegacyConversationImportOpt
 /** Import-only occurrence receipts use the existing versioned storage metadata
  * namespace. They retain every source location even when several locations prove
  * one fact. They are not live SDK replay receipts or a second event authority. */
-function importEventRows(db:Database,source:ImportEventSource):void{
+function importEventRows(db:Database,source:ImportEventSource,sequenceByEventId?:ReadonlyMap<string,number>):void{
  const {entry:e,owner,memberId}=source;
  const scope=ensureImportedScope(db,e.scopeId!,e.path.startsWith("rooms/")?e.path.split("/")[1]:undefined);
  if(memberId!==null&&!db.get("SELECT id FROM members WHERE id=?",memberId))throw new Error("Unknown imported event member ID");
@@ -80,30 +72,95 @@ function importEventRows(db:Database,source:ImportEventSource):void{
   if(typeof event.type!=="string"||!event.type)throw new Error(`Invalid legacy event: ${e.path}`);
   const sourceId=`legacy:${hash}:${row.ordinal}`;
   const id=row.proof===undefined?sourceId:`legacy-proven:${row.proof}`;
-  const key=`${occurrencePrefix}${hash}:${row.ordinal}`;
-  const stored=db.get<{value:string}>("SELECT value FROM storage_meta WHERE key=?",key);
-  const receipt:EventOccurrence|undefined=stored?JSON.parse(stored.value):undefined;
-  if(receipt&&(receipt.path!==e.path||receipt.ordinal!==row.ordinal||receipt.eventId!==id||receipt.proof!==(row.proof??null)
-   ||receipt.scopeId!==scope||receipt.ownerKey!==owner||receipt.memberId!==memberId
-   ||receipt.sourceScopeId!==e.scopeId||receipt.sourceOwnerKey!==(e.ownerKey??null)))throw new Error(`Conflicting legacy event provenance: ${e.path}:${row.ordinal}`);
+  const inputFingerprint=createHash("sha256").update(canonicalJson(event,"Invalid historical event JSON")).digest("hex");
+  const receipt=db.get<{event_id:string;input_fingerprint:string}>(
+   "SELECT event_id,input_fingerprint FROM event_source_receipts WHERE source_key=? AND source_seq=?",e.path,row.ordinal);
+  if(receipt&&(receipt.event_id!==id||receipt.input_fingerprint!==inputFingerprint))throw new Error(`Conflicting legacy event provenance: ${e.path}:${row.ordinal}`);
   if(id!==sourceId&&readAgentEvent(sourceId,db))throw new Error(`Conflicting legacy event provenance: ${e.path}:${row.ordinal}`);
   const previous=readAgentEvent(id,db);
-  const proofKey=row.proof===undefined?undefined:`legacy-event-proof-v1:${row.proof}`;
-  const proven=proofKey===undefined?undefined:db.get<{value:string}>("SELECT value FROM storage_meta WHERE key=?",proofKey);
-  if(proofKey!==undefined&&(previous?proven?.value!==JSON.stringify({eventId:id}):proven!==undefined))throw new Error(`Conflicting legacy event proof: ${e.path}:${row.ordinal}`);
   if(receipt&&!previous)throw new Error(`Conflicting legacy event provenance: ${e.path}:${row.ordinal}`);
-  if(previous&&(previous.historicalOwnerKey!==owner||previous.memberId!==memberId||!isDeepStrictEqual(previous.event,event)))throw new Error(`Conflicting imported event identity: ${e.path}:${row.ordinal}`);
+  const sourceRef=memberId===null?undefined:(scope.startsWith("dm:")||scope.startsWith("mm:")||scope.startsWith("room:")?scope:`room:${scope}`);
+  const plannedSequence=sequenceByEventId?.get(id);
+  if(previous&&(previous.historicalSourceKey!==scope||previous.historicalOwnerKey!==owner||previous.memberId!==memberId||previous.sourceRef!==(sourceRef??null)
+   ||(plannedSequence!==undefined&&previous.historicalSeq!==plannedSequence)||!isDeepStrictEqual(previous.event,event)))throw new Error(`Conflicting imported event identity: ${e.path}:${row.ordinal}`);
   const ts=typeof event.ts==="number"&&Number.isFinite(event.ts)?event.ts:Math.trunc(e.mtimeMs);
   if(!previous){
-   const sourceRef=memberId===null?undefined:(scope.startsWith("dm:")||scope.startsWith("mm:")||scope.startsWith("room:")?scope:`room:${scope}`);
-   importHistoricalEvent(db,{id,sourceKey:e.path,ownerKey:owner,sourceSeq:row.ordinal,memberId:memberId??undefined,sourceRef,event:event as AgentHistoryEvent,ts});
-   if(proofKey!==undefined)db.run("INSERT INTO storage_meta(key,value) VALUES(?,?)",proofKey,JSON.stringify({eventId:id}));
+   const sourceSeq=plannedSequence??(db.get<{seq:number}>("SELECT MAX(historical_seq) seq FROM agent_events WHERE historical_source_key=? AND historical_owner_key=?",scope,owner)?.seq??0)+1;
+   importHistoricalEvent(db,{id,sourceKey:scope,ownerKey:owner,sourceSeq,memberId:memberId??undefined,sourceRef,event:event as AgentHistoryEvent,ts});
   }
-  if(!receipt){
-   const value:EventOccurrence={path:e.path,ordinal:row.ordinal,eventId:id,proof:row.proof??null,
-    scopeId:scope,ownerKey:owner,memberId,sourceScopeId:e.scopeId!,sourceOwnerKey:e.ownerKey??null,sourceTimestamp:ts,mtimeMs:e.mtimeMs};
-   db.run("INSERT INTO storage_meta(key,value) VALUES(?,?)",key,JSON.stringify(value));
+  if(!receipt)db.run("INSERT INTO event_source_receipts(event_id,input_fingerprint,source_key,source_seq) VALUES(?,?,?,?)",id,inputFingerprint,e.path,row.ordinal);
+ }
+}
+
+/** Build canonical logical sequence numbers before opening the import transaction.
+ * Facts remain immutable after insertion; physical path/ordinal only live in occurrence
+ * receipts. Repeated proofs alias a fact and contradictory source orders fail as a batch. */
+function planProvenEvents(sources: readonly ImportEventSource[]): Map<string,number> {
+ const result = new Map<string,number>();
+ const streams = new Map<string,ImportEventSource[]>();
+ for (const source of sources) {
+  const scope = executionScopeId(source.entry.scopeId!);
+  const key = JSON.stringify([scope,source.owner]);
+  const stream = streams.get(key) ?? [];
+  stream.push(source);
+  streams.set(key,stream);
+ }
+ for (const streamSources of streams.values()) {
+  const facts = new Map<string,{event:unknown;scope:string;owner:string;memberId:string|null}>();
+  const edges = new Map<string,Set<string>>();
+  const incoming = new Map<string,number>();
+  const eventId = (source:ImportEventSource,row:ImportEventRow):string => {
+   const hash = sourceHash(source.entry.path);
+   return row.proof===undefined?`legacy:${hash}:${row.ordinal}`:`legacy-proven:${row.proof}`;
+  };
+  for (const source of streamSources) {
+   const scope = executionScopeId(source.entry.scopeId!);
+   let previousId:string|undefined;
+   for (const row of source.rows) {
+    const event = requireObject(row.value,`Invalid legacy conversation object: ${source.entry.path}`);
+    if(typeof event.type!=="string"||!event.type)throw new Error(`Invalid legacy event: ${source.entry.path}`);
+    const id=eventId(source,row);
+    const existing=facts.get(id);
+    if(existing&&(!isDeepStrictEqual(existing.event,event)||existing.scope!==scope||existing.owner!==source.owner||existing.memberId!==source.memberId)){
+     throw new Error(`Conflicting imported event identity: ${source.entry.path}:${row.ordinal}`);
+    }
+    if(!existing)facts.set(id,{event,scope,owner:source.owner,memberId:source.memberId});
+    if(!edges.has(id))edges.set(id,new Set());
+    if(!incoming.has(id))incoming.set(id,0);
+    if(previousId&&previousId!==id&&!edges.get(previousId)!.has(id)){
+     edges.get(previousId)!.add(id);
+     incoming.set(id,incoming.get(id)!+1);
+    }
+    previousId=id;
+   }
   }
+  const ready=[...facts.keys()].filter(id=>incoming.get(id)===0).sort();
+  const ordered:string[]=[];
+  while(ready.length){
+   const id=ready.shift()!;
+   ordered.push(id);
+   for(const next of [...edges.get(id)!].sort()){
+    const count=incoming.get(next)!-1;
+    incoming.set(next,count);
+    if(count===0){ready.push(next);ready.sort();}
+   }
+  }
+  if(ordered.length!==facts.size)throw new Error("Conflicting imported event source order");
+  ordered.forEach((id,index)=>result.set(id,index+1));
+ }
+ return result;
+}
+
+function importPlannedEventRows(db:Database,sources:readonly ImportEventSource[],sequenceByEventId:ReadonlyMap<string,number>):void{
+ const occurrences=sources.flatMap(source=>source.rows.map(row=>{
+  const hash=sourceHash(source.entry.path);
+  const id=row.proof===undefined?`legacy:${hash}:${row.ordinal}`:`legacy-proven:${row.proof}`;
+  return {source,row,id,scope:executionScopeId(source.entry.scopeId!),sequence:sequenceByEventId.get(id)!};
+ }));
+ occurrences.sort((a,b)=>a.scope.localeCompare(b.scope)||a.source.owner.localeCompare(b.source.owner)
+  ||a.sequence-b.sequence||a.source.entry.path.localeCompare(b.source.entry.path)||a.row.ordinal-b.row.ordinal);
+ for(const occurrence of occurrences){
+  importEventRows(db,{...occurrence.source,rows:[occurrence.row]},sequenceByEventId);
  }
 }
 
@@ -194,8 +251,9 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   consumed.add(e.path);
  }
  if(provenSources.length){
+  const sequenceByEventId=planProvenEvents(provenSources);
   ctx.db.transaction(tx=>{
-   for(const source of provenSources)importEventRows(tx,source);
+   importPlannedEventRows(tx,provenSources,sequenceByEventId);
    rebuildEventAggregates(tx);
   });
   completed+=provenSources.reduce((n,s)=>n+s.rows.length,0);ctx.progress(completed);

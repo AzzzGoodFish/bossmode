@@ -37,7 +37,7 @@ const MAX_RESULT_CHARS = 25_000;
  */
 function toolScopeId(roomId: string): ScopeId {
   // dm:<id> / mm:<a>-<b> are already full ScopeIds; bare room uuid → room:<uuid>
-  if (roomId.startsWith("dm:") || isMmScopeId(roomId)) return roomId;
+  if (roomId.startsWith("room:") || roomId.startsWith("dm:") || isMmScopeId(roomId)) return roomId;
   return `room:${roomId}`;
 
 }

@@ -102,7 +102,7 @@ export function importHistoricalEvent(db:Database,input:{id:string;sourceKey:str
 }
 export function hasAgentEvent(id:string):boolean{return !!getDatabase().get("SELECT 1 FROM agent_events WHERE id=?",id);}
 export function readAgentEvent(id:string,db:Database=getDatabase()):EventFact|null{const row=db.get<EventRow>(`${EVENT_SELECT} WHERE id=?`,id);return row?decode(row):null;}
-export function loadEventsFromDisk(sourceRef:string,memberId:string):AgentHistoryEvent[]{return getDatabase().all<EventRow>(`${EVENT_SELECT} WHERE member_id=? AND source_ref=? ORDER BY member_seq`,memberId,sourceRef).map(row=>limitRuntimeErrorEvent(JSON.parse(row.payload_json)));}
+export function loadEventsFromDisk(sourceRef:string,memberId:string):AgentHistoryEvent[]{return getDatabase().all<EventRow>(`${EVENT_SELECT} WHERE member_id=? AND source_ref=? ORDER BY CASE WHEN historical_seq IS NULL THEN 1 ELSE 0 END,historical_source_key,historical_owner_key,historical_seq,member_seq`,memberId,sourceRef).map(row=>limitRuntimeErrorEvent(JSON.parse(row.payload_json)));}
 export function loadEventsPaginated(sourceRef:string,memberId:string,limit:number,before?:number):{events:AgentHistoryEvent[];total:number;hasMore:boolean}{
   const all=loadEventsFromDisk(sourceRef,memberId),end=before===undefined?all.length:Math.max(0,Math.min(before,all.length)),start=Math.max(0,end-limit);return {events:all.slice(start,end),total:all.length,hasMore:start>0};
 }
@@ -153,11 +153,14 @@ export function rebuildEventAggregates(db:Database=getDatabase()):void{
   db.transaction(tx=>{
     tx.exec("DELETE FROM member_statistics; DELETE FROM token_usage_daily; DELETE FROM event_usage_receipts");
     const stats=new Map<string,{turns:number;tools:number;active:number;starts:Map<string,number>;input:number;output:number;read:number;write:number;cost:number;updated:number}>();
-    for(const row of tx.all<EventRow>(`${EVENT_SELECT} ORDER BY ts,id`)){
+    for(const row of tx.all<EventRow>(`${EVENT_SELECT} ORDER BY member_id,CASE WHEN historical_seq IS NULL THEN 1 ELSE 0 END,historical_source_key,historical_owner_key,historical_seq,member_seq,id`)){
       const fact=decode(row),event=fact.event,u=usageOf(event),stream=fact.historicalSourceKey&&fact.historicalOwnerKey?`${fact.historicalSourceKey}\0${fact.historicalOwnerKey}`:`member:${fact.memberId}`;
       if(u)applyEventUsage(tx,fact);if(!fact.memberId)continue;
       const s=stats.get(fact.memberId)??{turns:0,tools:0,active:0,starts:new Map(),input:0,output:0,read:0,write:0,cost:0,updated:0};
-      const ts=typeof (event as any).ts==="number"?(event as any).ts:fact.ts;if(event.type==="agent_start")s.starts.set(stream,ts);if(event.type==="agent_end"){s.turns++;const start=s.starts.get(stream);if(start!==undefined&&ts>start)s.active+=ts-start;s.starts.delete(stream);}if(event.type==="tool_start")s.tools++;if(u){s.input+=u.inputTokens||0;s.output+=u.outputTokens||0;s.read+=u.cacheRead||0;s.write+=u.cacheWrite||0;s.cost+=u.cost||0;}s.updated=Math.max(s.updated,fact.ts);stats.set(fact.memberId,s);
+      const eventTs=typeof (event as any).ts==="number"&&Number.isFinite((event as any).ts)?(event as any).ts:undefined;
+      if(event.type==="agent_start"&&eventTs!==undefined)s.starts.set(stream,eventTs);
+      if(event.type==="agent_end"){s.turns++;const start=s.starts.get(stream);if(start!==undefined&&eventTs!==undefined&&eventTs>start)s.active+=eventTs-start;s.starts.delete(stream);}
+      if(event.type==="tool_start")s.tools++;if(u){s.input+=u.inputTokens||0;s.output+=u.outputTokens||0;s.read+=u.cacheRead||0;s.write+=u.cacheWrite||0;s.cost+=u.cost||0;}s.updated=Math.max(s.updated,fact.ts);stats.set(fact.memberId,s);
     }
     for(const [memberId,s] of stats)tx.run(`INSERT INTO member_statistics(member_id,turns,tool_calls,active_ms,input_tokens,output_tokens,cache_read,cache_write,cost,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,memberId,s.turns,s.tools,s.active,s.input,s.output,s.read,s.write,s.cost,s.updated);
     tx.run("DELETE FROM storage_meta WHERE key='event_aggregates_rebuild_required'");
