@@ -5,6 +5,7 @@ import {
   getRoom,
   getRoomMembers,
   inviteRoomMember,
+  isMemberId,
   listMmScopes,
   listRooms,
   parseConversation,
@@ -151,22 +152,49 @@ function roomResponse(room: Room) {
   return { ...room, members: getRoomMembers(room.id).map(member => member.name),
     agentStatuses: actions?.roomStatuses?.(room.id) ?? {} };
 }
+function invalidRoomWrite(message: string): never {
+  throw new HttpError(400, "invalid_request", message);
+}
+async function exactRoomWriteBody(
+  request: Parameters<typeof parseBody>[0],
+  allowedFields: readonly string[],
+): Promise<Record<string, unknown>> {
+  const raw = await requestValue(() => parseBody(request));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalidRoomWrite("Request body must be an object");
+  const body = raw as Record<string, unknown>;
+  const unknown = Object.keys(body).filter(field => !allowedFields.includes(field));
+  if (unknown.length) invalidRoomWrite(`Unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`);
+  return body;
+}
+function validOptionalString(body: Record<string, unknown>, field: string, nullable = false): void {
+  if (!Object.hasOwn(body, field)) return;
+  if (typeof body[field] !== "string" && !(nullable && body[field] === null)) {
+    invalidRoomWrite(`${field} must be ${nullable ? "a string or null" : "a string"}`);
+  }
+}
 addRoute("GET", "/api/rooms", async (_request, response) => {
   sendJson(response, 200, listRooms().map(roomResponse));
 });
 addRoute("POST", "/api/rooms", async (request, response) => {
-  const body = await parseBody(request) as {
-    name?: string; memberIds?: unknown; leaderMemberId?: string | null; description?: string;
-    docsPath?: string | null;
-  };
-  if (typeof body.name !== "string" || !body.name.trim()) return sendJson(response, 400, { error: "name is required" });
-  if (!Array.isArray(body.memberIds) || body.memberIds.some((id) => typeof id !== "string" || !id || id.trim() !== id)) {
-    return sendJson(response, 400, { error: "memberIds must contain stable member IDs" });
+  const body = await exactRoomWriteBody(request, ["name", "memberIds", "leaderMemberId", "description", "docsPath"]);
+  if (typeof body.name !== "string" || !body.name.trim()) invalidRoomWrite("name is required");
+  const name = body.name as string;
+  if (!Array.isArray(body.memberIds) || body.memberIds.some(id => typeof id !== "string" || !isMemberId(id))) {
+    invalidRoomWrite("memberIds must contain stable member IDs");
   }
-  const room = await requestValue(() => createRoom(body.name!.trim(), body.memberIds as string[], {
-    promptLeaderMemberId: body.leaderMemberId ?? undefined,
-    docsPath: body.docsPath,
-    description: body.description,
+  validOptionalString(body, "leaderMemberId", true);
+  validOptionalString(body, "description");
+  validOptionalString(body, "docsPath", true);
+  const memberIds = body.memberIds as string[];
+  const leaderMemberId = body.leaderMemberId as string | null | undefined;
+  if (leaderMemberId && !isMemberId(leaderMemberId)) invalidRoomWrite("leaderMemberId must be a stable member ID or null");
+  if (leaderMemberId && !memberIds.includes(leaderMemberId)) invalidRoomWrite("leaderMemberId must be one of memberIds");
+  const missing = memberIds.find(id => !getMember(id));
+  if (missing) throw new HttpError(404, "not_found", `Member not found: ${missing}`);
+  const room = await requestValue(() => createRoom(name.trim(), memberIds, {
+    promptLeaderMemberId: leaderMemberId ?? undefined,
+    docsPath: body.docsPath as string | null | undefined,
+    description: body.description as string | undefined,
   }));
   sendJson(response, 200, roomResponse(room));
 });
@@ -178,12 +206,23 @@ addRoute("DELETE", "/api/rooms/:id", async (_request, response, params) => {
   sendJson(response, 200, { ok: true });
 });
 addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
+  const body = await exactRoomWriteBody(request, ["name", "description", "promptLeaderMemberId", "docsPath"]);
+  if (!Object.keys(body).length) invalidRoomWrite("At least one room field is required");
+  validOptionalString(body, "name");
+  validOptionalString(body, "description", true);
+  validOptionalString(body, "promptLeaderMemberId", true);
+  validOptionalString(body, "docsPath", true);
+  if (Object.hasOwn(body, "name") && !(body.name as string).trim()) invalidRoomWrite("name must not be empty");
+  const leaderMemberId = body.promptLeaderMemberId as string | null | undefined;
+  if (leaderMemberId && !isMemberId(leaderMemberId)) invalidRoomWrite("promptLeaderMemberId must be a stable member ID or null");
   const room = requireRoom(params.id);
-  const body = await parseBody(request) as {
-    name?: string; description?: string | null;
-    promptLeaderMemberId?: string | null; docsPath?: string | null;
-  };
-  const updated = await requestValue(() => updateRoom(room.id, body));
+  if (leaderMemberId) {
+    if (!getMember(leaderMemberId)) throw new HttpError(404, "not_found", `Member not found: ${leaderMemberId}`);
+    if (!room.memberIds.includes(leaderMemberId)) invalidRoomWrite("promptLeaderMemberId must be a current room member");
+  }
+  const updated = await requestValue(() => updateRoom(room.id, body as {
+    name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null;
+  }));
   sendJson(response, 200, roomResponse(updated!));
 });
 
@@ -273,9 +312,10 @@ addRoute("GET", "/api/rooms/:id/members", async (_request, response, params) => 
   sendJson(response, 200, getRoomMembers(params.id));
 });
 addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => {
+  const body = await exactRoomWriteBody(request, ["memberId"]);
+  if (typeof body.memberId !== "string" || !isMemberId(body.memberId)) invalidRoomWrite("memberId must be a stable member ID");
   requireRoom(params.id);
-  const body = await parseBody(request) as { memberId?: string };
-  const member = body.memberId ? getMember(body.memberId) : null;
+  const member = getMember(body.memberId);
   if (!member) return sendJson(response, 404, { error: "Member not found" });
   const result = inviteRoomMember(params.id, member.id);
   if (!result.ok) return sendJson(response, result.code === "duplicate" ? 409 : 400, { error: result.error });
