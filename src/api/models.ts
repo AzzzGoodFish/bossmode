@@ -2,7 +2,7 @@
 import { addRoute, sendJson, parseBody } from "./http.js";
 import { invalidateModelCredentialProfile } from "../agent/controls.js";
 import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
-import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile } from "../config/models.js";
+import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, saveModelCredentialProfile } from "../config/models.js";
 import { listBuiltinModelProviders, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
 import { listAvailableModels } from "../config/models.js";
 
@@ -117,18 +117,6 @@ async function updateModelCredentialProfileRoute(req: any, res: any, params: Rec
 }
 
 addRoute("PUT", "/api/model-credential-profiles/:id", updateModelCredentialProfileRoute);
-
-async function refreshModelCredentialProfileModelsRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
-  try {
-    const result = await refreshModelCredentialProfileModels(params.id);
-    await invalidateModelCredentialProfile(result.profile.id, result.profile.providerSlug, "profileUpdated");
-    sendJson(res, 200, result);
-  } catch (err: any) {
-    sendJson(res, 400, { error: err.message || String(err) });
-  }
-}
-
-addRoute("POST", "/api/model-credential-profiles/:id/refresh-models", refreshModelCredentialProfileModelsRoute);
 
 async function deleteModelCredentialProfileRoute(_req: any, res: any, params: Record<string, string>): Promise<void> {
   const existing = getModelCredentialProfile(params.id);
