@@ -14,6 +14,7 @@ import {
   resolveConversation,
   resolveRoomMember,
   updateRoom,
+  RoomWriteError,
   type Room,
 } from "../chat/conversations.js";
 import { setUserReadCursor } from "../chat/cursors.js";
@@ -155,6 +156,16 @@ function roomResponse(room: Room) {
 function invalidRoomWrite(message: string): never {
   throw new HttpError(400, "invalid_request", message);
 }
+async function roomWriteValue<T>(operation: () => T | Promise<T>): Promise<T> {
+  try { return await operation(); }
+  catch (error) {
+    if (error instanceof RoomWriteError) {
+      const missing = error.reason === "member_not_found";
+      throw new HttpError(missing ? 404 : 400, missing ? "not_found" : "invalid_request", error.message);
+    }
+    return requestValue(() => { throw error; });
+  }
+}
 async function exactRoomWriteBody(
   request: Parameters<typeof parseBody>[0],
   allowedFields: readonly string[],
@@ -188,10 +199,7 @@ addRoute("POST", "/api/rooms", async (request, response) => {
   const memberIds = body.memberIds as string[];
   const leaderMemberId = body.leaderMemberId as string | null | undefined;
   if (leaderMemberId && !isMemberId(leaderMemberId)) invalidRoomWrite("leaderMemberId must be a stable member ID or null");
-  if (leaderMemberId && !memberIds.includes(leaderMemberId)) invalidRoomWrite("leaderMemberId must be one of memberIds");
-  const missing = memberIds.find(id => !getMember(id));
-  if (missing) throw new HttpError(404, "not_found", `Member not found: ${missing}`);
-  const room = await requestValue(() => createRoom(name.trim(), memberIds, {
+  const room = await roomWriteValue(() => createRoom(name.trim(), memberIds, {
     promptLeaderMemberId: leaderMemberId ?? undefined,
     docsPath: body.docsPath as string | null | undefined,
     description: body.description as string | undefined,
@@ -215,15 +223,11 @@ addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
   if (Object.hasOwn(body, "name") && !(body.name as string).trim()) invalidRoomWrite("name must not be empty");
   const leaderMemberId = body.promptLeaderMemberId as string | null | undefined;
   if (leaderMemberId && !isMemberId(leaderMemberId)) invalidRoomWrite("promptLeaderMemberId must be a stable member ID or null");
-  const room = requireRoom(params.id);
-  if (leaderMemberId) {
-    if (!getMember(leaderMemberId)) throw new HttpError(404, "not_found", `Member not found: ${leaderMemberId}`);
-    if (!room.memberIds.includes(leaderMemberId)) invalidRoomWrite("promptLeaderMemberId must be a current room member");
-  }
-  const updated = await requestValue(() => updateRoom(room.id, body as {
+  const updated = await roomWriteValue(() => updateRoom(params.id, body as {
     name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null;
   }));
-  sendJson(response, 200, roomResponse(updated!));
+  if (!updated) throw new HttpError(404, "not_found", "Room not found");
+  sendJson(response, 200, roomResponse(updated));
 });
 
 function parseAttachments(sourceRef: string, raw: unknown): RoomMessageAttachment[] {
@@ -314,11 +318,8 @@ addRoute("GET", "/api/rooms/:id/members", async (_request, response, params) => 
 addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => {
   const body = await exactRoomWriteBody(request, ["memberId"]);
   if (typeof body.memberId !== "string" || !isMemberId(body.memberId)) invalidRoomWrite("memberId must be a stable member ID");
-  requireRoom(params.id);
-  const member = getMember(body.memberId);
-  if (!member) return sendJson(response, 404, { error: "Member not found" });
-  const result = inviteRoomMember(params.id, member.id);
-  if (!result.ok) return sendJson(response, result.code === "duplicate" ? 409 : 400, { error: result.error });
+  const result = inviteRoomMember(params.id, body.memberId);
+  if (!result.ok) return sendJson(response, result.code === "duplicate" ? 409 : 404, { error: result.error });
   sendJson(response, 200, roomResponse(requireRoom(params.id)));
 });
 addRoute("DELETE", "/api/rooms/:id/members/:memberId", async (_request, response, params) => {

@@ -27,6 +27,20 @@ it("validates the three canonical room write bodies before mutating", async () =
     const outsider = await createMember("strict-room-outsider");
     const missing = "mem_aaaaaaaaaa";
 
+    const conversations = await import("../src/chat/conversations.js");
+    const roomRuleError = (operation: () => unknown): InstanceType<typeof conversations.RoomWriteError> => {
+      try { operation(); }
+      catch (error) {
+        expect(error).toBeInstanceOf(conversations.RoomWriteError);
+        return error as InstanceType<typeof conversations.RoomWriteError>;
+      }
+      throw new Error("Expected a room write rule error");
+    };
+    expect(roomRuleError(() => conversations.createRoom("Missing", [missing])).reason).toBe("member_not_found");
+    expect(roomRuleError(() => conversations.createRoom("Bad leader", [leader], {
+      promptLeaderMemberId: outsider,
+    })).reason).toBe("leader_not_member");
+
     const roomsBefore = JSON.parse((await request("GET", "/api/rooms")).body);
     for (const body of [
       ["not-an-object"],
@@ -54,6 +68,18 @@ it("validates the three canonical room write bodies before mutating", async () =
     expect(created.status, created.body).toBe(200);
     const room = JSON.parse(created.body);
     const roomPath = `/api/rooms/${room.id}`;
+    expect(roomRuleError(() => conversations.updateRoom(room.id, {
+      promptLeaderMemberId: missing,
+    })).reason).toBe("member_not_found");
+    expect(roomRuleError(() => conversations.updateRoom(room.id, {
+      promptLeaderMemberId: outsider,
+    })).reason).toBe("leader_not_member");
+    expect(conversations.inviteRoomMember("rm_does-not-exist", outsider)).toMatchObject({
+      ok: false, code: "room_not_found",
+    });
+    expect(conversations.inviteRoomMember(room.id, missing)).toMatchObject({
+      ok: false, code: "member_not_found",
+    });
     const stableRoomFields = (value: any) => ({
       name: value.name,
       description: value.description,

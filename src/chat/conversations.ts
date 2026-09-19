@@ -2,6 +2,11 @@ import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 export interface RoomMember { id: string; name: string }
+export type RoomWriteErrorReason = "member_not_found" | "leader_not_member";
+export class RoomWriteError extends Error {
+  readonly name = "RoomWriteError";
+  constructor(readonly reason: RoomWriteErrorReason, message: string) { super(message); }
+}
 export interface Room {
   id: string;
   name: string;
@@ -73,9 +78,13 @@ export function createRoom(name: string, memberIds: string[], opts?: {
     throw new Error("memberIds must contain stable member IDs");
   }
   const ids = [...new Set(memberIds)];
-  for (const id of ids) if (!conversationMember(id)) throw new Error(`Member not found: ${id}`);
+  for (const id of ids) {
+    if (!conversationMember(id)) throw new RoomWriteError("member_not_found", `Member not found: ${id}`);
+  }
   const leader = opts?.promptLeaderMemberId ?? ids[0];
-  if (leader && !ids.includes(leader)) throw new Error("leaderMemberId must be one of memberIds");
+  if (leader && !ids.includes(leader)) {
+    throw new RoomWriteError("leader_not_member", "leaderMemberId must be one of memberIds");
+  }
   const roomDescription = typeof opts?.description === "string" ? opts.description.trim() : "";
   if (roomDescription.length > ROOM_DESCRIPTION_MAX_CHARS) {
     throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
@@ -129,7 +138,12 @@ export function updateRoom(roomId: string, patch: {
     }
     if (Object.hasOwn(patch, "promptLeaderMemberId")) {
       const leader = patch.promptLeaderMemberId;
-      if (leader && !room.memberIds.includes(leader)) throw new Error("promptLeaderMemberId must be a current room member");
+      if (leader && !conversationMember(leader)) {
+        throw new RoomWriteError("member_not_found", `Member not found: ${leader}`);
+      }
+      if (leader && !room.memberIds.includes(leader)) {
+        throw new RoomWriteError("leader_not_member", "promptLeaderMemberId must be a current room member");
+      }
       if (leader) room.promptLeaderMemberId = leader; else delete room.promptLeaderMemberId;
     }
     if (Object.hasOwn(patch, "docsPath")) {
@@ -181,13 +195,13 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
 export function inviteRoomMember(
   roomId: string,
   memberId: string,
-): { ok: true; member: RoomMember } | { ok: false; error: string; code: "not_found" | "duplicate" } {
+): { ok: true; member: RoomMember } | { ok: false; error: string; code: "room_not_found" | "member_not_found" | "duplicate" } {
   return getDatabase().transaction((): ReturnType<typeof inviteRoomMember> => {
     const room = getRoom(roomId);
-    if (!room) return { ok: false, code: "not_found", error: "Room not found" };
+    if (!room) return { ok: false, code: "room_not_found", error: "Room not found" };
     if (room.memberIds.includes(memberId)) return { ok: false, code: "duplicate", error: "Member already in this room" };
     const identity = conversationMember(memberId);
-    if (!identity) return { ok: false, code: "not_found", error: "Member not found" };
+    if (!identity) return { ok: false, code: "member_not_found", error: "Member not found" };
     room.memberIds.push(memberId);
     storeRoom(room);
     initializeMemberCursor(roomId, memberId);
