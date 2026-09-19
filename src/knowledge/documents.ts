@@ -185,13 +185,7 @@ export function getRawEntry(entryId: string): { path: string; contentType: strin
  * Write/overwrite a text document. If no extension is provided, `.md` is appended.
  * Creates intermediate directories. Frontmatter is not injected or parsed.
  */
-export function addEntry(
-  title: string,
-  content: string,
-  source: string,
-  path?: string,
-  _extraFrontmatter?: Record<string, string>,
-): KnowledgeEntry {
+export function addEntry(title: string, content: string, source: string, path?: string): KnowledgeEntry {
   ensureDocsRoot();
 
   const rel = path
@@ -205,12 +199,7 @@ export function addEntry(
   return describeEntry(rel, content, source);
 }
 
-export function updateEntry(
-  entryId: string,
-  _title: string,
-  content: string,
-  _extraFrontmatter?: Record<string, string>,
-): KnowledgeEntry | null {
+export function updateEntry(entryId: string, content: string): KnowledgeEntry | null {
   let rel: string;
   try { rel = normalizeDocPath(entryId); } catch { return null; }
   if (!isTextFile(rel)) return null;
@@ -263,65 +252,45 @@ export function moveEntry(fromId: string, toId: string): KnowledgeEntry | null {
   return isTextFile(toRel) ? getEntry(toRel) : describeEntry(toRel, "");
 }
 
-export function moveFolder(
-  fromPath: string,
-  toPath: string,
-): { ok: boolean; movedFiles: Array<[string, string]>; error?: string } {
+export function moveFolder(fromPath: string, toPath: string): { ok: boolean; error?: string } {
   let fromRel: string, toRel: string;
   try {
     fromRel = normalizeDocPath(fromPath);
     toRel = normalizeDocPath(toPath);
   } catch (err: any) {
-    return { ok: false, movedFiles: [], error: String(err?.message || err) };
+    return { ok: false, error: String(err?.message || err) };
   }
 
   if (toRel === fromRel || toRel.startsWith(`${fromRel}/`)) {
-    return { ok: false, movedFiles: [], error: "Cannot move folder into itself or its subfolder" };
+    return { ok: false, error: "Cannot move folder into itself or its subfolder" };
   }
 
   const fromAbs = absDocPath(fromRel);
   const toAbs = absDocPath(toRel);
   if (!existsSync(fromAbs) || !statSync(fromAbs).isDirectory()) {
-    return { ok: false, movedFiles: [], error: "Source folder not found" };
+    return { ok: false, error: "Source folder not found" };
   }
   if (existsSync(toAbs)) {
-    return { ok: false, movedFiles: [], error: "Destination already exists" };
+    return { ok: false, error: "Destination already exists" };
   }
 
   mkdirSync(dirname(toAbs), { recursive: true });
   renameSync(fromAbs, toAbs);
 
-  const movedFiles: Array<[string, string]> = [];
-  for (const newPath of collectDocPathsInFolder(toAbs, toRel)) {
-    const suffix = newPath.startsWith(`${toRel}/`) ? newPath.slice(toRel.length + 1) : "";
-    const oldPath = suffix ? `${fromRel}/${suffix}` : fromRel;
-    movedFiles.push([oldPath, newPath]);
-  }
-
   cleanupEmptyParentDirs(dirname(fromAbs));
-  return { ok: true, movedFiles };
+  return { ok: true };
 }
 
-export function deleteFolder(
-  folderPath: string,
-): { ok: boolean; deletedCount: number; deletedPaths: string[] } {
+export function deleteFolder(folderPath: string): { ok: boolean; deletedPaths: string[] } {
   let rel: string;
-  try {
-    rel = normalizeDocPath(folderPath);
-  } catch {
-    return { ok: false, deletedCount: 0, deletedPaths: [] };
-  }
-
+  try { rel = normalizeDocPath(folderPath); }
+  catch { return { ok: false, deletedPaths: [] }; }
   const abs = absDocPath(rel);
-  if (!existsSync(abs) || !statSync(abs).isDirectory()) {
-    return { ok: false, deletedCount: 0, deletedPaths: [] };
-  }
-
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) return { ok: false, deletedPaths: [] };
   const deletedPaths = collectDocPathsInFolder(abs, rel);
   rmSync(abs, { recursive: true, force: true });
   cleanupEmptyParentDirs(dirname(abs));
-
-  return { ok: true, deletedCount: deletedPaths.length, deletedPaths };
+  return { ok: true, deletedPaths };
 }
 
 // -- Helpers --

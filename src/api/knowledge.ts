@@ -163,13 +163,10 @@ addRoute("GET", "/api/knowledge/entry", async (req, res) => {
 addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
   const path = queryPath(req, res);
   if (!path) return;
-  const body = (await parseBody(req)) as { title?: string; content?: string };
-  if (!body.title || body.content === undefined) {
-    sendJson(res, 400, { error: "title and content are required" });
-    return;
-  }
+  const body = (await parseBody(req)) as { content?: string };
+  if (body.content === undefined) return sendJson(res, 400, { error: "content is required" });
   try {
-    const updated = knowledgeStore.updateEntry(path, body.title, body.content);
+    const updated = knowledgeStore.updateEntry(path, body.content);
     if (!updated) { sendJson(res, 404, { error: "Document not found" }); return; }
     sendJson(res, 200, updated);
   } catch (err: any) {
