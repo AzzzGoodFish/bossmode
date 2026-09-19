@@ -73,7 +73,6 @@ interface LiveShell {
   lineCount: number; // absolute next line number
   pendingMarker: boolean;
   carry: string; // partial OSC/escape sequence split across data chunks
-  lastCwd?: string; // last cwd reported by the completion marker (receipt base)
   currentExec: ShellExec | null;
   execHistory: ShellExec[]; // finished execs (capped) so terminal_read can close them out
   writeQueue: Array<PendingWrite & { exec?: ShellExec }>;
@@ -112,6 +111,14 @@ export function settleMemberShellWaits(memberId: string): void {
   set.clear();
   memberShellWaits.delete(memberId);
   for (const fn of fns) fn();
+}
+
+async function waitForTerminal(done:Promise<void>,memberId:string,signal:AbortSignal|undefined,ms:number,zeroImmediate=false):Promise<boolean>{
+  if(signal?.aborted||zeroImmediate&&ms===0)return false;
+  let timer:ReturnType<typeof setTimeout>|undefined,unregister=()=>{},stop=()=>{};
+  const interrupted=new Promise<false>(resolve=>{stop=()=>resolve(false);unregister=registerMemberShellWait(memberId,stop);signal?.addEventListener("abort",stop,{once:true});if(ms>0)timer=setTimeout(stop,ms);});
+  try{return await Promise.race([done.then(()=>true as const),interrupted]);}
+  finally{unregister();signal?.removeEventListener("abort",stop);if(timer)clearTimeout(timer);}
 }
 
 function shellKey(memberId: string, shellId: string): string {
@@ -182,21 +189,7 @@ function pushData(shell: LiveShell, raw: string): void {
   shell.lineCount = shell.firstLine + shell.lines.length;
   if (shell.currentExec && clean.length > 0) shell.currentExec.output += clean;
   for (const marker of markers) {
-    // cwd receipt (fish 2026-09-04): every completion marker carries $PWD; when
-    // it changes the exec result (and the line stream) gets one receipt line.
-    // The first marker after shell birth just records the baseline silently.
-    if (marker.cwd) {
-      if (shell.lastCwd && shell.lastCwd !== marker.cwd) {
-        const receipt = `cwd: ${shell.lastCwd} → ${marker.cwd}`;
-        shell.lines.push(receipt);
-        shell.lineCount = shell.firstLine + shell.lines.length;
-        if (shell.currentExec) {
-          shell.currentExec.output += `${shell.currentExec.output.endsWith("\n") || shell.currentExec.output === "" ? "" : "\n"}${receipt}\n`;
-        }
-      }
-      shell.lastCwd = marker.cwd;
-      if (shell.cwd !== marker.cwd) shell.cwd = marker.cwd;
-    }
+    if(marker.cwd)shell.cwd=marker.cwd;
     if (shell.currentExec) {
       const exec = shell.currentExec;
       exec.status = "done";
@@ -474,29 +467,7 @@ export async function execInShell(args: {
   drainQueue(shell);
 
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : BLOCK_UNTIL_MS_DEFAULT;
-  const timer = blockMs > 0 ? setTimeout(() => {}, blockMs) : null; // keep the event loop honest in tests
-  let settled = false;
-  // Abort settle (qa rc.22 note ①): a blocking wait must end the moment the
-  // member is interrupted — settleMemberShellWaits resolves this race as
-  // running instead of holding the abort hostage until the command/timeout
-  // finishes.
-  const waitReg: { unregister?: () => void } = {};
-  const raced = await Promise.race([
-    done.then(() => true),
-    blockMs > 0
-      ? new Promise<boolean>((resolve) => {
-          const t = setTimeout(() => resolve(false), blockMs);
-          const interrupt = () => {clearTimeout(t);resolve(false);};
-          const unregister = registerMemberShellWait(args.memberId,interrupt);
-          args.signal?.addEventListener("abort",interrupt,{once:true});
-          waitReg.unregister = () => {unregister();args.signal?.removeEventListener("abort",interrupt);clearTimeout(t);};
-          if(args.signal?.aborted)interrupt();
-        })
-      : Promise.resolve(false), // 0 = never block (qa rc.20 Major: a never-resolving promise here turned "background immediately" into a hang)
-  ]);
-  waitReg.unregister?.();
-  settled = raced;
-  if (timer) clearTimeout(timer);
+  const settled=await waitForTerminal(exec.done,args.memberId,args.signal,blockMs,true);
 
   if (settled && exec.status === "done") {
     return { ok: true, exec: exec.id, status: "done", exitCode: exec.exitCode, lineStart: exec.lineStart, lineEnd: exec.lineEnd ?? exec.lineStart, output: exec.output };
@@ -611,18 +582,8 @@ export async function waitShell(args: {
     : { ok: true as const, exec: exec.id, status: "running" as const, outputSoFar: exec.output, note: `Still running — wait again with terminal_wait, or snapshot with terminal_read.` };
   if (exec.status === "done" || args.signal?.aborted) return respond();
   const blockMs = args.blockUntilMs !== undefined && args.blockUntilMs >= 0 ? args.blockUntilMs : 30_000;
-  let unregister: (()=>void) | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const interrupted = new Promise<void>(resolve => {
-    const interrupt = () => resolve();
-    const unregisterWait = registerMemberShellWait(args.memberId,interrupt);
-    args.signal?.addEventListener("abort",interrupt,{once:true});
-    unregister = () => {unregisterWait();args.signal?.removeEventListener("abort",interrupt);};
-    if(args.signal?.aborted)resolve();
-    if (blockMs > 0) timer = setTimeout(resolve,blockMs);
-  });
-  try { await Promise.race([exec.done,interrupted]); }
-  finally { unregister?.(); if(timer) clearTimeout(timer); }
+  await waitForTerminal(exec.done,args.memberId,args.signal,blockMs);
+
   return respond();
 }
 
