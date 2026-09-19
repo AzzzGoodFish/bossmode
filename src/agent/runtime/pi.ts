@@ -4,17 +4,15 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   createAgentSession,
-  DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
   SettingsManager,
   VERSION as PI_SDK_VERSION,
   type AgentSession,
-  type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { dispatchSdkExecution, type SdkExecutionAttempt } from "../scheduler.js";
 import { logger } from "../../kernel/logger.js";
-import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.js";
+import type { PiTransportSetting } from "../../kernel/types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";
@@ -49,10 +47,6 @@ function classifyToolSource(
     if (/pi-mcp-adapter|mcp/i.test(haystack)) return "mcp";
   }
   return "extension:unknown";
-}
-
-function safeSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 function splitModelRef(modelRef: string): { provider: string; modelId: string } {
@@ -913,12 +907,4 @@ export class PiSdkRuntime implements AgentRuntime {
     });
     return this.shutdownSettlement;
   }
-}
-// Environment helpers for spawning CLI subprocesses
-
-export function getPiSpawnEnv(piAgentDir?: string): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    ...(piAgentDir ? { PI_CODING_AGENT_DIR: piAgentDir } : {}),
-  };
 }

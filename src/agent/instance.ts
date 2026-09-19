@@ -131,12 +131,6 @@ export function updateDispatchState(instance: AgentInstance, next: DispatchState
   instance.dispatchState = next;
 }
 
-/** ① B4: member-level live status — one runtime, one status, every chat. */
-export function getMemberLiveStatus(memberId: string): AgentStatus {
-  const instance = instances.get(instanceKey(memberId));
-  return instance ? instance.status : "inactive";
-}
-
 // -- Status publication (output port; connected by app/wire) --
 /** Same shape as the websocket `agent:status` payload; the app owns the transport. */
 export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }

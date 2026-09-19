@@ -128,11 +128,6 @@ export function maybeEmitKnowledgeActivity(
   }
 }
 
-/** Test hook: clear dedup state. */
-export function _resetDedup(): void {
-  recentCards.clear();
-}
-
 /** Connect agent event facts to transports and chat ownership; the agent core stays subscriber-free. */
 import { connectChatHttpActions } from "../api/chats.js";
 import { connectMemberHttpActions } from "../api/members.js";

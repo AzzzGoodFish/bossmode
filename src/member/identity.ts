@@ -150,8 +150,6 @@ export function getMemberConfiguration(id: string): MemberGlobalConfig {
     skills: config.skills ?? [], mcpServers: config.mcpServers ?? [] };
 }
 
-export function renameMember(id: string, name: string): MemberRecord { return updateMemberIdentity(id, { name }); }
-
 /** Runs inside the config-patch transaction: stale-mount bookkeeping stays atomic
  *  with the patch (a failure rolls both back). Connected by the composition root
  *  to the runtime checkpoint owner; member code never imports the agent. */

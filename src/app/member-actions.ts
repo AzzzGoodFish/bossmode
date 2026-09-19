@@ -6,7 +6,7 @@ import { getBossmodeDir, memberDir, membersRoot, memberSkillsDir, memberExtensio
 import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
 import { ensureDmScope } from "../chat/conversations.js";
-import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, normalizeMemberName, validateMemberName, deleteMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
+import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
 import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot, getActiveWorkspace, getWorkspace } from "../member/workspaces.js";
 import { configureTerminalWorkspaces } from "../agent/terminal.js";
 import { resolveGlobalSkillPaths } from "../member/skills.js";
@@ -129,9 +129,9 @@ export function previewMemberPrompt(memberId: string, contextWindowTokens?: numb
   return compileMemberPrompt(loadMemberPromptSource(memberId, contextWindowTokens));
 }
 
-import { configureControls, applyPendingAfterPromptSettlement, interruptAcceptedInput, destroyInstance } from "../agent/controls.js";
+import { configureControls, applyPendingAfterPromptSettlement, interruptAcceptedInput } from "../agent/controls.js";
 
-import { recoverRuntimeInputState, acceptAgentAdmission, acceptControlInput, pendingRuntimeInputOwners, cancelPendingRuntimeInputs, waitForInputSettlement, configureScheduler, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
+import { recoverRuntimeInputState, acceptAgentAdmission, acceptControlInput, pendingRuntimeInputOwners, waitForInputSettlement, configureScheduler, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
 
 import { appendMessageWithAdmissions, confirmChatAdmission, dismissPendingReplies, listPendingChatAdmissions, listPendingReplies, repairPendingChatAdmission, type PreparedChatAdmission } from "../chat/delivery.js";
 import { scheduleMessageDispatch, type Message, type MessageInput } from "../chat/messages.js";
@@ -147,9 +147,8 @@ import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, 
 
 import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../chat/conversations.js";
 import { listRoomsForMember } from "../chat/conversations.js";
-import { applyMemberConfigPatch, updateMember } from "../member/identity.js";
-import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../agent/events.js";
-import { clearRuntimeStateEntry } from "../agent/instance.js";
+import { updateMember } from "../member/identity.js";
+import { handleAgentEvent as processEvent } from "../agent/events.js";
 import type { AgentHistoryEvent } from "../agent/events.js";
 import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
@@ -193,7 +192,7 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
   return message;
 }
 
-export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
+export function initializeMemberRuntime(reg: RuntimeRegistry, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);
   configureMcpFactoryLoader(async adapterPath=>{
     const loaded=await createJiti(import.meta.url).import(join(dirname(adapterPath),"host-factory.js")) as any;
@@ -315,31 +314,6 @@ function refreshProfileSources(instance: AgentInstance): void {
  * back". Legacy non-mem_ rooms still persist to memberOverrides — that is the
  * only authority their read side (name-keyed overrides) consults.
  */
-export interface RoomMemberConfigPatch {
-  mcpServers?: string[] | null;
-  skills?: string[] | null;
-}
-
-/**
- * Persist a room-member config patch to the 0.20 authority — the member
- * registry (F4, 2026-08-04). Batch-5b: all fields write global (scope
- * overrides retired). The pre-0.20 room.json memberOverrides write is invisible to every read
- * side for mem_* members (display / effective-config / activate-heal) —
- * "applies once, display stale, heal rolls back". Legacy non-mem_ rooms
- * keep memberOverrides (the only authority their read side consults).
- */
-function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberConfigPatch): void {
-  if (memberId.startsWith("mem_")) {
-    try {
-      applyMemberConfigPatch(memberId, patch as Record<string, unknown>);
-    } catch (err) {
-      logger.error("agent", "persistConfigPatch: member not in registry", { memberId, roomId, error: String(err) });
-    }
-    return;
-  }
-  roomStore.updateRoomMemberOverride(roomId, memberId, patch);
-}
-
 export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
@@ -569,42 +543,9 @@ export async function activateDmMember(memberId:string):Promise<void>{
   await waitForInputSettlement(input,pumpRuntimeInputs(memberId));
 }
 
-import { MemberNotFoundError } from "../member/identity.js";
-import type { RoomMemberRecord } from "../kernel/types.js";
-
-function toAgentMemberConfig(roomMember: RoomMemberRecord): AgentMemberConfig | null {
-  const globalId = roomMember.id.startsWith("mem_") ? roomMember.id
-    : roomMember.sourceMemberId?.startsWith("mem_") ? roomMember.sourceMemberId : undefined;
-  if (globalId) {
-    // Current identity and configuration come exclusively from the database.
-    // Cleared values must never revive config from a historical room shadow.
-    const member = getMember(globalId);
-    if (!member) throw new MemberNotFoundError(globalId);
-    const config = getMemberConfiguration(globalId);
-    return {
-      id: globalId,
-      name: member.name,
-      type: "agent",
-      agent: member.agentTemplate,
-      runtime: "pi-cli",
-      model: config.model ?? undefined,
-      credentialId: config.credentialId ?? undefined,
-      thinkingLevel: config.thinkingLevel || "off",
-      skills: config.skills,
-      mcpServers: config.mcpServers,
-      createdAt: roomMember.createdAt,
-      ...(member.title ? { title: member.title } : {}),
-    };
-  }
-
-  // Legacy snapshots are display/import data, not executable members.
-  return null;
-}
-
 export function resolveRoomMember(roomId: string, memberRef: string): AgentMemberConfig | null {
   const roomMember = roomStore.resolveRoomMemberRef(roomId, memberRef);
-  if (roomMember) return toAgentMemberConfig(roomMember);
-  return null;
+  return roomMember ? memberRecordToConfig(roomMember.id) : null;
 }
 
 import type { WsServerEvent } from "../kernel/types.js";

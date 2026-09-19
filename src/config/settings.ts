@@ -1,10 +1,6 @@
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
 import type { BossmodeConfig } from "../kernel/types.js";
 
-export function configExists(db: Database = getDatabase()): boolean {
-  return !!db.get("SELECT id FROM app_settings WHERE id=1");
-}
-
 /** Internal secret-bearing configuration; public transports select their own fields. */
 export function readConfig(db: Database = getDatabase()): BossmodeConfig {
   const row = db.get<any>("SELECT * FROM app_settings WHERE id=1");
@@ -30,10 +26,6 @@ export function writeConfig(config: BossmodeConfig, db: Database = getDatabase()
     tx.run("DELETE FROM provider_api_keys");
     for (const [provider, key] of Object.entries(config.apiKeys)) tx.run("INSERT INTO provider_api_keys VALUES (?,?)", provider, key);
   });
-}
-
-export function resolveApiKey(provider: string, config?: BossmodeConfig): string | undefined {
-  return process.env[`${provider.toUpperCase()}_API_KEY`] || (config ?? readConfig()).apiKeys[provider];
 }
 
 export function getDefaultConfig(): BossmodeConfig {

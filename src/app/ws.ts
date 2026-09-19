@@ -49,7 +49,7 @@ export function createWebSocketServer(server: import("node:http").Server): WebSo
       clients.delete(ws);
     });
 
-    ws.on("error", (err) => {
+    ws.on("error", () => {
       // Prevent unhandled errors from crashing the server
       clients.delete(ws);
       try { ws.terminate(); } catch {}
@@ -110,10 +110,6 @@ export function broadcastMemberProfileChanged(profile: { memberId: string; name:
       try { state.ws.send(payload); } catch { clients.delete(state.ws); }
     }
   }
-}
-
-export function getConnectedClientCount(): number {
-  return clients.size;
 }
 
 export async function shutdownWebSocket(): Promise<void> {

@@ -7,27 +7,6 @@ import { memberArchivePath, getMember, retireMemberIdentity } from "./identity.j
 import { validateArchivePath } from "../files/layout.js";
 import { type MemberGlobalConfig } from "../data/types.js";
 
-/** Resolve a logical relative or old absolute member-owned reference, including immutable D/E snapshots.
- * External references stay external; this is relocation, NOT authorization for arbitrary file reads. */
-export function resolveMemberArtifactPath(db: Database, root: string, memberId: string, reference: string): string {
-  if (!/^mem_[a-zA-Z0-9_-]+$/.test(memberId) || !reference || reference.includes("\0")) throw new Error("invalid_member_artifact_reference");
-  const source = resolve(root, "members", memberId);
-  const path = isAbsolute(reference) ? resolve(reference) : resolve(source, reference);
-  const rel = relative(source, path);
-  const owned = rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
-  if (!isAbsolute(reference) && !owned) throw new Error("member_artifact_outside_root");
-  const archive = memberArchivePath(memberId, db);
-  if (archive) validateArchivePath(archive);
-  else if (readMemberArchiveIntent(memberId, db)?.state === "pending") throw new Error("member_archive_pending");
-  return owned && archive ? resolve(root, archive, rel) : path;
-}
-
-/** E keys are data-root relative, not member-relative. Preserve logical DB keys when opening bodies. */
-export function resolveMemberDocumentPath(db: Database, root: string, memberId: string, logicalPath: string): string {
-  if (isAbsolute(logicalPath) || logicalPath.includes("\\") || logicalPath.split("/").includes("..")) throw new Error("invalid_document_path");
-  return resolveMemberArtifactPath(db, root, memberId, resolve(root, logicalPath));
-}
-
 function statIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try { return lstatSync(path); } catch (err: any) { if (err.code === "ENOENT") return null; throw err; }
 }
@@ -223,21 +202,4 @@ export function importMemberArchiveCatalog(source: ArchiveCatalogSource, db: Dat
       source.roomScopes.forEach((r,i) => tx.run("INSERT INTO member_archive_rooms VALUES(?,?,?,?,?,?)", source.archivePath, source.name, i, r.room, Number(r.hasPrinciples), Number(r.hasMainline)));
       source.conflicts?.forEach((c,i) => tx.run("INSERT INTO member_archive_conflicts VALUES(?,?,?,?)", source.archivePath, source.name, i, c));
     });
-  }
-
-export function readMemberArchiveCatalog(archivePath: string, name: string, db: Database = getDatabase()): ArchiveCatalogSource | null {
-    const r = db.get<any>("SELECT * FROM member_archives WHERE archive_path=? AND source_name=?", archivePath, name);
-    if (!r) return null;
-    const conflicts = db.all<{conflict:string}>("SELECT conflict FROM member_archive_conflicts WHERE archive_path=? AND source_name=? ORDER BY position", archivePath, name).map(r => r.conflict);
-    return {archivePath, name, ...(r.member_id ? {memberId:r.member_id} : {}), kind:r.kind, template:r.template,
-      ...(r.title !== null ? {title:r.title} : {}), global:JSON.parse(r.global_json),
-      ...(r.persona_path !== null ? {personaPath:r.persona_path} : {}), personaFormat:r.persona_format, hasPersona:!!r.has_persona,
-      roomScopes:db.all<any>("SELECT * FROM member_archive_rooms WHERE archive_path=? AND source_name=? ORDER BY position", archivePath, name)
-        .map(r => ({room:r.room, hasPrinciples:!!r.has_principles, hasMainline:!!r.has_mainline})),
-      ...(conflicts.length ? {conflicts} : {})};
-  }
-
-export function listMemberArchiveCatalog(db: Database = getDatabase()): ArchiveCatalogSource[] {
-    return db.all<{archive_path:string;source_name:string}>("SELECT archive_path,source_name FROM member_archives ORDER BY source_name,archive_path")
-      .map(r => readMemberArchiveCatalog(r.archive_path, r.source_name, db)!);
   }
