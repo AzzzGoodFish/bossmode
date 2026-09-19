@@ -1065,10 +1065,14 @@ CREATE TABLE event_usage_receipts (
 INSERT INTO event_usage_receipts SELECT event_id,total_tokens FROM event_usage_receipts_saved;
 DROP TABLE event_usage_receipts_saved;
 CREATE TABLE event_source_receipts (
-  event_id TEXT PRIMARY KEY REFERENCES agent_events(id) ON DELETE CASCADE,
-  input_fingerprint TEXT NOT NULL
+  event_id TEXT NOT NULL REFERENCES agent_events(id) ON DELETE CASCADE,
+  input_fingerprint TEXT NOT NULL,
+  source_key TEXT NOT NULL DEFAULT '',
+  source_seq INTEGER NOT NULL DEFAULT 0 CHECK(source_seq >= 0),
+  PRIMARY KEY(event_id,source_key,source_seq)
 );
-INSERT INTO event_source_receipts SELECT event_id,input_fingerprint FROM event_source_receipts_saved;
+CREATE UNIQUE INDEX event_source_occurrence ON event_source_receipts(source_key,source_seq) WHERE source_key<>'';
+INSERT INTO event_source_receipts(event_id,input_fingerprint) SELECT event_id,input_fingerprint FROM event_source_receipts_saved;
 DROP TABLE event_source_receipts_saved;
 DROP TABLE member_statistics;
 CREATE TABLE member_statistics (

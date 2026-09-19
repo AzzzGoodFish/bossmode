@@ -72,7 +72,13 @@ describe("core-agent-queue-v2 migration", () => {
     expect(() => db.run("UPDATE agent_events SET historical_seq=9 WHERE id='event-member'"))
       .toThrow("Historical event identity is immutable");
     expect(db.get("SELECT * FROM event_usage_receipts")).toEqual({ event_id: "event-member", total_tokens: 5 });
-    expect(db.get("SELECT * FROM event_source_receipts")).toEqual({ event_id: "event-member", input_fingerprint: "hash" });
+    expect(db.get("SELECT * FROM event_source_receipts")).toEqual({
+      event_id: "event-member", input_fingerprint: "hash", source_key: "", source_seq: 0,
+    });
+    db.run("INSERT INTO event_source_receipts(event_id,input_fingerprint,source_key,source_seq) VALUES(?,?,?,?)",
+      "event-member", "hash", "rooms/r1/events.jsonl", 4);
+    expect(() => db.run("INSERT INTO event_source_receipts(event_id,input_fingerprint,source_key,source_seq) VALUES(?,?,?,?)",
+      "event-member-next", "other", "rooms/r1/events.jsonl", 4)).toThrow("UNIQUE");
     expect(db.get<{scope_id:string}>("SELECT scope_id FROM outbox WHERE kind='agent-event'")!.scope_id).toBe("room:r1");
     expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
     applyStorageMigrations(db, coreStorageMigrations);
