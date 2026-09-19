@@ -400,13 +400,12 @@ export function ensureMmScope(memberA: string, memberB: string, db: Database = g
   return id;
 }
 
-/** Persist a current room, or import a legacy room snapshot at the upgrade boundary. */
-export function storeRoom(room: Room | LegacyRoomImport, db: Database = getDatabase()): void {
+/** Persist current room state without rewriting imported historical snapshots. */
+export function storeRoom(room: Room, db: Database = getDatabase()): void {
   if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) throw new Error("Room scope must use the bare room ID");
   db.transaction(() => {
     ensureConversationScope(room.id, "room", room.id, null, db);
-    if ("memberIds" in room) {
-      db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
+    db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
         roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,NULL,?,?,?,NULL,'global',0,?,0)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,docs_path=excluded.docs_path,description=excluded.description,
         leader_member_id=excluded.leader_member_id,roster_kind='global',has_rule_docs=excluded.has_rule_docs`,
@@ -415,11 +414,15 @@ export function storeRoom(room: Room | LegacyRoomImport, db: Database = getDatab
       db.run("DELETE FROM room_members WHERE room_id=?", room.id);
       [...new Set(room.memberIds)].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
       db.run("DELETE FROM room_rule_docs WHERE room_id=?", room.id);
-      (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
-      return;
-    }
-    const configs = new Map(db.all<{ id: string; config_json: string | null }>(
-      "SELECT id,config_json FROM room_member_snapshots WHERE room_id=?", room.id).map(row => [row.id, row.config_json]));
+    (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
+  });
+}
+
+/** Import legacy labels and snapshots without making them active members. */
+export function importLegacyRoom(room: LegacyRoomImport, db: Database = getDatabase()): void {
+  if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) throw new Error("Room scope must use the bare room ID");
+  db.transaction(() => {
+    ensureConversationScope(room.id, "room", room.id, null, db);
     db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
       roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET name=excluded.name,created_at=excluded.created_at,legacy_cwd=excluded.legacy_cwd,
@@ -437,7 +440,7 @@ export function storeRoom(room: Room | LegacyRoomImport, db: Database = getDatab
       (room_id,position,id,name,source_agent,source_member_id,avatar,created_at,updated_at,migrated_name,migrated_id,config_json)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, room.id, i, member.id, member.name, member.sourceAgent, member.sourceMemberId ?? null,
       member.avatar ?? null, member.createdAt, member.updatedAt, member.migratedFrom?.memberName ?? null,
-      member.migratedFrom?.memberId ?? null, member.config === undefined ? configs.get(member.id) ?? null : JSON.stringify(member.config)));
+      member.migratedFrom?.memberId ?? null, member.config === undefined ? null : JSON.stringify(member.config)));
     if (room.memberOverrides !== undefined) {
       db.run("UPDATE rooms SET has_overrides=? WHERE id=?", Number(Object.keys(room.memberOverrides).length > 0), room.id);
       db.run("DELETE FROM room_member_overrides WHERE room_id=?", room.id);
