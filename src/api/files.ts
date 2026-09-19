@@ -10,7 +10,6 @@ import {
   type AttachmentLocation,
 } from "../files/attachments.js";
 import { checkPath } from "../kernel/path.js";
-import { logger } from "../kernel/logger.js";
 import * as knowledgeStore from "../knowledge/documents.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
@@ -41,14 +40,9 @@ addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
   if (path !== HOME && !path.startsWith(HOME + sep)) return sendJson(response, 403, { error: "Path must be within home directory" });
   if (!existsSync(path)) return sendJson(response, 404, { error: "Directory not found" });
   if (!statSync(path).isDirectory()) return sendJson(response, 400, { error: "Path is not a directory" });
-  try {
-    const dirs = readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).slice(0, 200)
-      .map((entry) => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
-    sendJson(response, 200, { path, parent: path === HOME ? null : dirname(path), segments: segments(path), dirs, truncated: dirs.length >= 200 });
-  } catch (error) {
-    logger.warn("api", "directory read failed", { path, error: String(error) });
-    sendJson(response, 500, { error: "Failed to read directory" });
-  }
+  const dirs = readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory()).slice(0, 200)
+    .map(entry => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
+  sendJson(response, 200, { path, parent: path === HOME ? null : dirname(path), segments: segments(path), dirs, truncated: dirs.length >= 200 });
 });
 
 function conversationLocation(scope: string): { scopeId: string; location: AttachmentLocation } | null {
@@ -78,12 +72,10 @@ async function upload(request: Parameters<typeof requestUrl>[0] & NodeJS.Readabl
 }
 function download(response: Parameters<typeof sendJson>[0], location: AttachmentLocation, filename: string): void {
   if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
-  try {
-    const path = getAttachmentPath(location, filename);
-    response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": statSync(path).size,
-      "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" });
-    createReadStream(path).pipe(response);
-  } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
+  const path = getAttachmentPath(location, filename);
+  response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": statSync(path).size,
+    "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" });
+  createReadStream(path).pipe(response);
 }
 function preview(response: Parameters<typeof sendJson>[0], scopeId: string, location: AttachmentLocation, filename: string): void {
   if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
@@ -111,21 +103,10 @@ addRoute("GET", "/api/conversations/:scope/attachments/:filename/preview", async
   preview(response, target.scopeId, target.location, params.filename);
 });
 
-const TEXT_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".bash", ".json", ".yaml", ".yml",
-  ".toml", ".xml", ".css", ".scss", ".sql", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".cs",
-  ".rb", ".php", ".swift", ".kt", ".vue", ".ini", ".conf", ".cfg", ".env", ".properties",
-  ".diff", ".patch", ".csv", ".tsv", ".log", ".proto", ".txt",
-]);
-const TEXT_FILENAMES = new Set(["dockerfile", "makefile", ".gitignore", ".dockerignore"]);
 type ArtifactType = "md" | "html" | "image" | "text";
 function artifactType(path: string): ArtifactType | null {
-  const extension = extname(path).toLowerCase();
-  if ([".md", ".markdown"].includes(extension)) return "md";
-  if ([".html", ".htm"].includes(extension)) return "html";
-  if ([".png", ".jpg", ".jpeg", ".gif", ".webp"].includes(extension)) return "image";
-  if (TEXT_EXTENSIONS.has(extension) || TEXT_FILENAMES.has((path.split(/[\\/]/).pop() || "").toLowerCase())) return "text";
-  return null;
+  const type = inferAttachmentPreviewType(path);
+  return type === "download" ? null : type === "markdown" ? "md" : type;
 }
 function real(path: string): string | null { try { return realpathSync(path); } catch { return null; } }
 function resolveArtifact(roomId: string, originalPath: string): { path: string; type: ArtifactType; size: number; normalized: string } | { error: string; status: number } {

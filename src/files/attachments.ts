@@ -123,15 +123,6 @@ export async function storeAttachment(
   return { storedFilename, originalFilename, absolutePath, size };
 }
 
-export function copyAttachment(
-  sourceAbsolutePath: string,
-  location: AttachmentLocation,
-  originalFilename = basename(sourceAbsolutePath),
-  maxSize = MAX_UPLOAD_SIZE,
-): Promise<StoredAttachment> {
-  return storeAttachment(createReadStream(sourceAbsolutePath), location, originalFilename, maxSize);
-}
-
 /** Validate local paths against host-authorized roots, then copy each file into one attachment store. */
 export async function importAttachments(
   paths: string[], location: AttachmentLocation, allowedRoots: string[], maxSize = MAX_UPLOAD_SIZE,
@@ -147,7 +138,8 @@ export async function importAttachments(
       continue;
     }
     try {
-      outcomes.push({ ok: true, ...await copyAttachment(check.absolutePath, location, basename(check.absolutePath), maxSize) });
+      outcomes.push({ ok: true, ...await storeAttachment(
+        createReadStream(check.absolutePath), location, basename(check.absolutePath), maxSize) });
     } catch (error) {
       outcomes.push({ ok: false, path, error: error instanceof Error ? error.message : String(error) });
     }
