@@ -116,6 +116,17 @@ describe("aggregateUsage", () => {
     expect(byAgent[0].agent).toBe("rm_ghost");
     expect(breakdown[0].memberName).toBeUndefined();
   });
+
+  it("includes unassociated history in totals but not member attribution", () => {
+    const historical = row({ member_id: "historical", date: "2026-07-24", model: "a/x", input_tokens: 42 }) as any;
+    historical.member_id = null;
+    const { kpis, series, breakdown, byAgent } = aggregateUsage([historical], meta);
+    expect(kpis.inputTokens).toBe(42);
+    expect(series[0].inputTokens).toBe(42);
+    expect(series[0].byAgent).toEqual({});
+    expect(breakdown).toEqual([]);
+    expect(byAgent).toEqual([]);
+  });
 });
 
 describe("aggregatePlatformUsage (cross-room)", () => {
