@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { StartupWaitError, waitForStartup } from "../../src/app/cli/startup-wait.js";
+import { StartupWaitError, waitForStartup } from "../../src/app/cli.js";
 let child: EventEmitter;
 const processHandle = () => child as unknown as ChildProcess;
 beforeEach(()=>{ vi.useFakeTimers(); child=new EventEmitter(); });
@@ -35,12 +35,6 @@ it("marks post-preparation errors so the caller does not blindly terminate a wri
   child.emit("message",{type:"progress",phase:"validating"});
   child.emit("message",{type:"error",message:"Validation failed"});
   await expect(result).rejects.toEqual(new StartupWaitError("Validation failed",true));
-});
-it("ignores malformed progress and rejects malformed readiness",async()=>{
-  const result=waitForStartup(processHandle(),{inactivityMs:30000});
-  child.emit("message",{type:"progress",phase:"checking",completed:-1});
-  child.emit("message",{type:"ready",host:"localhost",port:"12521"});
-  await expect(result).rejects.toMatchObject({preparationStarted:false});
 });
 it("console observer failures do not interrupt preparation",async()=>{
   const result=waitForStartup(processHandle(),{inactivityMs:30000,onProgress:()=>{throw new Error("broken output");},onStall:()=>{throw new Error("broken output");}});

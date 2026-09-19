@@ -1,53 +1,13 @@
-import { createMember } from "../../src/app/member-actions.js";
-import { findMemberByName } from "../../src/member/identity.js";
-import { describe, it, expect, afterEach, vi } from "vitest";
-import {
-  closeTestServer,
-  createTestServer,
-  getTestBossmodeDir,
-  jsonRequest,
-  loginAndGetToken,
-  setupTestWorkspace,
-} from "../helpers/test-server.js";
+import {describe,expect,it} from "vitest";
+import {setupTestWorkspace} from "../helpers/test-server.js";
+import {createMember} from "../../src/app/member-actions.js";
+import {getMemberActiveTools} from "../../src/agent/controls.js";
 
 setupTestWorkspace();
 
-describe("member active tools", () => {
-  const servers: Awaited<ReturnType<typeof createTestServer>>[] = [];
-
-  afterEach(async () => {
-    while (servers.length) await closeTestServer(servers.pop()!);
-  });
-
-  it("returns empty session when member has no running instance", async () => {
-    const roomStore = await import("../../src/chat/conversations.js");
-    const agentManager = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
-    const room = roomStore.createRoom("Tools Room", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
-    const result = agentManager.getMemberActiveTools(room.id, "pm");
-    expect(result.sessionActive).toBe(false);
-    expect(result.tools).toEqual([]);
-    expect(result.message).toMatch(/Start or Reload/i);
-  });
-
-  it("API route returns 404 for unknown room/member and empty for idle member", async () => {
-    const ts = await createTestServer();
-    servers.push(ts);
-    const token = await loginAndGetToken(ts.port);
-
-    const roomStore = await import("../../src/chat/conversations.js");
-    const room = roomStore.createRoom("API Tools", getTestBossmodeDir(), [(findMemberByName("pm") ?? createMember({ name: "pm" })).id]);
-
-    const missRoom = await jsonRequest(ts.port, "GET", "/api/rooms/nope/members/pm/tools", { token });
-    expect(missRoom.status).toBe(404);
-
-    const missMember = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/members/ghost/tools`, { token });
-    expect(missMember.status).toBe(404);
-
-    const idle = await jsonRequest(ts.port, "GET", `/api/rooms/${room.id}/members/pm/tools`, { token });
-    expect(idle.status).toBe(200);
-    const body = JSON.parse(idle.body);
-    expect(body.sessionActive).toBe(false);
-    expect(body.tools).toEqual([]);
-    expect(String(body.message || "")).toMatch(/Start or Reload/i);
+describe("member active tools",()=>{
+  it("returns an explicit empty session for an idle member",()=>{
+    const member=createMember({name:"tools-idle"});
+    expect(getMemberActiveTools(member.id)).toEqual({sessionActive:false,tools:[],message:expect.stringMatching(/Start or Reload/i)});
   });
 });

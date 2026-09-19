@@ -79,8 +79,8 @@ describe("task feature retirement migration", () => {
 
     // README explains why + how to verify.
     const readme = readFileSync(join(dir, "README.md"), "utf8");
-    expect(readme).toContain("Task feature");
-    expect(readme).toContain("sha256sum -c SHA256SUMS");
+    expect(readme).toContain("Retired task data");
+    expect(readme).toContain("SHA256SUMS verifies every JSON export");
   });
 
   it("returns null (no archive) when the task tables never existed — fresh install", () => {

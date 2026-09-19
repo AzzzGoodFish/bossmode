@@ -9,7 +9,7 @@ import { inspectStartupSettings } from "../../src/app/upgrade/inventory.js";
 
 import { listMembers, retireMemberIdentity, insertMemberIdentity, getRetainedMember, getMember } from "../../src/member/identity.js";
 import type { Database } from "../../src/data/database.js";
-import { MemberArchiveService } from "../../src/member/archive.js";
+import {MemberArchiveService,pendingMemberArchives,readMemberArchiveIntent} from "../../src/member/archive.js";
 import { migratedMemberId } from "../helpers/short-id.js";
 
 let root: string;
@@ -117,8 +117,8 @@ it.each(["before-move","after-move"]) ("preserves automatic recovery of a pendin
   if(phase==="after-move")db!.exec("CREATE TRIGGER fail_archive BEFORE INSERT ON member_archives BEGIN SELECT RAISE(ABORT,'archive failure'); END");
   const archive=new MemberArchiveService(db!,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{if(phase==="before-move")throw new Error("quiesce failure");}});
   await expect(archive.archive(mid,{confirm:true})).rejects.toThrow(/failure/);
-  expect(archive.admission(mid)).toBe("pending");
-  const intent=archive.pending()[0];
+  expect(readMemberArchiveIntent(mid,db!)?.state).toBe("pending");
+  const intent=pendingMemberArchives(db!)[0];
   if(phase==="after-move")db!.exec("DROP TRIGGER fail_archive");
   db!.close();
   const result=await start(async ready=>{await new MemberArchiveService(ready,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{}}).recoverPending();});
@@ -132,7 +132,7 @@ it.each(["both","neither","replaced","symlink","missing-persona"]) ("does not le
   seed(); await start(); syncIds();
   const archive=new MemberArchiveService(db!,root,{ detachFromConversations: detachMemberFromConversations, quiesce:async()=>{throw new Error("stop");}});
   await expect(archive.archive(mid,{confirm:true})).rejects.toThrow("stop");
-  const intent=archive.pending()[0];
+  const intent=pendingMemberArchives(db!)[0];
   if(conflict==="both")file(`${intent.archivePath}/sentinel`,"unknown bytes");
   if(conflict==="neither"||conflict==="replaced"||conflict==="symlink"){
     renameSync(join(root,intent.sourcePath),join(root,"quarantined-member"));
