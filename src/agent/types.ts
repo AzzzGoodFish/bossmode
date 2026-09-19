@@ -13,7 +13,6 @@ export type { AgentMemberConfig };
  *  The app layer reads member state; agent code consumes only this snapshot. */
 export interface AgentPromptSnapshot {
   agentPrompt: string;
-  envPrompt: string;
   appendSystemPrompt: string[];
   contractFingerprint: string;
 }
@@ -85,21 +84,13 @@ export interface CreateAgentOpts {
 
   // Layered prompt content
   agentPrompt: string;       // Source agent role prompt only. Empty for builtin/general.
-  envPrompt?: string;        // Legacy compatibility: Bossmode overlay. Prefer appendSystemPrompt.
-  appendSystemPrompt?: string[]; // Bossmode core + prompt assets.
+  appendSystemPrompt: string[];
   skillPaths: string[];      // Skill directory paths
   skillNames?: string[];     // Resolved skill names for status display
-  rulesPrompt?: string;      // Legacy compatibility; ignored by new prompt compiler.
-
   // Session resume
   resumeSession?: { sessionId?: string; sessionFile?: string };
   /** Member-owned directory for a newly created main session. Ignored on resume. */
   sessionDir?: string;
-  /** A just-forked main-session manager. It must not be re-opened before first append. */
-  sessionManager?: unknown;
-  // SDK session id when the runtime exposes one (live sessions report
-  // identity through onSessionChanged instead).
-  readonly sessionId?: string;
   // Called whenever runtime reports session identity (initial + later changes after compact/fork)
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
 }
@@ -143,9 +134,7 @@ export interface AgentHandle {
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
 
   // Metadata for status reporting
-  readonly pid?: number; // deprecated: CLI rollback metadata
   readonly runtimeName?: string;
-  readonly spawnArgs?: string[]; // deprecated: CLI rollback metadata
   readonly runtimeParams?: AgentRuntimeParams;
 
   // Optional — check runtime.capabilities before calling

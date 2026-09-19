@@ -128,7 +128,6 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
         resolveSourceRef,
         resources: snapshot.resources,
         agentPrompt: compiled.agentPrompt,
-        envPrompt: compiled.envPrompt,
         appendSystemPrompt: compiled.appendSystemPrompt,
         skillPaths: snapshot.resources.skillPaths,
         skillNames: snapshot.resources.skillNames,
@@ -165,8 +164,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
           member: { ...member },
           compiled: {
             agentPrompt: compiled.agentPrompt,
-            envPrompt: compiled.envPrompt,
-            appendSystemPrompt: [...compiled.appendSystemPrompt],
+                appendSystemPrompt: [...compiled.appendSystemPrompt],
           },
           skills: [...snapshot.resources.skillNames],
           skillPaths: [...snapshot.resources.skillPaths],

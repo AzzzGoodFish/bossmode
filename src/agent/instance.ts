@@ -26,7 +26,7 @@ export interface PendingCredentialRefresh {
 export interface SessionSources {
   /** Member config as applied at instance build (model/credential/thinking of that moment). */
   member: AgentMemberConfig;
-  compiled: { agentPrompt: string; envPrompt: string; appendSystemPrompt: string[] };
+  compiled: { agentPrompt: string; appendSystemPrompt: string[] };
   skills: string[];
   skillPaths: string[];
   cwd: string;

@@ -708,11 +708,6 @@ export class PiSdkRuntime implements AgentRuntime {
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
-    if (opts.sessionManager) {
-      // A provided manager must not be re-opened before the first append —
-      // re-opening the file would restore the old leaf.
-      sessionManager = opts.sessionManager as SessionManager;
-    } else
     try {
       const resumeFile = opts.resumeSession?.sessionFile;
       if (resumeFile && existsSync(resumeFile)) {
@@ -757,10 +752,7 @@ export class PiSdkRuntime implements AgentRuntime {
     }
 
     const rolePrompt = opts.agentPrompt.trim();
-    const appendBase = (opts.appendSystemPrompt && opts.appendSystemPrompt.length > 0
-      ? opts.appendSystemPrompt
-      : [opts.envPrompt, opts.rulesPrompt]
-    ).filter((v): v is string => !!v && v.trim().length > 0);
+    const appendBase = opts.appendSystemPrompt.filter(v => v.trim().length > 0);
     const promptSources = resolvePiSystemPromptSources({
       agentPrompt: opts.agentPrompt,
       appendSystemPrompt: appendBase,

@@ -19,7 +19,6 @@ export interface CompiledPromptSection {
 export interface CompiledMemberPrompt {
   agentPrompt: string;
   appendSystemPrompt: string[];
-  envPrompt: string;
   fullPrompt: string;
   sections: CompiledPromptSection[];
   manifestHash: string;
@@ -202,7 +201,6 @@ export function compileMemberPrompt(args: MemberPromptSource): CompiledMemberPro
   return {
     agentPrompt,
     appendSystemPrompt,
-    envPrompt: environmentSeg,
     fullPrompt,
     sections,
     manifestHash,
