@@ -8,7 +8,6 @@ import { addRoute, sendJson, parseBody } from "./http.js";
 import { logger } from "../kernel/logger.js";
 import { listMembers, listMemberIdentities, getMember, updateMember, resolveMemberRef, getMemberConfiguration, MemberNameTakenError, MemberNotFoundError, type MemberRecord } from "../member/identity.js";
 import { createMember } from "../app/member-actions.js";
-import { latestMessage } from "../chat/messages.js";
 import { getMcpServerNames, readMcpStatusCache, readMemberMcpConfig } from "../member/mcp.js";
 import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
@@ -448,30 +447,3 @@ addRoute("GET", "/api/members/:id/memory", async (req, res, params) => {
   }
 });
 
-
-
-// ── DM session ──
-
-addRoute("GET", "/api/dm/:memberId/session", async (_req, res, params) => {
-  const m = resolveMemberRef(params.memberId);
-  if (!m) {
-    sendJson(res, 404, { error: "not_found", message: "Member not found" });
-    return;
-  }
-  const scopeId = scopeIdOf({ kind: "dm", memberId: m.id });
-  let status: string = "idle";
-  let contextPct: number | null = null;
-  try {
-    const { getAgentStatus, getAgentContextUsage } = await import("../app/member-actions.js");
-    status = getAgentStatus(scopeId, m.id) || "idle";
-    const usage = getAgentContextUsage(scopeId, m.id);
-    if (usage && typeof (usage as any).percentage === "number") contextPct = (usage as any).percentage;
-  } catch { /* runtime not ready */ }
-  sendJson(res, 200, {
-    memberId: m.id,
-    scopeId,
-    status,
-    contextPct,
-    latestSeq: latestMessage(scopeId)?.seq ?? null,
-  });
-});

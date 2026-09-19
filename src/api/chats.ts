@@ -36,6 +36,13 @@ import { addRoute, parseBody, requestUrl, sendJson } from "./http.js";
 
 export interface ChatHttpActions {
   postMessage(sourceRef: string, input: MessageInput): Promise<Message> | Message;
+  resetSession(sourceRef: string, memberId: string): Promise<unknown> | unknown;
+  abort(sourceRef: string, memberId: string): Promise<unknown> | unknown;
+  compact(sourceRef: string, memberId: string): Promise<unknown> | unknown;
+  readContextUsage(sourceRef: string, memberId: string): unknown;
+  readEvents(sourceRef: string, memberId: string, limit: number, before?: number): unknown;
+  readTools(sourceRef: string, memberId: string): unknown;
+  readSession(sourceRef: string, memberId: string): unknown;
   scopeStatus?(sourceRef: string): string;
   roomStatuses?(roomId: string): unknown;
 }
@@ -119,6 +126,87 @@ addRoute("POST", "/api/conversations/:scope/read", async (request, response, par
     seq: body.seq === undefined ? last?.seq ?? null : body.seq,
   });
   sendJson(response, 200, { scopeId: sourceRef, cursor });
+});
+
+interface ConversationTarget { sourceRef: string; memberId: string; memberName: string }
+function conversationTarget(rawScope: string, request: { url?: string }): ConversationTarget | null {
+  let sourceRef: string;
+  try { sourceRef = decodeURIComponent(rawScope); } catch { return null; }
+  const ref = parseConversation(sourceRef);
+  if (!ref) return null;
+  if (ref.kind === "dm") {
+    const member = getMember(ref.memberId);
+    return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
+  }
+  const memberRef = requestUrl(request).searchParams.get("memberId")
+    || requestUrl(request).searchParams.get("member") || "";
+  if (!memberRef) return null;
+  if (ref.kind === "room") {
+    if (!getRoom(ref.roomId)) return null;
+    const member = resolveRoomMemberRef(ref.roomId, memberRef);
+    return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
+  }
+  const member = getMember(memberRef);
+  return member && ref.memberIds.includes(member.id)
+    ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name }
+    : null;
+}
+function requireConversationTarget(rawScope: string, request: { url?: string }, response: Parameters<typeof sendJson>[0]): ConversationTarget | null {
+  const target = conversationTarget(rawScope, request);
+  if (!target) sendJson(response, 400, { error: "scope_or_member_not_found" });
+  return target;
+}
+
+addRoute("POST", "/api/conversations/:scope/reset-session", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  sendJson(response, 200, { ...await connected().resetSession(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
+});
+addRoute("POST", "/api/conversations/:scope/reload", async (_request, response) => {
+  sendJson(response, 410, { error: "gone", message: "Reload retired — activation recompiles the latest prompt" });
+});
+addRoute("POST", "/api/conversations/:scope/abort", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  sendJson(response, 200, { ...await connected().abort(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
+});
+addRoute("POST", "/api/conversations/:scope/compact", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  try {
+    sendJson(response, 200, { ...await connected().compact(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
+  } catch (error) {
+    sendJson(response, 400, { error: "compact_failed", message: error instanceof Error ? error.message : String(error) });
+  }
+});
+addRoute("GET", "/api/conversations/:scope/context-usage", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  const usage = connected().readContextUsage(target.sourceRef, target.memberId);
+  sendJson(response, 200, usage === null
+    ? { supported: true, unavailable: true, scopeId: target.sourceRef }
+    : { supported: true, scopeId: target.sourceRef, ...usage as object });
+});
+addRoute("GET", "/api/conversations/:scope/events", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  const url = requestUrl(request);
+  const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 50), 200));
+  const beforeValue = url.searchParams.get("before");
+  const before = beforeValue === null ? undefined : Number(beforeValue);
+  const page = connected().readEvents(target.sourceRef, target.memberId, limit, Number.isFinite(before) ? before : undefined);
+  sendJson(response, 200, { ...page as object, scopeId: target.sourceRef, memberId: target.memberId });
+});
+addRoute("GET", "/api/conversations/:scope/tools", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  sendJson(response, 200, { ...connected().readTools(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef, memberId: target.memberId });
+});
+addRoute("GET", "/api/conversations/:scope/session", async (request, response, params) => {
+  const target = requireConversationTarget(params.scope, request, response);
+  if (!target) return;
+  sendJson(response, 200, { ...connected().readSession(target.sourceRef, target.memberId) as object,
+    scopeId: target.sourceRef, memberId: target.memberId, memberName: target.memberName });
 });
 
 function roomResponse(room: Room) {

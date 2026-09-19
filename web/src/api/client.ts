@@ -860,9 +860,8 @@ export async function resetAgentSession(
   roomId: string,
   agentName: string,
 ): Promise<{ ok: true; message: string }> {
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/reset-session`, {
-    method: "POST",
-  });
+  const scope = encodeURIComponent(`room:${roomId}`);
+  return apiFetch(`/api/conversations/${scope}/reset-session?member=${encodeURIComponent(agentName)}`, { method: "POST" });
 }
 
 // ── Mount-stale info ──
@@ -873,7 +872,8 @@ export interface StaleInfo {
 }
 
 export async function getAgentEvents(roomId: string, agentName: string): Promise<unknown[]> {
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events`);
+  const scope = encodeURIComponent(`room:${roomId}`);
+  return apiFetch(`/api/conversations/${scope}/events?member=${encodeURIComponent(agentName)}`);
 }
 
 export interface PaginatedEvents {
@@ -883,8 +883,9 @@ export interface PaginatedEvents {
 }
 
 export async function getAgentEventsPaginated(roomId: string, agentName: string, limit: number, before?: number): Promise<PaginatedEvents> {
-  const params = before !== undefined ? `?limit=${limit}&before=${before}` : `?limit=${limit}`;
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/events${params}`);
+  const params = new URLSearchParams({ member: agentName, limit: String(limit) });
+  if (before !== undefined) params.set("before", String(before));
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/events?${params}`);
 }
 
 /** Scope-addressed events (dm:<id> / room:<id>). */
@@ -947,7 +948,7 @@ export interface ContextUsageData {
 }
 
 export async function getAgentContextUsage(roomId: string, agentName: string): Promise<ContextUsageData> {
-  return apiFetch(`/api/rooms/${roomId}/agents/${agentName}/context-usage`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?member=${encodeURIComponent(agentName)}`);
 }
 
 // -- Attachments --
@@ -1301,7 +1302,7 @@ export interface DmSession {
 }
 
 export async function getDmSession(memberId: string): Promise<DmSession> {
-  return apiFetch(`/api/dm/${encodeURIComponent(memberId)}/session`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(`dm:${memberId}`)}/session`);
 }
 
 export interface ChatEntry {
