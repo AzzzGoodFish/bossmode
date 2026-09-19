@@ -1,4 +1,4 @@
-import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "../kernel/logger.js";
 import { login, requireAuth } from "./auth.js";
 
@@ -46,8 +46,6 @@ export function requestUrl(request: Pick<IncomingMessage, "url">): URL {
   return new URL(request.url || "", "http://localhost");
 }
 
-export function requireHttpAuth(headers: IncomingHttpHeaders): boolean { return requireAuth(headers); }
-
 addRoute("POST", "/api/auth/login", async (request, response) => {
   const body = await parseBody(request) as { username?: string; password?: string };
   if (!body.username || !body.password) return sendJson(response, 400, { error: "username and password required" });
@@ -67,7 +65,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (method === "OPTIONS") { response.writeHead(204); response.end(); return true; }
-  const publicAttachment = method === "GET" && /^\/api\/(rooms|dm|member-chats)\/[^/]+\/attachments\//.test(path);
+  const publicAttachment = method === "GET" && /^\/api\/conversations\/[^/]+\/attachments\//.test(path);
   if (path !== "/api/auth/login" && !publicAttachment && !requireAuth(request.headers)) {
     sendJson(response, 401, { error: "Unauthorized" });
     return true;

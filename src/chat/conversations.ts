@@ -275,62 +275,6 @@ export function resolveRoomMemberRef(roomId: string, ref: string): RoomMemberRec
 
 
 
-function applyConfigPatch(current: RoomMemberConfig, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null }): RoomMemberConfig {
-  const next: RoomMemberConfig = { ...current };
-  if (Object.prototype.hasOwnProperty.call(patch, "model")) {
-    if (patch.model) next.model = patch.model;
-    else {
-      delete next.model;
-      delete next.credentialId;
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "credentialId")) {
-    if (patch.credentialId) next.credentialId = patch.credentialId;
-    else delete next.credentialId;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) {
-    if (patch.thinkingLevel) next.thinkingLevel = patch.thinkingLevel;
-    else delete next.thinkingLevel;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "mcpServers")) {
-    if (Array.isArray(patch.mcpServers) && patch.mcpServers.length > 0) next.mcpServers = Array.from(new Set(patch.mcpServers.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
-    else delete next.mcpServers;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "extensions")) {
-    if (Array.isArray(patch.extensions) && patch.extensions.length > 0) next.extensions = Array.from(new Set(patch.extensions.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())));
-    else delete next.extensions;
-  }
-  return cleanMemberConfig(next);
-}
-
-export function updateRoomMemberOverride(roomId: string, memberRef: string, patch: { model?: string | null; credentialId?: string | null; thinkingLevel?: string | null; mcpServers?: string[] | null; extensions?: string[] | null }): Room | null {
-  const room = getRoom(roomId);
-  if (!room) return null;
-
-  if (Array.isArray(room.roomMembers) && room.roomMembers.length > 0) {
-    const member = findRoomMemberByRefInRoom(room, memberRef);
-    if (!member) return null;
-    const cleaned = applyConfigPatch(member.config || {}, patch);
-    room.roomMembers = room.roomMembers.map((entry) => entry.id === member.id
-      ? { ...entry, config: Object.keys(cleaned).length > 0 ? cleaned : undefined, updatedAt: Date.now() }
-      : entry);
-    room.members = room.roomMembers.map((entry) => entry.name);
-    writeRoom(room);
-    return room;
-  }
-
-  const current = room.memberOverrides?.[memberRef] || {};
-  const cleaned = applyConfigPatch(current, patch);
-  if (Object.keys(cleaned).length > 0) {
-    room.memberOverrides = { ...(room.memberOverrides || {}), [memberRef]: cleaned };
-  } else if (room.memberOverrides?.[memberRef]) {
-    delete room.memberOverrides[memberRef];
-    if (Object.keys(room.memberOverrides).length === 0) delete room.memberOverrides;
-  }
-  writeRoom(room);
-  return room;
-}
-
 export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
   return changeRoom(roomId, room => {
     if (ruleDocs.length) room.ruleDocs = ruleDocs;
@@ -416,7 +360,7 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
  */
 export function inviteGlobalMember(
   roomId: string,
-  global: { id: string; name: string; agentTemplate: string; config?: Partial<RoomMemberConfig> },
+  global: { id: string; name: string; agentTemplate: string },
 ): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "invalid" | "duplicate" } {
   return getDatabase().transaction((): ReturnType<typeof inviteGlobalMember> => {
     const room = getRoom(roomId);

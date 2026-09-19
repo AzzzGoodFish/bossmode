@@ -774,7 +774,7 @@ export interface RoomMessageAttachment {
 export interface MemberIdentity { id: string; name: string }
 
 export async function getMemberIdentities(signal?: AbortSignal): Promise<MemberIdentity[]> {
-  const result = await apiFetch<{members: MemberIdentity[]}>("/api/members/identities", {signal});
+  const result = await apiFetch<{members: MemberIdentity[]}>("/api/members", {signal});
   if (!Array.isArray(result.members)) throw new Error("Invalid member identity response");
   return result.members;
 }
@@ -1167,7 +1167,8 @@ export interface ContactEntry {
 }
 
 export async function getContacts(): Promise<{ contacts: ContactEntry[] }> {
-  return apiFetch("/api/contacts");
+  const result = await apiFetch<{ members: ContactEntry[] }>("/api/members");
+  return { contacts: result.members };
 }
 
 export interface MemberGlobalConfig {
