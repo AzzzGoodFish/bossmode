@@ -10,7 +10,6 @@ export interface Room {
   docsPath?: string;
   description?: string;
   createdAt: number;
-  ruleDocs?: string[];
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
@@ -153,28 +152,6 @@ export function resolveRoomMember(roomId: string, memberId: string): RoomMember 
 }
 
 
-/**
- * Cascade update room.ruleDocs references when a knowledge doc path changes.
- * - Move: oldPath -> newPath
- * - Delete: remove oldPath when newPath is undefined
- *
- * Returns number of affected rooms.
- */
-export function updateRuleDocPaths(oldPath: string, newPath?: string): number {
-  if (!oldPath) return 0;
-  return changeRuleDocPaths(path => path === oldPath, () => newPath || undefined, Boolean(newPath));
-}
-
-/**
- * Cascade update for folder move: replace ruleDocs path prefix.
- * Example: oldPrefix="rules/dev", newPrefix="rules/protocols"
- *   rules/dev/a.md -> rules/protocols/a.md
- */
-export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix?: string): number {
-  if (!oldPrefix) return 0;
-  return changeRuleDocPaths(path => path === oldPrefix || path.startsWith(oldPrefix + "/"),
-    path => newPrefix ? newPrefix + path.slice(oldPrefix.length) : undefined);
-}
 
 /** ⑤ A: room description (name + description) — product cap on every write. */
 export const ROOM_DESCRIPTION_MAX_CHARS = 2000;
@@ -350,7 +327,7 @@ interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | n
 
 interface RoomRow {
   name: string; created_at: number; docs_path: string | null; description: string | null;
-  leader_member_id: string | null; leader_global_member_id: string | null; has_rule_docs: number;
+  leader_member_id: string | null; leader_global_member_id: string | null;
 }
 
 export interface LegacyRoomImport {
@@ -394,15 +371,12 @@ export function storeRoom(room: Room, db: Database = getDatabase()): void {
   db.transaction(() => {
     ensureConversationScope(room.id, "room", room.id, null, db);
     db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
-        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,NULL,?,?,?,NULL,'global',0,?,0)
+        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,NULL,?,?,?,NULL,'global',0,0,0)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,docs_path=excluded.docs_path,description=excluded.description,
-        leader_member_id=excluded.leader_member_id,roster_kind='global',has_rule_docs=excluded.has_rule_docs`,
-        room.id, room.name, room.createdAt, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null,
-        Number(Boolean(room.ruleDocs?.length)));
-      db.run("DELETE FROM room_members WHERE room_id=?", room.id);
-      [...new Set(room.memberIds)].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
-      db.run("DELETE FROM room_rule_docs WHERE room_id=?", room.id);
-    (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
+        leader_member_id=excluded.leader_member_id,roster_kind='global'`,
+        room.id, room.name, room.createdAt, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null);
+    db.run("DELETE FROM room_members WHERE room_id=?", room.id);
+    [...new Set(room.memberIds)].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
   });
 }
 
@@ -450,8 +424,6 @@ export function getRoom(id: string, db: Database = getDatabase()): Room | null {
     ...((row.leader_member_id ?? row.leader_global_member_id) !== null
       ? { promptLeaderMemberId: row.leader_member_id ?? row.leader_global_member_id! } : {}),
   };
-  if (row.has_rule_docs) room.ruleDocs = db.all<{ path: string }>(
-    "SELECT path FROM room_rule_docs WHERE room_id=? ORDER BY position", id).map(item => item.path);
   return room;
 }
 
@@ -515,21 +487,5 @@ function changeRoom(id: string, change: (room: Room) => void): Room | null {
     change(room);
     storeRoom(room);
     return room;
-  });
-}
-function changeRuleDocPaths(matches: (path: string) => boolean, replace: (path: string) => string | undefined, unique = true): number {
-  return getDatabase().transaction(() => {
-    let affected = 0;
-    for (const room of listRooms()) {
-      if (!room.ruleDocs?.some(matches)) continue;
-      const next = room.ruleDocs.map(path => matches(path) ? replace(path) : path);
-      const filtered = next.filter((path): path is string => path !== undefined);
-      const retained = unique ? [...new Set(filtered)] : filtered;
-      if (retained.length) room.ruleDocs = retained;
-      else delete room.ruleDocs;
-      storeRoom(room);
-      affected++;
-    }
-    return affected;
   });
 }

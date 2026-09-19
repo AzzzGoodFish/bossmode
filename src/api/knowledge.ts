@@ -4,30 +4,11 @@
 
 import { addRoute, HttpError, sendJson, parseBody, requestValue } from "./http.js";
 import * as knowledgeStore from "../knowledge/documents.js";
-import * as roomStore from "../chat/conversations.js";
 
 function queryPath(req: { url?: string }): string {
   const path = new URL(req.url || "", "http://localhost").searchParams.get("path");
   if (!path) throw new HttpError(400, "path_required", "path query parameter is required");
   return path;
-}
-
-function moveOne(from: string, to: string): knowledgeStore.PathMutation {
-  const result = knowledgeStore.movePath(from, to);
-  if (result.ok) {
-    if (result.type === "file") roomStore.updateRuleDocPaths(result.from, result.to);
-    else roomStore.updateRuleDocPathsByPrefix(result.from, result.to);
-  }
-  return result;
-}
-
-function deleteOne(path: string): knowledgeStore.PathMutation {
-  const result = knowledgeStore.deletePath(path);
-  if (result.ok) {
-    if (result.type === "file") roomStore.updateRuleDocPaths(result.from);
-    else roomStore.updateRuleDocPathsByPrefix(result.from);
-  }
-  return result;
 }
 
 function batch(paths: string[], action: (path: string) => { ok: boolean }): { count: number; failed: string[] } {
@@ -116,7 +97,7 @@ addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
 
 addRoute("DELETE", "/api/knowledge/entry", async (req, res) => {
   const path = queryPath(req);
-  const result = await requestValue(() => deleteOne(path));
+  const result = await requestValue(() => knowledgeStore.deletePath(path));
   if (!result.ok) return sendJson(res, 404, { error: result.error || "Document not found" });
   sendJson(res, 200, { ok: true, type: result.type });
 });
@@ -129,7 +110,7 @@ addRoute("POST", "/api/knowledge/move", async (req, res) => {
     sendJson(res, 400, { error: "from and to are required" });
     return;
   }
-  const result = await requestValue(() => moveOne(body.from!, body.to!));
+  const result = await requestValue(() => knowledgeStore.movePath(body.from!, body.to!));
   if (!result.ok || !result.type || !result.to) {
     return sendJson(res, 404, { error: result.error || "Source not found or destination conflicts" });
   }
@@ -143,7 +124,7 @@ addRoute("POST", "/api/knowledge/batch-move", async (req, res) => {
     return;
   }
 
-  const result = batch(body.paths, path => moveOne(path, body.destination!));
+  const result = batch(body.paths, path => knowledgeStore.movePath(path, body.destination!));
   sendJson(res, 200, { ok: true, moved: result.count, failed: result.failed });
 });
 
@@ -154,6 +135,6 @@ addRoute("POST", "/api/knowledge/batch-delete", async (req, res) => {
     return;
   }
 
-  const result = batch(body.paths, deleteOne);
+  const result = batch(body.paths, knowledgeStore.deletePath);
   sendJson(res, 200, { ok: true, deleted: result.count, failed: result.failed });
 });
