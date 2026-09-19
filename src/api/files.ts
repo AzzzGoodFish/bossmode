@@ -1,5 +1,6 @@
-import { createReadStream, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { getRoom, parseConversation, roomMemberAssetRoots } from "../chat/conversations.js";
 import {
   attachmentExists,
@@ -9,10 +10,12 @@ import {
   type AttachmentLocation,
 } from "../files/attachments.js";
 import { checkPath } from "../kernel/path.js";
+import { logger } from "../kernel/logger.js";
 import * as knowledgeStore from "../knowledge/documents.js";
 import { getMember } from "../member/identity.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
+const HOME = homedir();
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
@@ -22,6 +25,33 @@ const MIME: Record<string, string> = {
   ".csv": "text/csv", ".zip": "application/zip",
 };
 function mime(filename: string): string { return MIME[extname(filename).toLowerCase()] || "application/octet-stream"; }
+function segments(path: string): Array<{ name: string; path: string }> {
+  if (path !== HOME && !path.startsWith(HOME + sep)) return [];
+  const values = [{ name: HOME.slice(dirname(HOME).length + 1) || HOME, path: HOME }];
+  let cursor = HOME;
+  for (const part of path.slice(HOME.length).split(sep).filter(Boolean)) {
+    cursor = join(cursor, part);
+    values.push({ name: part, path: cursor });
+  }
+  return values;
+}
+
+addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
+  const raw = (requestUrl(request).searchParams.get("path") || HOME).replace(/^~(\/|$)/, HOME + "$1");
+  const path = resolve(raw);
+  if (path !== HOME && !path.startsWith(HOME + sep)) return sendJson(response, 403, { error: "Path must be within home directory" });
+  if (!existsSync(path)) return sendJson(response, 404, { error: "Directory not found" });
+  if (!statSync(path).isDirectory()) return sendJson(response, 400, { error: "Path is not a directory" });
+  try {
+    const dirs = readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).slice(0, 200)
+      .map((entry) => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
+    sendJson(response, 200, { path, parent: path === HOME ? null : dirname(path), segments: segments(path), dirs, truncated: dirs.length >= 200 });
+  } catch (error) {
+    logger.warn("api", "directory read failed", { path, error: String(error) });
+    sendJson(response, 500, { error: "Failed to read directory" });
+  }
+});
+
 function conversationLocation(raw: string): { scopeId: string; location: AttachmentLocation } | null {
   let scope: string;
   try { scope = decodeURIComponent(raw); } catch { return null; }
