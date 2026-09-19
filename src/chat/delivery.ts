@@ -6,7 +6,6 @@ import {
   conversationMember,
   getRoomMembers,
   parseConversation,
-  parseMmScopeId,
   storageScopeId,
 } from "./conversations.js";
 import { captureChatContext, renderChatInput, type PreparedAgentInput } from "./context.js";
@@ -17,7 +16,6 @@ export type DeliveryKind = "ordinary" | "dm";
 export interface DeliveryActor { actorKey: string; memberId: string | null }
 export interface CapturedDeliverySnapshot {
   message: { [key: string]: JsonValue };
-  context: JsonValue;
   origin: "user" | "member" | "system" | "unresolved";
   messageType: "chat" | "task_event" | "knowledge_event" | "notification";
   senderActorKey: string | null;
@@ -27,8 +25,6 @@ export interface CapturedDeliverySnapshot {
 }
 export interface CapturedMessage { scopeId: string; messageId: string; snapshot: CapturedDeliverySnapshot }
 export interface DeliveryKey { scopeId: string; messageId: string; targetActorKey: string; deliveryKind: DeliveryKind }
-export interface AcceptedDelivery extends DeliveryKey { targetMemberId: string | null; acceptedAt: number }
-
 export interface ChatAdmissionToken extends DeliveryKey {
   sourceRef: string;
   idempotencyKey: string;
@@ -144,29 +140,21 @@ export function readCapture(scope: string, messageId: string, db: Database = get
   return row ? { scopeId, messageId, snapshot: JSON.parse(row.snapshot_json) as CapturedDeliverySnapshot } : null;
 }
 
-export function readDelivery(key: DeliveryKey, db: Database = getDatabase()): AcceptedDelivery | null {
-  return db.get<AcceptedDelivery>(`SELECT scope_id AS scopeId,message_id AS messageId,target_actor_key AS targetActorKey,
-    target_member_id AS targetMemberId,delivery_kind AS deliveryKind,accepted_at AS acceptedAt
-    FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(key)) ?? null;
-}
-
-function acceptDelivery(db: Database, key: DeliveryKey, snapshot: CapturedDeliverySnapshot, at: number): { inserted: boolean; delivery: AcceptedDelivery } {
+function acceptDelivery(db: Database, key: DeliveryKey, snapshot: CapturedDeliverySnapshot, at: number): boolean {
   return db.transaction((tx) => {
-    const stored = captureMessage(tx, { scopeId: key.scopeId, messageId: key.messageId, snapshot }, at).capture;
-    const target = stored.snapshot.targets[key.deliveryKind].find((actor) => actor.actorKey === key.targetActorKey);
+    const target = snapshot.targets[key.deliveryKind].find(actor => actor.actorKey === key.targetActorKey);
     if (!target) throw new Error("Delivery actor is not a captured target");
     const scope = tx.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", key.scopeId);
     if ((scope?.kind === "dm") !== (key.deliveryKind === "dm")) throw new Error("Delivery kind does not match scope");
-    const old = readDelivery(key, tx);
-    if (old) return { inserted: false, delivery: old };
+    if (tx.get("SELECT 1 FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?", ...keyParams(key))) return false;
     tx.run(`INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at)
       VALUES(?,?,?,?,?,?)`, ...keyParams(key), target.memberId, at);
-    return { inserted: true, delivery: readDelivery(key, tx)! };
+    return true;
   });
 }
 
 function openReplies(db: Database, capture: CapturedMessage, at: number): void {
-  const value = captureMessage(db, capture, at).capture.snapshot;
+  const value = capture.snapshot;
   if (value.messageType !== "chat" || value.needResponse?.length === 0) return;
   const targets = new Map([...value.targets.ordinary, ...value.targets.dm].map((actor) => [actor.actorKey, actor]));
   const requiredActors = value.origin === "user"
@@ -283,7 +271,7 @@ function prepareAdmission(
   let row = db.get<AdmissionRow>(`SELECT * FROM chat_admissions
     WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?`, ...keyParams(key));
   if (!row) {
-    if (!accepted.inserted) throw new Error("Historical captured delivery is not repairable without a pending admission");
+    if (!accepted) throw new Error("Historical captured delivery is not repairable without a pending admission");
     const replyExpected = Boolean(db.get(`SELECT 1 FROM reply_obligations
       WHERE scope_id=? AND message_id=? AND actor_key=? AND settled_at IS NULL AND ${ACTIVE_REPLY}`,
     capture.scopeId, capture.messageId, target.actorKey));
@@ -377,7 +365,7 @@ export function appendMessageWithAdmissions(
     if (messageType === "chat") {
       if (ref.kind === "dm" && origin === "user") targets.dm = [actor(ref.memberId)];
       else if (ref.kind === "mm" && sender) {
-        const other = parseMmScopeId(sourceRef)?.find((id) => id !== sender.memberId);
+        const other = ref.memberIds.find(id => id !== sender.memberId);
         if (other) targets.ordinary = [actor(other)];
       } else if (ref.kind === "room") {
         targets.ordinary = ids(message.mentionMemberIds, message.mentions)
@@ -391,7 +379,6 @@ export function appendMessageWithAdmissions(
       messageId: message.id,
       snapshot: {
         message: JSON.parse(JSON.stringify(message)) as { [key: string]: JsonValue },
-        context: {},
         origin,
         messageType,
         senderActorKey: sender?.actorKey ?? null,
