@@ -168,7 +168,6 @@ export function transition(
 
 // -- Context usage (cache-only API + idle refresh push) --
 export const contextUsageCache = new Map<string, ContextUsage>();
-export const contextCompactionWarningCache = new Set<string>();
 
 export function isCompactUsageDrop(previous: ContextUsage | undefined, next: ContextUsage): boolean {
   if (!previous) return false;

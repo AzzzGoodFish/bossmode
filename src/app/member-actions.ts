@@ -152,7 +152,7 @@ import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
 import type { AgentStatus, ContextUsage } from "../agent/types.js";
-import { contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance, type AgentStatusBroadcast } from "../agent/instance.js";
+import { contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance, type AgentStatusBroadcast } from "../agent/instance.js";
 
 const chatTargetOf = (sourceRef: string): string => sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
 const canonicalSourceRef = (value: string): string => value.startsWith("room:") || value.startsWith("dm:") || value.startsWith("mm:") ? value : `room:${value}`;
@@ -301,20 +301,6 @@ function refreshContextUsageOnce(roomId: string, memberId: string, options: Refr
     if (usage.compacted && previous && !options.acceptCompactedSnapshot) usage = { ...previous, compacted: true };
     else if (isCompactUsageDrop(previous, usage) || shouldKeepCompactedMarker(previous, usage)) usage = { ...usage, compacted: true };
     if (usage.compacted && !previous && !options.acceptCompactedSnapshot) return;
-    const crossedCompactionThreshold = !usage.compacted && usage.percentage >= 80 && (!previous || previous.percentage < 80);
-    if (crossedCompactionThreshold && !contextCompactionWarningCache.has(key)) {
-      contextCompactionWarningCache.add(key);
-      logger.warn("agent", "context usage crossed compaction threshold without compacted marker", {
-        roomId,
-        agent: agentName,
-        memberId,
-        totalTokens: usage.totalTokens,
-        rawMaxTokens: usage.rawMaxTokens,
-        percentage: usage.percentage,
-        model: usage.model,
-      });
-    }
-    if (usage.compacted || usage.percentage < 50) contextCompactionWarningCache.delete(key);
     contextUsageCache.set(key, usage);
     broadcastToRoom(roomId, {
       type: "agent:context_usage",

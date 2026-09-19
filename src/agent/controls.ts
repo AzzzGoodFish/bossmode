@@ -7,7 +7,7 @@ import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, maybeFlushPendingReload, getRegistry } from "./assembly.js";
 import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal.js";
-import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, contextCompactionWarningCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
+import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";
 import type { AgentHistoryEvent } from "./events.js";
 
@@ -92,7 +92,7 @@ async function applyThinking(instance:AgentInstance,pending:PendingThinkingSwitc
 }
 
 function dropCredential(instance:AgentInstance,reason:string):void{
-  const key=instanceKey(instance.memberId);if(instances.get(key)===instance)instances.delete(key);contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);
+  const key=instanceKey(instance.memberId);if(instances.get(key)===instance)instances.delete(key);contextUsageCache.delete(key);
   try{instance.unsubscribe();}catch{}try{instance.handle.destroy();}catch{}instance.status="inactive";updateDispatchState(instance,"idle","credential_unavailable");publishCurrentStatus(instance);
   logger.warn("agent","credentialRefreshUnavailable",{member:instance.agentName,reason});noticeCurrentSource(instance,`Member "${instance.agentName}" model credential is no longer available.`);
 }
@@ -284,7 +284,6 @@ export function destroyInstance(memberId: string,options:{preservePending?:boole
     instance.unsubscribe();
     instances.delete(key);
     contextUsageCache.delete(key);
-    contextCompactionWarningCache.delete(key);
     logger.info("agent", "instance destroyed", { memberId });
   }
 }
@@ -331,7 +330,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
       requestInstanceStop(instance);
       if (!instance.handle.destroyAndWait) throw new Error("Runtime cannot confirm member teardown");
       await instance.handle.destroyAndWait();instance.unsubscribe();instances.delete(key);sessionPublishOwners.delete(key);
-      contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);
+      contextUsageCache.delete(key);
     }catch(error){errors.push(error);}
   }
   for (const runtime of getRegistry()?.getAll() ?? []) {
@@ -365,7 +364,7 @@ export async function shutdownAll(): Promise<void> {
     await settleMemberOperations();
     for (const instance of instances.values()) {try {instance.unsubscribe();}catch(error){failures.push(error);}}
     instances.clear(); pendingCreations.clear(); sessionPublishOwners.clear();
-    contextUsageCache.clear(); contextCompactionWarningCache.clear();
+    contextUsageCache.clear();
     if (failures.length) throw new AggregateError(failures, "Runtime shutdown incomplete");
   })().finally(() => { shutdownRunning = false; });
   return shutdownSettlement;
