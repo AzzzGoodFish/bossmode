@@ -65,15 +65,16 @@ function read(query:UsageReportQuery,sources?:UsageSourceSelection):{rows:UsageR
   const rows=readUsageRows({from:query.from,to:query.to,...(sources===undefined?{}:{sources})}),meta=metadata(rows);
   return {rows:filtered(rows,query,meta),meta};
 }
-type RoomSourceIndex={sourceRefs:Map<string,string|null>;historicalSourceKeys:Map<string,string|null>};
+type RoomSourceIndex={sourceRefs:Map<string,string>;historicalSourceKeys:Map<string,string>};
 function roomSourceIndex(associations:readonly RoomSourceAssociation[]):RoomSourceIndex{
-  const sourceRefs=new Map<string,string|null>(),historicalSourceKeys=new Map<string,string|null>();
-  const addAlias=(map:Map<string,string|null>,alias:string,roomId:string)=>{
-    if(!map.has(alias))map.set(alias,roomId);else if(map.get(alias)!==roomId)map.set(alias,null);
+  const sourceRefs=new Map<string,string>(),historicalSourceKeys=new Map<string,string>();
+  const indexAlias=(map:Map<string,string>,alias:string,roomId:string)=>{
+    const existing=map.get(alias);if(existing!==undefined&&existing!==roomId)throw new Error(`Conflicting room source association: ${alias}`);
+    map.set(alias,roomId);
   };
   for(const association of associations){
-    for(const sourceRef of association.sourceRefs)addAlias(sourceRefs,sourceRef,association.roomId);
-    for(const sourceKey of association.historicalSourceKeys)addAlias(historicalSourceKeys,sourceKey,association.roomId);
+    for(const sourceRef of association.sourceRefs)indexAlias(sourceRefs,sourceRef,association.roomId);
+    for(const sourceKey of association.historicalSourceKeys)indexAlias(historicalSourceKeys,sourceKey,association.roomId);
   }
   return {sourceRefs,historicalSourceKeys};
 }
@@ -82,12 +83,8 @@ function associatedRoomId(row:UsageRow,index:RoomSourceIndex):string|null{
   return row.historicalSourceKey===null?null:index.historicalSourceKeys.get(row.historicalSourceKey)??null;
 }
 export function getRoomUsageReport(roomId:string,query:UsageReportQuery={}):UsageReport|null{
-  const associations=listRoomSourceAssociations(),association=associations.find(item=>item.roomId===roomId);if(!association)return null;
-  const index=roomSourceIndex(associations),sources={
-    sourceRefs:association.sourceRefs.filter(value=>index.sourceRefs.get(value)===roomId),
-    historicalSourceKeys:association.historicalSourceKeys.filter(value=>index.historicalSourceKeys.get(value)===roomId),
-  };
-  const {rows,meta}=read(query,sources);return report(rows,meta,query);
+  const association=listRoomSourceAssociations().find(item=>item.roomId===roomId);if(!association)return null;
+  const {rows,meta}=read(query,{sourceRefs:association.sourceRefs,historicalSourceKeys:association.historicalSourceKeys});return report(rows,meta,query);
 }
 export function getPlatformUsageReport(query:UsageReportQuery={}):PlatformUsageReport{
   const associations=listRoomSourceAssociations(),index=roomSourceIndex(associations),names=new Map(associations.map(room=>[room.roomId,room.roomName]));
