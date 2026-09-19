@@ -86,42 +86,7 @@ export function archiveRetiredTasks(stagingDb: Database, root: string): TaskArch
   exportedFiles.push("SHA256SUMS");
 
   const total = Object.values(rowCounts).reduce((n, c) => n + c, 0);
-  const readme = [
-    "# Retired: Task feature data archive",
-    "",
-    `Exported: ${new Date().toISOString()}`,
-    "",
-    "## Why this archive exists",
-    "",
-    "The Task feature (task board, `/api/tasks` HTTP API, the `create_task` / `update_task` /",
-    "`list_tasks` / `get_task` / `comment_task` member tools, and the `task:` mainline reference)",
-    "was retired on 2026-09-11 by decision of the product owner (fish #19253/#19256/#19259).",
-    "The four task SQL tables were exported here, verified, and then dropped.",
-    "",
-    "Historical chat messages of type `task_event` were NOT modified — they remain in the",
-    "message store verbatim and still render as plain text in the chat history.",
-    "",
-    "## Tables exported",
-    "",
-    ...TASK_TABLES.map((t) => `- \`${t}\`: ${rowCounts[t] ?? "(absent)"} rows`),
-    "",
-    `Total rows: ${total}`,
-    "",
-    "## Files",
-    "",
-    "- `tasks.json` — `tasks` rows",
-    "- `task_references.json` — `task_references` rows",
-    "- `task_subscribers.json` — `task_subscribers` rows",
-    "- `task_comments.json` — `task_comments` rows",
-    "- `SHA256SUMS` — sha256 of each JSON export, verifiable with `sha256sum -c SHA256SUMS`",
-    "",
-    "## Restoring",
-    "",
-    "This archive is a read-only record, not a supported restore path. The application",
-    "no longer creates or reads these tables. To inspect, use any JSON/SQLite tooling;",
-    "each file is a JSON object with `table`, `exportedAt`, `rowCount` and `rows`.",
-    "",
-  ].join("\n");
+  const readme=["# Retired task data",`Exported: ${new Date().toISOString()}`,"","The task feature was retired on 2026-09-11. Its SQL rows are preserved here as verified JSON; historical chat events remain unchanged.","",...TASK_TABLES.map(table=>`- ${table}: ${rowCounts[table]??"absent"} rows`),"",`Total rows: ${total}`,"SHA256SUMS verifies every JSON export. This archive is read-only and has no supported restore path.",""].join("\n");
   writeDurably(join(directory, "README.md"), Buffer.from(readme, "utf8"));
   exportedFiles.push("README.md");
 

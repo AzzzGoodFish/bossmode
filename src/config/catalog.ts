@@ -1,4 +1,3 @@
-export type ModelProtocol="openai-completions"|"openai-responses"|"openai-codex-responses"|"anthropic-messages"|"azure-openai-responses"|"google-generative-ai"|"google-gemini-cli"|"google-vertex"|"bedrock-converse-stream"|"mistral-conversations";
 export interface ModelDefinitionConfig {id:string;name?:string;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;thinkingLevelMap?:Partial<Record<"off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max",string|null>>;compat?:Record<string,unknown>;metadataSource?:"endpoint"|"pi_catalog"|"unknown";}
 export interface PublicModelProvider {providerSlug:string;displayName:string;authModes:Array<"api_key"|"oauth">;defaultAuthMode:"api_key"|"oauth";modelCount:number;sampleModels:string[];protocol?:ModelProtocol;logoKey?:string;}
 import { getCatalogRegistrySync, ensureCatalogRegistry, getCatalogRuntimeSync, DatabaseModelsStore } from "./pi-adapt/catalog.js";
@@ -7,18 +6,8 @@ import { readConfig, writeConfig } from "./settings.js";
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
 import { defined, objectJson, parseObject } from "../kernel/json.js";
 
-export const MODEL_PROTOCOLS: ModelProtocol[] = [
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "anthropic-messages",
-  "azure-openai-responses",
-  "google-generative-ai",
-  "google-gemini-cli",
-  "google-vertex",
-  "bedrock-converse-stream",
-  "mistral-conversations",
-];
+export const MODEL_PROTOCOLS=["openai-completions","openai-responses","openai-codex-responses","anthropic-messages","azure-openai-responses","google-generative-ai","google-gemini-cli","google-vertex","bedrock-converse-stream","mistral-conversations"] as const;
+export type ModelProtocol=(typeof MODEL_PROTOCOLS)[number];
 
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 
@@ -73,40 +62,11 @@ export function modelSdkMetadata(raw: any): Pick<ModelDefinitionConfig, "thinkin
   };
 }
 
-function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-}
-
-function hasSameMetadata(a: ModelDiscoveredMetadata, b: ModelDiscoveredMetadata): boolean {
-  const normalizeInputs = (items?: Array<"text" | "image">) => {
-    const copy = items ? [...items] : undefined;
-    return copy ? copy.sort() : undefined;
-  };
-  return (
-    a.contextWindow === b.contextWindow
-    && a.maxTokens === b.maxTokens
-    && a.reasoning === b.reasoning
-    && JSON.stringify(normalizeInputs(a.input)) === JSON.stringify(normalizeInputs(b.input))
-    && sameJson(a.thinkingLevelMap, b.thinkingLevelMap)
-    && sameJson(a.compat, b.compat)
-  );
-}
-
-function applyConsistentMetadataFallback(matches: ModelDiscoveredMetadata[]): ModelDiscoveredMetadata | null {
-  if (matches.length === 0) return null;
-  const first = matches[0];
-  if (
-    first.contextWindow === undefined
-    && first.maxTokens === undefined
-    && first.reasoning === undefined
-    && !first.input
-    && !first.thinkingLevelMap
-    && !first.compat
-  ) {
-    return null;
-  }
-  if (!matches.every((m) => hasSameMetadata(m, first))) return null;
-  return first;
+const sameJson=(a:unknown,b:unknown):boolean=>JSON.stringify(a??null)===JSON.stringify(b??null);
+function metadataKey(value:ModelDiscoveredMetadata):string{return JSON.stringify({...value,...(value.input?{input:[...value.input].sort()}: {})});}
+function applyConsistentMetadataFallback(matches:ModelDiscoveredMetadata[]):ModelDiscoveredMetadata|null{
+  const first=matches[0];if(!first||metadataKey(first)==="{}")return null;
+  const key=metadataKey(first);return matches.every(value=>metadataKey(value)===key)?first:null;
 }
 
 function loadBundledCatalogSync(): any[] {

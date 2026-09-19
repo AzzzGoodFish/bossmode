@@ -13,7 +13,7 @@ export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfil
 export interface ConnectApiKeyRequest {providerSlug:string;apiKey:string;name?:string;baseUrlOverride?:string;requestProfile?:ModelRequestProfile;isDefault?:boolean;}
 export interface OAuthDeviceCodeInfo {userCode:string;verificationUri:string;expiresInSeconds?:number;intervalSeconds?:number;}
 export interface OAuthSelectPrompt {message:string;options:Array<{id:string;label:string}>;}
-export interface AvailableModelOption {ref:string;provider:string;providerSlug:string;providerDisplayName?:string;modelId:string;displayName?:string;profileId:string;profileName:string;profileBaseUrl?:string;protocol:ModelProtocol;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;metadataSource?:"endpoint"|"pi_catalog"|"unknown";credentialStatus:"configured"|"missing"|"no_auth"|"ambient";thinkingLevelMap?:ModelDefinitionConfig["thinkingLevelMap"];images:boolean;}
+export interface AvailableModelOption extends Omit<ModelDefinitionConfig,"id"|"name"> {ref:string;provider:string;providerSlug:string;providerDisplayName?:string;modelId:string;displayName?:string;profileId:string;profileName:string;profileBaseUrl?:string;protocol:ModelProtocol;credentialStatus:"configured"|"missing"|"no_auth"|"ambient";images:boolean;}
 
 
 
