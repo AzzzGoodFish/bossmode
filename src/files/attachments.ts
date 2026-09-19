@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { logger } from "../kernel/logger.js";
 import { checkPath } from "../kernel/path.js";
 import { memberChatDir, memberDir, roomDir } from "./layout.js";
+import { locateReadableFile, type LocatedFile } from "./io.js";
 
 export type AttachmentPreviewType = "image" | "markdown" | "html" | "text" | "download";
 
@@ -151,7 +152,14 @@ export function getAttachmentPath(location: AttachmentLocation, storedFilename: 
   return join(attachmentDirectory(location), safeStoredFilename(storedFilename));
 }
 
+export function locateAttachment(location: AttachmentLocation, storedFilename: string, maxSizeBytes?: number): LocatedFile {
+  try {
+    return locateReadableFile([getAttachmentPath(location, storedFilename)], [attachmentDirectory(location)], maxSizeBytes);
+  } catch (error) {
+    return { ok: false, code: "invalid", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function attachmentExists(location: AttachmentLocation, storedFilename: string): boolean {
-  try { return existsSync(getAttachmentPath(location, storedFilename)); }
-  catch { return false; }
+  return locateAttachment(location, storedFilename).ok;
 }

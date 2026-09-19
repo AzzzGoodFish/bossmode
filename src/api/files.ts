@@ -1,15 +1,13 @@
-import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname } from "node:path";
 import { attachmentLocation, resolveConversation } from "../chat/conversations.js";
 import {
-  attachmentExists,
-  getAttachmentPath,
   inferAttachmentPreviewType,
+  locateAttachment,
   storeAttachment,
   type AttachmentLocation,
 } from "../files/attachments.js";
-import { browseDirectories, openFileStream } from "../files/io.js";
+import { browseDirectories, openFileStream, readFileBytes } from "../files/io.js";
 import { readArtifactPreview, resolveArtifact } from "../app/artifact-actions.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
@@ -57,20 +55,20 @@ async function upload(request: Parameters<typeof requestUrl>[0] & NodeJS.Readabl
   }
 }
 function download(response: Parameters<typeof sendJson>[0], location: AttachmentLocation, filename: string): void {
-  if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
-  const path = getAttachmentPath(location, filename);
-  response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": statSync(path).size,
+  const file = locateAttachment(location, filename);
+  if (!file.ok) return sendJson(response, file.code === "not_found" ? 404 : 400, { error: file.code === "not_found" ? "Attachment not found" : file.error });
+  response.writeHead(200, { "Content-Type": mime(filename), "Content-Length": file.size,
     "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" });
-  openFileStream(path).pipe(response);
+  openFileStream(file.path).pipe(response);
 }
 function preview(response: Parameters<typeof sendJson>[0], scopeId: string, location: AttachmentLocation, filename: string): void {
-  if (!attachmentExists(location, filename)) return sendJson(response, 404, { error: "Attachment not found" });
+  const file = locateAttachment(location, filename);
+  if (!file.ok) return sendJson(response, file.code === "not_found" ? 404 : 400, { error: file.code === "not_found" ? "Attachment not found" : file.error });
   const type = inferAttachmentPreviewType(filename);
   if (type === "download") return sendJson(response, 400, { error: "Attachment is download-only" });
-  const path = getAttachmentPath(location, filename);
-  if (statSync(path).size > MAX_PREVIEW_BYTES) return sendJson(response, 413, { error: "Attachment preview is too large" });
+  if (file.size > MAX_PREVIEW_BYTES) return sendJson(response, 413, { error: "Attachment preview is too large" });
   sendJson(response, 200, { type: type === "markdown" ? "md" : type, originalPath: filename, path: filename, title: filename,
-    content: type === "image" ? attachmentUrl(scopeId, filename) : readFileSync(path, "utf8") });
+    content: type === "image" ? attachmentUrl(scopeId, filename) : readFileBytes(file.path).toString("utf8") });
 }
 
 addRoute("POST", "/api/conversations/:scope/attachments", async (request, response, params) => {
