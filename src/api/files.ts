@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, extname, join, resolve, sep } from "node:path";
+import { extname } from "node:path";
 import { attachmentLocation, resolveConversation } from "../chat/conversations.js";
 import {
   attachmentExists,
@@ -9,7 +9,7 @@ import {
   storeAttachment,
   type AttachmentLocation,
 } from "../files/attachments.js";
-import { openFileStream } from "../files/io.js";
+import { browseDirectories, openFileStream } from "../files/io.js";
 import { readArtifactPreview, resolveArtifact } from "../app/artifact-actions.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
@@ -23,26 +23,14 @@ const MIME: Record<string, string> = {
   ".csv": "text/csv", ".zip": "application/zip",
 };
 function mime(filename: string): string { return MIME[extname(filename).toLowerCase()] || "application/octet-stream"; }
-function segments(path: string): Array<{ name: string; path: string }> {
-  if (path !== HOME && !path.startsWith(HOME + sep)) return [];
-  const values = [{ name: HOME.slice(dirname(HOME).length + 1) || HOME, path: HOME }];
-  let cursor = HOME;
-  for (const part of path.slice(HOME.length).split(sep).filter(Boolean)) {
-    cursor = join(cursor, part);
-    values.push({ name: part, path: cursor });
-  }
-  return values;
-}
-
 addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
-  const raw = (requestUrl(request).searchParams.get("path") || HOME).replace(/^~(\/|$)/, HOME + "$1");
-  const path = resolve(raw);
-  if (path !== HOME && !path.startsWith(HOME + sep)) return sendJson(response, 403, { error: "Path must be within home directory" });
-  if (!existsSync(path)) return sendJson(response, 404, { error: "Directory not found" });
-  if (!statSync(path).isDirectory()) return sendJson(response, 400, { error: "Path is not a directory" });
-  const dirs = readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory()).slice(0, 200)
-    .map(entry => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
-  sendJson(response, 200, { path, parent: path === HOME ? null : dirname(path), segments: segments(path), dirs, truncated: dirs.length >= 200 });
+  const result = browseDirectories(HOME, requestUrl(request).searchParams.get("path") || HOME);
+  if (!result.ok) {
+    const status = result.code === "outside" ? 403 : result.code === "not_found" ? 404 : 400;
+    return sendJson(response, status, { error: result.error });
+  }
+  const { ok: _ok, ...listing } = result;
+  sendJson(response, 200, listing);
 });
 
 function conversationLocation(scope: string): { scopeId: string; location: AttachmentLocation } | null {

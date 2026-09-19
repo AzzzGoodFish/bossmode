@@ -1,5 +1,5 @@
 import { readdirSync, statSync, mkdirSync, closeSync, fsyncSync, openSync, lstatSync, chmodSync, existsSync, linkSync, unlinkSync, createReadStream, copyFileSync, writeFileSync, readFileSync, renameSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, parse, join } from "node:path";
+import { dirname, isAbsolute, relative, resolve, parse, join, sep } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { checkPath } from "../kernel/path.js";
 
@@ -116,6 +116,27 @@ export function moveDurably(source: string, destination: string): void {
   renameSync(source, destination);
   syncPath(dirname(source));
   if (dirname(source) !== dirname(destination)) syncPath(dirname(destination));
+}
+
+export type DirectoryListing =
+  | { ok: true; path: string; parent: string | null; segments: Array<{ name: string; path: string }>; dirs: Array<{ name: string; path: string }>; truncated: boolean }
+  | { ok: false; code: "outside" | "not_found" | "not_directory"; error: string };
+
+export function browseDirectories(root: string, requested = root, limit = 200): DirectoryListing {
+  const boundary = resolve(root);
+  const expanded = requested.replace(/^~(\/|$)/, boundary + "$1");
+  const path = resolve(expanded), rel = relative(boundary, path);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return { ok: false, code: "outside", error: "Path must be within home directory" };
+  }
+  if (!existsSync(path)) return { ok: false, code: "not_found", error: "Directory not found" };
+  if (!statSync(path).isDirectory()) return { ok: false, code: "not_directory", error: "Path is not a directory" };
+  const all = readdirSync(path, { withFileTypes: true }).filter(entry => entry.isDirectory())
+    .map(entry => ({ name: entry.name, path: join(path, entry.name) })).sort((a, b) => a.name.localeCompare(b.name));
+  const segments = [{ name: boundary.slice(dirname(boundary).length + 1) || boundary, path: boundary }];
+  let cursor = boundary;
+  for (const part of rel.split(sep).filter(Boolean)) { cursor = join(cursor, part); segments.push({ name: part, path: cursor }); }
+  return { ok: true, path, parent: path === boundary ? null : dirname(path), segments, dirs: all.slice(0, limit), truncated: all.length > limit };
 }
 
 export type LocatedFile =

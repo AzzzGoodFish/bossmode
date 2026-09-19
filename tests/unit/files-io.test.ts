@@ -1,14 +1,31 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { locateReadableFile, readFileBytes } from "../../src/files/io.js";
+import { browseDirectories, locateReadableFile, readFileBytes } from "../../src/files/io.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function temporary(name: string): string { const root = mkdtempSync(join(tmpdir(), name)); roots.push(root); return root; }
 
-describe("generic allowlisted file reads", () => {
+describe("generic filesystem reads", () => {
+  it("browses sorted child directories without escaping the supplied root", () => {
+    const root = temporary("bossmode-files-root-");
+    const child = join(root, "child");
+    writeFileSync(join(root, "plain.txt"), "ignored");
+    for (const name of ["z", "a"]) {
+      const directory = join(child, name);
+      mkdirSync(directory, { recursive: true });
+    }
+    expect(browseDirectories(root, "~/child")).toEqual({
+      ok: true, path: child, parent: root,
+      segments: [{ name: root.split("/").pop()!, path: root }, { name: "child", path: child }],
+      dirs: [{ name: "a", path: join(child, "a") }, { name: "z", path: join(child, "z") }], truncated: false,
+    });
+    expect(browseDirectories(root, join(root, ".."))).toMatchObject({ ok: false, code: "outside" });
+    expect(browseDirectories(root, join(root, "plain.txt"))).toMatchObject({ ok: false, code: "not_directory" });
+  });
+
   it("selects the first existing regular file and reports its canonical size", () => {
     const root = temporary("bossmode-files-root-");
     const file = join(root, "artifact.md");
