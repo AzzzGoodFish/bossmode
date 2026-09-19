@@ -677,7 +677,6 @@ export interface Room {
   docsPath?: string;
   createdAt: number;
   /** Legacy. No longer injected into prompts or shown in Room Settings. */
-  ruleDocs?: string[];
   agentStatuses?: Record<string, string>;
 }
 
@@ -693,16 +692,6 @@ export async function createRoom(
   return apiFetch("/api/rooms", {
     method: "POST",
     body: JSON.stringify({ name, memberIds, leaderMemberId }),
-  });
-}
-
-export async function updateRoomBindings(
-  id: string,
-  patch: { ruleDocs?: string[] },
-): Promise<Room> {
-  return apiFetch(`/api/rooms/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
   });
 }
 
