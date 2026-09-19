@@ -40,6 +40,8 @@ describe("core-agent-queue-v2 migration", () => {
       VALUES(?,?,?,?,?,?,'interrupted',?,?,?,'tail')`, "r1", "msg-history", "old-actor", "ordinary", JSON.stringify({ prompt: "old" }), "chat-message", 6, 20, "historical");
     db.run("INSERT INTO execution_attempts VALUES(?,?,?,?,?,?,?,?,?,?)", "attempt-1", "mem_one", "r1", "input", null, "prepared", 1, null, null, null);
     db.run("INSERT INTO agent_events VALUES(?,?,?,?,?,?,?,?)", "event-member", "r1", "mem_one", "mem_one", 4, 100, "message_end", JSON.stringify({ type: "message_end", usage: { inputTokens: 3, outputTokens: 2, cost: 0.4 } }));
+    // Lower wall-clock time must not reorder the immutable historical stream.
+    db.run("INSERT INTO agent_events VALUES(?,?,?,?,?,?,?,?)", "event-member-next", "r1", "mem_one", "mem_one", 5, 50, "tool_start", JSON.stringify({ type: "tool_start" }));
     db.run("INSERT INTO agent_events VALUES(?,?,?,?,?,?,?,?)", "event-history", "r1", "old-display", null, 7, 90, "tool_start", JSON.stringify({ type: "tool_start" }));
     db.run("INSERT INTO event_usage_receipts VALUES(?,?)", "event-member", 5);
     db.run("INSERT INTO event_source_receipts VALUES(?,?)", "event-member", "hash");
@@ -61,9 +63,14 @@ describe("core-agent-queue-v2 migration", () => {
     expect(db.get("SELECT id,member_id,source_ref,member_seq,historical_source_key,historical_owner_key,historical_seq FROM agent_events WHERE id='event-member'")).toEqual({
       id: "event-member", member_id: "mem_one", source_ref: "room:r1", member_seq: 1, historical_source_key: "r1", historical_owner_key: "mem_one", historical_seq: 4,
     });
+    expect(db.get("SELECT id,member_id,source_ref,member_seq,historical_source_key,historical_owner_key,historical_seq FROM agent_events WHERE id='event-member-next'")).toEqual({
+      id: "event-member-next", member_id: "mem_one", source_ref: "room:r1", member_seq: 2, historical_source_key: "r1", historical_owner_key: "mem_one", historical_seq: 5,
+    });
     expect(db.get("SELECT id,member_id,source_ref,member_seq,historical_source_key,historical_owner_key,historical_seq FROM agent_events WHERE id='event-history'")).toEqual({
       id: "event-history", member_id: null, source_ref: null, member_seq: null, historical_source_key: "r1", historical_owner_key: "old-display", historical_seq: 7,
     });
+    expect(() => db.run("UPDATE agent_events SET historical_seq=9 WHERE id='event-member'"))
+      .toThrow("Historical event identity is immutable");
     expect(db.get("SELECT * FROM event_usage_receipts")).toEqual({ event_id: "event-member", total_tokens: 5 });
     expect(db.get("SELECT * FROM event_source_receipts")).toEqual({ event_id: "event-member", input_fingerprint: "hash" });
     expect(db.get<{scope_id:string}>("SELECT scope_id FROM outbox WHERE kind='agent-event'")!.scope_id).toBe("room:r1");

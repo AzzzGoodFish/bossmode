@@ -1033,7 +1033,9 @@ CREATE TABLE agent_events (
 );
 WITH ranked AS (
   SELECT e.*,
-    CASE WHEN e.member_id IS NOT NULL THEN ROW_NUMBER() OVER(PARTITION BY e.member_id ORDER BY e.ts,e.id) END AS next_member_seq
+    CASE WHEN e.member_id IS NOT NULL THEN ROW_NUMBER() OVER(
+      PARTITION BY e.member_id ORDER BY e.scope_id,e.owner_key,e.seq,e.id
+    ) END AS next_member_seq
   FROM agent_events_scope_v1 e
 )
 INSERT INTO agent_events(
@@ -1051,6 +1053,11 @@ CREATE UNIQUE INDEX agent_events_history_identity ON agent_events(historical_sou
   WHERE historical_source_key IS NOT NULL;
 CREATE INDEX agent_events_source_member ON agent_events(source_ref,member_id,member_seq);
 CREATE INDEX agent_events_member_type_time ON agent_events(member_id,type,ts);
+CREATE TRIGGER agent_event_history_immutable BEFORE UPDATE OF historical_source_key,historical_owner_key,historical_seq ON agent_events
+WHEN NEW.historical_source_key IS NOT OLD.historical_source_key
+  OR NEW.historical_owner_key IS NOT OLD.historical_owner_key
+  OR NEW.historical_seq IS NOT OLD.historical_seq
+BEGIN SELECT RAISE(ABORT,'Historical event identity is immutable'); END;
 CREATE TABLE event_usage_receipts (
   event_id TEXT PRIMARY KEY REFERENCES agent_events(id) ON DELETE CASCADE,
   total_tokens INTEGER NOT NULL
