@@ -4,7 +4,6 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsClientCommand, WsServerEvent } from "../kernel/types.js";
 
-import { findMemberByName } from "../member/identity.js";
 
 interface ClientState {
   ws: WebSocket;
@@ -69,7 +68,7 @@ function handleCommand(client: ClientState, cmd: WsClientCommand): void {
       break;
     case "subscribe:agent":
     case "unsubscribe:agent": {
-      const memberId = cmd.memberId || findMemberByName(cmd.agent)?.id;
+      const memberId = cmd.memberId;
       if (!memberId) break;
       const key = `${cmd.roomId}:${memberId}`;
       if (cmd.type === "subscribe:agent") client.agentSubscriptions.add(key);
@@ -88,17 +87,9 @@ export function broadcastToRoom(roomId: string, event: WsServerEvent): void {
   }
 }
 
-export function broadcastToAgentSubscribers(roomId: string, agent: string, event: WsServerEvent): void {
-  const memberId = "memberId" in event && event.memberId
-    ? event.memberId : findMemberByName(agent)?.id;
-  if (!memberId) return;
-  const key = `${roomId}:${memberId}`;
-  const payload = JSON.stringify(event);
-  for (const [, state] of clients) {
-    if (state.agentSubscriptions.has(key) && state.ws.readyState === 1) {
-      try { state.ws.send(payload); } catch { clients.delete(state.ws); }
-    }
-  }
+export function broadcastToAgentSubscribers(roomId:string,event:WsServerEvent):void{
+  const memberId="memberId" in event?event.memberId:undefined;if(!memberId)return;const key=`${roomId}:${memberId}`,payload=JSON.stringify(event);
+  for(const [,state]of clients)if(state.agentSubscriptions.has(key)&&state.ws.readyState===1)try{state.ws.send(payload);}catch{clients.delete(state.ws);}
 }
 
 /** Current identity is global, including clients without any scope subscriptions. */

@@ -27,26 +27,10 @@ import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, Runt
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 
 /** Classify active-tool source. Bossmode tools come from the live customTools set (single source of truth) — no static name whitelist. */
-function classifyToolSource(
-  name: string,
-  bossmodeToolNames: ReadonlySet<string>,
-  sourceInfo?: { path?: string; source?: string; baseDir?: string },
-): string {
-  if (BUILTIN_TOOL_NAMES.has(name)) return "builtin";
-  if (bossmodeToolNames.has(name)) return "bossmode";
-  if (name === "mcp") return "mcp";
-  const haystack = [sourceInfo?.path, sourceInfo?.baseDir, sourceInfo?.source].filter(Boolean).join(" ");
-  if (haystack) {
-    // Platform extension store is retired (fish 2026-09-04) — classify by
-    // sourceInfo shape only: member-owned extension files classify as
-    // extension:<leaf>, the MCP adapter stays "mcp".
-    if (/extensions|node_modules|\.ts$|\.js$/i.test(haystack) && !/pi-mcp-adapter/.test(haystack)) {
-      const leaf = haystack.split(/[/\\]/).filter(Boolean).find((p) => p.startsWith("pi-") || p.includes("web-access"));
-      if (leaf) return `extension:${leaf.replace(/@.*$/, "")}`;
-    }
-    if (/pi-mcp-adapter|mcp/i.test(haystack)) return "mcp";
-  }
-  return "extension:unknown";
+function classifyToolSource(name:string,bossmodeTools:ReadonlySet<string>,source?:{path?:string;source?:string;baseDir?:string}):string{
+  if(BUILTIN_TOOL_NAMES.has(name))return "builtin";if(bossmodeTools.has(name))return "bossmode";
+  const path=source?.path??source?.source??source?.baseDir??name;if(name==="mcp"||/mcp/i.test(path))return "mcp";
+  return `extension:${path.split(/[/\\]/).filter(Boolean).pop()?.replace(/@.*$/,"")??name}`;
 }
 
 function splitModelRef(modelRef: string): { provider: string; modelId: string } {
@@ -95,7 +79,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   readonly runtimeName = "pi-cli";
   readonly runtimeParams: AgentRuntimeParams;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
-  private mcpConfigs = new Set<McpRuntimeSettings>();
+  private mcpConfig?:McpRuntimeSettings;
   private unsubscribeSession: (() => void) | undefined;
   private currentRun: Promise<void> | null = null;
   private promptAttempt: SdkExecutionAttempt | null = null;
@@ -124,7 +108,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
     initialMcpConfig?: McpRuntimeSettings,
   ) {
-    if (initialMcpConfig) this.mcpConfigs.add(initialMcpConfig);
+    this.mcpConfig=initialMcpConfig;
     this.runtimeParams = runtimeParams;
     this.onTeardownSuccess = onTeardownSuccess;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
@@ -281,10 +265,7 @@ export class PiSdkAgentHandle implements AgentHandle {
       // SDK idle does not include manual compaction or reload continuations.
       await Promise.allSettled([...this.resourceOperations]);
     });
-    for (const config of this.mcpConfigs) {
-      try { config.dispose(); } catch (err) { errors.push(`MCP config cleanup: ${String(err)}`); }
-    }
-    this.mcpConfigs.clear();
+    try{this.mcpConfig?.dispose();}catch(error){errors.push(`MCP config cleanup: ${String(error)}`);}this.mcpConfig=undefined;
     this.listeners.clear();
     if (errors.length > 0) {
       throw new Error(`teardown incomplete (${errors.length}): ${errors.join("; ")}`);

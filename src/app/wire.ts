@@ -280,12 +280,12 @@ export function wireChatHttp(): () => void {
 export function wireAgentEvents(): () => void {
   setRuntimeViewSink((scopeId, event, memberName) => {
     if (memberName === undefined) broadcastToRoom(scopeId, event);
-    else broadcastToAgentSubscribers(scopeId, memberName, event);
+    else broadcastToAgentSubscribers(scopeId, event);
   });
   setAgentEventSink((sourceRef, memberId, payload) => {
     const agentName = readMemberIdentity(memberId)?.name ?? memberId;
     const target = sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
-    broadcastToAgentSubscribers(target, agentName, { ...payload, roomId: target, agent: agentName });
+    broadcastToAgentSubscribers(target, { ...payload, roomId: target, agent: agentName, memberId });
   });
   setStatusSink((sourceRef, payload) => {
     const target = sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
