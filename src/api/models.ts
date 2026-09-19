@@ -1,6 +1,6 @@
 import { addRoute, HttpError, parseBody, requestValue, sendJson } from "./http.js";
 import { invalidateModelCredentialProfile } from "../agent/controls.js";
-import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
+import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, submitOAuthLoginJobInput } from "../config/oauth.js";
 import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listAvailableModels, listPublicModelCredentialProfiles, refreshBuiltinCatalog, saveModelCredentialProfile } from "../config/models.js";
 import { getCatalogAutoRefreshIntervalDays, getCatalogSettingsPublic, listBuiltinModelProviders, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
 
@@ -46,18 +46,14 @@ addRoute("POST", "/api/model-credential-profiles/discover-models", async (reques
 addRoute("POST", "/api/model-credential-profiles/oauth/start", async (request, response) => {
   await ok(response, async () => startNativeOAuthConnection(await body(request)));
 });
-addRoute("POST", "/api/model-credential-profiles/oauth-login/start", async (request, response) => {
-  await ok(response, async () => startOAuthLoginJob(await body(request)));
+const oauthPath = "/api/model-credential-profiles/oauth/:id";
+addRoute("GET", oauthPath, async (_request, response, params) => { sendJson(response, 200, oauthJob(params.id)); });
+addRoute("POST", `${oauthPath}/input`, async (request, response, params) => {
+  await ok(response, async () => await submitOAuthLoginJobInput(params.id, await body(request)) || oauthJob(params.id));
 });
-for (const path of ["/api/model-credential-profiles/oauth/:id", "/api/model-credential-profiles/oauth-login/:id"]) {
-  addRoute("GET", path, async (_request, response, params) => { sendJson(response, 200, oauthJob(params.id)); });
-  addRoute("POST", `${path}/input`, async (request, response, params) => {
-    await ok(response, async () => await submitOAuthLoginJobInput(params.id, await body(request)) || oauthJob(params.id));
-  });
-  addRoute("POST", `${path}/cancel`, async (_request, response, params) => {
-    sendJson(response, 200, cancelOAuthLoginJob(params.id) || oauthJob(params.id));
-  });
-}
+addRoute("POST", `${oauthPath}/cancel`, async (_request, response, params) => {
+  sendJson(response, 200, cancelOAuthLoginJob(params.id) || oauthJob(params.id));
+});
 addRoute("DELETE", "/api/model-credential-profiles/:id", async (_request, response, params) => {
   const profile = getModelCredentialProfile(params.id);
   if (!deleteModelCredentialProfile(params.id)) throw new HttpError(404, "not_found", "Model credential profile not found");

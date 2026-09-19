@@ -376,32 +376,16 @@ export async function startOAuthConnection(data: StartOAuthConnectionRequest): P
   return apiFetch("/api/model-credential-profiles/oauth/start", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function startOAuthLoginJob(data: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string }): Promise<OAuthLoginJob> {
-  return apiFetch("/api/model-credential-profiles/oauth-login/start", { method: "POST", body: JSON.stringify(data) });
-}
-
 export async function getOAuthConnectionJob(id: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}`);
-}
-
-export async function getOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}`);
 }
 
 export async function submitOAuthConnectionInput(id: string, code: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
 }
 
-export async function submitOAuthLoginJobInput(id: string, code: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/input`, { method: "POST", body: JSON.stringify({ code }) });
-}
-
 export async function cancelOAuthConnection(id: string): Promise<OAuthLoginJob> {
   return apiFetch(`/api/model-credential-profiles/oauth/${id}/cancel`, { method: "POST" });
-}
-
-export async function cancelOAuthLoginJob(id: string): Promise<OAuthLoginJob> {
-  return apiFetch(`/api/model-credential-profiles/oauth-login/${id}/cancel`, { method: "POST" });
 }
 
 export async function discoverModelCredentialModels(data: Partial<ModelCredentialProfileInput> & { id?: string }): Promise<ModelDiscoveryResult> {
