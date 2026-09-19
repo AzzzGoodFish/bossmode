@@ -8,7 +8,7 @@ import {initRouter} from "../../src/chat/router.js";
 import {patchMessage,archiveMessagesInTransaction,readMessages} from "../../src/data/repositories/message-repository.js";
 let fixture:ReturnType<typeof coreFixture>;let members:Database;let rooms:Database;let captures:DeliveryRepository;
 const transport=vi.hoisted(()=>({broadcast:vi.fn()}));
-vi.mock("../../src/app/server/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
+vi.mock("../../src/app/ws.js",async original=>({...await original<object>(),broadcastToRoom:transport.broadcast}));
 const stops:Array<()=>void>=[];
 const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
 beforeEach(()=>{

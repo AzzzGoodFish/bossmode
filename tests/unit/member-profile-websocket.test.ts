@@ -13,7 +13,7 @@ import { findMemberByName } from "../../src/member/identity.js";
 import {
   broadcastMemberProfileChanged, broadcastToAgentSubscribers, createWebSocketServer,
   getConnectedClientCount, shutdownWebSocket,
-} from "../../src/app/server/ws.js";
+} from "../../src/app/ws.js";
 
 let server: Server;
 let url: string;

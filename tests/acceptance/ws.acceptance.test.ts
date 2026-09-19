@@ -89,7 +89,7 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Manually trigger a broadcast (testing the infrastructure)
-    const { broadcastToRoom } = await import("../../src/app/server/ws.js");
+    const { broadcastToRoom } = await import("../../src/app/ws.js");
     const testEvent: WsServerEvent = {
       type: "room:message",
       roomId: "broadcast-test",
@@ -114,7 +114,7 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     // unsubscribedClient does NOT subscribe
     await new Promise((r) => setTimeout(r, 50));
 
-    const { broadcastToRoom } = await import("../../src/app/server/ws.js");
+    const { broadcastToRoom } = await import("../../src/app/ws.js");
     broadcastToRoom("isolation-test", {
       type: "room:message",
       roomId: "isolation-test",
@@ -145,7 +145,7 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     roomOnlyClient.send({ type: "subscribe:room", roomId: room.id });
     await new Promise((r) => setTimeout(r, 50));
 
-    const { broadcastToAgentSubscribers } = await import("../../src/app/server/ws.js");
+    const { broadcastToAgentSubscribers } = await import("../../src/app/ws.js");
     broadcastToAgentSubscribers(room.id, member.name, {
       type: "agent:event",
       roomId: room.id,
@@ -188,7 +188,7 @@ describe("Acceptance: WebSocket Infrastructure", () => {
     client3.send({ type: "subscribe:room", roomId: "multi-test" });
     await new Promise((r) => setTimeout(r, 50));
 
-    const { broadcastToRoom } = await import("../../src/app/server/ws.js");
+    const { broadcastToRoom } = await import("../../src/app/ws.js");
     broadcastToRoom("multi-test", {
       type: "room:message",
       roomId: "multi-test",

@@ -6,7 +6,7 @@ import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } fr
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, maybeFlushPendingReload, getRegistry } from "./assembly.js";
 import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
-import { settleMemberShellWaits } from "./terminal/shell-manager.js";
+import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, contextCompactionWarningCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";
 import type { AgentHistoryEvent } from "./events.js";
@@ -703,7 +703,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
     try {requestInstanceStop(instance);} catch(error){errors.push(error);}
   }
   await Promise.allSettled([...pendingCreationsFor(memberId), ...(memberSwitchGates.has(memberId) ? [memberSwitchGates.get(memberId)!] : [])]);
-  const {closeAllShellsForMember}=await import("./terminal/shell-manager.js");
+  const {closeAllShellsForMember}=await import("./terminal.js");
   const resources = await Promise.allSettled([closeAllShellsForMember(memberId)]);
   for (const result of resources) if (result.status === "rejected") errors.push(result.reason);
   for (const [key,instance] of [...instances]) if(instance.memberId===memberId) {
@@ -736,7 +736,7 @@ export async function shutdownAll(): Promise<void> {
     for (const pending of await Promise.allSettled([...pendingCreations.values(), ...memberSwitchGates.values()])) {
       if (pending.status === "rejected") failures.push(pending.reason);
     }
-    const {closeAllShellsForMember}=await import("./terminal/shell-manager.js");
+    const {closeAllShellsForMember}=await import("./terminal.js");
     const resources = await Promise.allSettled([closeAllShellsForMember()]);
     for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
     for (const rt of getRegistry()?.getAll() ?? []) {

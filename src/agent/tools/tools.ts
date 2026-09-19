@@ -641,7 +641,7 @@ export async function handleToolCallback(
     case "terminal_list":
     case "terminal_close": {
       // Batch 7 P2: persistent terminals — member-owned, cross-scope.
-      const shell = await import("../terminal/shell-manager.js");
+      const shell = await import("../terminal.js");
       const shellMemberId = resolveCallerMemberId(roomId, actorRef);
       if (tool === "terminal_create") {
         const result = await shell.createShell({

@@ -70,9 +70,9 @@ function insertOutbox(db:Database,fact:EventFact):void{
     payload:{eventId:fact.id,memberId:fact.memberId},createdAt:fact.ts});
 }
 
-export function appendMemberEvent(input:{id?:string;memberId:string;sourceRef:string|null;event:AgentHistoryEvent}):{fact:EventFact;inserted:boolean}{
+export function appendMemberEvent(input:{id?:string;memberId:string;sourceRef:string|null;event:AgentHistoryEvent;sourceEvent?:unknown}):{fact:EventFact;inserted:boolean}{
   if(!input.memberId)throw new Error("Live agent event requires memberId");
-  const id=input.id??identityFor(input.event as object),sourceHash=fingerprint(input.event),db=getDatabase();
+  const id=input.id??identityFor(input.event as object),sourceHash=fingerprint(input.sourceEvent??input.event),db=getDatabase();
   return db.transaction(tx=>{
     const old=tx.get<EventRow>(`${EVENT_SELECT} WHERE id=?`,id);
     if(old){const fact=decode(old),receipt=tx.get<{input_fingerprint:string}>("SELECT input_fingerprint FROM event_source_receipts WHERE event_id=?",id);
@@ -135,7 +135,7 @@ export function handleAgentEvent(sourceRef:string|null,agentName:string,instance
   }
   const state=event.type==="message_end"||event.type==="message_start"?streams.get(instanceKey):undefined;
   const enriched:any={...eventForLog};if(event.type==="message_end"){if(state){const streamed=content(state);if(!(event as any).text&&streamed.text)enriched.text=streamed.text;if(streamed.thinking)enriched.thinking=streamed.thinking;}if(model?.trim()&&!enriched.model)enriched.model=model;}
-  const {fact,inserted}=appendMemberEvent({id:eventId,memberId,sourceRef,event:enriched});
+  const {fact,inserted}=appendMemberEvent({id:eventId,memberId,sourceRef,event:enriched,sourceEvent:source});
   if(inserted){if(state)state.pending.push(boundary(eventId,state));getDatabase().afterCommit(()=>{consume(instanceKey,eventId,state);eventBuffer.push(fact.event);});
     getDatabase().afterCommit(()=>{
       if(fact.event.type==="tool_start")toolArgs.set(`${instanceKey}:${(fact.event as any).toolCallId}`,(fact.event as any).args);
@@ -158,7 +158,10 @@ export function rebuildEventAggregates(db:Database=getDatabase()):void{
       if(u)applyEventUsage(tx,fact);if(!fact.memberId)continue;
       const s=stats.get(fact.memberId)??{turns:0,tools:0,active:0,starts:new Map(),input:0,output:0,read:0,write:0,cost:0,updated:0};
       const eventTs=typeof (event as any).ts==="number"&&Number.isFinite((event as any).ts)?(event as any).ts:undefined;
-      if(event.type==="agent_start"&&eventTs!==undefined)s.starts.set(stream,eventTs);
+      if(event.type==="agent_start"){
+        if(eventTs===undefined)s.starts.delete(stream);
+        else s.starts.set(stream,eventTs);
+      }
       if(event.type==="agent_end"){s.turns++;const start=s.starts.get(stream);if(start!==undefined&&eventTs!==undefined&&eventTs>start)s.active+=eventTs-start;s.starts.delete(stream);}
       if(event.type==="tool_start")s.tools++;if(u){s.input+=u.inputTokens||0;s.output+=u.outputTokens||0;s.read+=u.cacheRead||0;s.write+=u.cacheWrite||0;s.cost+=u.cost||0;}s.updated=Math.max(s.updated,fact.ts);stats.set(fact.memberId,s);
     }

@@ -16,7 +16,7 @@ import { handleAgentEvent, appendEventToDisk, loadEventsFromDisk, scheduleAgentE
 import type { RoomMessage } from "../src/kernel/types.js";
 
 const transport = vi.hoisted(() => ({room:vi.fn(),agent:vi.fn()}));
-vi.mock("../src/app/server/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
+vi.mock("../src/app/ws.js",() => ({broadcastToRoom:transport.room,broadcastToAgentSubscribers:transport.agent}));
 vi.mock("../src/kernel/logger.js",() => ({logger:{info:vi.fn(),error:vi.fn()}}));
 
 let db: Database; let root: string; let fixture: ReturnType<typeof coreFixture>;

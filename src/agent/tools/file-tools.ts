@@ -1,4 +1,4 @@
-import {awaitResourceClose} from "../terminal/resource-close.js";
+import {awaitResourceClose} from "../terminal.js";
 import {memberRuntimeAllowed} from "../instance.js";
 /**
  * Batch 7 P1 (spec §3): workspace-aware file tools — read/write/edit override

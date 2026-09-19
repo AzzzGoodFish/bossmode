@@ -10,7 +10,7 @@ export function wireConfiguration(): () => void {
 import { onMemberProfileChanged } from "../member/profile.js";
 import { setGlobalConfigPatchObserver } from "../member/identity.js";
 import { markStaleMounts } from "../agent/instance.js";
-import { broadcastMemberProfileChanged } from "./server/ws.js";
+import { broadcastMemberProfileChanged } from "./ws.js";
 
 export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberProfileChanged(member => notifyMemberProfileChanged(member));
@@ -33,7 +33,7 @@ export function wireConversationMembers(): () => void {
 import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
 import { abortAgent, abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { setStatusSink } from "../agent/instance.js";
-import { broadcastToAgentSubscribers, broadcastToRoom } from "./server/ws.js";
+import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
 import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getMemberInstances, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
 
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.

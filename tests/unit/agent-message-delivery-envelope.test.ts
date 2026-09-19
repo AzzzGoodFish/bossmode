@@ -11,7 +11,7 @@ import { createRoom, stampGlobalMemberIds } from "../../src/chat/conversations.j
 import { importMessage } from "../../src/data/repositories/message-repository.js";
 
 
-vi.mock("../../src/app/server/ws.js", () => ({
+vi.mock("../../src/app/ws.js", () => ({
   broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn(),
 }));
 

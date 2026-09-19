@@ -22,8 +22,8 @@ const broadcastToRoom = vi.fn();
 
 
 
-vi.mock("../../src/app/server/ws.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/app/server/ws.js")>();
+vi.mock("../../src/app/ws.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/ws.js")>();
   return {
     ...actual,
     broadcastToRoom: (...args: unknown[]) => broadcastToRoom(...args),

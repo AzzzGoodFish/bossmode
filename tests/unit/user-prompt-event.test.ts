@@ -10,11 +10,11 @@ import { activateAgent, initializeMemberRuntime } from "../../src/app/member-act
 import { shutdownAll } from "../../src/agent/controls.js";
 import { postMessage } from "../../src/chat/message-bus.js";
 import { loadEventsFromDisk, setAgentEventSink } from "../../src/agent/events.js";
-import { broadcastToAgentSubscribers } from "../../src/app/server/ws.js";
+import { broadcastToAgentSubscribers } from "../../src/app/ws.js";
 
 import { formatToolArgsFull, getSanitizedArgs } from "../../web/src/components/agent-event-utils.js";
 
-vi.mock("../../src/app/server/ws.js", () => ({
+vi.mock("../../src/app/ws.js", () => ({
   broadcastToRoom: vi.fn(), broadcastToAgentSubscribers: vi.fn(),
 }));
 

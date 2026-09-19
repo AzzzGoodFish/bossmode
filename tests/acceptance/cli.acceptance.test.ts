@@ -71,7 +71,7 @@ function cleanupTestDir(): void {
 function runCli(args: string, env?: Record<string, string>): { stdout: string; stderr: string; exitCode: number } {
   try {
     const stdout = execSync(
-      `node dist/app/cli/index.js ${args}`,
+      `node dist/app/cli.js ${args}`,
       {
         cwd: process.cwd(),
         timeout: 8000,

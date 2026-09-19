@@ -5,7 +5,7 @@ import {pendingScopeNotifications} from "../data/repositories/notification-repos
 import * as messageStore from "./message-store.js";
 import { appendCapturedMessage } from "./message-service.js";
 import { pendingMessageDispatches, recordDispatchAttempt, markDispatchDelivered, isDispatchDelivered } from "../data/repositories/message-dispatch-repository.js";
-import { broadcastToRoom } from "../app/server/ws.js";
+import { broadcastToRoom } from "../app/ws.js";
 import { logger } from "../kernel/logger.js";
 import type { RoomMessage } from "../kernel/types.js";
 

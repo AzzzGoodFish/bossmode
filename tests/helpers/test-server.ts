@@ -105,7 +105,7 @@ export async function createTestServer(): Promise<TestServer> {
   const { getDatabase } = await import("../../src/data/database.js");
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
   const { handleApiRequest } = await import("../../src/api/http.js");
-  const { createWebSocketServer } = await import("../../src/app/server/ws.js");
+  const { createWebSocketServer } = await import("../../src/app/ws.js");
   const { initializeMemberRuntime } = await import("../../src/app/member-actions.js");
   const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const { MockRuntime } = await import("./mock-runtime.js");
@@ -150,7 +150,7 @@ export async function createTestServer(): Promise<TestServer> {
 export async function closeTestServer(ts: TestServer): Promise<void> {
   ts.stopRouter();
   ts.stopAgentEvents();
-  const { shutdownWebSocket } = await import("../../src/app/server/ws.js");
+  const { shutdownWebSocket } = await import("../../src/app/ws.js");
   await shutdownWebSocket();
   const { shutdownAll } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
   await shutdownAll();

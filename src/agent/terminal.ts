@@ -1,5 +1,4 @@
-import {awaitResourceClose} from "./resource-close.js";
-import { memberRuntimeAllowed } from "../instance.js";
+import { memberRuntimeAllowed } from "./instance.js";
 /**
  * Batch 7 P2 (spec-batch7-workspace-shell-impl-v1 §3-§4): persistent member
  * terminals. A terminal is a real PTY (node-pty locally, an ssh2 channel for
@@ -16,8 +15,21 @@ import { memberRuntimeAllowed } from "../instance.js";
  * Known limit (documented in guide): a shell started inside a terminal does
  * not emit markers — the outer exec stays "running" until it returns.
  */
-import { getWorkspace, type SshWorkspace } from "../../member/workspaces.js";
-import { logger } from "../../kernel/logger.js";
+import { logger } from "../kernel/logger.js";
+
+export type TerminalWorkspace =
+  | {id:string;kind:"original";root:string;description?:string}
+  | {id:string;kind:"ssh";root:string;description?:string;host:string;port:number;user:string;keyPath:string};
+export type TerminalWorkspaceResolver=(memberId:string,workspaceId?:string)=>TerminalWorkspace|undefined;
+let resolveTerminalWorkspace:TerminalWorkspaceResolver|undefined;
+export function configureTerminalWorkspaces(resolve:TerminalWorkspaceResolver|undefined):void{resolveTerminalWorkspace=resolve;}
+
+/** A timeout is an explicit cleanup failure, never confirmation of release. */
+export async function awaitResourceClose(closed:Promise<void>,label:string):Promise<void>{
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{await Promise.race([closed,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} closure was not confirmed within 10 seconds`)),10_000);})]);}
+ finally{if(timer)clearTimeout(timer);}
+}
 
 export const SHELL_COLS = 160;
 export const SHELL_ROWS = 1000;
@@ -284,7 +296,7 @@ async function spawnLocalShell(memberId: string, workspaceId: string, cwd: strin
   return shell;
 }
 
-async function spawnSshShell(memberId: string, workspace: SshWorkspace, cwd: string | undefined, id: string, name: string | undefined): Promise<LiveShell> {
+async function spawnSshShell(memberId: string, workspace: TerminalWorkspace & {kind:"ssh"}, cwd: string | undefined, id: string, name: string | undefined): Promise<LiveShell> {
   const { readFileSync, existsSync } = await import("node:fs");
   const { Client } = await import("ssh2");
   if (!memberRuntimeAllowed(memberId)) throw new Error("member runtime admission is closed");
@@ -358,11 +370,9 @@ async function createShellInternal(args: {
   workspace?: string;
   cwd?: string;
 }): Promise<ShellCreateResult> {
-  const ws = args.workspace ? getWorkspace(args.memberId, args.workspace) : undefined;
-  if (args.workspace && !ws) {
-    return { ok: false, error: `Workspace not found: ${args.workspace}` };
-  }
-  const workspace = ws ?? (await import("../../member/workspaces.js")).getActiveWorkspace(args.memberId);
+  if(!resolveTerminalWorkspace)return {ok:false,error:"Terminal workspaces are not connected"};
+  const workspace=resolveTerminalWorkspace(args.memberId,args.workspace);
+  if(!workspace)return {ok:false,error:`Workspace not found: ${args.workspace??"active"}`};
   const id = newShellId();
   try {
     let shell: LiveShell;

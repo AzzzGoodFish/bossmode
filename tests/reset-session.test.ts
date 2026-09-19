@@ -20,9 +20,9 @@ import * as sessionStore from "../src/member/sessions.js";
 import { loadEventsFromDisk, setAgentEventSink } from "../src/agent/events.js";
 import { setStatusSink } from "../src/agent/instance.js";
 import { setRuntimeViewSink } from "../src/app/member-actions.js";
-import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/server/ws.js";
+import { broadcastToRoom, broadcastToAgentSubscribers } from "../src/app/ws.js";
 
-vi.mock("../src/app/server/ws.js", () => ({
+vi.mock("../src/app/ws.js", () => ({
   broadcastToRoom: vi.fn(),
   broadcastToAgentSubscribers: vi.fn(),
 }));

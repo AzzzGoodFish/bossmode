@@ -1,31 +1,30 @@
-import { loadMemberPromptSource, loadAgentMemberSnapshot } from "../member-actions.js";
-import { readConfig, writeConfig } from "../../config/settings.js";
-import { ensureDirectory } from "../../files/io.js";
-import { getBossmodeDir } from "../../files/layout.js";
+import { loadMemberPromptSource, loadAgentMemberSnapshot } from "./member-actions.js";
+import { readConfig, writeConfig } from "../config/settings.js";
+import { ensureDirectory } from "../files/io.js";
+import { getBossmodeDir } from "../files/layout.js";
 
-import { recoverMemberArchives } from "../member-actions.js";
-import { listenAndPublish, closeHttpServer } from "./startup-listener.js";
-import { prepareCoreStorage } from "../upgrade/run.js";
-import { type UpgradeProgress } from "../upgrade/inventory.js";
-import type { BossmodeConfig } from "../../kernel/types.js";
+import { recoverMemberArchives } from "./member-actions.js";
+import { prepareCoreStorage } from "./upgrade/run.js";
+import { type UpgradeProgress } from "./upgrade/inventory.js";
+import type { BossmodeConfig } from "../kernel/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
-import { handleApiRequest } from "../../api/http.js";
+import { handleApiRequest } from "../api/http.js";
 import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
 
-import { removePidFile, writePidFile } from "../pid.js";
-import { ensurePiCatalogWarm } from "../../config/catalog.js";
-import { startCatalogAutoRefreshScheduler } from "../../config/models.js";
-import { initializeMemberRuntime, getActiveInstanceCount } from "../member-actions.js";
-import { shutdownAll as shutdownAgents } from "../../agent/controls.js";
-import { resumePendingRuntimeInputs } from "../../agent/scheduler.js";
+import { removePidFile, writePidFile } from "./process.js";
+import { ensurePiCatalogWarm } from "../config/catalog.js";
+import { startCatalogAutoRefreshScheduler } from "../config/models.js";
+import { initializeMemberRuntime, getActiveInstanceCount } from "./member-actions.js";
+import { shutdownAll as shutdownAgents } from "../agent/controls.js";
+import { resumePendingRuntimeInputs } from "../agent/scheduler.js";
 
-import { RuntimeRegistry } from "../../agent/types.js";
-import { PiSdkRuntime } from "../../agent/runtime/pi.js";
-import { logger } from "../../kernel/logger.js";
-import { seedBuiltinAssets } from "../../member/templates.js";
-import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "../wire.js";
+import { RuntimeRegistry } from "../agent/types.js";
+import { PiSdkRuntime } from "../agent/runtime/pi.js";
+import { logger } from "../kernel/logger.js";
+import { seedBuiltinAssets } from "../member/templates.js";
+import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireMemberHttp, wireUsageHttp, wireChatHttp, wireAgentEvents } from "./wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -80,7 +79,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const unsubscribeAgentEvents = wireAgentEvents();
 
 
-  const webDistDir = join(import.meta.dirname, "../../../web/dist");
+  const webDistDir = join(import.meta.dirname, "../../web/dist");
 
   let accepting = true;
   const requests = new Set<Promise<void>>();
@@ -211,4 +210,37 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   process.on("SIGTERM", () => {void shutdown("SIGTERM");});
   process.on("SIGINT", () => {void shutdown("SIGINT");});
   process.on("SIGHUP", () => {void shutdown("SIGHUP");});
+}
+
+
+/** Publish readiness only after listening. Failed publication/listen awaits owned-resource cleanup. */
+export async function listenAndPublish(
+  server: import("node:http").Server, options: { host: string; port: number },
+  publish: () => void, cleanup: () => Promise<void>,
+): Promise<void> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: NodeJS.ErrnoException) => {
+        server.off("listening", onListening);
+        reject(error.code === "EADDRINUSE" ? new Error(`Port ${options.port} is already in use`) : error);
+      };
+      const onListening = () => { server.off("error", onError); resolve(); };
+      server.once("error", onError); server.once("listening", onListening);
+      try { server.listen(options.port, options.host); }
+      catch (error) { server.off("error", onError); server.off("listening", onListening); reject(error); }
+    });
+    publish();
+  } catch (error) {
+    try { await cleanup(); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "Startup and cleanup failed"); }
+    throw error;
+  }
+}
+
+export async function closeHttpServer(server: import("node:http").Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve());
+    server.closeAllConnections();
+  });
 }

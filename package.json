@@ -34,13 +34,13 @@
     "CHANGELOG.md"
   ],
   "bin": {
-    "bossmode": "./dist/app/cli/index.js"
+    "bossmode": "./dist/app/cli.js"
   },
   "scripts": {
     "prebuild": "rm -rf dist",
-    "build": "tsc && chmod +x dist/app/cli/index.js && cd web && npm run build",
+    "build": "tsc && chmod +x dist/app/cli.js && cd web && npm run build",
     "dev": "tsc --watch",
-    "start": "node dist/app/cli/index.js",
+    "start": "node dist/app/cli.js",
     "test": "node scripts/run-tests.mjs run",
     "test:watch": "node scripts/run-tests.mjs --watch",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",

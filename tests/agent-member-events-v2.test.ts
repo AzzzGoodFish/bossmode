@@ -3,7 +3,7 @@ import { coreFixture } from "./helpers/core-fixture.js";
 import { MockAgentHandle } from "./helpers/mock-runtime.js";
 import { instances, instanceKey, type AgentInstance } from "../src/agent/instance.js";
 import { wireInstanceEvents } from "../src/agent/scheduler.js";
-import { appendMemberEvent, importHistoricalEvent, readAgentEvent, readStats, readUsageRows, rebuildEventAggregates } from "../src/agent/events.js";
+import { appendMemberEvent, handleAgentEvent, importHistoricalEvent, readAgentEvent, readStats, readUsageRows, rebuildEventAggregates } from "../src/agent/events.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
 afterEach(() => {
@@ -68,11 +68,30 @@ describe("member event facts v2", () => {
     imported("legacy-end", 3, { type: "agent_end", ts: 120 }, 120);
     imported("legacy-missing-start", 4, { type: "agent_start" }, 200);
     imported("legacy-missing-end", 5, { type: "agent_end", ts: 300 }, 300);
+    const missing = (id: string, sourceSeq: number, event: any, factTs: number) => importHistoricalEvent(fixture.db, {
+      id, sourceKey: "room:rm_missing", ownerKey: "legacy-owner", sourceSeq,
+      memberId: "mem_events", sourceRef: "room:rm_missing", event, ts: factTs,
+    });
+    missing("missing-start-valid", 1, { type: "agent_start", ts: 100 }, 100);
+    missing("missing-start-clears", 2, { type: "agent_start" }, 150);
+    missing("missing-end-after-clear", 3, { type: "agent_end", ts: 200 }, 200);
 
     rebuildEventAggregates(fixture.db);
 
     expect(readStats("mem_events").activeMs).toBe(70);
-    expect(readStats("mem_events").turns).toBe(2);
+    expect(readStats("mem_events").turns).toBe(3);
+  });
+
+  it("keeps raw SDK identity separate from one-time streamed fact materialization", () => {
+    setup();
+    const buffer: any[] = [];
+    handleAgentEvent("room:rm_events", "Events", "instance", { type: "message_update", text: "streamed" }, buffer, "mem_events");
+    const source = { type: "message_end", stopReason: "stop", usage: { inputTokens: 1, outputTokens: 1, cacheRead: 0, cacheWrite: 0, cost: 0 } } as any;
+    handleAgentEvent("room:rm_events", "Events", "instance", source, buffer, "mem_events", "fake:model", "same-sdk-id");
+    expect(readAgentEvent("same-sdk-id")?.event).toMatchObject({ text: "streamed", model: "fake:model" });
+
+    expect(() => handleAgentEvent("room:rm_events", "Events", "instance", source, buffer, "mem_events", "other:model", "same-sdk-id")).not.toThrow();
+    expect(readAgentEvent("same-sdk-id")?.event).toMatchObject({ text: "streamed", model: "fake:model" });
   });
 
   it("keeps member statistics for null-source facts and routes only addressed facts", () => {

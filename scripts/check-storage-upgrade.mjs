@@ -71,7 +71,7 @@ const env = {
 };
 const run = (repo, args, timeout = 120000) => new Promise((resolve, reject) => {
   // New layout (P9): dist/app/cli; old release trees keep dist/cli — accept both.
-  const cli = [join(repo, 'dist/app/cli/index.js'), join(repo, 'dist/cli/index.js')].find(existsSync) ?? join(repo, 'dist/app/cli/index.js');
+  const cli = [join(repo, 'dist/app/cli.js'), join(repo, 'dist/app/cli/index.js'), join(repo, 'dist/cli/index.js')].find(existsSync) ?? join(repo, 'dist/app/cli.js');
   const child = spawn(process.execPath, [cli, ...args], {
     cwd: repo,
     env,

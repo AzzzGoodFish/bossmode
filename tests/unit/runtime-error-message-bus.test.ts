@@ -6,7 +6,7 @@ let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>
 
 
 const wsMocks = vi.hoisted(() => ({ broadcastToRoom: vi.fn() }));
-vi.mock("../../src/app/server/ws.js", () => ({
+vi.mock("../../src/app/ws.js", () => ({
   broadcastToRoom: wsMocks.broadcastToRoom,
 }));
 

@@ -6,7 +6,8 @@ import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
 import { ensureDmScope } from "../chat/conversations.js";
 import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, normalizeMemberName, validateMemberName, deleteMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
-import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot } from "../member/workspaces.js";
+import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot, getActiveWorkspace, getWorkspace } from "../member/workspaces.js";
+import { configureTerminalWorkspaces } from "../agent/terminal.js";
 import { resolveGlobalSkillPaths } from "../member/skills.js";
 import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../member/extensions.js";
 import { filterMcpConfigForServers, getAssignableMcpServerNames, getBossmodeMcpRuntimeDir, readMemberMcpConfig } from "../member/mcp.js";
@@ -213,6 +214,7 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
 }
 
 export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
+  configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);
   configureControls({
     memberConfig: memberRecordToConfig,
     resolveMember: resolveRoomMember,
