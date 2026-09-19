@@ -4,10 +4,16 @@ import { canonicalJson } from "../kernel/json.js";
 import { getDatabase, type Database } from "../data/database.js";
 import { claimOutbox, completeOutbox, enqueueOutbox } from "../data/outbox.js";
 import { logger } from "../kernel/logger.js";
-import type { AgentStreamEvent } from "./types.js";
-import type { AgentStatus } from "../kernel/types.js";
-import type { MemberStats } from "../data/types.js";
-import { limitRuntimeErrorEvent } from "../kernel/runtime-error-limit.js";
+import type { AgentStreamEvent, AgentStatus } from "./types.js";
+export interface MemberStats {turns:number;toolCalls:number;activeMs:number;tokens:{input:number;output:number;cacheRead:number;cacheWrite:number};cost:number;updatedAt?:number;}
+const limitError=(value:string)=>{const chars=Array.from(value);return chars.length<=300?value:`${chars.slice(0,299).join("")}…`;};
+function limitRuntimeErrorEvent<T>(event:T):T{
+  if(!event||typeof event!=="object")return event;const row=event as Record<string,unknown>,next={...row};let changed=false;
+  for(const key of ["errorMessage","stderrTail"] as const)if(typeof row[key]==="string"){next[key]=limitError(row[key]);changed ||= next[key]!==row[key];}
+  if(row.type==="compaction_end"&&typeof row.result==="string"){next.result=limitError(row.result);changed ||= next.result!==row.result;}
+  else if(row.type==="compaction_end"&&row.result&&typeof row.result==="object"&&typeof (row.result as any).error==="string"){const error=limitError((row.result as any).error);if(error!==(row.result as any).error){next.result={...(row.result as object),error};changed=true;}}
+  return (changed?next:event) as T;
+}
 
 export type AgentHistoryEvent = AgentStreamEvent
   | { type:"user_prompt";text:string;trigger:string;ts?:number }

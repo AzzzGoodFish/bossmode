@@ -4,9 +4,8 @@
 // instance fields. Publication (WS push) and business permission checks stay
 // with callers; instance code never imports app/chat/member.
 import { logger } from "../kernel/logger.js";
-import type { AgentStatus, ContextUsage } from "../kernel/types.js";
 import type { AgentHistoryEvent } from "./events.js";
-import type { AgentHandle, AgentMemberConfig } from "./types.js";
+import type { AgentHandle, AgentMemberConfig, AgentStatus, ContextUsage } from "./types.js";
 
 export type DispatchState = "idle" | "promptSubmitted" | "running" | "aborting";
 
@@ -133,14 +132,12 @@ export function updateDispatchState(instance: AgentInstance, next: DispatchState
 
 // -- Status publication (output port; connected by app/wire) --
 /** Same shape as the websocket `agent:status` payload; the app owns the transport. */
-export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: AgentStatus }
+export interface AgentStatusBroadcast { type: "agent:status"; roomId: string; agent: string; memberId: string; status: AgentStatus }
 export type AgentStatusSink = (target: string, payload: AgentStatusBroadcast) => void;
 let statusSink: AgentStatusSink | undefined;
 export function setStatusSink(sink: AgentStatusSink | undefined): void { statusSink = sink; }
 
-export function memberIdentityMeta(agentName: string, memberId: string): { memberId?: string } {
-  return memberId && memberId !== agentName ? { memberId } : {};
-}
+export function memberIdentityMeta(_agentName: string, memberId: string): { memberId:string } { return {memberId}; }
 
 export function transition(
   instance: AgentInstance,
@@ -193,9 +190,9 @@ export function shouldKeepCompactedMarker(previous: ContextUsage | undefined, ne
 // DB-owned state; module import never initializes storage.
 import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
-import type { MountStale, RuntimeStateEntry, RuntimeStateMap } from "../data/types.js";
-
-export type { MountStale, RuntimeStateEntry, RuntimeStateMap };
+export interface MountStale {since:number;fields:string[]}
+export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number;staleMounts?:MountStale}
+export type RuntimeStateMap=Record<string,RuntimeStateEntry>;
 
 interface RuntimeCheckpointRow {
   member_id: string; contract_fingerprint: string | null;

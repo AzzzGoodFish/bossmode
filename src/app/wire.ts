@@ -47,7 +47,7 @@ import { resolve, sep, relative, isAbsolute } from "node:path";
 
 import { logger } from "../kernel/logger.js";
 import * as roomStore from "../chat/conversations.js";
-import type { KnowledgeEventMeta } from "../kernel/types.js";
+interface KnowledgeEventMeta {path:string;title:string;actor:string;tool:"write"|"edit";outsideRoomDocsPath?:boolean;}
 
 function docsRoot(): string {
   return resolve(documentsRoot());

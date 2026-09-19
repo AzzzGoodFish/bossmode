@@ -2,7 +2,8 @@ import { getBossmodeDir } from "../files/layout.js";
 import { getDatabase, type Database } from "../data/database.js";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { type McpServerAvailability, type McpServerSummary } from "../kernel/types.js";
+export interface McpServerAvailability {name:string;status:"unchecked"|"checking"|"available"|"unavailable"|"auth-required"|"invalid-config";checkedAt?:number;toolCount?:number;resourceCount?:number;error?:string;}
+export interface McpServerSummary {name:string;transport:"http"|"stdio"|"invalid";assignedCount?:number;availability?:McpServerAvailability;}
 import { defined, objectJson, parseObject, requireObject } from "../kernel/json.js";
 
 export const MCP_REDACTED_VALUE = "[REDACTED]";

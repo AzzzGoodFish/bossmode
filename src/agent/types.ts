@@ -4,10 +4,11 @@
 // ============================================================================
 
 import { logger } from "../kernel/logger.js";
-import type { AgentMemberConfig } from "../kernel/types.js";
-
-// The member config type consumed by runtimes (name kept for existing callers).
-export type { AgentMemberConfig };
+export type AgentStatus="inactive"|"idle"|"working";
+export interface AgentMemberConfig {
+  id:string;name:string;type:"agent";agent:string;title?:string;model?:string;runtime:"pi-cli";
+  skills?:string[];thinkingLevel:string;contextLimit?:number;credentialId?:string;mcpServers?:string[];createdAt?:number;
+}
 
 /** Build material for a member session, assembled outside the agent core.
  *  The app layer reads member state; agent code consumes only this snapshot. */

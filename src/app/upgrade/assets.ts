@@ -1,4 +1,4 @@
-import { type MemberRecord } from "../../data/types.js";
+import { type MemberRecord } from "../../member/identity.js";
 import { validateArchivePath } from "../../files/layout.js";
 import { type ArchiveCatalogSource, importMemberArchiveCatalog, readMemberArchiveIntent } from "../../member/archive.js";
 import { readFileSync, lstatSync } from "node:fs";

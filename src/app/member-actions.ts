@@ -153,8 +153,8 @@ import type { AgentHistoryEvent } from "../agent/events.js";
 import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
-import type { AgentStatus, ContextUsage } from "../kernel/types.js";
-import { contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance } from "../agent/instance.js";
+import type { AgentStatus, ContextUsage } from "../agent/types.js";
+import { contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance, type AgentStatusBroadcast } from "../agent/instance.js";
 
 const chatTargetOf = (sourceRef: string): string => sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
 const canonicalSourceRef = (value: string): string => value.startsWith("room:") || value.startsWith("dm:") || value.startsWith("mm:") ? value : `room:${value}`;
@@ -403,11 +403,11 @@ export function resolveRoomMember(roomId: string, memberRef: string): AgentMembe
   return roomMember ? memberRecordToConfig(roomMember.id) : null;
 }
 
-import type { WsServerEvent } from "../kernel/types.js";
+type RuntimeViewEvent=AgentStatusBroadcast|{type:"agent:context_usage";roomId:string;agent:string;memberId:string;usage:ContextUsage|null};
 /** Transport is registered by app/wire, never imported by application use cases. */
-export type RuntimeViewSink = (scopeId: string, event: WsServerEvent, memberName?: string) => void;
-let runtimeViewSink: RuntimeViewSink | undefined;
-export function setRuntimeViewSink(sink: RuntimeViewSink | undefined): void { runtimeViewSink = sink; }
-const broadcastToRoom = (scopeId: string, event: WsServerEvent): void => { runtimeViewSink?.(scopeId, event); };
-const broadcastToAgentSubscribers = (scopeId: string, name: string, event: WsServerEvent): void => { runtimeViewSink?.(scopeId, event, name); };
+export type RuntimeViewSink = (scopeId:string,event:RuntimeViewEvent,memberName?:string)=>void;
+let runtimeViewSink:RuntimeViewSink|undefined;
+export function setRuntimeViewSink(sink:RuntimeViewSink|undefined):void{runtimeViewSink=sink;}
+const broadcastToRoom=(scopeId:string,event:RuntimeViewEvent):void=>{runtimeViewSink?.(scopeId,event);};
+const broadcastToAgentSubscribers=(scopeId:string,name:string,event:RuntimeViewEvent):void=>{runtimeViewSink?.(scopeId,event,name);};
 export function getRuntimeCapabilities() { return getRegistry()?.getCapabilities() ?? {}; }

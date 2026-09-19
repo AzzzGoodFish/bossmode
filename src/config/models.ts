@@ -1,9 +1,19 @@
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
-import { type ModelAuthType, type ModelRequestProfile, type ModelCredentialProfileKind, type ModelCredentialProfile, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type PublicModelCredentialProfile, type ModelDefinitionConfig, type ModelCredentialProfileInput, type ConnectApiKeyRequest, type ModelProtocol, type AvailableModelOption } from "../kernel/types.js";
-import { modelsForBuiltinProvider, validateThinkingLevelMap, modelSdkMetadata, oauthProviderIds, MODEL_PROTOCOLS, loadPiCatalogModelsSync, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider, applyPiCatalogFallback, positiveNumber, explicitBoolean, type CatalogRefreshSource, refreshPiCatalogFromNetwork, getCatalogStatus, isCatalogRefreshDue, getCatalogAutoRefreshIntervalDays, piCatalogFallbackMetadata, ensurePiCatalogWarm, loadPiCatalogModels } from "./catalog.js";
+import { modelsForBuiltinProvider, validateThinkingLevelMap, modelSdkMetadata, oauthProviderIds, MODEL_PROTOCOLS, loadPiCatalogModelsSync, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider, applyPiCatalogFallback, positiveNumber, explicitBoolean, type CatalogRefreshSource, type ModelDefinitionConfig, type ModelProtocol, refreshPiCatalogFromNetwork, getCatalogStatus, isCatalogRefreshDue, getCatalogAutoRefreshIntervalDays, piCatalogFallbackMetadata, ensurePiCatalogWarm, loadPiCatalogModels } from "./catalog.js";
 import { randomUUID } from "node:crypto";
 import { logger } from "../kernel/logger.js";
 import { defined, optionalJson, parseObject } from "../kernel/json.js";
+export type {ModelDefinitionConfig,ModelProtocol} from "./catalog.js";
+export type ModelAuthType="api_key"|"oauth"|"none"|"ambient";
+export type ModelCredentialProfileKind="builtin_provider"|"custom_endpoint"|"trusted_adapter";
+export type ModelRequestProfile="standard"|"openai_codex_subscription";
+export interface ModelCredentialProfile {id:string;profileKind?:ModelCredentialProfileKind;name:string;providerSlug:string;protocol:ModelProtocol;baseUrl?:string;authType:ModelAuthType;apiKey?:string;oauthProviderId?:string;oauthCredentials?:Record<string,unknown>;requestProfile:ModelRequestProfile;authHeader?:boolean;headers?:Record<string,string>;enabled:boolean;isDefault:boolean;models:ModelDefinitionConfig[];modelCustomizations?:{disabled?:string[];contextWindowOverride?:Record<string,number>;addedModels?:ModelDefinitionConfig[]};createdAt:number;updatedAt:number;}
+export type ModelCredentialProfileInput=Omit<ModelCredentialProfile,"id"|"createdAt"|"updatedAt">;
+export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfile,"apiKey"|"oauthCredentials"> {hasSecret:boolean;modelRefs:string[];catalogModels?:ModelDefinitionConfig[];addedModels?:ModelDefinitionConfig[];}
+export interface ConnectApiKeyRequest {providerSlug:string;apiKey:string;name?:string;baseUrlOverride?:string;requestProfile?:ModelRequestProfile;isDefault?:boolean;}
+export interface OAuthDeviceCodeInfo {userCode:string;verificationUri:string;expiresInSeconds?:number;intervalSeconds?:number;}
+export interface OAuthSelectPrompt {message:string;options:Array<{id:string;label:string}>;}
+export interface AvailableModelOption {ref:string;provider:string;providerSlug:string;providerDisplayName?:string;modelId:string;displayName?:string;profileId:string;profileName:string;profileBaseUrl?:string;protocol:ModelProtocol;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;metadataSource?:"endpoint"|"pi_catalog"|"unknown";credentialStatus:"configured"|"missing"|"no_auth"|"ambient";thinkingLevelMap?:ModelDefinitionConfig["thinkingLevelMap"];images:boolean;}
 
 
 

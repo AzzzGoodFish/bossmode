@@ -1,4 +1,6 @@
-import { type ModelProtocol, type ModelDefinitionConfig, type PublicModelProvider } from "../kernel/types.js";
+export type ModelProtocol="openai-completions"|"openai-responses"|"openai-codex-responses"|"anthropic-messages"|"azure-openai-responses"|"google-generative-ai"|"google-gemini-cli"|"google-vertex"|"bedrock-converse-stream"|"mistral-conversations";
+export interface ModelDefinitionConfig {id:string;name?:string;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;thinkingLevelMap?:Partial<Record<"off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max",string|null>>;compat?:Record<string,unknown>;metadataSource?:"endpoint"|"pi_catalog"|"unknown";}
+export interface PublicModelProvider {providerSlug:string;displayName:string;authModes:Array<"api_key"|"oauth">;defaultAuthMode:"api_key"|"oauth";modelCount:number;sampleModels:string[];protocol?:ModelProtocol;logoKey?:string;}
 import { getCatalogRegistrySync, ensureCatalogRegistry, getCatalogRuntimeSync, DatabaseModelsStore } from "./pi-adapt/catalog.js";
 import { logger } from "../kernel/logger.js";
 import { readConfig, writeConfig } from "./settings.js";

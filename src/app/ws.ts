@@ -2,7 +2,13 @@ import { validateToken } from "../api/auth.js";
 import {logger} from "../kernel/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { WsClientCommand, WsServerEvent } from "../kernel/types.js";
+export type WsServerEvent=
+  |{type:"member:profile";memberId:string;name:string;title:string|null}
+  |{type:"room:message";roomId:string;message:unknown}
+  |{type:"agent:status";roomId:string;agent:string;memberId:string;status:"inactive"|"idle"|"working"}
+  |{type:"agent:event";roomId:string;agent:string;memberId:string;event:unknown}
+  |{type:"agent:context_usage";roomId:string;agent:string;memberId:string;usage:import("../agent/types.js").ContextUsage|null};
+export type WsClientCommand={type:"subscribe:room"|"unsubscribe:room";roomId:string}|{type:"subscribe:agent"|"unsubscribe:agent";roomId:string;memberId:string};
 
 
 interface ClientState {

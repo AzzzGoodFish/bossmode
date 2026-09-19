@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dispatchSdkExecution, type SdkExecutionAttempt } from "../scheduler.js";
 import { logger } from "../../kernel/logger.js";
-import type { PiTransportSetting } from "../../kernel/types.js";
+type PiTransportSetting="auto"|"websocket"|"websocket-cached"|"sse";
 import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";

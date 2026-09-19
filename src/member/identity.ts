@@ -1,9 +1,8 @@
 import { getDatabase, type Database } from "../data/database.js";
 import { newMemberId } from "../kernel/ids.js";
 import { validateArchivePath } from "../files/layout.js";
-import type { MemberGlobalConfig, MemberRecord } from "../data/types.js";
-
-export type { MemberGlobalConfig, MemberRecord };
+export interface MemberGlobalConfig { model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[]; }
+export interface MemberRecord { id:string;name:string;title?:string;agentTemplate:string;global:MemberGlobalConfig;createdAt:number;updatedAt:number; }
 export interface CreateMemberInput {
   name?: string; title?: string; agentTemplate?: string;
   model?: string | null; credentialId?: string | null; thinkingLevel?: string | null;
@@ -25,8 +24,7 @@ function decodeMember(row: MemberRow): MemberRecord {
   const global = JSON.parse(row.global_json);
   if (!global || typeof global !== "object" || Array.isArray(global)) throw new Error(`Invalid member configuration: ${row.id}`);
   return { id: row.id, name: row.name, ...(row.title ? { title: row.title } : {}),
-    agentTemplate: row.agent_template, global, unifiedModel: true, unifiedExtensions: true,
-    scopeOverrides: {}, createdAt: row.created_at, updatedAt: row.updated_at };
+    agentTemplate: row.agent_template, global, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function encodeConfig(config: MemberGlobalConfig): string {
   const { extensions: _retired, ...retained } = config as MemberGlobalConfig & { extensions?: unknown };
@@ -88,7 +86,6 @@ export function prepareMemberIdentity(input: CreateMemberInput): MemberRecord {
   for (let attempt = 0; attempt < 10 && getRetainedMember(id); attempt++) id = newMemberId();
   const now = Date.now();
   return { id, name, ...(input.title?.trim() ? { title: input.title.trim() } : {}), agentTemplate: input.agentTemplate || "general",
-    unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
     global: { model: input.model ?? null, credentialId: input.credentialId ?? null, thinkingLevel: input.thinkingLevel ?? null,
       skills: input.skills ?? [], mcpServers: input.mcpServers ?? [] }, createdAt: now, updatedAt: now };
 }

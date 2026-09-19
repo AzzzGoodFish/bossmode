@@ -1,6 +1,6 @@
 import { getDefaultConfig, writeConfig } from "../../config/settings.js";
 import { parseDocument, parse } from "yaml";
-import { type MemberRecord } from "../../data/types.js";
+import { type MemberRecord } from "../../member/identity.js";
 import { readFileSync } from "node:fs";
 import { listMembers, insertMemberIdentity } from "../../member/identity.js";
 import { ensureDmScope } from "../../chat/conversations.js";
@@ -12,7 +12,7 @@ import { type Database } from "../../data/database.js";
 import { createHash } from "node:crypto";
 import { requireObject } from "../../kernel/json.js";
 
-import { type BossmodeConfig } from "../../kernel/types.js";
+import { type BossmodeConfig } from "../../config/settings.js";
 import { normalizeLegacyCredentialImport } from "../../config/models.js";
 import { decodeLegacyMcpOauthEntry, importHashedMcpOauthEntry } from "../../member/mcp.js";
 
@@ -71,8 +71,7 @@ export function parseLegacyMemberRecord(bytes: Uint8Array, memberId: string, pat
     typeof value.agentTemplate!=="string" || !value.agentTemplate || !value.global || typeof value.global!=="object" || Array.isArray(value.global) ||
     !Number.isSafeInteger(value.createdAt) || !Number.isSafeInteger(value.updatedAt)) throw new Error(`Invalid legacy member record: ${path}`);
   const {extensions:_retired,...global}=value.global;
-  return {id:memberId,name:value.name.trim(),agentTemplate:value.agentTemplate,global,createdAt:value.createdAt,updatedAt:value.updatedAt,
-    unifiedModel:true,unifiedExtensions:true,scopeOverrides:{}};
+  return {id:memberId,name:value.name.trim(),agentTemplate:value.agentTemplate,global,createdAt:value.createdAt,updatedAt:value.updatedAt};
 }
 
 export interface MemberSourceImport {

@@ -5,7 +5,7 @@ import { ensureDirectory } from "../files/io.js";
 import { getBossmodeDir } from "../files/layout.js";
 
 import { inspectStartupSettings } from "./upgrade/inventory.js";
-import type { BossmodeConfig } from "../kernel/types.js";
+import type { BossmodeConfig } from "../config/settings.js";
 
 import { fork, type ChildProcess } from "node:child_process";
 import { stopDaemonProcess, processIsAlive } from "./process.js";

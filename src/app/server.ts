@@ -6,7 +6,7 @@ import { getBossmodeDir } from "../files/layout.js";
 import { recoverMemberArchives } from "./member-actions.js";
 import { prepareCoreStorage } from "./upgrade/run.js";
 import { type UpgradeProgress } from "./upgrade/inventory.js";
-import type { BossmodeConfig } from "../kernel/types.js";
+import type { BossmodeConfig } from "../config/settings.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";

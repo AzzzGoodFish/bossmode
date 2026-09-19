@@ -6,7 +6,7 @@ import { existsSync, readFileSync, chmodSync, realpathSync, renameSync } from "n
 import { requireRegularFile, ensurePrivateDirectory, managedPath, syncPath, moveDurably, hashFile, copyDurably, publishAssetDurably, syncDirectoryChain, writeDurably } from "../../files/io.js";
 import { join, isAbsolute, relative } from "node:path";
 import { replayShortIdJournalFromDisk, migrateShortIds } from "./ids.js";
-import { type BossmodeConfig } from "../../kernel/types.js";
+import { type BossmodeConfig } from "../../config/settings.js";
 import { logger } from "../../kernel/logger.js";
 import { coreStorageMigrations, CORE_STORAGE_FORMAT } from "../../data/schema.js";
 import { importLegacyArchives, importLegacyDocuments, verifyActiveMemberAssets } from "./assets.js";

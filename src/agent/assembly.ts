@@ -2,7 +2,7 @@
 // immutable snapshot; chat source is assigned later by the scheduler per batch.
 import { mainSessionDirectory } from "../files/layout.js";
 import { logger } from "../kernel/logger.js";
-import { MEMBER_CONTRACT_VERSION } from "../kernel/contract-version.js";
+const MEMBER_CONTRACT_VERSION=2;
 import { normalizeModelRef } from "../config/models.js";
 import type { AgentMemberSnapshot, RuntimeRegistry } from "./types.js";
 import {

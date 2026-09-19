@@ -4,7 +4,7 @@ import { ensureCatalogRegistryRuntime } from "./catalog.js";
 import { type OAuthCredentials, type OAuthLoginCallbacks, type OAuthLoginAdapter, hasCompleteOAuthCredentials, readModelCredential, modifyModelCredential, DUMMY_API_KEY, normalizeRuntimeBaseUrl, shouldUseSdkBuiltinCatalog, loadModelCredentialProfiles, sanitizeProfile, resolveCredentialProfileForModel } from "../models.js";
 import { getBossmodeDir } from "../../files/layout.js";
 import { type Credential, type CredentialInfo, type CredentialStore, type AuthInteraction } from "@earendil-works/pi-ai";
-import { type ModelCredentialProfile, type PublicModelCredentialProfile } from "../../kernel/types.js";
+import { type ModelCredentialProfile, type PublicModelCredentialProfile } from "../models.js";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createDatabaseModelsStore } from "../catalog.js";
 import { mkdirSync } from "node:fs";

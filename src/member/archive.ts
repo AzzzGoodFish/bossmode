@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { type Database, getDatabase } from "../data/database.js";
 import { memberArchivePath, getMember, retireMemberIdentity } from "./identity.js";
 import { validateArchivePath } from "../files/layout.js";
-import { type MemberGlobalConfig } from "../data/types.js";
+import { type MemberGlobalConfig } from "./identity.js";
 
 function statIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try { return lstatSync(path); } catch (err: any) { if (err.code === "ENOENT") return null; throw err; }

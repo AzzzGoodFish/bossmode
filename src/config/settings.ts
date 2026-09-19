@@ -1,5 +1,8 @@
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
-import type { BossmodeConfig } from "../kernel/types.js";
+export interface BossmodeConfig {
+  auth:{username:string;passwordHash:string};apiKeys:Record<string,string>;defaults:{host:string;port:number};
+  mcp?:{enabled:boolean};catalog?:{autoRefreshIntervalDays?:number};
+}
 
 /** Internal secret-bearing configuration; public transports select their own fields. */
 export function readConfig(db: Database = getDatabase()): BossmodeConfig {
