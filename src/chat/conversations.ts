@@ -336,6 +336,14 @@ export function parseConversation(value: string): ConversationIdentity | null {
   return validRoomId(roomId) ? { kind: "room", scopeId: value, roomId } : null;
 }
 
+export function resolveConversation(value: string): ConversationIdentity | null {
+  const ref = parseConversation(value);
+  if (!ref) return null;
+  if (ref.kind === "room") return getRoom(ref.roomId) ? ref : null;
+  if (ref.kind === "dm") return conversationMember(ref.memberId) ? ref : null;
+  return ref.memberIds.every(id => conversationMember(id)) ? ref : null;
+}
+
 /** Convert a canonical source or an internal bare room key to the database key. */
 export function storageScopeId(value: string): string {
   if (validRoomId(value)) return value;

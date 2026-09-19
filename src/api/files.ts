@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
-import { getRoom, parseConversation, roomMemberAssetRoots } from "../chat/conversations.js";
+import { getRoom, resolveConversation, roomMemberAssetRoots } from "../chat/conversations.js";
 import {
   attachmentExists,
   getAttachmentPath,
@@ -12,7 +12,6 @@ import {
 import { checkPath } from "../kernel/path.js";
 import { logger } from "../kernel/logger.js";
 import * as knowledgeStore from "../knowledge/documents.js";
-import { getMember } from "../member/identity.js";
 import { addRoute, requestUrl, sendJson } from "./http.js";
 
 const HOME = homedir();
@@ -52,14 +51,12 @@ addRoute("GET", "/api/fs/list-dirs", async (request, response) => {
   }
 });
 
-function conversationLocation(raw: string): { scopeId: string; location: AttachmentLocation } | null {
-  let scope: string;
-  try { scope = decodeURIComponent(raw); } catch { return null; }
-  const ref = parseConversation(scope);
+function conversationLocation(scope: string): { scopeId: string; location: AttachmentLocation } | null {
+  const ref = resolveConversation(scope);
   if (!ref) return null;
-  if (ref.kind === "room") return getRoom(ref.roomId) ? { scopeId: ref.scopeId, location: { kind: "room", roomId: ref.roomId } } : null;
-  if (ref.kind === "dm") return getMember(ref.memberId) ? { scopeId: ref.scopeId, location: { kind: "dm", memberId: ref.memberId } } : null;
-  return ref.memberIds.every(id => getMember(id)) ? { scopeId: ref.scopeId, location: { kind: "mm", memberIds: ref.memberIds } } : null;
+  if (ref.kind === "room") return { scopeId: ref.scopeId, location: { kind: "room", roomId: ref.roomId } };
+  if (ref.kind === "dm") return { scopeId: ref.scopeId, location: { kind: "dm", memberId: ref.memberId } };
+  return { scopeId: ref.scopeId, location: { kind: "mm", memberIds: ref.memberIds } };
 }
 function attachmentUrl(scopeId: string, filename: string): string {
   return `/api/conversations/${encodeURIComponent(scopeId)}/attachments/${encodeURIComponent(filename)}`;

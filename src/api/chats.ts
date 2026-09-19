@@ -10,6 +10,7 @@ import {
   parseConversation,
   parseMmScopeId,
   removeRoomMember,
+  resolveConversation,
   resolveRoomMember,
   updateRoom,
   type Room,
@@ -120,7 +121,7 @@ addRoute("POST", "/api/conversations/:scope/read", async (request, response, par
 
 interface ConversationTarget { sourceRef: string; memberId: string; memberName: string }
 function conversationTarget(sourceRef: string, request: { url?: string }): ConversationTarget | null {
-  const ref = parseConversation(sourceRef);
+  const ref = resolveConversation(sourceRef);
   if (!ref) return null;
   if (ref.kind === "dm") {
     const member = getMember(ref.memberId);
@@ -129,7 +130,6 @@ function conversationTarget(sourceRef: string, request: { url?: string }): Conve
   const memberId = requestUrl(request).searchParams.get("memberId") || "";
   if (!memberId) return null;
   if (ref.kind === "room") {
-    if (!getRoom(ref.roomId)) return null;
     const member = resolveRoomMember(ref.roomId, memberId);
     return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
   }
@@ -274,12 +274,7 @@ async function postUserMessage(sourceRef: string, request: Parameters<typeof par
 }
 
 function conversationSource(sourceRef: string): string | null {
-  const ref = parseConversation(sourceRef);
-  if (!ref) return null;
-  if (ref.kind === "room" && !getRoom(ref.roomId)) return null;
-  if (ref.kind === "dm" && !getMember(ref.memberId)) return null;
-  if (ref.kind === "mm" && ref.memberIds.some(id => !getMember(id))) return null;
-  return ref.scopeId;
+  return resolveConversation(sourceRef)?.scopeId ?? null;
 }
 
 type ConversationHandler = (request: Parameters<RouteHandler>[0], response: Parameters<RouteHandler>[1], sourceRef: string) => Promise<void>;
