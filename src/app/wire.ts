@@ -218,29 +218,29 @@ async function executeAgentHostTool(input:{tool:string;params:Record<string,unkn
     return {ok:true,chat:target,...searchMessages(target,{query:String(params.query??""),from:params.from?String(params.from):undefined,after:Number.isFinite(after)?after:undefined,before:Number.isFinite(before)?before:undefined,limit:Number(params.limit)||50})};
   }
   if(tool==="chat_list"){
-    const rooms=listRoomsForMember(memberId).map(room=>({type:"room",id:`room:${room.id}`,name:room.name,description:room.description??""}));
-    const mm=roomStore.listMmScopesForMember(memberId).map(id=>{const peer=parseMmScopeId(id)?.find(value=>value!==memberId),name=peer?(getMember(peer)?.name??peer):"member";return {type:"mm",id,name:`Private chat with ${name}`,description:""};});
-    const chats=[{type:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms,...mm];
+    const rooms=listRoomsForMember(memberId).map(room=>({kind:"room",id:`room:${room.id}`,name:room.name,description:room.description??""}));
+    const mm=roomStore.listMmScopesForMember(memberId).map(id=>{const peer=parseMmScopeId(id)?.find(value=>value!==memberId),name=peer?(getMember(peer)?.name??peer):"member";return {kind:"mm",id,name:`Private chat with ${name}`,description:""};});
+    const chats=[{kind:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms,...mm];
     const query=String(params.query??"").toLowerCase(),filtered=query?chats.filter(chat=>`${chat.id} ${chat.name} ${chat.description}`.toLowerCase().includes(query)):chats;
     const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,chats:filtered.slice(offset,offset+limit),total:filtered.length};
   }
   if(tool==="chat_info"){
     const target=resolveToolChat(memberId,currentSourceRef,params.chat),pair=parseMmScopeId(target);
-    if(target.startsWith("dm:"))return {ok:true,chat:{id:target,type:"dm",name:"user"}};
-    if(pair){const peer=pair.find(id=>id!==memberId)!;return {ok:true,chat:{id:target,type:"mm",name:`Private chat with ${getMember(peer)?.name??peer}`,counterpart:peer}};}
-    const room=roomStore.getRoom(target.slice(5))!;return {ok:true,chat:{id:target,type:"room",name:room.name,description:room.description??"",members:roomStore.getRoomMembers(room.id).map(item=>({id:item.id,name:item.name}))}};
+    if(target.startsWith("dm:"))return {ok:true,chat:{id:target,kind:"dm",name:"user"}};
+    if(pair){const peer=pair.find(id=>id!==memberId)!;return {ok:true,chat:{id:target,kind:"mm",name:`Private chat with ${getMember(peer)?.name??peer}`,counterpart:peer}};}
+    const room=roomStore.getRoom(target.slice(5))!;return {ok:true,chat:{id:target,kind:"room",name:room.name,description:room.description??"",members:roomStore.getRoomMembers(room.id).map(item=>({id:item.id,name:item.name}))}};
   }
   if(tool==="chat_create"){
     const name=String(params.name??"").trim();if(!name)return {ok:false,error:"name is required"};
     const ids=[...new Set([memberId,...(Array.isArray(params.members)?params.members.map(String):[])])];const missing=ids.filter(id=>!getMember(id));if(missing.length)return {ok:false,error:`Unknown member id: ${missing.join(", ")}`};
-    try{const room=roomStore.createRoom(name,undefined,ids,undefined,{promptLeaderMemberId:memberId,description:String(params.description??"").trim()});return {ok:true,chat:{id:`room:${room.id}`,type:"room",name:room.name}};}catch(error){return {ok:false,error:(error as Error).message};}
+    try{const room=roomStore.createRoom(name,undefined,ids,undefined,{promptLeaderMemberId:memberId,description:String(params.description??"").trim()});return {ok:true,chat:{id:`room:${room.id}`,kind:"room",name:room.name}};}catch(error){return {ok:false,error:(error as Error).message};}
   }
   if(tool==="chat_edit"){
     const target=resolveToolChat(memberId,currentSourceRef,params.chat);if(!target.startsWith("room:"))return {ok:false,error:"chat_edit edits group chats only"};const roomId=target.slice(5);
     if(typeof params.name==="string"&&params.name.trim())roomStore.updateRoomName(roomId,params.name.trim());if(typeof params.description==="string")roomStore.updateRoomDescription(roomId,params.description.trim());
     const added:string[]=[],removed:string[]=[];for(const id of Array.isArray(params.add_members)?params.add_members.map(String):[]){const item=getMember(id);if(item&&roomStore.inviteGlobalMember(roomId,{id:item.id,name:item.name,agentTemplate:item.agentTemplate||"general"}).ok)added.push(item.name);}
     for(const id of Array.isArray(params.remove_members)?params.remove_members.map(String):[]){if(id===memberId)continue;const item=getMember(id);if(item&&roomStore.removeRoomMemberByRef(roomId,item.name,{globalMemberId:item.id}).ok)removed.push(item.name);}
-    const room=roomStore.getRoom(roomId)!;return {ok:true,chat:{id:target,type:"room",name:room.name},added,removed};
+    const room=roomStore.getRoom(roomId)!;return {ok:true,chat:{id:target,kind:"room",name:room.name},added,removed};
   }
   if(tool==="member_list"){
     const query=String(params.query??"").toLowerCase();let members=listMembers().map(item=>({id:item.id,name:item.name,description:item.title??""}));if(query)members=members.filter(item=>`${item.id} ${item.name} ${item.description}`.toLowerCase().includes(query));const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,members:members.slice(offset,offset+limit),total:members.length};

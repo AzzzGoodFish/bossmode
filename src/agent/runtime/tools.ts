@@ -182,7 +182,7 @@ export function createBossmodeSdkTools(opts: {
         const data = await call("chat_read", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_read failed");
         if (data && typeof data === "object" && "path" in data) return textResult("Messages written to: " + data.path + " (count: " + data.count + ")");
-        const messages = Array.isArray(data) ? data : [];
+        const messages = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [];
         // Member-view rendering (shared with file output): No./sender/time header,
         // replyTo quote block, content, attachment lines.
         return textResult(truncate(renderQueryRowsForMember(messages)));
@@ -193,7 +193,7 @@ export function createBossmodeSdkTools(opts: {
       execute: async (_id, params) => {
         const data = await call("chat_search", params as any) as any;
         if (data?.ok === false) throw new Error(data.error || "chat_search failed");
-        const hits = Array.isArray(data) ? data : [];
+        const hits = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [];
         return textResult(truncate(renderQueryRowsForMember(hits)));
       },
     }),

@@ -118,9 +118,6 @@ export function retireMemberIdentity(id: string, path: string, timestamp: number
   if (!Number.isSafeInteger(timestamp)) throw new Error("invalid_archive_timestamp");
   db.run("UPDATE members SET archived_at=?,archive_path=? WHERE id=? AND archived_at IS NULL", timestamp, path, id);
 }
-export function deleteMemberIdentity(id: string, db: Database = getDatabase()): void {
-  db.run("DELETE FROM members WHERE id=?", id);
-}
 export function updateMemberIdentity(id: string, patch: { name?: string; title?: string | null }): MemberRecord {
   return getDatabase().transaction(() => {
     const member = requireMember(id);
@@ -156,17 +153,6 @@ export function getMemberConfiguration(id: string): MemberGlobalConfig {
 export type GlobalConfigPatchObserver = (id: string, fields: string[]) => void;
 let globalConfigPatchObserver: GlobalConfigPatchObserver | undefined;
 export function setGlobalConfigPatchObserver(observer: GlobalConfigPatchObserver | undefined): void { globalConfigPatchObserver = observer; }
-
-export function applyMemberConfigPatch(id: string, patch: Record<string, unknown>): MemberRecord {
-  return getDatabase().transaction(() => {
-    requireMember(id);
-    const keys = ["model", "credentialId", "thinkingLevel", "mcpServers"];
-    const global = Object.fromEntries(Object.entries(patch).filter(([key]) => keys.includes(key)));
-    if (Object.keys(global).length) updateMember(id, { global });
-    if ("mcpServers" in patch) globalConfigPatchObserver?.(id, ["mcpServers"]);
-    return requireMember(id);
-  });
-}
 
 /** Current identity projection without reading runtime configuration. */
 export function readMemberIdentity(id: string, retained = false): { id: string; name: string; agentTemplate: string; createdAt: number; updatedAt: number } | null {
