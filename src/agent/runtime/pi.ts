@@ -21,7 +21,7 @@ import { BossmodeResourceLoader, resolvePiSystemPromptSources, assertHostedMcpLo
 import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
-import { WATCHDOG_CONTINUE_PROMPT, WATCHDOG_EMPTY_RETRY_PROMPT, WATCHDOG_SAFETY_MARGIN, assistantHasToolCalls, assistantTextOf, shutdownSdkSession, watchdogActionThreshold, type CompactionWatchdogRun, type WatchdogTurnState } from "./compaction.js";
+import { shutdownSdkSession } from "./compaction.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, RuntimeCapabilities, RuntimeDetectResult, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
@@ -129,8 +129,6 @@ export class PiSdkAgentHandle implements AgentHandle {
   /** Outlives SDK preflight, where Agent.abort() has no active controller yet. */
   private promptAbortIntent: { aborted: boolean } | null = null;
   private compactAttempts = new Set<SdkExecutionAttempt>();
-  private compactionWatchdogRun: CompactionWatchdogRun | null = null;
-  private watchdogTurn: WatchdogTurnState | null = null;
   private manualCompactionOutcome: { aborted: boolean } | null = null;
   private destroyed = false;
   private destroyPromise: Promise<void> | null = null;
@@ -161,7 +159,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.unsubscribeSession = session.subscribe((raw) => {
       this.observeExecutionEvidence(raw);
       this.publishSessionReferenceIfMaterialized();
-      this.observeCompactionWatchdog(raw);
       if (this.manualCompactionOutcome && (raw.type === "compaction_start" || raw.type === "compaction_end") && raw.reason === "manual") {
         if (raw.type === "compaction_start" && this.manualCompactionOutcome.aborted) {
           // Stop can arrive before the SDK creates its abort controller.
@@ -242,152 +239,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     for (const listener of this.listeners) listener(event);
   }
 
-  private startCompactionWatchdogRun(): void {
-    const settings = this.session.settingsManager.getCompactionSettings();
-    const model = this.session.model as any;
-    const contextWindow = typeof model?.contextWindow === "number" ? model.contextWindow : 0;
-    const reserveTokens = settings.reserveTokens ?? 16384;
-    if (settings.enabled === false || contextWindow <= 0) {
-      this.compactionWatchdogRun = null;
-      return;
-    }
-    this.compactionWatchdogRun = {
-      maxTokens: 0,
-      threshold: contextWindow - reserveTokens,
-      actionThreshold: watchdogActionThreshold(contextWindow, reserveTokens),
-      contextWindow,
-      model: model?.provider && model?.id ? `${model.provider}/${model.id}` : (this.runtimeParams.model || "unknown"),
-      compactionEventSeen: false,
-      interventionRequested: false,
-      emptyStopSeen: false,
-    };
-  }
-
-  private observeCompactionWatchdog(raw: any): void {
-    const run = this.compactionWatchdogRun;
-    if (!run) return;
-    if (raw?.type === "compaction_start" || raw?.type === "compaction_end") {
-      run.compactionEventSeen = true;
-      return;
-    }
-    if (raw?.type !== "message_end" || raw.message?.role !== "assistant") return;
-    if (raw.message.stopReason === "error" || raw.message.stopReason === "aborted") return;
-    const usage = raw.message.usage;
-    if (!usage) return;
-    const tokens = Number(usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)));
-    if (Number.isFinite(tokens) && tokens > run.maxTokens) run.maxTokens = tokens;
-
-    const hasToolCalls = assistantHasToolCalls(raw.message);
-    if (
-      raw.message.stopReason === "stop" &&
-      !hasToolCalls &&
-      assistantTextOf(raw.message.content).trim().length === 0 &&
-      Number(usage.output ?? 0) <= 1
-    ) {
-      run.emptyStopSeen = true;
-    }
-
-    // Mid-run action: real usage crossed the action line and the turn continues
-    // (tool calls pending). The SDK has no checkpoint until the run boundary, so
-    // without this the next request can be clamped to max_tokens=1 (empty reply).
-    if (
-      !run.interventionRequested &&
-      this.watchdogTurn && this.watchdogTurn.interventions === 0 &&
-      run.actionThreshold > 0 &&
-      run.maxTokens > run.actionThreshold &&
-      hasToolCalls
-    ) {
-      run.interventionRequested = true;
-      logger.warn("runtime:pi-sdk", "compaction watchdog: mid-run crossing, aborting for compaction", {
-        model: run.model,
-        maxTokens: run.maxTokens,
-        actionThreshold: run.actionThreshold,
-        contextWindow: run.contextWindow,
-      });
-      this.interruptAttempts("Compaction watchdog requested abort", false);
-      void this.session.abort().catch((err) => {
-        logger.error("runtime:pi-sdk", "compaction watchdog: abort failed", { error: String(err) });
-      });
-    }
-  }
-
-  private finishCompactionWatchdogRun(): CompactionWatchdogRun | null {
-    const run = this.compactionWatchdogRun;
-    this.compactionWatchdogRun = null;
-    if (!run) return null;
-    if (!run.compactionEventSeen && !run.interventionRequested && run.maxTokens > 0 && run.maxTokens > run.threshold) {
-      logger.warn("runtime:pi-sdk", "compaction watchdog: run crossed threshold without SDK compaction event", {
-        model: run.model,
-        maxTokens: run.maxTokens,
-        contextWindow: run.contextWindow,
-        threshold: run.threshold,
-      });
-    }
-    return run;
-  }
-
-  /**
-   * Post-run watchdog decisions. Returns the next prompt to run (continue after
-   * compaction / one empty-response retry), or null to settle the turn.
-   */
-  private async afterWatchdogRun(run: CompactionWatchdogRun | null): Promise<string | null> {
-    const turn = this.watchdogTurn;
-    if (!run || !turn || this.destroyed) return null;
-
-    // A: mid-run intervention — the abort already happened; compact (unless the
-    // SDK's own boundary check beat us to it), then continue the turn.
-    if (run.interventionRequested && turn.interventions === 0) {
-      turn.interventions++;
-      await this.compactForWatchdog(run, "mid-run threshold crossing");
-      return WATCHDOG_CONTINUE_PROMPT;
-    }
-
-    // B: empty assistant response (stop + no text + ≤1 output token).
-    if (run.emptyStopSeen) {
-      // Fault mode (usage near the clamp zone): compaction is decided by token
-      // usage, never by response shape (fish 2026-07-29). The band is only armed
-      // when it is positive — degenerate small windows fall through to the
-      // generic retry below.
-      const faultBandStart = run.actionThreshold - WATCHDOG_SAFETY_MARGIN;
-      if (turn.interventions === 0 && faultBandStart > 0 && run.maxTokens > faultBandStart) {
-        turn.interventions++;
-        await this.compactForWatchdog(run, "empty response near context limit");
-        return WATCHDOG_CONTINUE_PROMPT;
-      }
-      // Generic transient (low usage): one verbatim retry, then a visible error.
-      if (turn.emptyRetries === 0) {
-        turn.emptyRetries++;
-        logger.warn("runtime:pi-sdk", "empty assistant response, retrying once", { model: run.model });
-        return WATCHDOG_EMPTY_RETRY_PROMPT;
-      }
-      throw new Error("Model returned an empty response twice in a row. Try again, or compact/reset the session if it persists.");
-    }
-    return null;
-  }
-
-  private async compactForWatchdog(run: CompactionWatchdogRun, reason: string): Promise<void> {
-    if (run.compactionEventSeen) {
-      // The SDK's own post-run check already compacted after our abort.
-      logger.info("runtime:pi-sdk", "compaction watchdog: SDK compaction already handled", { model: run.model, reason });
-      return;
-    }
-    try {
-      logger.warn("runtime:pi-sdk", "compaction watchdog: compacting", {
-        model: run.model,
-        reason,
-        maxTokens: run.maxTokens,
-        actionThreshold: run.actionThreshold,
-      });
-      await this.dispatchCompact();
-    } catch (err: any) {
-      const message = err?.message || String(err);
-      // Raced with an SDK compaction (or nothing worth compacting) — fine.
-      if (/already compacted|nothing to compact/i.test(message)) return;
-      // No automatic retry (avoid retry storms): surface the failure instead.
-      throw new Error(`Automatic context compaction failed: ${message}`);
-    }
-  }
-
   subscribe(fn: (event: AgentStreamEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -400,47 +251,15 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.promptOperation = operation;
     return operation.finally(() => { if (this.promptOperation === operation) this.promptOperation = null; });
   }
-  private async promptInternal(message: string, options?: RuntimePromptOptions): Promise<void> {
-    this.watchdogTurn = { interventions: 0, emptyRetries: 0 };
-    try {
-      let next: string | null = message;
-      let dispatchIndex = 0;
-      while (next !== null && !this.destroyed && this.watchdogTurn !== null) {
-        this.startCompactionWatchdogRun();
-        this.promptAbortIntent = { aborted: false };
-        let settled: CompactionWatchdogRun | null = null;
-        try {
-          const dispatchMessage: string = next;
-          if (options?.beforeDispatch?.constructor.name === "AsyncFunction") {
-            throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
-          }
-          const attempt = this.dispatchExecution("input", "pi-sdk:session.prompt", options?.beforeDispatch
-            ? attemptId => options.beforeDispatch!({ attemptId, dispatchIndex, message: dispatchMessage })
-            : undefined);
-          dispatchIndex++;
-          this.promptAttempt = attempt;
-          // A synchronous dispatch hook may itself request Stop before this
-          // attempt is assigned. Record that intent after its SQL commit.
-          if (this.promptAbortIntent.aborted || this.destroyed) attempt.interrupt("Runtime abort requested before SDK preflight");
-          const run = attempt.run(() => this.session.prompt(dispatchMessage, { source: "external" as any })).catch((err) => {
-            this.emit({ type: "message_end", text: "", stopReason: "error", errorMessage: err.message || String(err) });
-            throw err;
-          }).finally(() => {
-            if (this.currentRun === run) this.currentRun = null;
-          });
-          this.currentRun = run;
-          await run;
-        } finally {
-          this.promptAttempt = null;
-          this.promptAbortIntent = null;
-          settled = this.finishCompactionWatchdogRun();
-        }
-        next = await this.afterWatchdogRun(settled);
-      }
-    } finally {
-      this.publishSessionReferenceIfMaterialized();
-      this.watchdogTurn = null;
-    }
+  private async promptInternal(message:string,options?:RuntimePromptOptions):Promise<void>{
+    this.promptAbortIntent={aborted:false};
+    try{
+      if(options?.beforeDispatch?.constructor.name==="AsyncFunction")throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
+      const attempt=this.dispatchExecution("input","pi-sdk:session.prompt",options?.beforeDispatch?attemptId=>options.beforeDispatch!({attemptId,dispatchIndex:0,message}):undefined);
+      this.promptAttempt=attempt;if(this.promptAbortIntent.aborted||this.destroyed)attempt.interrupt("Runtime abort requested before SDK preflight");
+      const run=attempt.run(()=>this.session.prompt(message,{source:"external" as any})).catch(error=>{this.emit({type:"message_end",text:"",stopReason:"error",errorMessage:error.message||String(error)});throw error;}).finally(()=>{if(this.currentRun===run)this.currentRun=null;});
+      this.currentRun=run;await run;
+    }finally{this.promptAttempt=null;this.promptAbortIntent=null;this.publishSessionReferenceIfMaterialized();}
   }
 
   abort(options?: { preserveCompaction?: boolean }): void {
@@ -449,7 +268,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     // The SDK owns aborted messages and tool results. Never patch session history.
     this.session.abort().catch(() => {});
     if (options?.preserveCompaction) return;
-    this.watchdogTurn = null;
     if (this.manualCompactionOutcome) this.manualCompactionOutcome.aborted = true;
     try { this.session.abortCompaction(); } catch {}
     try { this.session.abortBranchSummary(); } catch {}
@@ -593,7 +411,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   /** Called by the owner at the idle boundary before the next prompt. */
   refreshPrompt(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
-    if (this.currentRun || this.watchdogTurn || this.manualCompactionOutcome || this.session.isStreaming || this.session.isCompacting) {
+    if (this.currentRun || this.manualCompactionOutcome || this.session.isStreaming || this.session.isCompacting) {
       throw new Error("Prompt refresh requires an idle pre-prompt boundary");
     }
     const sources = resolvePiSystemPromptSources(opts);
