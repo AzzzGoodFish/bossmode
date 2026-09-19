@@ -398,18 +398,6 @@ export function commitRemoteCatalog(models: any[], fetchedAt: number = Date.now(
   }));
 }
 
-export function retainLastGoodCatalog(reason: string, error?: string): CatalogSnapshot {
-  const snap = getCatalog();
-  logger.warn("catalog", "refresh kept last-good catalog", {
-    reason,
-    error,
-    source: snap.source,
-    modelCount: snap.modelCount,
-    fetchedAt: snap.fetchedAtIso,
-  });
-  return snap;
-}
-
 export function commitProviderOverlays(overlays: Record<string, ProviderModelsStoreEntry>): void {
   importProviderOverlays(overlays, getDatabase());
 }
@@ -504,36 +492,6 @@ export function deleteProviderOverlay(provider: string, db: Database = getDataba
 export function importProviderOverlays(overlays: Record<string,ProviderModelsStoreEntry>, db: Database = getDatabase()): void {
     db.transaction(() => { for (const [provider,entry] of Object.entries(overlays)) importProviderOverlay(provider,entry, db); });
   }
-
-export function buildProviderOverlaysFromFetch(
-  models: any[],
-  fetchMeta: Map<string, { lastModified: number; etag?: string; models: any[] }>,
-  fetchedAt: number,
-): Record<string, ProviderModelsStoreEntry> {
-  const byProvider = new Map<string, any[]>();
-  for (const m of models) {
-    const p = m?.provider ? String(m.provider) : "";
-    if (!p) continue;
-    if (!byProvider.has(p)) byProvider.set(p, []);
-    byProvider.get(p)!.push(m);
-  }
-  const out: Record<string, ProviderModelsStoreEntry> = {};
-  for (const [providerId, providerModels] of byProvider) {
-    const meta = fetchMeta.get(providerId);
-    // Prefer fetch-time models for that provider when available (exact remote shard).
-    const modelsForEntry = meta?.models?.length ? meta.models : providerModels;
-    let lastModified = meta?.lastModified && meta.lastModified > 0 ? meta.lastModified : fetchedAt;
-    // Must beat pi's builtinModelDataGeneratedAt or remoteModels() returns [].
-    if (!lastModified || lastModified <= 0) lastModified = Date.now();
-    out[providerId] = {
-      models: modelsForEntry,
-      lastModified,
-      checkedAt: fetchedAt,
-      ...(meta?.etag ? { etag: meta.etag } : {}),
-    };
-  }
-  return out;
-}
 
 export function publishProviderModels(overlays: Record<string, ProviderModelsStoreEntry>): void {
   commitProviderOverlays(overlays);

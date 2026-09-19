@@ -61,426 +61,83 @@ let shutdownSettlement: Promise<void> | null = null;
 let shutdownRunning = false;
 
 export function applyPendingAfterPromptSettlement(instance:AgentInstance,trigger:string):void{
-  applyPendingCredentialRefresh(instance,trigger);applyPendingThinkingSwitch(instance,trigger);
+  const credential=instance.pendingCredentialRefresh;instance.pendingCredentialRefresh=undefined;
+  if(credential)void refreshCredential(instance,credential,trigger);
+  const thinking=instance.pendingThinkingSwitch;instance.pendingThinkingSwitch=undefined;
+  if(thinking)void applyThinking(instance,thinking,trigger).catch(error=>noticeCurrentSource(instance,`Failed to switch thinking level for "${instance.agentName}": ${String(error)}`));
 }
 
-function normalizeSwitchModelRef(model: string): string {
-  return normalizeModelRef(model.trim());
+function normalizedBinding(model:string,credentialId?:string){
+  const ref=normalizeModelRef(model.trim());if(!ref)throw new Error("model is required");
+  assertModelAvailable(ref,"model switch");const profile=credentialId?getModelCredentialProfile(credentialId):null;
+  if(!profile?.enabled)throw new Error(`No model credentials configured for ${ref}`);
+  if(ref.split("/")[0]!==profile.providerSlug)throw new Error(`Credential "${profile.name}" (${profile.providerSlug}) does not serve model ${ref}`);
+  return {model:ref,profile};
 }
 
-/** Split "provider/model-id" — the provider segment used for the explicit
- * profile match (read-only; no export, no models.json write). */
-function modelProviderOf(ref: string): string {
-  return ref.includes("/") ? ref.split("/")[0] : "";
+async function applyModel(instance:AgentInstance,binding:{model:string;credentialId?:string},trigger:string):Promise<void>{
+  if(!memberRuntimeAllowed(instance.memberId))return;const {model,profile}=normalizedBinding(binding.model,binding.credentialId);
+  if(!instance.handle.setModel)throw new Error("Runtime does not support dynamic model switching");
+  if(!exportPiConfigForMember({memberId:instance.memberId,modelRef:model,credentialId:profile.id}))throw new Error(`No model credentials configured for ${model}`);
+  await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setModel!(model,profile.id);});
+  instance.appliedModel=model;instance.appliedCredentialId=profile.id;
+  if(instance.handle.runtimeParams)Object.assign(instance.handle.runtimeParams,{model,credentialId:profile.id,credentialName:profile.name});
+  logger.info("agent","modelSwitchApplied",{member:instance.agentName,model,trigger});publishCurrentStatus(instance);
 }
 
-/** The SDK handle applies model and fixed-profile credentials together.
- * Binding validation is read-only (enabled profile + explicit provider
- * match); only after it passes do we export — the write refreshes THIS
- * instance's models.json so a newly created provider reaches the old
- * session's dir (runtime.refresh reads disk, and without this it would not
- * find the model). */
-function applyModelSwitchToInstance(
-  instance: AgentInstance,
-  pending: { model: string; credentialId?: string },
-  trigger: string,
-): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
-  return trackMemberOperation(instance.memberId,()=>applyModelSwitchToInstanceInternal(instance, pending, trigger));
+async function applyThinking(instance:AgentInstance,pending:PendingThinkingSwitch,trigger:string):Promise<void>{
+  if(!memberRuntimeAllowed(instance.memberId))return;if(!instance.handle.setThinkingLevel)throw new Error("Runtime does not support dynamic thinking level switching");
+  await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setThinkingLevel!(pending.thinkingLevel);});
+  if(instance.handle.runtimeParams)instance.handle.runtimeParams.thinkingLevel=pending.thinkingLevel;
+  logger.info("agent","thinkingSwitchApplied",{member:instance.agentName,thinkingLevel:pending.thinkingLevel,trigger});publishCurrentStatus(instance);
 }
 
-async function applyModelSwitchToInstanceInternal(
-  instance: AgentInstance,
-  pending: { model: string; credentialId?: string },
-  trigger: string,
-): Promise<void> {
-  const model = normalizeSwitchModelRef(pending.model);
-  const profile = pending.credentialId ? getModelCredentialProfile(pending.credentialId) : null;
-  if (!profile || !profile.enabled) {
-    throw new Error(`No model credentials configured for ${model}`);
-  }
-  if (modelProviderOf(model) !== profile.providerSlug) {
-    throw new Error(`Credential "${profile.name}" (${profile.providerSlug}) does not serve model ${model}`);
-  }
-
-  if (!instance.handle.setModel) throw new Error("Runtime does not support dynamic model switching");
-
-  // Validation passed — apply-time export refreshes the instance's model
-  // catalog (models.json) before setModel binds.
-  const exported = exportPiConfigForMember({
-    memberId: instance.memberId,
-    modelRef: model,
-    credentialId: profile.id,
-  });
-  if (!exported) throw new Error(`No model credentials configured for ${model}`);
-
-  await instance.handle.setModel(model, profile.id);
-
-  if (instance.handle.runtimeParams) {
-    instance.handle.runtimeParams.model = model;
-    instance.handle.runtimeParams.credentialId = profile.id;
-    instance.handle.runtimeParams.credentialName = profile.name;
-  }
-  instance.appliedModel = model;
-  instance.appliedCredentialId = profile.id;
-  logger.info("agent", "modelSwitchApplied", { member: instance.agentName, sourceRef: activeSource(instance), model, trigger });
-  publishCurrentStatus(instance);
+function dropCredential(instance:AgentInstance,reason:string):void{
+  const key=instanceKey(instance.memberId);if(instances.get(key)===instance)instances.delete(key);contextUsageCache.delete(key);contextCompactionWarningCache.delete(key);
+  try{instance.unsubscribe();}catch{}try{instance.handle.destroy();}catch{}instance.status="inactive";updateDispatchState(instance,"idle","credential_unavailable");publishCurrentStatus(instance);
+  logger.warn("agent","credentialRefreshUnavailable",{member:instance.agentName,reason});noticeCurrentSource(instance,`Member "${instance.agentName}" model credential is no longer available.`);
 }
 
-/** If the live instance drifted from the room binding, re-apply (or destroy so the next create is clean). */
-function applyThinkingSwitchToInstance(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
-  return trackMemberOperation(instance.memberId,()=>applyThinkingSwitchToInstanceInternal(instance, pending, trigger));
+async function refreshCredential(instance:AgentInstance,pending:PendingCredentialRefresh,trigger:string):Promise<void>{
+  if(!memberRuntimeAllowed(instance.memberId))return;
+  try{
+    const exported=exportPiConfigForMember({memberId:instance.memberId,modelRef:instance.appliedModel,credentialId:instance.appliedCredentialId});
+    if(!exported||!instance.handle.refreshModelRegistry||!instance.handle.setModel){dropCredential(instance,`${pending.changeType}:${pending.profileId}`);return;}
+    await trackMemberOperation(instance.memberId,async()=>{await instance.handle.refreshModelRegistry!({allowNetwork:false});await instance.handle.setModel!(instance.appliedModel,instance.appliedCredentialId!);});
+    instance.appliedCredentialId=exported.profile?.id||instance.appliedCredentialId;
+    if(instance.handle.runtimeParams)Object.assign(instance.handle.runtimeParams,{credentialId:instance.appliedCredentialId,credentialName:exported.profile?.name});
+    logger.info("agent","credentialRefreshApplied",{member:instance.agentName,profileId:pending.profileId,trigger});
+  }catch(error){if(pending.changeType==="profileDeleted")dropCredential(instance,String(error));else logger.warn("agent","credentialRefreshFailed",{member:instance.agentName,error:String(error)});}
 }
 
-async function applyThinkingSwitchToInstanceInternal(instance: AgentInstance, pending: PendingThinkingSwitch, trigger: string): Promise<void> {
-  if (!instance.handle.setThinkingLevel) throw new Error("Runtime does not support dynamic thinking level switching");
-  await instance.handle.setThinkingLevel(pending.thinkingLevel);
-  if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
-  logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, sourceRef: activeSource(instance), thinkingLevel: pending.thinkingLevel, trigger });
-  publishCurrentStatus(instance);
+export async function refreshAllInstanceModelRegistries():Promise<{refreshed:number;failed:number}>{
+  let refreshed=0,failed=0;await Promise.all([...instances.values()].map(async instance=>{if(!instance.handle.refreshModelRegistry)return;try{await instance.handle.refreshModelRegistry({allowNetwork:false});refreshed++;}catch(error){failed++;logger.warn("agent","catalogRegistryRefreshFailed",{member:instance.agentName,error:String(error)});}}));return {refreshed,failed};
 }
 
-function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): void {
-  const pending = instance.pendingThinkingSwitch;
-  if (!pending) return;
-  instance.pendingThinkingSwitch = undefined;
-  applyThinkingSwitchToInstance(instance, pending, trigger).catch((err) => {
-    logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, sourceRef: activeSource(instance), error: String(err) });
-    noticeCurrentSource(instance, `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
-  });
+export async function invalidateModelCredentialProfile(profileId:string,providerSlug:string,changeType:PendingCredentialRefresh["changeType"]="profileUpdated"):Promise<Array<{roomId:string;memberName:string;applied:boolean;pending:boolean}>>{
+  const pending={profileId,providerSlug,changeType},targets=[...instances.values()].filter(instance=>instance.appliedCredentialId===profileId);
+  return Promise.all(targets.map(async instance=>{const roomId=activeSource(instance)??instance.memberId;if(instance.status==="working"||instance.dispatchState!=="idle"){instance.pendingCredentialRefresh=pending;return {roomId,memberName:instance.agentName,applied:false,pending:true};}await refreshCredential(instance,pending,"credentialProfileInvalidated");return {roomId,memberName:instance.agentName,applied:true,pending:false};}));
 }
 
-function instanceUsesCredentialProfile(instance: AgentInstance, profileId: string): boolean {
-  return instance.appliedCredentialId === profileId;
+export class MemberModelSwitchConflictError extends Error{constructor(memberId:string){super(`A model switch is already in progress for this member (${memberId})`);this.name="MemberModelSwitchConflictError";}}
+export interface MemberModelSwitchResult{model:string;credentialId:string;instances:Array<{scopeId:string;applied:boolean}>}
+
+export async function switchMemberModel(memberId:string,binding:{model:string;credentialId:string}):Promise<MemberModelSwitchResult>{
+  if(memberSwitchGates.has(memberId))throw new MemberModelSwitchConflictError(memberId);
+  let release=()=>{};memberSwitchGates.set(memberId,new Promise<void>(resolve=>{release=resolve;}));
+  try{
+    const {model,profile}=normalizedBinding(binding.model,binding.credentialId);await Promise.all(pendingCreationsFor(memberId));
+    const instance=instances.get(instanceKey(memberId)),original=instance?{model:instance.appliedModel,credentialId:instance.appliedCredentialId}:null;
+    try{if(instance)await applyModel(instance,{model,credentialId:profile.id},"switchMemberModel");controlServices().commitModelBinding(memberId,{model,credentialId:profile.id});}
+    catch(error){if(instance&&original?.model&&original.credentialId)try{await applyModel(instance,original,"switchMemberModel-rollback");}catch{destroyInstance(memberId);}throw error;}
+    return {model,credentialId:profile.id,instances:instance?[{scopeId:activeSource(instance)??memberId,applied:true}]:[]};
+  }finally{memberSwitchGates.delete(memberId);release();}
 }
 
-function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason: string): void {
-  const key = instanceKey(instance.memberId);
-  if (instances.get(key) === instance) instances.delete(key);
-  contextUsageCache.delete(key);
-  contextCompactionWarningCache.delete(key);
-  try { instance.unsubscribe(); } catch {}
-  try { instance.handle.destroy(); } catch {}
-  instance.status = "inactive";
-  updateDispatchState(instance, "idle", "credential_unavailable");
-  publishCurrentStatus(instance);
-  logger.warn("agent", "credentialRefreshUnavailable", { member: instance.agentName, sourceRef: activeSource(instance), reason });
-  noticeCurrentSource(instance, `Member "${instance.agentName}" model credential is no longer available. Update Settings → Model Credentials or choose another model before the next turn.`);
-}
-
-const CREDENTIAL_REFRESH_TIMEOUT_MS = 8_000;
-
-function isTransientCredentialRefreshError(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return /timeout|timed out|network|econnrefused|enotfound|econnreset|fetch failed|aborted|socket|hang up|etimedout|ehostunreach|certificate|eai_again/.test(msg);
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
-
-function applyCredentialRefreshToInstance(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
-  if (!memberRuntimeAllowed(instance.memberId)) return Promise.resolve();
-  return trackMemberOperation(instance.memberId,()=>applyCredentialRefreshToInstanceInternal(instance, pending, trigger));
-}
-
-async function applyCredentialRefreshToInstanceInternal(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
-  try {
-    const exported = exportPiConfigForMember({
-      memberId: instance.memberId,
-      modelRef: instance.appliedModel,
-      credentialId: instance.appliedCredentialId,
-    });
-    if (!exported) {
-      dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:export-null`);
-      return;
-    }
-
-    if (!instance.handle.refreshModelRegistry || !instance.handle.setModel) {
-      dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:runtime-refresh-unsupported`);
-      return;
-    }
-
-    await withTimeout(
-      // Credential profile changed locally — reload disk registry only; never hang on network.
-      Promise.resolve(instance.handle.refreshModelRegistry({ allowNetwork: false })),
-      CREDENTIAL_REFRESH_TIMEOUT_MS,
-      "credential registry refresh",
-    );
-    await instance.handle.setModel(instance.appliedModel, instance.appliedCredentialId!);
-    if (instance.handle.runtimeParams) {
-      instance.handle.runtimeParams.model = instance.appliedModel;
-      instance.handle.runtimeParams.credentialId = exported.profile?.id || instance.appliedCredentialId;
-      instance.handle.runtimeParams.credentialName = exported.profile?.name;
-    }
-    instance.appliedCredentialId = exported.profile?.id || instance.appliedCredentialId;
-    logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
-  } catch (err) {
-    // Profile gone / export empty already dropped above. Network/timeouts must NOT
-    // destroy the live instance or cry "credential no longer available".
-    if (pending.changeType !== "profileDeleted" && isTransientCredentialRefreshError(err)) {
-      logger.warn("agent", "credentialRefreshTransient", {
-        member: instance.agentName,
-        roomId: activeSource(instance) ?? instance.memberId,
-        profileId: pending.profileId,
-        error: err instanceof Error ? err.message : String(err),
-        trigger,
-      });
-      return;
-    }
-    dropInstanceAfterCredentialUnavailable(instance, `${pending.changeType}:${pending.profileId}:${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function applyPendingCredentialRefresh(instance: AgentInstance, trigger: string): void {
-  const pending = instance.pendingCredentialRefresh;
-  if (!pending) return;
-  instance.pendingCredentialRefresh = undefined;
-  applyCredentialRefreshToInstance(instance, pending, trigger).catch((err) => {
-    logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
-    noticeCurrentSource(instance, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
-  });
-}
-
-/**
- * Disk-only model registry refresh for every live instance (catalog models-store
- * distribute path). Failures are logged per-instance and never thrown.
- */
-export async function refreshAllInstanceModelRegistries(): Promise<{ refreshed: number; failed: number }> {
-  let refreshed = 0;
-  let failed = 0;
-  await Promise.all(Array.from(instances.values()).map(async (instance) => {
-    if (!instance.handle.refreshModelRegistry) return;
-    try {
-      await withTimeout(
-        Promise.resolve(instance.handle.refreshModelRegistry({ allowNetwork: false })),
-        CREDENTIAL_REFRESH_TIMEOUT_MS,
-        "catalog models-store registry refresh",
-      );
-      refreshed += 1;
-    } catch (err) {
-      failed += 1;
-      logger.warn("agent", "catalogRegistryRefreshFailed", {
-        member: instance.agentName,
-        roomId: activeSource(instance) ?? instance.memberId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }));
-  return { refreshed, failed };
-}
-
-export async function invalidateModelCredentialProfile(profileId: string, providerSlug: string, changeType: PendingCredentialRefresh["changeType"] = "profileUpdated"): Promise<Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }>> {
-  const pending = { profileId, providerSlug, changeType };
-  const targets = Array.from(instances.values()).filter((instance) => instanceUsesCredentialProfile(instance, profileId));
-
-  // profileDeleted must still be applied synchronously so callers know instances dropped.
-  // profileUpdated is best-effort background refresh — Settings save must return immediately.
-  if (changeType === "profileUpdated") {
-    for (const instance of targets) {
-      if (instance.status === "working" || instance.dispatchState !== "idle") {
-        instance.pendingCredentialRefresh = pending;
-        logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
-        continue;
-      }
-      // Fire-and-forget; errors handled inside applyCredentialRefreshToInstance.
-      void applyCredentialRefreshToInstance(instance, pending, "credentialProfileInvalidated").catch((err) => {
-        logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
-      });
-    }
-    return targets.map((instance) => ({
-      roomId: activeSource(instance) ?? instance.memberId,
-      memberName: instance.agentName,
-      applied: false,
-      pending: true,
-    }));
-  }
-
-  const results: Array<{ roomId: string; memberName: string; applied: boolean; pending: boolean }> = [];
-  // Concurrent refresh (no serial await chain).
-  await Promise.all(targets.map(async (instance) => {
-    if (instance.status === "working" || instance.dispatchState !== "idle") {
-      instance.pendingCredentialRefresh = pending;
-      logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
-      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: false, pending: true });
-      return;
-    }
-    try {
-      await applyCredentialRefreshToInstance(instance, pending, "credentialProfileInvalidated");
-      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: true, pending: false });
-    } catch (err: any) {
-      logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
-      noticeCurrentSource(instance, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
-      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: false, pending: false });
-    }
-  }));
-  return results;
-}
-
-/** §10: in-flight model switches per memberId — ONE map with the creation
- * gate (memberSwitchGates). Acquired synchronously before the first await; a
- * second concurrent request gets MemberModelSwitchConflictError (HTTP 409). */
-
-/** Thrown when another switch is already running for the member — mapped to
- * HTTP 409 by the API layer. */
-export class MemberModelSwitchConflictError extends Error {
-  constructor(memberId: string) {
-    super(`A model switch is already in progress for this member (${memberId}) — retry when it finishes.`);
-    this.name = "MemberModelSwitchConflictError";
-  }
-}
-
-export interface MemberModelSwitchResult {
-  model: string;
-  credentialId: string;
-  instances: Array<{ scopeId: string; applied: boolean }>;
-}
-
-/** §10: restore every attempted instance (including the one whose setModel
- * threw — the SDK may have assigned its state.model before failing) to the
- * binding it ran before the switch. A rollback that fails stops that exact
- * scope's instance (history preserved) and reports its scopeId. */
-async function rollbackSwitchedInstances(
-  attempted: AgentInstance[],
-  originals: Map<AgentInstance, { model?: string; credentialId?: string }>,
-  trigger: string,
-): Promise<string[]> {
-  const failedScopes: string[] = [];
-  for (const inst of attempted) {
-    const original = originals.get(inst);
-    if (!original) continue;
-    const stillCurrent = instances.get(instanceKey(inst.memberId)) === inst;
-    if (!stillCurrent) continue;
-    if (!original.model || !original.credentialId) {
-      destroyInstance(inst.memberId);
-      failedScopes.push((activeSource(inst) ?? inst.memberId));
-      continue;
-    }
-    try {
-      await applyModelSwitchToInstance(inst, { model: original.model, credentialId: original.credentialId }, trigger);
-    } catch (err) {
-      logger.error("agent", "modelSwitchRollbackFailed", {
-        member: inst.agentName,
-        scopeId: (activeSource(inst) ?? inst.memberId),
-        error: String(err),
-        trigger,
-      });
-      destroyInstance(inst.memberId);
-      failedScopes.push((activeSource(inst) ?? inst.memberId));
-    }
-  }
-  return failedScopes;
-}
-
-/**
- * The ONE model switch method (design-model-switch-single-path-v1 §3, §10),
- * keyed by memberId: acquire the member lock synchronously → let already-
- * pending creations finish → validate the complete target binding → apply to
- * every live instance (room + DM, idle and working) via the SDK's
- * setModel(model, credentialId) → save the global config exactly once. Any
- * failure (an instance rejecting the switch, or the config save) rolls every
- * attempted instance back through the single rollback path above; the config
- * is only written after all instances accepted the switch. New creations wait
- * at their gate for the switch to end, so there is no latecomer path.
- */
-export async function switchMemberModel(memberId: string, binding: { model: string; credentialId: string }): Promise<MemberModelSwitchResult> {
-  // Synchronous acquisition, before the first await (§10): two callers cannot
-  // both pass the check across an await boundary. The same map entry is the
-  // creation gate — it resolves only when this switch fully settles.
-  if (memberSwitchGates.has(memberId)) throw new MemberModelSwitchConflictError(memberId);
-  let releaseGate: () => void = () => {};
-  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
-  memberSwitchGates.set(memberId, gate);
-  try {
-    const normalizedModel = normalizeSwitchModelRef(binding.model);
-    if (!normalizedModel) throw new Error("model is required");
-    assertModelAvailable(normalizedModel, "switchMemberModel");
-    const profile = getModelCredentialProfile(binding.credentialId);
-    if (!profile || !profile.enabled) {
-      throw new Error(`Credential profile not found or disabled: ${binding.credentialId}`);
-    }
-    // Read-only binding validation (§10): the ref's provider must explicitly
-    // match the profile's providerSlug. No export probe — that would write
-    // models.json and still not prove the provider match.
-    if (modelProviderOf(normalizedModel) !== profile.providerSlug) {
-      throw new Error(`Credential "${profile.name}" (${profile.providerSlug}) does not serve model ${normalizedModel}`);
-    }
-
-    // §10: let creations that were already in flight finish before the
-    // snapshot, so the switch sees every instance that exists. No timeout —
-    // a partial snapshot could miss an instance. (Creations that arrive
-    // after the lock are gated above, not here.)
-    const pending = pendingCreationsFor(memberId);
-    if (pending.length > 0) {
-      await Promise.all(pending);
-    }
-
-    const targets = [...instances.values()].filter((inst) => inst.memberId === memberId);
-    const originals = new Map(targets.map((inst) => [inst, { model: inst.appliedModel, credentialId: inst.appliedCredentialId }]));
-    const attempted: AgentInstance[] = [];
-    try {
-      for (const inst of targets) {
-        // Registered BEFORE the call: an instance whose setModel throws is
-        // still attempted — the SDK may have assigned state.model already.
-        attempted.push(inst);
-        await applyModelSwitchToInstance(inst, { model: normalizedModel, credentialId: binding.credentialId }, "switchMemberModel");
-      }
-    } catch (err) {
-      const failedAt = attempted[attempted.length - 1]?.memberId ?? "unknown member";
-      const reason = String((err as Error)?.message || err);
-      const failedScopes = await rollbackSwitchedInstances(attempted, originals, "switchMemberModel-rollback");
-      throw new Error(failedScopes.length > 0
-        ? `Model switch failed at ${failedAt} (${reason}); rollback could not restore ${failedScopes.join(", ")} — those instances were stopped, their conversation history is preserved.`
-        : `Model switch failed at ${failedAt} (${reason}); every attempted instance was restored to its previous model.`);
-    }
-
-    // Commit the global config exactly once, after every instance accepted.
-    try {
-      controlServices().commitModelBinding(memberId, { model: normalizedModel, credentialId: binding.credentialId });
-    } catch (saveErr) {
-      const reason = String((saveErr as Error)?.message || saveErr);
-      const failedScopes = await rollbackSwitchedInstances(attempted, originals, "switchMemberModel-save-rollback");
-      throw new Error(failedScopes.length > 0
-        ? `Config save failed (${reason}); rollback could not restore ${failedScopes.join(", ")} — those instances were stopped, their conversation history is preserved.`
-        : `Config save failed (${reason}) — every live instance was restored to its previous model.`);
-    }
-
-    return {
-      model: normalizedModel,
-      credentialId: profile.id,
-      instances: attempted.map((inst) => ({ scopeId: (activeSource(inst) ?? inst.memberId), applied: true })),
-    };
-  } finally {
-    memberSwitchGates.delete(memberId);
-    releaseGate();
-  }
-}
-
-/** Thinking level is member-global too (§6): apply to every live instance of
- * the member. Working instances queue the level for their next settlement
- * (per-instance pending switch), idle ones apply immediately. */
-export async function switchMemberThinkingLevel(memberId: string, thinkingLevel: string): Promise<{ applied: string[]; pending: string[] }> {
-  const targets = [...instances.values()].filter((inst) => inst.memberId === memberId);
-  const applied: string[] = [];
-  const pending: string[] = [];
-  for (const inst of targets) {
-    const p = { thinkingLevel };
-    if (inst.status === "working" || inst.dispatchState !== "idle") {
-      inst.pendingThinkingSwitch = p;
-      pending.push((activeSource(inst) ?? inst.memberId));
-      continue;
-    }
-    await applyThinkingSwitchToInstance(inst, p, "switchMemberThinkingLevel");
-    applied.push((activeSource(inst) ?? inst.memberId));
-  }
-  return { applied, pending };
+export async function switchMemberThinkingLevel(memberId:string,thinkingLevel:string):Promise<{applied:string[];pending:string[]}>{
+  const instance=instances.get(instanceKey(memberId));if(!instance)return {applied:[],pending:[]};const source=activeSource(instance)??memberId;
+  if(instance.status==="working"||instance.dispatchState!=="idle"){instance.pendingThinkingSwitch={thinkingLevel};return {applied:[],pending:[source]};}
+  await applyThinking(instance,{thinkingLevel},"switchMemberThinkingLevel");return {applied:[source],pending:[]};
 }
 
 // -- Manual compaction (conversation action) --
