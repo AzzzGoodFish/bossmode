@@ -1,78 +1,28 @@
 import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-export interface RoomMemberRecord {
-  id: string;
-  roomId?: string;
-  name: string;
-  sourceAgent: string;
-  sourceMemberId?: string;
-  avatar?: string;
-  createdAt: number;
-  updatedAt: number;
-  migratedFrom?: { memberName: string; memberId?: string };
-}
+export interface RoomMember { id: string; name: string }
 export interface Room {
   id: string;
   name: string;
-  cwd?: string;
-  members: string[];
+  memberIds: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
   description?: string;
-  roomMembers?: RoomMemberRecord[];
-  globalMemberIds?: string[];
-  promptLeaderGlobalMemberId?: string;
   createdAt: number;
   ruleDocs?: string[];
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
 
-/** Batch 7 P3: cwd is peeled on write — it exists on disk only until the
- * attachment migration has consumed it. */
-function serializeRoom(room: Room): Room {
-  const { cwd: _legacyCwd, ...rest } = room;
-  return rest as Room;
-}
+function writeRoom(room: Room): void { storeRoom(room, getDatabase()); }
 
-function writeRoom(room: Room): void {
-  room.members = getRoomMembersFromRoom(room).map((member) => member.name);
-  storeRoom(serializeRoom(room), getDatabase());
+export function getRoomMembersFromRoom(room: Room): RoomMember[] {
+  return room.memberIds.flatMap(id => {
+    const member = conversationMember(id);
+    return member ? [{ id: member.id, name: member.name }] : [];
+  });
 }
-
-export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
-  // 0.20 G3 cutover: globalMemberIds is membership authority. Synthesize records with id=mem_*.
-  if (Array.isArray(room.globalMemberIds)) {
-    const out: RoomMemberRecord[] = [];
-    for (const gid of room.globalMemberIds) {
-      const g = conversationMember(gid);
-      if (!g) continue;
-      const shadow = Array.isArray(room.roomMembers)
-        ? room.roomMembers.find((m) => m.sourceMemberId === gid || m.id === gid)
-        : undefined;
-      out.push({
-        id: gid,
-        roomId: room.id,
-        name: g.name,
-        sourceAgent: g.agentTemplate || "general",
-        sourceMemberId: gid,
-        // Config lives on global registry (effective-config); do not rehydrate shadow config.
-        createdAt: shadow?.createdAt ?? g.createdAt,
-        updatedAt: g.updatedAt,
-      });
-    }
-    return out;
-  }
-  // Legacy: roomMembers array, then members: string[].
-  if (Array.isArray(room.roomMembers)) {
-    return room.roomMembers.map((member) => ({ ...member, roomId: member.roomId || room.id }));
-  }
-  const now = Date.now();
-  return (room.members || []).map((name) => ({ id: name, roomId: room.id, name, sourceAgent: name,
-    createdAt: now, updatedAt: now, migratedFrom: { memberName: name } }));
-}
-
 
 
 export function slugifyRoomDocsPath(input: string): string {
@@ -109,10 +59,7 @@ export function memberAssetRoots(memberIds: Iterable<string>): string[] {
 export function roomMemberAssetRoots(roomId: string): string[] {
   const room = getRoom(roomId);
   if (!room) return [];
-  const ids = new Set<string>();
-  for (const m of getRoomMembersFromRoom(room)) ids.add(m.id);
-  for (const gid of room.globalMemberIds ?? []) ids.add(gid);
-  return memberAssetRoots(ids);
+  return memberAssetRoots(room.memberIds);
 }
 
 /** Asset roots for any chat scope: rooms use their roster; dm/mm use the participant members. */
@@ -149,9 +96,8 @@ export function createRoom(name: string, memberIds: string[], opts?: {
   let id = newRoomId();
   for (let attempts = 0; attempts < 10 && (readStoredRoom(id, repository) || existsSync(roomDir(id))); attempts++) id = newRoomId();
   const room: Room = {
-    id, name,
-    members: [], globalMemberIds: ids,
-    ...(leader ? { promptLeaderMemberId: leader, promptLeaderGlobalMemberId: leader } : {}),
+    id, name, memberIds: ids,
+    ...(leader ? { promptLeaderMemberId: leader } : {}),
     docsPath: normalizeRoomDocsPath(opts?.docsPath) || slugifyRoomDocsPath(name),
     ...(roomDescription ? { description: roomDescription } : {}),
     createdAt: Date.now(),
@@ -167,9 +113,7 @@ export function createRoom(name: string, memberIds: string[], opts?: {
 }
 
 export function getRoom(roomId: string): Room | null {
-  const room = readStoredRoom(roomId, getDatabase());
-  if (room && Array.isArray(room.globalMemberIds)) room.members = getRoomMembersFromRoom(room).map(member => member.name);
-  return room;
+  return readStoredRoom(roomId, getDatabase());
 }
 
 export function deleteRoom(roomId: string): boolean {
@@ -184,11 +128,9 @@ export function updateRoomName(roomId: string, name: string): Room | null {
 
 export function updateRoomPromptLeader(roomId: string, memberId: string | null): Room | null {
   return changeRoom(roomId, room => {
-    if (!memberId) { delete room.promptLeaderMemberId; delete room.promptLeaderGlobalMemberId; return; }
-    const member = findRoomMemberByIdInRoom(room, memberId);
-    if (!member) throw new Error("promptLeaderMemberId must be a current room member");
-    room.promptLeaderMemberId = member.id;
-    if (Array.isArray(room.globalMemberIds)) room.promptLeaderGlobalMemberId = member.id;
+    if (!memberId) { delete room.promptLeaderMemberId; return; }
+    if (!room.memberIds.includes(memberId)) throw new Error("promptLeaderMemberId must be a current room member");
+    room.promptLeaderMemberId = memberId;
   });
 }
 
@@ -200,18 +142,13 @@ export function updateRoomDocsPath(roomId: string, docsPath: string | null): Roo
   });
 }
 
-function findRoomMemberByIdInRoom(room: Room, memberId: string): RoomMemberRecord | null {
-  return getRoomMembersFromRoom(room).find(member => member.id === memberId || member.sourceMemberId === memberId) || null;
-}
-
-export function getRoomMembers(roomId: string): RoomMemberRecord[] {
+export function getRoomMembers(roomId: string): RoomMember[] {
   const room = readStoredRoom(roomId);
   return room ? getRoomMembersFromRoom(room) : [];
 }
 
-export function resolveRoomMember(roomId: string, memberId: string): RoomMemberRecord | null {
-  const room = readStoredRoom(roomId);
-  return room ? findRoomMemberByIdInRoom(room, memberId) : null;
+export function resolveRoomMember(roomId: string, memberId: string): RoomMember | null {
+  return getRoomMembers(roomId).find(member => member.id === memberId) ?? null;
 }
 
 
@@ -250,12 +187,7 @@ export function updateRoomDescription(roomId: string, description: string): Room
   });
 }
 
-export function listRooms(): Room[] {
-  return listStoredRooms(getDatabase()).map(room => {
-    if (Array.isArray(room.globalMemberIds)) room.members = getRoomMembersFromRoom(room).map(member => member.name);
-    return room;
-  });
-}
+export function listRooms(): Room[] { return listStoredRooms(getDatabase()); }
 
 
 
@@ -292,75 +224,45 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
 export function inviteRoomMember(
   roomId: string,
   memberId: string,
-): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "duplicate" } {
+): { ok: true; member: RoomMember } | { ok: false; error: string; code: "not_found" | "duplicate" } {
   return getDatabase().transaction((): ReturnType<typeof inviteRoomMember> => {
     const room = getRoom(roomId);
     if (!room) return { ok: false, code: "not_found", error: "Room not found" };
-    if ((room.globalMemberIds || []).includes(memberId)) return { ok: false, code: "duplicate", error: "Member already in this room" };
+    if (room.memberIds.includes(memberId)) return { ok: false, code: "duplicate", error: "Member already in this room" };
     const identity = conversationMember(memberId);
     if (!identity) return { ok: false, code: "not_found", error: "Member not found" };
-    room.globalMemberIds = [...(room.globalMemberIds || []), memberId];
-    room.members = room.globalMemberIds.map(id => conversationMember(id)?.name).filter((name): name is string => Boolean(name));
+    room.memberIds.push(memberId);
     writeRoom(room);
     initializeMemberCursor(roomId, memberId);
-    return { ok: true, member: { id: memberId, roomId, name: identity.name, sourceAgent: identity.agentTemplate,
-      sourceMemberId: memberId, createdAt: identity.createdAt, updatedAt: identity.updatedAt } };
+    return { ok: true, member: { id: memberId, name: identity.name } };
   });
 }
 
 export function removeRoomMember(
   roomId: string,
   memberId: string,
-): { ok: true; removed: RoomMemberRecord } | { ok: false; error: string } {
+): { ok: true; removed: RoomMember } | { ok: false; error: string } {
   return getDatabase().transaction((): ReturnType<typeof removeRoomMember> => {
     const room = getRoom(roomId);
     if (!room) return { ok: false, error: "Room not found" };
-    const member = findRoomMemberByIdInRoom(room, memberId);
+    const member = resolveRoomMember(roomId, memberId);
     if (!member) return { ok: false, error: "Member is not in this room" };
-    const gid = member.sourceMemberId?.startsWith("mem_") ? member.sourceMemberId
-      : member.id.startsWith("mem_") ? member.id : undefined;
-
-    // G3: membership authority is globalMemberIds
-    if (gid) {
-      room.globalMemberIds = (room.globalMemberIds || []).filter((id) => id !== gid);
-      if (room.promptLeaderGlobalMemberId === gid) delete room.promptLeaderGlobalMemberId;
-      if (room.promptLeaderMemberId === gid || room.promptLeaderMemberId === member.id) {
-        delete room.promptLeaderMemberId;
-      }
-    }
-    if (Array.isArray(room.roomMembers)) {
-      // An absent global link is not a match for every unlinked local snapshot.
-      // Keep unrelated source records even when global membership is authoritative.
-      room.roomMembers = room.roomMembers.filter((m) => m.id !== member.id && (!gid || m.sourceMemberId !== gid));
-    }
-    room.members = (room.globalMemberIds?.length
-      ? room.globalMemberIds.map((id) => conversationMember(id)?.name).filter((n): n is string => Boolean(n))
-      : (room.members || []).filter((n) => n !== member.name));
+    room.memberIds = room.memberIds.filter(id => id !== memberId);
+    if (room.promptLeaderMemberId === memberId) delete room.promptLeaderMemberId;
     writeRoom(room);
-    // Drop cursor for this member (mem_* or legacy key)
-    deleteCursor(roomId, member.id);
-    if (gid && gid !== member.id) deleteCursor(roomId, gid);
+    deleteCursor(roomId, memberId);
     return { ok: true, removed: member };
   });
 }
 
-/** Detach only explicit member identities; retain unrelated room and historical fields. */
-export function detachMemberFromConversations(memberId: string, db: import("../data/database.js").Database): void {
-  // B owns room persistence. Preserve all labels/local historical records and unrelated room fields.
-  const conversations = db;
-  for (const room of listStoredRooms(conversations)) {
-    // Global rosters treat local records as historical shadows. In a still-local roster,
-    // detach only records explicitly linked by ID, never a matching display label.
-    const localIds = new Set(room.globalMemberIds === undefined
-      ? (room.roomMembers ?? []).filter(m => m.id === memberId || m.sourceMemberId === memberId).map(m => m.id)
-      : []);
-    const isLeader = room.promptLeaderMemberId === memberId || (room.promptLeaderMemberId !== undefined && localIds.has(room.promptLeaderMemberId));
-    if (!room.globalMemberIds?.includes(memberId) && !localIds.size && !isLeader && room.promptLeaderGlobalMemberId !== memberId) continue;
-    if (room.globalMemberIds) room.globalMemberIds = room.globalMemberIds.filter(id => id !== memberId);
-    else if (localIds.size) room.roomMembers = room.roomMembers!.filter(m => !localIds.has(m.id));
-    if (isLeader) delete room.promptLeaderMemberId;
-    if (room.promptLeaderGlobalMemberId === memberId) delete room.promptLeaderGlobalMemberId;
-    storeRoom(room, conversations);
+/** Remove active membership while retaining imported historical snapshots. */
+export function detachMemberFromConversations(memberId: string, db: Database): void {
+  for (const room of listStoredRooms(db)) {
+    if (!room.memberIds.includes(memberId) && room.promptLeaderMemberId !== memberId) continue;
+    room.memberIds = room.memberIds.filter(id => id !== memberId);
+    if (room.promptLeaderMemberId === memberId) delete room.promptLeaderMemberId;
+    storeRoom(room, db);
+    deleteMemberCursor(room.id, memberId, db);
   }
 }
 
@@ -469,103 +371,104 @@ interface RoomRow {
   roster_kind: "global" | "local" | "names"; has_local_records: number; has_rule_docs: number; has_overrides: number;
 }
 
-interface SnapshotRow {
-  id: string; name: string; source_agent: string; source_member_id: string | null; avatar: string | null;
-  created_at: number; updated_at: number; migrated_name: string | null; migrated_id: string | null;
+export interface LegacyRoomImport {
+  id: string; name: string; createdAt: number; cwd?: string; members?: string[];
+  globalMemberIds?: string[]; promptLeaderMemberId?: string; promptLeaderGlobalMemberId?: string;
+  docsPath?: string; description?: string; ruleDocs?: string[];
+  roomMembers?: Array<{
+    id: string; name: string; sourceAgent: string; sourceMemberId?: string; avatar?: string;
+    createdAt: number; updatedAt: number; migratedFrom?: { memberName: string; memberId?: string }; config?: unknown;
+  }>;
+  memberOverrides?: Record<string, unknown>;
 }
 
 /** Historical references deliberately have no FK to live members. Never resolve names here. */
 function ensureConversationScope(id: string, kind: ScopeRow["kind"], roomId: string | null, memberId: string | null, db: Database = getDatabase()): void {
-    const previous = db.get<ScopeRow>("SELECT * FROM scopes WHERE id=?", id);
-    if (previous) {
-      if (previous.kind !== kind || previous.room_id !== roomId || previous.member_id !== memberId) {
-        throw new Error(`Scope ownership cannot change: ${id}`);
-      }
-      return;
-    }
-    db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES (?,?,?,?)", id, kind, roomId, memberId);
+  const previous = db.get<ScopeRow>("SELECT * FROM scopes WHERE id=?", id);
+  if (previous) {
+    if (previous.kind !== kind || previous.room_id !== roomId || previous.member_id !== memberId) throw new Error(`Scope ownership cannot change: ${id}`);
+    return;
   }
+  db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES (?,?,?,?)", id, kind, roomId, memberId);
+}
 
 export function ensureDmScope(memberId: string, db: Database = getDatabase()): string {
-    if (!memberId) throw new Error("DM scope requires a stable member ID");
-    const id = `dm:${memberId}`;
-    ensureConversationScope(id, "dm", null, memberId, db);
-    return id;
-  }
+  if (!memberId) throw new Error("DM scope requires a stable member ID");
+  const id = `dm:${memberId}`;
+  ensureConversationScope(id, "dm", null, memberId, db);
+  return id;
+}
 
 export function ensureMmScope(memberA: string, memberB: string, db: Database = getDatabase()): string {
-    const id = mmScopeIdOf(memberA, memberB);
-    const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
-    ensureConversationScope(id, "mm", null, `${a}|${b}`, db);
-    return id;
-  }
+  const id = mmScopeIdOf(memberA, memberB);
+  const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
+  ensureConversationScope(id, "mm", null, `${a}|${b}`, db);
+  return id;
+}
 
-type LegacyRoomInput = Room & {
-  roomMembers?: Array<RoomMemberRecord & { config?: unknown }>;
-  memberOverrides?: Record<string, unknown>;
-};
-
-export function storeRoom(room: Room, db: Database = getDatabase()): void {
-    if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) throw new Error("Room scope must use the bare room ID");
-    const legacy = room as LegacyRoomInput;
-    db.transaction(() => {
-      ensureConversationScope(room.id, "room", room.id, null, db);
-      const configs = new Map(db.all<{id: string; config_json: string | null}>(
-        "SELECT id,config_json FROM room_member_snapshots WHERE room_id=?", room.id).map(row => [row.id, row.config_json]));
+/** Persist a current room, or import a legacy room snapshot at the upgrade boundary. */
+export function storeRoom(room: Room | LegacyRoomImport, db: Database = getDatabase()): void {
+  if (!room.id || room.id.startsWith("room:") || room.id.startsWith("dm:")) throw new Error("Room scope must use the bare room ID");
+  db.transaction(() => {
+    ensureConversationScope(room.id, "room", room.id, null, db);
+    if ("memberIds" in room) {
       db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
-        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name,created_at=excluded.created_at,legacy_cwd=excluded.legacy_cwd,
-        docs_path=excluded.docs_path,description=excluded.description,leader_member_id=excluded.leader_member_id,leader_global_member_id=excluded.leader_global_member_id,
-        roster_kind=excluded.roster_kind,has_local_records=excluded.has_local_records,has_rule_docs=excluded.has_rule_docs`,
-        room.id, room.name, room.createdAt, room.cwd ?? null, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null,
-        room.promptLeaderGlobalMemberId ?? null, Array.isArray(room.globalMemberIds) ? "global" : Array.isArray(room.roomMembers) ? "local" : "names",
-        Number(Array.isArray(room.roomMembers)), Number(Array.isArray(room.ruleDocs)), Number(legacy.memberOverrides !== undefined));
-      for (const table of ["room_members", "room_member_labels", "room_member_snapshots", "room_rule_docs"]) db.run(`DELETE FROM ${table} WHERE room_id=?`, room.id);
-      [...new Set(room.globalMemberIds ?? [])].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
-      (room.members ?? []).forEach((label, i) => db.run("INSERT INTO room_member_labels VALUES (?,?,?)", room.id, i, label));
-      (legacy.roomMembers ?? []).forEach((m, i) => {
-        const config = (m as RoomMemberRecord & { config?: unknown }).config;
-        db.run(`INSERT INTO room_member_snapshots
-          (room_id,position,id,name,source_agent,source_member_id,avatar,created_at,updated_at,migrated_name,migrated_id,config_json)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, room.id, i, m.id, m.name, m.sourceAgent, m.sourceMemberId ?? null,
-          m.avatar ?? null, m.createdAt, m.updatedAt, m.migratedFrom?.memberName ?? null, m.migratedFrom?.memberId ?? null,
-          config === undefined ? configs.get(m.id) ?? null : JSON.stringify(config));
-      });
-      if (legacy.memberOverrides !== undefined) {
-        db.run("UPDATE rooms SET has_overrides=? WHERE id=?", Number(Object.keys(legacy.memberOverrides).length > 0), room.id);
-        db.run("DELETE FROM room_member_overrides WHERE room_id=?", room.id);
-        Object.entries(legacy.memberOverrides).forEach(([label, config]) => db.run(
-          "INSERT INTO room_member_overrides(room_id,member_label,config_json) VALUES (?,?,?)", room.id, label, JSON.stringify(config)));
-      }
+        roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,NULL,?,?,?,NULL,'global',0,?,0)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,docs_path=excluded.docs_path,description=excluded.description,
+        leader_member_id=excluded.leader_member_id,roster_kind='global',has_rule_docs=excluded.has_rule_docs`,
+        room.id, room.name, room.createdAt, room.docsPath ?? null, room.description ?? null, room.promptLeaderMemberId ?? null,
+        Number(Boolean(room.ruleDocs?.length)));
+      db.run("DELETE FROM room_members WHERE room_id=?", room.id);
+      [...new Set(room.memberIds)].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
+      db.run("DELETE FROM room_rule_docs WHERE room_id=?", room.id);
       (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
-    });
-  }
+      return;
+    }
+    const configs = new Map(db.all<{ id: string; config_json: string | null }>(
+      "SELECT id,config_json FROM room_member_snapshots WHERE room_id=?", room.id).map(row => [row.id, row.config_json]));
+    db.run(`INSERT INTO rooms(id,name,created_at,legacy_cwd,docs_path,description,leader_member_id,leader_global_member_id,
+      roster_kind,has_local_records,has_rule_docs,has_overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,created_at=excluded.created_at,legacy_cwd=excluded.legacy_cwd,
+      docs_path=excluded.docs_path,description=excluded.description,leader_member_id=excluded.leader_member_id,
+      leader_global_member_id=excluded.leader_global_member_id,roster_kind=excluded.roster_kind,
+      has_local_records=excluded.has_local_records,has_rule_docs=excluded.has_rule_docs`,
+      room.id, room.name, room.createdAt, room.cwd ?? null, room.docsPath ?? null, room.description ?? null,
+      room.promptLeaderMemberId ?? null, room.promptLeaderGlobalMemberId ?? null,
+      Array.isArray(room.globalMemberIds) ? "global" : Array.isArray(room.roomMembers) ? "local" : "names",
+      Number(Array.isArray(room.roomMembers)), Number(Boolean(room.ruleDocs?.length)), Number(room.memberOverrides !== undefined));
+    for (const table of ["room_members", "room_member_labels", "room_member_snapshots", "room_rule_docs"]) db.run(`DELETE FROM ${table} WHERE room_id=?`, room.id);
+    [...new Set(room.globalMemberIds ?? [])].forEach((id, i) => db.run("INSERT INTO room_members VALUES (?,?,?)", room.id, id, i));
+    (room.members ?? []).forEach((label, i) => db.run("INSERT INTO room_member_labels VALUES (?,?,?)", room.id, i, label));
+    (room.roomMembers ?? []).forEach((member, i) => db.run(`INSERT INTO room_member_snapshots
+      (room_id,position,id,name,source_agent,source_member_id,avatar,created_at,updated_at,migrated_name,migrated_id,config_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, room.id, i, member.id, member.name, member.sourceAgent, member.sourceMemberId ?? null,
+      member.avatar ?? null, member.createdAt, member.updatedAt, member.migratedFrom?.memberName ?? null,
+      member.migratedFrom?.memberId ?? null, member.config === undefined ? configs.get(member.id) ?? null : JSON.stringify(member.config)));
+    if (room.memberOverrides !== undefined) {
+      db.run("UPDATE rooms SET has_overrides=? WHERE id=?", Number(Object.keys(room.memberOverrides).length > 0), room.id);
+      db.run("DELETE FROM room_member_overrides WHERE room_id=?", room.id);
+      Object.entries(room.memberOverrides).forEach(([label, config]) => db.run(
+        "INSERT INTO room_member_overrides(room_id,member_label,config_json) VALUES (?,?,?)", room.id, label, JSON.stringify(config)));
+    }
+    (room.ruleDocs ?? []).forEach((path, i) => db.run("INSERT INTO room_rule_docs VALUES (?,?,?)", room.id, i, path));
+  });
+}
 
 export function readStoredRoom(id: string, db: Database = getDatabase()): Room | null {
-    const row = db.get<RoomRow>("SELECT * FROM rooms WHERE id=?", id);
-    if (!row) return null;
-    const room: Room = {
-      id, name: row.name, createdAt: row.created_at,
-      members: db.all<{ label: string }>("SELECT label FROM room_member_labels WHERE room_id=? ORDER BY position", id).map(r => r.label),
-      ...(row.legacy_cwd !== null ? { cwd: row.legacy_cwd } : {}),
-      ...(row.docs_path !== null ? { docsPath: row.docs_path } : {}),
-      ...(row.description !== null ? { description: row.description } : {}),
-      ...(row.leader_member_id !== null ? { promptLeaderMemberId: row.leader_member_id } : {}),
-      ...(row.leader_global_member_id !== null ? { promptLeaderGlobalMemberId: row.leader_global_member_id } : {}),
-    };
-    if (row.roster_kind === "global") room.globalMemberIds = db.all<{ member_id: string }>(
-      "SELECT member_id FROM room_members WHERE room_id=? ORDER BY position", id).map(r => r.member_id);
-    if (row.has_local_records) room.roomMembers = db.all<SnapshotRow>(
-      "SELECT * FROM room_member_snapshots WHERE room_id=? ORDER BY position", id).map((m): RoomMemberRecord => ({
-        id: m.id, roomId: id, name: m.name, sourceAgent: m.source_agent, createdAt: m.created_at, updatedAt: m.updated_at,
-        ...(m.source_member_id !== null ? { sourceMemberId: m.source_member_id } : {}),
-        ...(m.avatar !== null ? { avatar: m.avatar } : {}),
-        ...(m.migrated_name !== null ? { migratedFrom: { memberName: m.migrated_name, ...(m.migrated_id !== null ? { memberId: m.migrated_id } : {}) } } : {}),
-      }));
-    if (row.has_rule_docs) room.ruleDocs = db.all<{ path: string }>(
-      "SELECT path FROM room_rule_docs WHERE room_id=? ORDER BY position", id).map(r => r.path);
-    return room;
-  }
+  const row = db.get<RoomRow>("SELECT * FROM rooms WHERE id=?", id);
+  if (!row) return null;
+  const room: Room = {
+    id, name: row.name, createdAt: row.created_at,
+    memberIds: db.all<{ member_id: string }>("SELECT member_id FROM room_members WHERE room_id=? ORDER BY position", id).map(item => item.member_id),
+    ...(row.docs_path !== null ? { docsPath: row.docs_path } : {}),
+    ...(row.description !== null ? { description: row.description } : {}),
+    ...((row.leader_member_id ?? row.leader_global_member_id) !== null
+      ? { promptLeaderMemberId: row.leader_member_id ?? row.leader_global_member_id! } : {}),
+  };
+  if (row.has_rule_docs) room.ruleDocs = db.all<{ path: string }>(
+    "SELECT path FROM room_rule_docs WHERE room_id=? ORDER BY position", id).map(item => item.path);
+  return room;
+}
 
 export function listStoredRooms(db: Database = getDatabase()): Room[] {
     return db.all<{ id: string }>("SELECT id FROM rooms ORDER BY created_at DESC,id").map(r => readStoredRoom(r.id, db)!);
@@ -602,8 +505,7 @@ export function deleteMemberCursor(scopeId: string, actorKey: string, db: Databa
 /** Active membership is proven by IDs, never a historical display name. */
 export function listRoomsForMember(memberId: string): Room[] {
   if (!conversationMember(memberId)) return [];
-  return listRooms().filter(room => getRoomMembersFromRoom(room).some(member =>
-    member.id === memberId || member.sourceMemberId === memberId));
+  return listRooms().filter(room => room.memberIds.includes(memberId));
 }
 
 export type ScopeAccess =
@@ -629,7 +531,7 @@ export function assertMemberScopeAccess(memberId: string, scopeId: ScopeId): Sco
     return ref;
   }
   const room = getRoom(ref.roomId);
-  if (!room || !getRoomMembersFromRoom(room).some(member => member.id === memberId || member.sourceMemberId === memberId)) {
+  if (!room?.memberIds.includes(memberId)) {
     throw new Error(`Access denied: member is not in room ${ref.roomId}`);
   }
   return { kind: "room", roomId: ref.roomId, room };
@@ -655,7 +557,7 @@ function changeRuleDocPaths(matches: (path: string) => boolean, replace: (path: 
       const retained = unique ? [...new Set(filtered)] : filtered;
       if (retained.length) room.ruleDocs = retained;
       else delete room.ruleDocs;
-      storeRoom(serializeRoom(room));
+      storeRoom(room);
       affected++;
     }
     return affected;

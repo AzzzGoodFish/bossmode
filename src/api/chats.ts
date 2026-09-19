@@ -185,7 +185,8 @@ function requireRoom(id: string): Room {
   return room;
 }
 function roomResponse(room: Room) {
-  return { ...room, agentStatuses: actions?.roomStatuses?.(room.id) ?? {}, agentStale: {} };
+  return { ...room, members: getRoomMembers(room.id).map(member => member.name),
+    agentStatuses: actions?.roomStatuses?.(room.id) ?? {}, agentStale: {} };
 }
 addRoute("GET", "/api/rooms", async (_request, response) => {
   sendJson(response, 200, listRooms().map(roomResponse));
@@ -338,10 +339,10 @@ addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => 
   if (!member) return sendJson(response, 404, { error: "Member not found" });
   const result = inviteRoomMember(params.id, member.id);
   if (!result.ok) return sendJson(response, result.code === "duplicate" ? 409 : 400, { error: result.error });
-  sendJson(response, 200, getRoom(params.id));
+  sendJson(response, 200, roomResponse(requireRoom(params.id)));
 });
 addRoute("DELETE", "/api/rooms/:id/members/:memberId", async (_request, response, params) => {
   const result = removeRoomMember(params.id, params.memberId);
   if (!result.ok) return sendJson(response, 404, { error: result.error });
-  sendJson(response, 200, getRoom(params.id));
+  sendJson(response, 200, roomResponse(requireRoom(params.id)));
 });

@@ -594,10 +594,8 @@ export interface Room {
   name: string;
   /** ⑤: room description — shown in chat_info / the room settings dialog. */
   description?: string;
-  cwd: string;
   members: string[];
-  /** 0.20: authoritative member composition — join via useGlobalMembers(). */
-  globalMemberIds?: string[];
+  memberIds: string[];
   promptLeaderMemberId?: string;
   docsPath?: string;
   createdAt: number;
@@ -622,7 +620,7 @@ export async function createRoom(
 
 export async function updateRoomSettings(
   id: string,
-  patch: { name?: string; description?: string | null; ruleDocs?: string[]; promptLeaderMemberId?: string | null; docsPath?: string | null },
+  patch: { name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null },
 ): Promise<Room> {
   return apiFetch(`/api/rooms/${id}`, {
     method: "PATCH",

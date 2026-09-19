@@ -2,7 +2,7 @@ import { useMemberProfileRevision } from "./useMemberProfileRevision";
 /**
  * useGlobalMembers — contacts as a memberId → ContactEntry map (0.20).
  *
- * Rooms compose their member lists from room.globalMemberIds + this map;
+ * Rooms compose their member lists from room.memberIds + this map;
  * the legacy room.roomMembers record array is being removed (G3 debt ②).
  */
 import { useEffect, useState } from "react";
