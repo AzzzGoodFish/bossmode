@@ -45,16 +45,6 @@ export class MemberArchiveService {
   constructor(private readonly db: Database, private readonly root: string, private readonly hooks: ArchiveLifecycleHooks) {
     if (!isAbsolute(root)) throw new Error("Archive data root must be absolute");
   }
-  pending(): MemberArchiveIntent[] { return pendingMemberArchives(this.db); }
-  admission(memberId: string): "active" | "pending" | "archived" | "missing" {
-    if (memberArchivePath(memberId, this.db)) return "archived";
-    if (readMemberArchiveIntent(memberId, this.db)?.state === "pending") return "pending";
-    return getMember(memberId, this.db) ? "active" : "missing";
-  }
-  assertAdmission(memberId: string): void {
-    const state = this.admission(memberId);
-    if (state !== "active") throw new Error(`member_admission_${state}`);
-  }
   archive(memberId: string, opts: {confirm?: boolean}): Promise<{archived:string}> {
     this.db.assertOutsideTransaction();
     if (!opts.confirm) return Promise.reject(new Error("confirm_required"));
@@ -69,7 +59,7 @@ export class MemberArchiveService {
   /** Call before consumers/admission start. Does not guess identity, cancel tasks itself or replay execution. */
   async recoverPending(): Promise<void> {
     this.db.assertOutsideTransaction();
-    for (const intent of this.pending()) await this.archive(intent.memberId, {confirm:true});
+    for(const intent of pendingMemberArchives(this.db))await this.archive(intent.memberId,{confirm:true});
   }
   private async perform(memberId: string): Promise<{archived:string}> {
     this.db.assertOutsideTransaction();
