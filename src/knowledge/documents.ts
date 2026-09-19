@@ -172,6 +172,13 @@ export function getEntry(entryId: string): KnowledgeEntry | null {
   } catch { return null; }
 }
 
+export function getPathType(path: string): "file" | "folder" | null {
+  try {
+    const stat = statSync(absDocPath(normalizeDocPath(path)));
+    return stat.isDirectory() ? "folder" : stat.isFile() ? "file" : null;
+  } catch { return null; }
+}
+
 export function getRawEntry(entryId: string): { path: string; contentType: string; data: Buffer } | null {
   let rel: string;
   try { rel = normalizeDocPath(entryId); } catch { return null; }

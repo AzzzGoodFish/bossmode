@@ -1,41 +1,27 @@
 // Knowledge API — single-namespace document management (0.8.0)
 // ===============================================================
-// All docs live under the single global tree at
-// ~/.bossmode/knowledge/docs/. There is no KB container concept.
+// All docs live under the shared project-memory tree.
 
-import { existsSync, statSync } from "node:fs";
-import { addRoute, sendJson, parseBody } from "./http.js";
+import { addRoute, HttpError, sendJson, parseBody, requestValue } from "./http.js";
 import * as knowledgeStore from "../knowledge/documents.js";
 import * as roomStore from "../chat/conversations.js";
 
-function detectPathType(path: string): "file" | "folder" | null {
-  try {
-    const rel = knowledgeStore._internal.normalizeDocPath(path);
-    const abs = knowledgeStore._internal.absDocPath(rel);
-    if (!existsSync(abs)) return null;
-    const st = statSync(abs);
-    return st.isDirectory() ? "folder" : "file";
-  } catch {
-    return null;
-  }
-}
-
-function queryPath(req: { url?: string }, res: Parameters<typeof sendJson>[0]): string | null {
+function queryPath(req: { url?: string }): string {
   const path = new URL(req.url || "", "http://localhost").searchParams.get("path");
-  if (!path) sendJson(res, 400, { error: "path query parameter is required" });
+  if (!path) throw new HttpError(400, "path_required", "path query parameter is required");
   return path;
 }
 
 function inferTargetPath(from: string, to: string): string {
   // if destination is an existing folder path, preserve source basename
-  const toType = detectPathType(to);
+  const toType = knowledgeStore.getPathType(to);
   if (toType !== "folder") return to;
   const base = from.split("/").pop() || from;
   return `${to}/${base}`;
 }
 
 function moveOne(from: string, to: string): { ok: boolean; type?: "file" | "folder"; to?: string; error?: string } {
-  const sourceType = detectPathType(from);
+  const sourceType = knowledgeStore.getPathType(from);
   if (!sourceType) return { ok: false, error: "Source not found" };
   const resolvedTo = inferTargetPath(from, to);
 
@@ -56,7 +42,7 @@ function moveOne(from: string, to: string): { ok: boolean; type?: "file" | "fold
 }
 
 function deleteOne(path: string): { ok: boolean; type?: "file" | "folder"; error?: string } {
-  const type = detectPathType(path);
+  const type = knowledgeStore.getPathType(path);
   if (!type) return { ok: false, error: "Document not found" };
 
   if (type === "file") {
@@ -105,23 +91,15 @@ addRoute("POST", "/api/knowledge/entries", async (req, res) => {
     sendJson(res, 400, { error: "title and content are required" });
     return;
   }
-  try {
-    const entry = knowledgeStore.addEntry(
-      body.title, body.content,
-      body.source || "user",
-      body.path,
-    );
-    sendJson(res, 200, entry);
-  } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
-  }
+  const entry = await requestValue(() => knowledgeStore.addEntry(
+    body.title!, body.content!, body.source || "user", body.path));
+  sendJson(res, 200, entry);
 });
 
 // -- Single-doc read / update / delete (path via query string) --
 
 addRoute("GET", "/api/knowledge/raw", async (req, res) => {
-  const path = queryPath(req, res);
-  if (!path) return;
+  const path = queryPath(req);
   const raw = knowledgeStore.getRawEntry(path);
   if (!raw) { sendJson(res, 404, { error: "Document not found" }); return; }
   res.writeHead(200, {
@@ -143,50 +121,31 @@ addRoute("POST", "/api/knowledge/upload", async (req, res) => {
     sendJson(res, 400, { error: "Only image/png uploads are supported" });
     return;
   }
-  try {
-    const data = Buffer.from(body.dataBase64, "base64");
-    const entry = knowledgeStore.writePngEntry(body.path, data);
-    sendJson(res, 200, entry);
-  } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
-  }
+  const entry = await requestValue(() => knowledgeStore.writePngEntry(body.path!, Buffer.from(body.dataBase64!, "base64")));
+  sendJson(res, 200, entry);
 });
 
 addRoute("GET", "/api/knowledge/entry", async (req, res) => {
-  const path = queryPath(req, res);
-  if (!path) return;
+  const path = queryPath(req);
   const entry = knowledgeStore.getEntry(path);
   if (!entry) { sendJson(res, 404, { error: "Document not found" }); return; }
   sendJson(res, 200, entry);
 });
 
 addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
-  const path = queryPath(req, res);
-  if (!path) return;
+  const path = queryPath(req);
   const body = (await parseBody(req)) as { content?: string };
   if (body.content === undefined) return sendJson(res, 400, { error: "content is required" });
-  try {
-    const updated = knowledgeStore.updateEntry(path, body.content);
-    if (!updated) { sendJson(res, 404, { error: "Document not found" }); return; }
-    sendJson(res, 200, updated);
-  } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
-  }
+  const updated = await requestValue(() => knowledgeStore.updateEntry(path, body.content!));
+  if (!updated) return sendJson(res, 404, { error: "Document not found" });
+  sendJson(res, 200, updated);
 });
 
 addRoute("DELETE", "/api/knowledge/entry", async (req, res) => {
-  const path = queryPath(req, res);
-  if (!path) return;
-  try {
-    const result = deleteOne(path);
-    if (!result.ok) {
-      sendJson(res, 404, { error: result.error || "Document not found" });
-      return;
-    }
-    sendJson(res, 200, { ok: true, type: result.type });
-  } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
-  }
+  const path = queryPath(req);
+  const result = await requestValue(() => deleteOne(path));
+  if (!result.ok) return sendJson(res, 404, { error: result.error || "Document not found" });
+  sendJson(res, 200, { ok: true, type: result.type });
 });
 
 // -- Move / rename --
@@ -197,16 +156,11 @@ addRoute("POST", "/api/knowledge/move", async (req, res) => {
     sendJson(res, 400, { error: "from and to are required" });
     return;
   }
-  try {
-    const result = moveOne(body.from, body.to);
-    if (!result.ok || !result.type || !result.to) {
-      sendJson(res, 404, { error: result.error || "Source not found or destination conflicts" });
-      return;
-    }
-    sendJson(res, 200, { ok: true, from: body.from, to: result.to, type: result.type });
-  } catch (err: any) {
-    sendJson(res, 400, { error: String(err?.message || err) });
+  const result = await requestValue(() => moveOne(body.from!, body.to!));
+  if (!result.ok || !result.type || !result.to) {
+    return sendJson(res, 404, { error: result.error || "Source not found or destination conflicts" });
   }
+  sendJson(res, 200, { ok: true, from: body.from, to: result.to, type: result.type });
 });
 
 addRoute("POST", "/api/knowledge/batch-move", async (req, res) => {
