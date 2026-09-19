@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { logger } from "../kernel/logger.js";
+import { checkPath } from "../kernel/path.js";
 import { memberChatDir, memberDir, roomDir } from "./layout.js";
 
 export type AttachmentPreviewType = "image" | "markdown" | "html" | "text" | "download";
@@ -67,6 +68,10 @@ export interface StoredAttachment {
   size: number;
 }
 
+export type AttachmentImportOutcome =
+  | ({ ok: true } & StoredAttachment)
+  | { ok: false; path: string; error: string };
+
 function attachmentDirectory(location: AttachmentLocation): string {
   if (location.kind === "room") return join(roomDir(location.roomId), "attachments");
   if (location.kind === "dm") return join(memberDir(location.memberId), "dm-attachments");
@@ -125,6 +130,29 @@ export function copyAttachment(
   maxSize = MAX_UPLOAD_SIZE,
 ): Promise<StoredAttachment> {
   return storeAttachment(createReadStream(sourceAbsolutePath), location, originalFilename, maxSize);
+}
+
+/** Validate local paths against host-authorized roots, then copy each file into one attachment store. */
+export async function importAttachments(
+  paths: string[], location: AttachmentLocation, allowedRoots: string[], maxSize = MAX_UPLOAD_SIZE,
+): Promise<AttachmentImportOutcome[]> {
+  if (!Array.isArray(paths) || paths.length === 0) return [];
+  const allowedPrefixes = allowedRoots.flatMap(root => { try { return [realpathSync(root)]; } catch { return []; } });
+  const outcomes: AttachmentImportOutcome[] = [];
+  for (const path of paths) {
+    const check = checkPath(path, { allowedPrefixes, maxSizeBytes: maxSize });
+    if (!check.ok) {
+      logger.warn("attachments", "rejected", { path, error: check.error });
+      outcomes.push({ ok: false, path, error: check.error });
+      continue;
+    }
+    try {
+      outcomes.push({ ok: true, ...await copyAttachment(check.absolutePath, location, basename(check.absolutePath), maxSize) });
+    } catch (error) {
+      outcomes.push({ ok: false, path, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return outcomes;
 }
 
 export function getAttachmentPath(location: AttachmentLocation, storedFilename: string): string {
