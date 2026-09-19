@@ -274,6 +274,10 @@ type MappingProbe =
   | { kind: "mapping"; mapping: ShortIdMapping }
   | { kind: "empty" }
   | { kind: "unavailable" };
+function mappingFromRows(rows:Array<{kind:string;old_id:string;new_id:string}>):ShortIdMapping|null{
+  if(!rows.length)return null;const members=new Map<string,string>(),rooms=new Map<string,string>();
+  for(const row of rows)(row.kind==="member"?members:rooms).set(row.old_id,row.new_id);return {members,rooms};
+}
 
 function probeMappingFromDisk(root: string): MappingProbe {
   const dbPath = join(root, "bossmode.db");
@@ -281,10 +285,7 @@ function probeMappingFromDisk(root: string): MappingProbe {
   try {
     return inspectDatabase<MappingProbe>(dbPath,raw=>{
       const rows=raw.all<{kind:string;old_id:string;new_id:string}>("SELECT kind, old_id, new_id FROM id_migration_map");
-      if(rows.length===0)return {kind:"empty"};
-      const members=new Map<string,string>(),rooms=new Map<string,string>();
-      for(const row of rows)(row.kind==="member"?members:rooms).set(row.old_id,row.new_id);
-      return {kind:"mapping",mapping:{members,rooms}};
+      const mapping=mappingFromRows(rows);return mapping?{kind:"mapping",mapping}:{kind:"empty"};
     });
   } catch {
     return {kind:"unavailable"}; // Missing table or unreadable DB: replay still runs in strict mode.
@@ -427,30 +428,8 @@ const isOldMemberId = (value: string): boolean => /mem_[0-9a-f]{8}-[0-9a-f]{4}-/
 
 const isOldRoomUuid = (value: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 
-/** Residual old ids under the known transform keys only (content fields are exempt). */
-function jsonResidual(text: string, mapping: ShortIdMapping): boolean {
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { return false; }
-  let residual = false;
-  const walk = (value: unknown, key: string | null): void => {
-    if (typeof value === "string") {
-      if (key && SINGLE_MEMBER_KEYS.has(key)) { if (mapping.members.has(value)) residual = true; }
-      else if (key && MEMBER_LIST_KEYS.has(key)) { if (mapping.members.has(value)) residual = true; }
-      else if (key && SCOPE_KEYS.has(key)) { if (isOldMemberId(value) || /^[0-9a-f]{8}-/.test(value)) residual = true; }
-      else if (key && ROOM_KEYS.has(key)) { if (isOldRoomUuid(value)) residual = true; }
-      else if (key && COMPOSITE_KEYS.has(key)) {
-        if (isOldMemberId(value) || /rooms\/[0-9a-f]{8}-/.test(value) || /room-[0-9a-f]{8}-/.test(value)) residual = true;
-      }
-      return;
-    }
-    if (Array.isArray(value)) { for (const element of value) walk(element, key); return; }
-    if (value && typeof value === "object") {
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) walk(v, k);
-    }
-  };
-  walk(data, null);
-  return residual;
-}
+/** A value is residual when the canonical transform would still change it or leaves an old token behind. */
+function jsonResidual(text:string,mapping:ShortIdMapping):boolean{const result=transformJsonText(text,mapping);return result.changed||result.leftovers>0;}
 
 function jsonResidualCount(tx: Database, table: string, column: string, mapping: ShortIdMapping): number {
   const rows = tx.all<{ v: string }>(`SELECT "${column}" AS v FROM "${table}" WHERE "${column}" IS NOT NULL`);
@@ -509,18 +488,8 @@ export function transformJsonText(text: string, mapping: ShortIdMapping): JsonTr
 
 // ── mapping persistence ────────────────────────────────────────────────────
 
-export function loadShortIdMapping(db: Database): ShortIdMapping | null {
-  let rows: Array<{ kind: string; old_id: string; new_id: string }>;
-  try {
-    rows = db.all<{ kind: string; old_id: string; new_id: string }>("SELECT kind, old_id, new_id FROM id_migration_map");
-  } catch {
-    return null;
-  }
-  if (rows.length === 0) return null;
-  const members = new Map<string, string>();
-  const rooms = new Map<string, string>();
-  for (const row of rows) (row.kind === "member" ? members : rooms).set(row.old_id, row.new_id);
-  return { members, rooms };
+export function loadShortIdMapping(db:Database):ShortIdMapping|null{
+  try{return mappingFromRows(db.all("SELECT kind, old_id, new_id FROM id_migration_map"));}catch{return null;}
 }
 
 function loadOrAssignMapping(db: Database): ShortIdMapping {
