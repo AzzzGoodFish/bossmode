@@ -683,7 +683,7 @@ export async function handleToolCallback(
       // roomId arrives scope-shaped ("dm:<id>" / room id).
       const { reloadMemberSession } = await import("../assembly.js");
       const reloadMemberId = resolveCallerMemberId(roomId, actorRef);
-      const result = await reloadMemberSession(roomId, reloadMemberId, "tool");
+      const result = await reloadMemberSession(reloadMemberId, "tool");
       return {
         ok: true,
         queued: result.queued,

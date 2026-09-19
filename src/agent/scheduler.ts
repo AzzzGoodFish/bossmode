@@ -1,14 +1,13 @@
 import { canonicalJson, type JsonValue } from "../kernel/json.js";
 import {randomUUID} from "node:crypto";
 import {getDatabase, type Database} from "../data/database.js";
-import { instanceKey, instances, memberRuntimeAllowed, runtimeIsStopping, trackMemberOperation, transition, updateDispatchState, chatTargetOf, type AgentInstance } from "./instance.js";
+import { instanceKey, instances, memberRuntimeAllowed, runtimeIsStopping, trackMemberOperation, transition, updateDispatchState, type AgentInstance } from "./instance.js";
 import { logger } from "../kernel/logger.js";
 import { handleAgentEvent as processEvent, type AgentHistoryEvent } from "./events.js";
 import type { AgentMemberConfig, AgentStreamEvent } from "./types.js";
 import { formatRuntimeErrorMessage, isMemberConfigured, memberUnconfiguredMessage } from "./instance.js";
 import { DeliveryRepository, deliveryKeyParams, deliveryText, deliveryTime, type CapturedMessage, type DeliveryKey } from "../data/repositories/delivery-repository.js";
 import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
-import {executionScopeId,assertExecutionOwner} from "../data/repositories/execution-identity.js";
 
 export interface PreparedRuntimeInput {
   prompt:string;
@@ -17,7 +16,7 @@ export interface PreparedRuntimeInput {
   replySources?:string[];
 }
 export interface RuntimeInputOwner {scopeId:string;targetActorKey:string}
-export const runtimeInputOwner=(scope:string,memberId:string):RuntimeInputOwner=>({scopeId:executionScopeId(scope),targetActorKey:memberId});
+export const runtimeInputOwner=(sourceRef:string,memberId:string):RuntimeInputOwner=>({scopeId:sourceRef,targetActorKey:memberId});
 
 /** Preparation runs once, outside SQL; acceptance, payload and optional cursor commit together.
  * A duplicate never re-reads history or re-applies interruption policy. */
@@ -49,7 +48,8 @@ export function acceptRuntimeInput(
 
 /** A control has its own non-visible system identity, never an invented human timeline row. */
 export function acceptControlInput(scopeValue:string,memberId:string,payload:PreparedRuntimeInput,replyExpected:boolean,placement:"front"|"tail"="tail",onAccepted?:()=>void):{input:QueuedInput;accepted:boolean}{
-  const db=getDatabase(),scopeId=assertExecutionOwner(db,memberId,scopeValue),messageId=`control:${randomUUID()}`;
+  const db=getDatabase(),scopeId=scopeValue,messageId=`control:${randomUUID()}`;
+  deliveryText(scopeId,"source reference");
   const actor={actorKey:memberId,memberId};
   const deliveryKind=scopeId.startsWith("dm:")?"dm":"ordinary";
   const capture:CapturedMessage={scopeId,messageId,snapshot:{
@@ -164,15 +164,14 @@ function notifyInputProgress(key:string,error?:unknown):void{
 
 /** Runtime collaborators; scheduling, receipts and continuation policy stay here. */
 export interface SchedulerServices {
-  buildSession(memberId: string, scopeId: string): Promise<AgentInstance | null>;
+  buildSession(memberId: string): Promise<AgentInstance | null>;
   memberConfig(memberId: string): AgentMemberConfig | null;
-  canExecuteScope(scopeId: string, memberId: string): boolean;
-  postSystemNotice(scopeId: string, text: string): void;
-  emitEvent(scopeId: string, memberId: string, event: AgentHistoryEvent): void;
+  postSystemNotice(sourceRef: string, text: string): void;
+  emitEvent(sourceRef: string, memberId: string, event: AgentHistoryEvent): void;
   refreshProfileSources(instance: AgentInstance): void;
   applyPendingControls(instance: AgentInstance, trigger: string): void;
   flushPendingReload(instance: AgentInstance): void;
-  reloadSession(scopeId: string, memberId: string, reason: string): Promise<{ queued: boolean; rebuilt: boolean }>;
+  reloadSession(memberId: string, reason: string): Promise<{ queued: boolean; rebuilt: boolean }>;
 }
 let services: SchedulerServices | undefined;
 export function configureScheduler(next: SchedulerServices): void {
@@ -193,13 +192,11 @@ export function resumePendingRuntimeInputs():void{
   }
 }
 
-class RuntimeScopeRevokedError extends Error {
-  constructor() { super("Member no longer has access to this execution scope"); }
-}
-
 export function drainQueuedInputsAsPrompt(instance:AgentInstance,trigger:string):boolean{
   if(!memberRuntimeAllowed(instance.memberId)||!queueDepth(instance)||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")return false;
-  void pumpRuntimeInputs(instance.activeChat?.scopeId||instance.scopeId,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
+  const sourceRef=pendingRuntimeInputOwners(instance.memberId)[0];
+  if(!sourceRef)return false;
+  void pumpRuntimeInputs(sourceRef,instance.memberId).catch(error=>logger.error("agent","queued input failed",{memberId:instance.memberId,trigger,error:String(error)}));
   return true;
 }
 
@@ -207,20 +204,13 @@ export function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<voi
   const owner=runtimeInputOwner(scopeValue,memberId),key=instanceKey(memberId);
   const current=inputPumps.get(key);if(current)return current;
   if(!memberRuntimeAllowed(memberId)||!memberPendingInputCount(memberId))return Promise.resolve();
-  if(!schedulerServices().canExecuteScope(owner.scopeId,memberId)){
-    cancelPendingRuntimeInputs(owner,"execution scope access revoked");
-    return Promise.resolve();
-  }
   const epoch=inputScopeEpoch.get(key)??0;
   let failed=false;
   const operation=trackMemberOperation(memberId,async()=>{
-    const instance=await schedulerServices().buildSession(memberId,owner.scopeId);
+    const instance=await schedulerServices().buildSession(memberId);
     if(!instance){
       if(!runtimeIsStopping()&&(inputScopeEpoch.get(key)??0)===epoch){
-        const revoked=!schedulerServices().canExecuteScope(owner.scopeId,memberId);
-        cancelPendingRuntimeInputs(owner,revoked?"execution scope access revoked":"runtime creation failed",revoked?"cancelled":"failed");
-      }
-      if(schedulerServices().canExecuteScope(owner.scopeId,memberId)&&(inputScopeEpoch.get(key)??0)===epoch){
+        cancelPendingRuntimeInputs(owner,"runtime creation failed","failed");
         const member=schedulerServices().memberConfig(memberId);
         schedulerServices().postSystemNotice(owner.scopeId,member&&!isMemberConfigured(member)?memberUnconfiguredMessage(member.name):`Failed to activate member "${member?.name??memberId}": runtime unavailable.`);
       }
@@ -228,10 +218,6 @@ export function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<voi
     }
     for(;;){
       if(!memberRuntimeAllowed(memberId)||instances.get(key)!==instance||instance.compacting||instance.promptInFlight||instance.turnActive||instance.dispatchState!=="idle")break;
-      if(!schedulerServices().canExecuteScope(owner.scopeId,memberId)){
-        cancelPendingRuntimeInputs(owner,"execution scope access revoked");
-        break;
-      }
       const inputs=pendingRuntimeInputs(owner);if(!inputs.length)break;
       await runInputBatch(instance,inputs);
       notifyInputProgress(key);
@@ -253,7 +239,7 @@ export function pumpRuntimeInputs(scopeValue:string,memberId:string):Promise<voi
     // reads the member as busy.
     const quiet=instances.get(key);
     if(quiet&&!quiet.promptInFlight&&!quiet.turnActive&&quiet.dispatchState==="idle"&&quiet.status!=="idle"&&!memberPendingInputCount(memberId)){
-      transition(quiet,quiet.roomId,quiet.agentName,"idle","queue-cancelled");
+      transition(quiet,quiet.activeSourceRef,quiet.agentName,"idle","queue-cancelled");
     }
     notifyInputProgress(key);
     const live=instances.get(key);
@@ -279,29 +265,28 @@ function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],tr
   updateDispatchState(instance,"idle",trigger);
   if(!memberRuntimeAllowed(instance.memberId))return;
   schedulerServices().applyPendingControls(instance,trigger);
-  // ① B1: this batch's chat, not the build-time scope.
-  const chat=instance.activeChat?.scopeId||instance.roomId;
-  const chatTarget=chatTargetOf(chat);
+  const sourceRef=inputs[0]?.scopeId;
+  if(!sourceRef)return;
   // Pending work does not inherit this batch's reply obligations. Complete or
   // explicitly hand off this batch before the pump chooses its next inputs.
   if(instance.lengthContinuationPending&&!skipChatWarning){
     instance.lengthContinuationPending=false;instance.lastMessageEndWasLength=false;
     if(instance.lengthContinuationAttempted){
       dismissRuntimeReplies(inputs,"continuation-exhausted","length continuation budget exhausted");
-      schedulerServices().postSystemNotice(chatTarget,`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
+      schedulerServices().postSystemNotice(sourceRef,`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
     }else{
       instance.lengthContinuationAttempted=true;
-      const owed=hasRuntimeReply(runtimeInputOwner(chat,instance.memberId),inputs);
-      acceptControlInput(chat,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
+      const owed=hasRuntimeReply(runtimeInputOwner(sourceRef,instance.memberId),inputs);
+      acceptControlInput(sourceRef,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
     }
     return;
   }
-  const owner=runtimeInputOwner(chat,instance.memberId);
+  const owner=runtimeInputOwner(sourceRef,instance.memberId);
   if(!skipChatWarning&&!instance.hadErrorInTurn&&hasRuntimeReply(owner,inputs)){
     // A reply was owed but the turn ended without a chat call: nothing is
     // delivered — the debt is dismissed and the silence is made visible.
     dismissRuntimeReplies(inputs,"silent","member finished without replying");
-    schedulerServices().postSystemNotice(chatTarget,`Member "${instance.agentName}" finished without replying.`);
+    schedulerServices().postSystemNotice(sourceRef,`Member "${instance.agentName}" finished without replying.`);
   }
 }
 
@@ -309,24 +294,21 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   if(!memberRuntimeAllowed(instance.memberId))return;
   const payloads=inputs.map(runtimeInputPayload),message=payloads.map(x=>x.prompt).join("\n\n");
   const trigger=payloads.length===1?payloads[0].trigger:"queued",token=randomUUID();
-  // ① B1: this batch's chat — the instance serves it now; outbound calls follow it.
   const batchScope=inputs[0].scopeId;
-  instance.activeChat.scopeId=batchScope;
-  const batchTarget=chatTargetOf(batchScope);
+  instance.activeSourceRef=batchScope;
   updateDispatchState(instance,"promptSubmitted",trigger);
   instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
   instance.lastMessageEndWasLength=false;instance.lengthContinuationPending=false;
   instance.lengthContinuationAttempted=payloads.some(payload=>payload.trigger==="length_continuation");
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
   try{
-    if(trigger!=="length_continuation")schedulerServices().emitEvent(batchTarget,instance.memberId,{type:"user_prompt",text:message,trigger});
+    if(trigger!=="length_continuation")schedulerServices().emitEvent(batchScope,instance.memberId,{type:"user_prompt",text:message,trigger});
     if(instance.profilePromptDirty){
       schedulerServices().refreshProfileSources(instance);
       if(!instance.handle.refreshPrompt)throw new Error("Runtime cannot refresh member identity without resetting the session.");
       instance.handle.refreshPrompt(instance.sessionSources.compiled);instance.profilePromptDirty=false;
     }
     await instance.handle.prompt(message,{beforeDispatch:(event:{attemptId:string;dispatchIndex:number;message:string})=>{
-      if(!schedulerServices().canExecuteScope(batchScope,instance.memberId))throw new RuntimeScopeRevokedError();
       if(event.dispatchIndex===0){claimRuntimeInputs(inputs,event.attemptId,token);dispatched=true;}
       else{
         const continuation=acceptControlInput(batchScope,instance.memberId,{prompt:event.message,source:"system",trigger:"sdk-continuation",replySources:runtimeReplySources(inputs)},hasRuntimeReply(runtimeInputOwner(batchScope,instance.memberId),inputs)).input;
@@ -336,8 +318,7 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
     if(!dispatched)throw new Error("Runtime returned without a durable input dispatch receipt");
     outcome=instance.dispatchState==="aborting"?"cancelled":instance.hadErrorInTurn?"failed":"completed";
   }catch(error){
-    if(error instanceof RuntimeScopeRevokedError){outcome="cancelled";instance.lastTurnError=null;}
-    else{failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);}
+    failure=error;outcome=instance.dispatchState==="aborting"?"cancelled":"failed";instance.hadErrorInTurn=true;instance.lastTurnError=formatRuntimeErrorMessage(error);
   }
   instance.promptInFlight=false;
   // Provider settlement is not application publication. Publication failure cannot replay the input.
@@ -346,9 +327,10 @@ async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promis
   finally{finishRuntimeInputs(inputs,token,outcome,failure?"runtime operation or publication failed":outcome);}
   if(failure){
     logger.error("agent","input processing failed",{memberId:instance.memberId,scopeId:batchScope,error:String(failure)});
-    if(instances.get(instanceKey(instance.memberId))===instance)schedulerServices().postSystemNotice(batchTarget,`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
+    if(instances.get(instanceKey(instance.memberId))===instance)schedulerServices().postSystemNotice(batchScope,`Member "${instance.agentName}" error: ${formatRuntimeErrorMessage(failure)}`);
   }
-  if(instances.get(instanceKey(instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,batchTarget,instance.agentName,"idle",`${trigger}_settled`);
+  if(instances.get(instanceKey(instance.memberId))===instance&&!queueDepth(instance)&&!instance.compacting&&instance.status!=="idle")transition(instance,batchScope,instance.agentName,"idle",`${trigger}_settled`);
+  if(instance.activeSourceRef===batchScope)instance.activeSourceRef=null;
 }
 
 
@@ -523,7 +505,7 @@ export class ExecutionAttemptRepository {
   }
   prepare(a: Omit<ExecutionAttempt, "status" | "dispatchedAt" | "endedAt" | "diagnosis">): void {
     this.db.run(`INSERT INTO execution_attempts(id,member_id,scope_id,operation,external_reference,status,started_at)
-      VALUES(?,?,?,?,?,'prepared',?)`, a.id, a.memberId, assertExecutionOwner(this.db, a.memberId, a.scopeId), a.operation, a.externalReference, a.startedAt);
+      VALUES(?,?,?,?,?,'prepared',?)`, a.id, a.memberId, a.scopeId, a.operation, a.externalReference, a.startedAt);
   }
   markDispatched(id: string, memberId: string, at: number): void {
     if (!this.db.get("UPDATE execution_attempts SET status='dispatched',dispatched_at=? WHERE id=? AND member_id=? AND status='prepared' RETURNING id", at, id, memberId)) {
@@ -622,7 +604,7 @@ export class SdkExecutionService {
 
 /**
  * THE one instance event subscription. Room and DM instances share this wiring;
- * the only scope difference is the notification address: `roomId` is the bare
+ * the only scope difference is the notification address: `sourceRef` is the bare
  * room id for room scope and "dm:<memberId>" for DM scope, and postMessage
  * routes by that prefix (room store vs member-owned DM store). Failure notices
  * therefore reach the user in both UIs (G1), and lifecycle handling (length
@@ -630,13 +612,15 @@ export class SdkExecutionService {
  * drift between scopes.
  */
 export function wireInstanceEvents(instance: AgentInstance): void {
-  const key = instanceKey(instance.memberId), builtRoomId = instance.roomId, memberId = instance.memberId;
+  const key = instanceKey(instance.memberId), memberId = instance.memberId;
   const unsubscribe = instance.handle.subscribe((event: AgentStreamEvent) => {
     const memberName = instance.agentName;
-    // ① B1: persisted/streamed facts belong to the chat being served right
-    // now; event scopes keep the historical form (bare room id | dm:<id>).
-    const roomId = chatTargetOf(instance.activeChat?.scopeId || builtRoomId);
-    const newStatus = processEvent(roomId, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
+    const sourceRef = instance.activeSourceRef;
+    if (!sourceRef) {
+      logger.warn("agent", "runtime event without active source", { memberId, type: event.type });
+      return;
+    }
+    const newStatus = processEvent(sourceRef, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
     if (event.type === "agent_start") {
       instance.turnActive = true;
       if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
@@ -647,11 +631,11 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       // does not wake on the retry gap (fish 2026-08-09 experiment).
       if (event.willRetry) {
         instance.pendingErrorNotice = null; // suppress mid-retry error system messages
-        logger.info("agent", "agent_end_willRetry", { member: memberName, roomId, memberId });
+        logger.info("agent", "agent_end_willRetry", { member: memberName, sourceRef, memberId });
       } else {
         // Final agent_end for this attempt budget — settle deferred error notice once.
         if (instance.pendingErrorNotice) {
-          schedulerServices().postSystemNotice(roomId, instance.pendingErrorNotice);
+          schedulerServices().postSystemNotice(sourceRef, instance.pendingErrorNotice);
           instance.pendingErrorNotice = null;
         }
         // Public status may become idle here, but the SDK run can still be finalizing.
@@ -677,11 +661,11 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       }
     } else if (event.type === "compaction_start") {
       instance.compacting = true;
-      transition(instance, roomId, memberName, "working", event.type);
+      transition(instance, sourceRef, memberName, "working", event.type);
     } else if (event.type === "compaction_end") {
       instance.compacting = false;
       if (!instance.turnActive) {
-        transition(instance, roomId, memberName, "idle", event.type);
+        transition(instance, sourceRef, memberName, "idle", event.type);
         drainQueuedInputsAsPrompt(instance, event.type);
         schedulerServices().flushPendingReload(instance);
         // Batch 6 §3: after compaction the session is rebuilt with fresh
@@ -690,13 +674,12 @@ export function wireInstanceEvents(instance: AgentInstance): void {
         const settled = instance.status === "idle" && !instance.compacting && !instance.turnActive
           && instance.dispatchState === "idle" && !instance.promptInFlight && queueDepth(instance) === 0;
         if (settled) {
-          const compactionScopeId = instance.activeChat?.scopeId || instance.scopeId;
           const compactionMemberId = instance.memberId;
           const compactionKey = instanceKey(compactionMemberId);
           setTimeout(() => {
-            if (instances.get(compactionKey) !== instance) return; // replaced meanwhile
-            void schedulerServices().reloadSession(compactionScopeId, compactionMemberId, "compaction").catch((err) =>
-              logger.error("agent", "post-compaction reload failed", { memberId: compactionMemberId, scopeId: compactionScopeId, error: String(err) }),
+            if (instances.get(compactionKey) !== instance) return;
+            void schedulerServices().reloadSession(compactionMemberId, "compaction").catch((err) =>
+              logger.error("agent", "post-compaction reload failed", { memberId: compactionMemberId, error: String(err) }),
             );
           }, 0);
         } else {
@@ -711,7 +694,7 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
         // drained next prompt — stay working publicly
       } else {
-        transition(instance, roomId, memberName, newStatus, event.type);
+        transition(instance, sourceRef, memberName, newStatus, event.type);
       }
     }
 
@@ -719,7 +702,7 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
       if (instance.lastMessageEndWasLength) {
         instance.lengthContinuationPending = true;
-        logger.warn("agent", "lengthContinuationPending", { member: memberName, roomId, memberId, stopReason: event.stopReason });
+        logger.warn("agent", "lengthContinuationPending", { member: memberName, sourceRef, memberId, stopReason: event.stopReason });
       }
     }
 
@@ -730,7 +713,7 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       const detail = formattedError
         ? ` Error: ${formattedError}`
         : " An unrecoverable provider error occurred.";
-      logger.error("agent", "member request failed", { roomId, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
+      logger.error("agent", "member request failed", { sourceRef, member: memberName, memberId, error: formattedError || "unrecoverable provider error" });
       // Defer system notice until final agent_end — willRetry attempts stay silent
       // so a retry storm posts one death notice, not one per attempt (fish 2026-08-09).
       instance.pendingErrorNotice = `Member "${memberName}" request failed.${detail}`;
@@ -745,11 +728,11 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
       // Wake the runtime teardown path (processEvent does not idle this path).
       if (instance.status !== "idle") {
-        transition(instance, roomId, memberName, "idle", event.type);
+        transition(instance, sourceRef, memberName, "idle", event.type);
       }
-      schedulerServices().postSystemNotice(roomId, `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
+      schedulerServices().postSystemNotice(sourceRef, `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
       logger.warn("agent", "instance removed after unexpected exit", {
-        member: memberName, roomId, code: event.code, signal: event.signal,
+        member: memberName, sourceRef, code: event.code, signal: event.signal,
       });
       if (instances.get(key) === instance) instances.delete(key);
       try { instance.unsubscribe(); } catch {}

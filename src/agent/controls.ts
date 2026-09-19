@@ -7,7 +7,7 @@ import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, maybeFlushPendingReload, getRegistry } from "./assembly.js";
 import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, runtimeInputOwner, invalidateInputScope } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal/shell-manager.js";
-import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, contextCompactionWarningCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, chatTargetOf, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
+import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, contextCompactionWarningCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";
 import type { AgentHistoryEvent } from "./events.js";
 
@@ -33,6 +33,30 @@ export function configureControls(next: ControlServices): void {
 function controlServices(): ControlServices {
   if (!services) throw new Error("Runtime controls are not connected");
   return services;
+}
+
+function activeSource(instance: AgentInstance): string | null {
+  return instance.activeSourceRef;
+}
+
+function publishCurrentStatus(instance: AgentInstance): void {
+  const sourceRef = activeSource(instance);
+  if (!sourceRef) return;
+  controlServices().publishStatus(sourceRef, {
+    type: "agent:status", roomId: sourceRef, agent: instance.agentName,
+    ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status,
+  });
+}
+
+function noticeCurrentSource(instance: AgentInstance, message: string): void {
+  const sourceRef = activeSource(instance);
+  if (sourceRef) controlServices().postSystemNotice(sourceRef, message);
+}
+
+function cancelMemberPending(memberId: string, diagnosis: string): void {
+  for (const row of getDatabase().all<{ sourceRef: string }>(
+    "SELECT DISTINCT scope_id AS sourceRef FROM queued_inputs WHERE target_actor_key=? AND status='pending'", memberId,
+  )) cancelPendingRuntimeInputs(runtimeInputOwner(row.sourceRef, memberId), diagnosis);
 }
 
 let shutdownSettlement: Promise<void> | null = null;
@@ -87,8 +111,7 @@ async function applyModelSwitchToInstanceInternal(
   // Validation passed — apply-time export refreshes the instance's model
   // catalog (models.json) before setModel binds.
   const exported = exportPiConfigForMember({
-    roomId: instance.roomId,
-    memberName: instance.memberId,
+    memberId: instance.memberId,
     modelRef: model,
     credentialId: profile.id,
   });
@@ -103,9 +126,8 @@ async function applyModelSwitchToInstanceInternal(
   }
   instance.appliedModel = model;
   instance.appliedCredentialId = profile.id;
-  logger.info("agent", "modelSwitchApplied", { member: instance.agentName, roomId: instance.roomId, model, trigger });
-  const modelChat = chatTargetOf(instance.activeChat?.scopeId || instance.roomId);
-  controlServices().publishStatus(modelChat, { type: "agent:status", roomId: modelChat, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
+  logger.info("agent", "modelSwitchApplied", { member: instance.agentName, sourceRef: activeSource(instance), model, trigger });
+  publishCurrentStatus(instance);
 }
 
 /** If the live instance drifted from the room binding, re-apply (or destroy so the next create is clean). */
@@ -118,9 +140,8 @@ async function applyThinkingSwitchToInstanceInternal(instance: AgentInstance, pe
   if (!instance.handle.setThinkingLevel) throw new Error("Runtime does not support dynamic thinking level switching");
   await instance.handle.setThinkingLevel(pending.thinkingLevel);
   if (instance.handle.runtimeParams) instance.handle.runtimeParams.thinkingLevel = pending.thinkingLevel;
-  logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, roomId: instance.roomId, thinkingLevel: pending.thinkingLevel, trigger });
-  const thinkingChat = chatTargetOf(instance.activeChat?.scopeId || instance.roomId);
-  controlServices().publishStatus(thinkingChat, { type: "agent:status", roomId: thinkingChat, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: instance.status });
+  logger.info("agent", "thinkingSwitchApplied", { member: instance.agentName, sourceRef: activeSource(instance), thinkingLevel: pending.thinkingLevel, trigger });
+  publishCurrentStatus(instance);
 }
 
 function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): void {
@@ -128,8 +149,8 @@ function applyPendingThinkingSwitch(instance: AgentInstance, trigger: string): v
   if (!pending) return;
   instance.pendingThinkingSwitch = undefined;
   applyThinkingSwitchToInstance(instance, pending, trigger).catch((err) => {
-    logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
-    controlServices().postSystemNotice(chatTargetOf(instance.activeChat?.scopeId || instance.roomId), `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
+    logger.error("agent", "thinkingSwitchFailed", { member: instance.agentName, sourceRef: activeSource(instance), error: String(err) });
+    noticeCurrentSource(instance, `Failed to switch thinking level for "${instance.agentName}": ${err.message || String(err)}`);
   });
 }
 
@@ -146,9 +167,9 @@ function dropInstanceAfterCredentialUnavailable(instance: AgentInstance, reason:
   try { instance.handle.destroy(); } catch {}
   instance.status = "inactive";
   updateDispatchState(instance, "idle", "credential_unavailable");
-  controlServices().publishStatus(instance.roomId, { type: "agent:status", roomId: instance.roomId, agent: instance.agentName, ...memberIdentityMeta(instance.agentName, instance.memberId), status: "inactive" });
-  logger.warn("agent", "credentialRefreshUnavailable", { member: instance.agentName, roomId: instance.roomId, reason });
-  controlServices().postSystemNotice(instance.roomId, `Member "${instance.agentName}" model credential is no longer available. Update Settings → Model Credentials or choose another model before the next turn.`);
+  publishCurrentStatus(instance);
+  logger.warn("agent", "credentialRefreshUnavailable", { member: instance.agentName, sourceRef: activeSource(instance), reason });
+  noticeCurrentSource(instance, `Member "${instance.agentName}" model credential is no longer available. Update Settings → Model Credentials or choose another model before the next turn.`);
 }
 
 const CREDENTIAL_REFRESH_TIMEOUT_MS = 8_000;
@@ -176,8 +197,7 @@ function applyCredentialRefreshToInstance(instance: AgentInstance, pending: Pend
 async function applyCredentialRefreshToInstanceInternal(instance: AgentInstance, pending: PendingCredentialRefresh, trigger: string): Promise<void> {
   try {
     const exported = exportPiConfigForMember({
-      roomId: instance.roomId,
-      memberName: instance.memberId,
+      memberId: instance.memberId,
       modelRef: instance.appliedModel,
       credentialId: instance.appliedCredentialId,
     });
@@ -204,14 +224,14 @@ async function applyCredentialRefreshToInstanceInternal(instance: AgentInstance,
       instance.handle.runtimeParams.credentialName = exported.profile?.name;
     }
     instance.appliedCredentialId = exported.profile?.id || instance.appliedCredentialId;
-    logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: instance.roomId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
+    logger.info("agent", "credentialRefreshApplied", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId: pending.profileId, providerSlug: pending.providerSlug, trigger });
   } catch (err) {
     // Profile gone / export empty already dropped above. Network/timeouts must NOT
     // destroy the live instance or cry "credential no longer available".
     if (pending.changeType !== "profileDeleted" && isTransientCredentialRefreshError(err)) {
       logger.warn("agent", "credentialRefreshTransient", {
         member: instance.agentName,
-        roomId: instance.roomId,
+        roomId: activeSource(instance) ?? instance.memberId,
         profileId: pending.profileId,
         error: err instanceof Error ? err.message : String(err),
         trigger,
@@ -227,8 +247,8 @@ function applyPendingCredentialRefresh(instance: AgentInstance, trigger: string)
   if (!pending) return;
   instance.pendingCredentialRefresh = undefined;
   applyCredentialRefreshToInstance(instance, pending, trigger).catch((err) => {
-    logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
-    controlServices().postSystemNotice(instance.roomId, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
+    logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
+    noticeCurrentSource(instance, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
   });
 }
 
@@ -252,7 +272,7 @@ export async function refreshAllInstanceModelRegistries(): Promise<{ refreshed: 
       failed += 1;
       logger.warn("agent", "catalogRegistryRefreshFailed", {
         member: instance.agentName,
-        roomId: instance.roomId,
+        roomId: activeSource(instance) ?? instance.memberId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -270,16 +290,16 @@ export async function invalidateModelCredentialProfile(profileId: string, provid
     for (const instance of targets) {
       if (instance.status === "working" || instance.dispatchState !== "idle") {
         instance.pendingCredentialRefresh = pending;
-        logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: instance.roomId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
+        logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
         continue;
       }
       // Fire-and-forget; errors handled inside applyCredentialRefreshToInstance.
       void applyCredentialRefreshToInstance(instance, pending, "credentialProfileInvalidated").catch((err) => {
-        logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
+        logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
       });
     }
     return targets.map((instance) => ({
-      roomId: instance.roomId,
+      roomId: activeSource(instance) ?? instance.memberId,
       memberName: instance.agentName,
       applied: false,
       pending: true,
@@ -291,17 +311,17 @@ export async function invalidateModelCredentialProfile(profileId: string, provid
   await Promise.all(targets.map(async (instance) => {
     if (instance.status === "working" || instance.dispatchState !== "idle") {
       instance.pendingCredentialRefresh = pending;
-      logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: instance.roomId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
-      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: false, pending: true });
+      logger.info("agent", "credentialRefreshQueued", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, profileId, providerSlug, status: instance.status, dispatchState: instance.dispatchState });
+      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: false, pending: true });
       return;
     }
     try {
       await applyCredentialRefreshToInstance(instance, pending, "credentialProfileInvalidated");
-      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: true, pending: false });
+      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: true, pending: false });
     } catch (err: any) {
-      logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: instance.roomId, error: String(err) });
-      controlServices().postSystemNotice(instance.roomId, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
-      results.push({ roomId: instance.roomId, memberName: instance.agentName, applied: false, pending: false });
+      logger.error("agent", "credentialRefreshFailed", { member: instance.agentName, roomId: activeSource(instance) ?? instance.memberId, error: String(err) });
+      noticeCurrentSource(instance, `Failed to refresh model credential for "${instance.agentName}": ${err.message || String(err)}`);
+      results.push({ roomId: activeSource(instance) ?? instance.memberId, memberName: instance.agentName, applied: false, pending: false });
     }
   }));
   return results;
@@ -342,8 +362,8 @@ async function rollbackSwitchedInstances(
     const stillCurrent = instances.get(instanceKey(inst.memberId)) === inst;
     if (!stillCurrent) continue;
     if (!original.model || !original.credentialId) {
-      destroyInstance(inst.scopeId, inst.memberId);
-      failedScopes.push(inst.scopeId);
+      destroyInstance(inst.memberId);
+      failedScopes.push((activeSource(inst) ?? inst.memberId));
       continue;
     }
     try {
@@ -351,12 +371,12 @@ async function rollbackSwitchedInstances(
     } catch (err) {
       logger.error("agent", "modelSwitchRollbackFailed", {
         member: inst.agentName,
-        scopeId: inst.scopeId,
+        scopeId: (activeSource(inst) ?? inst.memberId),
         error: String(err),
         trigger,
       });
-      destroyInstance(inst.scopeId, inst.memberId);
-      failedScopes.push(inst.scopeId);
+      destroyInstance(inst.memberId);
+      failedScopes.push((activeSource(inst) ?? inst.memberId));
     }
   }
   return failedScopes;
@@ -416,7 +436,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
         await applyModelSwitchToInstance(inst, { model: normalizedModel, credentialId: binding.credentialId }, "switchMemberModel");
       }
     } catch (err) {
-      const failedAt = attempted[attempted.length - 1]?.scopeId ?? "unknown scope";
+      const failedAt = attempted[attempted.length - 1]?.memberId ?? "unknown member";
       const reason = String((err as Error)?.message || err);
       const failedScopes = await rollbackSwitchedInstances(attempted, originals, "switchMemberModel-rollback");
       throw new Error(failedScopes.length > 0
@@ -438,7 +458,7 @@ export async function switchMemberModel(memberId: string, binding: { model: stri
     return {
       model: normalizedModel,
       credentialId: profile.id,
-      instances: attempted.map((inst) => ({ scopeId: inst.scopeId, applied: true })),
+      instances: attempted.map((inst) => ({ scopeId: (activeSource(inst) ?? inst.memberId), applied: true })),
     };
   } finally {
     memberSwitchGates.delete(memberId);
@@ -457,11 +477,11 @@ export async function switchMemberThinkingLevel(memberId: string, thinkingLevel:
     const p = { thinkingLevel };
     if (inst.status === "working" || inst.dispatchState !== "idle") {
       inst.pendingThinkingSwitch = p;
-      pending.push(inst.scopeId);
+      pending.push((activeSource(inst) ?? inst.memberId));
       continue;
     }
     await applyThinkingSwitchToInstance(inst, p, "switchMemberThinkingLevel");
-    applied.push(inst.scopeId);
+    applied.push((activeSource(inst) ?? inst.memberId));
   }
   return { applied, pending };
 }
@@ -482,7 +502,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
     // The room /compact command can arrive before any activation — build the
     // session (no prompt) so there is something to compact. Unresolvable or
     // unconfigured members still fail honestly.
-    instance = (await buildMemberAgentSession(memberId, scopeId)) ?? undefined;
+    instance = (await buildMemberAgentSession(memberId)) ?? undefined;
     if (!instance) throw new Error(`No active session in this scope — nothing to compact (${scopeId})`);
   }
   if (instance.compacting) throw new Error("Compaction is already in progress for this session");
@@ -494,9 +514,10 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
   // Stop finds a busy lifecycle in every window instead of an already-idle
   // no-op. Reuses the existing compacting/dispatch fields — no second queue,
   // no timers.
+  instance.activeSourceRef = scopeId;
   instance.compacting = true;
   updateDispatchState(instance, "running", "compact-requested");
-  transition(instance, instance.roomId, instance.agentName, "working", "compact-requested");
+  transition(instance, scopeId, instance.agentName, "working", "compact-requested");
   let started = false;
   let completed = false;
   try {
@@ -509,7 +530,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
       // Stop landed in the gap (old prompt finished, compact not started):
       // abortAgent marked dispatchState "aborting" — honor it, do not compact.
       if (instance.dispatchState === "aborting" || !memberRuntimeAllowed(memberId)) {
-        logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, scopeId: instance.scopeId });
+        logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, sourceRef: activeSource(instance) });
         return { ok: false, action: "stopped" };
       }
     }
@@ -518,7 +539,7 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
     // compacting/status and resumes queued inputs as a fresh prompt.
     const outcome = await instance.handle.compact();
     if (outcome?.aborted) {
-      logger.info("agent", "manualCompactAborted", { member: instance.agentName, scopeId: instance.scopeId });
+      logger.info("agent", "manualCompactAborted", { member: instance.agentName, sourceRef: activeSource(instance) });
       return { ok: false, action: "stopped" };
     }
     completed = true;
@@ -527,8 +548,8 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
     const message = formatRuntimeErrorMessage(err);
     if (started) {
       // The bridge already emitted compaction_end(aborted/error) and settled.
-      logger.error("agent", "manualCompactFailed", { member: instance.agentName, scopeId: instance.scopeId, error: message });
-      controlServices().postSystemNotice(instance.roomId, `Manual compaction failed for "${instance.agentName}": ${message}`);
+      logger.error("agent", "manualCompactFailed", { member: instance.agentName, sourceRef: activeSource(instance), error: message });
+      noticeCurrentSource(instance, `Manual compaction failed for "${instance.agentName}": ${message}`);
     }
     throw err;
   } finally {
@@ -537,13 +558,14 @@ export async function compactMember(scopeId: string, memberId: string): Promise<
       // failure): restore the lifecycle here and resume queued inputs.
       instance.compacting = false;
       updateDispatchState(instance, "idle", "compact-not-started");
-      transition(instance, instance.roomId, instance.agentName, "idle", "compact-not-started");
+      transition(instance, scopeId, instance.agentName, "idle", "compact-not-started");
       drainQueuedInputsAsPrompt(instance, "compact-not-started");
     }
     // A manual compact emits agent_end after compaction_end and has no input
     // pump to flush deferred reloads. Wait for the actual SDK operation first.
     if (completed && instances.get(instanceKey(memberId)) === instance
       && memberRuntimeAllowed(memberId) && !queueDepth(instance)) maybeFlushPendingReload(instance);
+    if (instance.activeSourceRef === scopeId && !instance.promptInFlight && !instance.turnActive) instance.activeSourceRef = null;
   }
 }
 
@@ -565,7 +587,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
   updateDispatchState(instance, "aborting", "abort");
-  cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"explicit stop");
+  if(instance.activeSourceRef)cancelPendingRuntimeInputs(runtimeInputOwner(instance.activeSourceRef,instance.memberId),"explicit stop");
   logger.info("agent", "aborted", { member: memberName, memberId, roomId });
   return { ok: true, action: "aborted" };
 }
@@ -601,7 +623,7 @@ export function abortMember(memberId: string): { ok: boolean; action: string } {
 /** Compact the member's session: the chat being served, else the member DM. */
 export async function compactMemberById(memberId: string): Promise<{ ok: boolean; action: string }> {
   const instance = instances.get(instanceKey(memberId));
-  const scope = instance?.activeChat?.scopeId || controlServices().privateScope(memberId);
+  const scope = instance?.activeSourceRef || controlServices().privateScope(memberId);
   return compactMember(scope, memberId);
 }
 
@@ -618,8 +640,7 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
   teardownMemberInstance(memberId);
   for (const scope of scopes) {
     clearRuntimeStateEntry(memberId);
-    const target = chatTargetOf(scope);
-    const statusEvent = { type: "agent:status" as const, roomId: target, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
+    const statusEvent = { type: "agent:status" as const, roomId: scope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     controlServices().publishReset(scope, agentName, statusEvent);
   }
   controlServices().emitEvent(controlServices().privateScope(memberId), memberId, { type: "system", text: message }, { memberId, agentName });
@@ -635,12 +656,9 @@ export function restartMember(memberId: string): { ok: true; message: string } {
   return { ok: true, message: "Member restarted. Next activation will start a fresh runtime." };
 }
 
-export function destroyInstance(roomId: string, memberRef: string,options:{preservePending?:boolean}={}): void {
-  const resolved = controlServices().resolveMember(roomId, memberRef);
-  const memberId = resolved?.id || memberRef;
-  const memberName = resolved?.name || memberRef;
+export function destroyInstance(memberId: string,options:{preservePending?:boolean}={}): void {
   const key = instanceKey(memberId);
-  if(!options.preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"instance removed");
+  if(!options.preservePending)cancelMemberPending(memberId,"instance removed");
   invalidateInputScope(key);
   sessionPublishOwners.delete(key);
   if (pendingCreations.has(key)) cancelledCreations.add(key);
@@ -652,7 +670,7 @@ export function destroyInstance(roomId: string, memberRef: string,options:{prese
     instances.delete(key);
     contextUsageCache.delete(key);
     contextCompactionWarningCache.delete(key);
-    logger.info("agent", "instance destroyed", { member: memberName, memberId, roomId });
+    logger.info("agent", "instance destroyed", { memberId });
   }
 }
 
@@ -669,7 +687,7 @@ export function interruptAcceptedInput(scopeId:string,instance:AgentInstance,tri
 
 function requestInstanceStop(instance: AgentInstance,preservePending=false): void {
   const failures: unknown[] = [];
-  if(!runtimeIsStopping()&&!preservePending)cancelPendingRuntimeInputs(runtimeInputOwner(instance.scopeId,instance.memberId),"member quiescence");
+  if(!runtimeIsStopping()&&!preservePending)cancelMemberPending(instance.memberId,"member quiescence");
   for (const stop of [
     () => settleMemberShellWaits(instance.memberId),
     () => updateDispatchState(instance,"aborting","quiescence"),

@@ -1,10 +1,9 @@
 /** pi resource adapter: prompt sources, member asset discovery, hosted MCP wiring.
  * Everything here is SDK-facing; it never imports chat or scheduler. */
-import { existsSync } from "node:fs";
-import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../../member/extensions.js";
-export { discoverMemberExtensionEntries } from "../../member/extensions.js";
-import { memberExtensionsDir, memberSkillsDir } from "../../files/layout.js";
-import { ensureBossmodeMcpDirs, getBossmodeMcpRuntimeDir, writeMemberScopedMcpConfig } from "../../member/mcp.js";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { AgentResourceSnapshot } from "../types.js";
 import { logger } from "../../kernel/logger.js";
 import { DefaultResourceLoader, type ResourceLoader, type AgentSession, formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
 
@@ -82,34 +81,34 @@ export interface McpRuntimeSettings {
   serverNames: string[];
   dispose(): void;
 }
-/** Batch 6 §1: member-dir assets that join the loader paths (create + reload
- * both call this — skills dir §1.1, extensions dir §1.3 expanded to file
- * entries, present = included). */
-export function memberDirLoaderAssetPaths(memberId: string): { skills: string[]; extensions: string[] } {
-  const skillsDir = memberSkillsDir(memberId);
-  return {
-    skills: existsSync(skillsDir) ? [skillsDir] : [],
-    extensions: discoverMemberExtensionEntries(memberExtensionsDir(memberId)),
-  };
-}
-
-export function resolveMcpRuntimeSettings(args: { roomId: string; member: AgentMemberConfig }): McpRuntimeSettings {
-  // Member configuration is SQL-owned; the temporary file is derived adapter input.
-  // The adapter is platform infrastructure, including for an empty configuration.
-  const runtimeDir = getBossmodeMcpRuntimeDir();
-  const adapterPath = builtinMcpAdapterPath();
-  if (!existsSync(adapterPath)) {
-    throw new Error(`MCP adapter not found at ${adapterPath}. Run git submodule update --init --recursive.`);
+/** Materialize one immutable member resource snapshot for the SDK adapter. */
+export function materializeMcpRuntimeSettings(
+  resource: AgentResourceSnapshot["mcp"],
+): McpRuntimeSettings {
+  if (!existsSync(resource.adapterPath)) {
+    throw new Error(`MCP adapter not found at ${resource.adapterPath}. Run git submodule update --init --recursive.`);
   }
-  ensureBossmodeMcpDirs();
-  const mcpRoomId = args.roomId;
-  const scoped = writeMemberScopedMcpConfig({ roomId: mcpRoomId, memberId: args.member.id });
-  if (scoped.serverNames.length > 0) {
-    process.env.MCP_DIRECT_TOOLS = "__none__";
-    process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
-    process.env.PI_CODING_AGENT_DIR = runtimeDir;
+  const dir = mkdtempSync(join(tmpdir(), "bossmode-mcp-runtime-"));
+  try {
+    const configPath = join(dir, "mcp.json");
+    writeFileSync(configPath, JSON.stringify(resource.config), { mode: 0o600 });
+    if (resource.serverNames.length > 0) {
+      process.env.MCP_DIRECT_TOOLS = "__none__";
+      process.env.BOSSMODE_MCP_CONFIG_STRICT = "1";
+      process.env.PI_CODING_AGENT_DIR = resource.runtimeDir;
+    }
+    return {
+      enabled: true,
+      adapterPath: resource.adapterPath,
+      configPath,
+      runtimeDir: resource.runtimeDir,
+      serverNames: [...resource.serverNames],
+      dispose: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
   }
-  return { enabled: true, adapterPath, configPath: scoped.configPath, runtimeDir, serverNames: scoped.serverNames, dispose: scoped.dispose };
 }
 
 export function assertHostedMcpLoaded(loader: ResourceLoader): void {
@@ -166,13 +165,12 @@ export function buildFinalMemberSystemPrompt(args: FinalMemberSystemPromptArgs):
   // Agent dir resolution mirrors pi-sdk createAgent (credential override wins).
   const piConfig = args.member.model && args.member.credentialId
     ? exportPiConfigForMember({
-        roomId: args.scopeId,
-        memberName: args.member.id,
+        memberId: args.member.id,
         modelRef: args.member.model,
         credentialId: args.member.credentialId,
       })
     : null;
-  const agentDir = piConfig?.agentDir || resolvePiAgentDir(args.scopeId, args.member.id);
+  const agentDir = piConfig?.agentDir || resolvePiAgentDir(args.member.id);
 
   const skillPaths = args.skillPaths.filter((p) => existsSync(p));
   const skills = loadSkills({ cwd: args.cwd, agentDir, skillPaths, includeDefaults: false }).skills;

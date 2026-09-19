@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase, type Database } from "../data/database.js";
-import { getBossmodeDir, memberDir, membersRoot } from "../files/layout.js";
+import { getBossmodeDir, memberDir, membersRoot, memberSkillsDir, memberExtensionsDir } from "../files/layout.js";
 import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
 import { ensureDmScope } from "../chat/conversations.js";
 import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, normalizeMemberName, validateMemberName, deleteMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
 import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot } from "../member/workspaces.js";
 import { resolveGlobalSkillPaths } from "../member/skills.js";
+import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../member/extensions.js";
+import { filterMcpConfigForServers, getAssignableMcpServerNames, getBossmodeMcpRuntimeDir, readMemberMcpConfig } from "../member/mcp.js";
 import { getCurrentSession } from "../member/sessions.js";
 import type { AgentMemberSnapshot } from "../agent/types.js";
 import { writeMemberProfileSkeleton } from "../member/profile.js";
@@ -84,11 +86,28 @@ import { quiesceMember } from "../agent/controls.js";
 export function loadAgentMemberSnapshot(memberId: string): AgentMemberSnapshot | null {
   const config = memberRecordToConfig(memberId);
   if (!config) return null;
-  const skills = config.skills ?? [];
+  const skillNames = config.skills ?? [];
+  const memberSkillRoot = memberSkillsDir(memberId);
+  const skillPaths = resolveGlobalSkillPaths(skillNames);
+  if (existsSync(memberSkillRoot)) skillPaths.push(memberSkillRoot);
+  const mcpConfig = readMemberMcpConfig(memberId) ?? { mcpServers: {} };
+  const mcpServerNames = getAssignableMcpServerNames(mcpConfig);
   const savedSession = getCurrentSession(memberId);
+  const prompt = compileMemberPrompt(loadMemberPromptSource(memberId));
   return {
     config,
-    skillPaths: resolveGlobalSkillPaths(skills),
+    prompt,
+    resources: {
+      skillNames,
+      skillPaths,
+      extensionPaths: discoverMemberExtensionEntries(memberExtensionsDir(memberId)),
+      mcp: {
+        adapterPath: builtinMcpAdapterPath(),
+        runtimeDir: getBossmodeMcpRuntimeDir(),
+        config: filterMcpConfigForServers(mcpConfig, mcpServerNames),
+        serverNames: mcpServerNames,
+      },
+    },
     workspaceRoot: activeWorkspaceRoot(memberId),
     resumeSession: savedSession
       ? { sessionId: savedSession.sessionId, sessionFile: savedSession.sessionFile }
@@ -169,7 +188,9 @@ import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
 import type { AgentStatus, RoomMessage, ContextUsage } from "../kernel/types.js";
-import { chatTargetOf, contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance } from "../agent/instance.js";
+import { contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance } from "../agent/instance.js";
+
+const chatTargetOf = (sourceRef: string): string => sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
 
 export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   configureControls({
@@ -189,20 +210,13 @@ export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (membe
   });
   recoverRuntimeInputState();
   openRuntimeAdmission();
-  configureAssembly(reg, loadPrompt, loadSnapshot, {
-    isValidScope: scopeId => !!parseScopeId(scopeId) || isMmScopeId(scopeId),
-    hasScopeAccess: memberHasScopeAccess,
-    currentName: currentRuntimeName,
-    conversation: sessionConversation,
+  configureAssembly(reg, loadSnapshot, {
     saveSession: (memberId, runtime, session) => sessionStore.saveCurrentSession(memberId, { runtime, ...session }),
-    postSystemNotice: (scopeId, text) => { postMessage(scopeId, "system", text); },
   });
   configureScheduler({
-    buildSession: (memberId, scopeId) => buildMemberAgentSession(memberId,
-      scopeId.startsWith("dm:") || isMmScopeId(scopeId) ? scopeId : roomScopeId(scopeId)),
+    buildSession: buildMemberAgentSession,
     memberConfig: memberRecordToConfig,
-    canExecuteScope: memberScopeAllowsExecution,
-    postSystemNotice: (scopeId, text) => { postMessage(scopeId, "system", text); },
+    postSystemNotice: (sourceRef, text) => { postMessage(sourceRef, "system", text); },
     emitEvent: emitAgentLocalEvent,
     refreshProfileSources,
     applyPendingControls: applyPendingAfterPromptSettlement,
@@ -320,30 +334,12 @@ export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inac
  * chat, so the build scope says nothing about where it is active).
  */
 export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
-  const out: ScopeId[] = [];
-  const seen = new Set<string>();
-  const push = (scope: string) => { if (scope && !seen.has(scope)) { seen.add(scope); out.push(scope as ScopeId); } };
-  const own = instances.get(instanceKey(globalMemberId));
-  for (const scope of pendingRuntimeInputOwners(globalMemberId)) push(scope);
-  if (own && (own.status === "working" || own.dispatchState !== "idle")) push(own.activeChat?.scopeId || own.scopeId);
-  if (own || out.length) return Array.from(out);
-  // Historical name-only members (no mem_ id): keep the legacy room/DM match.
-  for (const inst of instances.values()) {
-    if (inst.status !== "working" && inst.dispatchState === "idle") continue;
-    if (inst.memberId.startsWith("mem_")) continue;
-    if (inst.scopeId.startsWith("dm:")) {
-      if (inst.memberId === globalMemberId || inst.scopeId === `dm:${globalMemberId}`) push(inst.scopeId);
-      continue;
-    }
-    const roomUuid = inst.roomId.startsWith("room:") ? inst.roomId.slice("room:".length) : inst.roomId;
-    const r = roomStore.getRoom(roomUuid);
-    if (!r) continue;
-    const local = roomStore.getRoomMembers(r.id).find((m) => m.id === inst.memberId || m.name === inst.agentName);
-    if (!local) continue;
-    const gid = roomStore.resolveGlobalMemberId(r, local);
-    if (gid === globalMemberId) push(scopeIdOf({ kind: "room", roomId: r.id }));
+  const scopes = new Set<string>(pendingRuntimeInputOwners(globalMemberId));
+  const instance = instances.get(instanceKey(globalMemberId));
+  if (instance?.activeSourceRef && (instance.status === "working" || instance.dispatchState !== "idle")) {
+    scopes.add(instance.activeSourceRef);
   }
-  return Array.from(out);
+  return [...scopes] as ScopeId[];
 }
 
 function currentRuntimeName(memberId: string, initialName: string): string {
@@ -357,16 +353,12 @@ function refreshProfileSources(instance: AgentInstance): void {
   if (!instance.profilePromptDirty) return;
   const member = getMember(instance.memberId);
   if (!member) throw new Error(`Member no longer exists: ${instance.memberId}`);
-  const ref = parseScopeId(instance.scopeId);
-  const parentId = ref?.kind === "room" ? ref.roomId : undefined;
-  const room = parentId ? roomStore.getRoom(parentId) : null;
-  // ① batch 2: one prompt per member — the compiler takes no scope.
+  // One prompt per member; chat source never participates in refresh.
   const compiled = compileForMember(member.id);
   instance.agentName = member.name;
   instance.sessionSources.member.name = member.name;
   instance.sessionSources.member.title = member.title;
   instance.sessionSources.compiled = compiled;
-  instance.sessionSources.roomMembers = room ? roomStore.getRoomMembers(room.id).map(m => m.name) : [member.name];
 }
 
 // -- Format messages --
@@ -546,7 +538,7 @@ async function activateControl(scope:string,memberId:string,ctx?:ReplyContext):P
   if(!memberRuntimeAllowed(memberId))return;
   const prepared=prepareScopeInput(scope,memberId,ctx);
   if(!prepared){
-    await buildMemberAgentSession(memberId,(scope.startsWith("dm:")||isMmScopeId(scope)?scope:roomScopeId(scope)) as ScopeId);
+    await buildMemberAgentSession(memberId);
     return;
   }
   const active=instances.get(instanceKey(memberId));
@@ -776,8 +768,7 @@ function emitAgentLocalEvent(
   const member = identity ? undefined : scopedMember ?? roomStore.resolveRoomMemberRef(roomId, memberRef);
   // Prefer live instance identity, then the global member record for DM.
   const keyHint = instanceKey(member?.id || memberRef);
-  const instance = instances.get(keyHint)
-    || [...instances.values()].find((inst) => inst.roomId === roomId && (inst.memberId === memberRef || inst.agentName === memberRef));
+  const instance = instances.get(keyHint);
   const memberId = identity?.memberId || member?.id || instance?.memberId || memberRef;
   const agentName = identity?.agentName || member?.name || instance?.agentName || memberRef;
   // Use the same authoritative, commit-safe event/outbox path as SDK events.
@@ -800,7 +791,7 @@ export function getMemberInstances(memberName: string): Array<{
   const result: Array<{ roomId: string; roomName: string; status: AgentStatus; runtime: string; pid?: number; spawnArgs?: string[]; runtimeParams?: import("../agent/types.js").AgentRuntimeParams }> = [];
   for (const instance of instances.values()) {
     if (instance.agentName === memberName || instance.memberId === memberName) {
-      const roomId = instance.roomId;
+      const roomId = instance.activeSourceRef ?? `dm:${instance.memberId}`;
       const room = roomStore.getRoom(roomId);
       const handle = instance.handle as any;
       result.push({
@@ -826,7 +817,7 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   const instance = instances.get(key);
   const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
 
-  destroyInstance(scopeId, memberId, {preservePending:true});
+  destroyInstance(memberId, {preservePending:true});
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
     cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");

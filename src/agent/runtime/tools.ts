@@ -144,21 +144,19 @@ function renderGatewayDescribe(entry: GatewayEntry): string {
 }
 
 export function createBossmodeSdkTools(opts: {
-  /** Chat this instance was built for; the fallback when no live resolver is given. */
-  roomId: string;
   memberId: string;
-  /** Retained for call-site compatibility — the tool surface no longer varies by scope kind (batch 3). */
-  scopeKind?: "dm" | "room";
-  /** ① B1: a member has one instance across chats, so tool calls must target the
-   *  chat of the turn being processed, not the one the instance was built for.
-   *  Resolved per call; defaults to `roomId`. */
-  resolveChatId?: () => string;
+  /** Opaque source of the batch currently being executed. */
+  resolveSourceRef: () => string;
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
-  const chatIdOf = () => opts.resolveChatId?.() || opts.roomId;
+  const sourceRefOf = () => {
+    const sourceRef = opts.resolveSourceRef();
+    if (!sourceRef) throw new Error("No active input source for member tool call");
+    return sourceRef;
+  };
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
     const { handleToolCallback } = await import("../tools/tools.js");
-    return handleToolCallback(tool, chatIdOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
+    return handleToolCallback(tool, sourceRefOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
   const specs = new Map(DIRECT_TOOL_SPECS.map((spec) => [spec.name, spec]));

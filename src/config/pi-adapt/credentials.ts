@@ -166,25 +166,19 @@ function safeFsSegment(s: string): string {
   return String(s || "_").replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
-export function resolvePiAgentDir(roomIdOrScope: string, memberIdOrName: string): string {
-  const safeMember = safeFsSegment(memberIdOrName);
-  const root = getBossmodePiRuntimeRoot();
-  if (typeof roomIdOrScope === "string" && roomIdOrScope.startsWith("dm:")) {
-    return join(root, "members", safeMember, "dm");
-  }
-  return join(root, safeFsSegment(roomIdOrScope), safeMember);
+export function resolvePiAgentDir(memberId: string): string {
+  return join(getBossmodePiRuntimeRoot(), "members", safeFsSegment(memberId));
 }
 
 export function exportPiConfigForMember(args: {
-  roomId: string;
-  memberName: string;
+  memberId: string;
   modelRef: string;
   credentialId?: string;
 }): PiCredentialExport | null {
   const profile = resolveCredentialProfileForModel({ modelRef: args.modelRef, credentialId: args.credentialId });
   if (!profile) return null;
 
-  const agentDir = resolvePiAgentDir(args.roomId, args.memberName);
+  const agentDir = resolvePiAgentDir(args.memberId);
   mkdirSync(agentDir, { recursive: true });
 
   // Parent runtime registers buildAllProvidersCatalog(profile.id) in memory and

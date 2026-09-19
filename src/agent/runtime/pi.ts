@@ -19,7 +19,7 @@ import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";
 import { loadDatabaseMcpFactory } from "./mcp-factory.js";
-import { BossmodeResourceLoader, resolvePiSystemPromptSources, memberDirLoaderAssetPaths, assertHostedMcpLoaded, bindMcpExtension, resolveMcpRuntimeSettings, type McpRuntimeSettings } from "./resources.js";
+import { BossmodeResourceLoader, resolvePiSystemPromptSources, assertHostedMcpLoaded, bindMcpExtension, materializeMcpRuntimeSettings, type McpRuntimeSettings } from "./resources.js";
 import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
@@ -148,7 +148,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   private sessionReferencePublished = false;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
-  private toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string };
+  private executionOwner: { memberId: string; resolveSourceRef: () => string };
 
   constructor(
     private session: AgentSession,
@@ -157,7 +157,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private resourceLoader: BossmodeResourceLoader,
     runtimeParams: AgentRuntimeParams,
     bossmodeToolNames: Iterable<string>,
-    toolAssembly: { roomId: string; agentName: string; roomMembers: string[]; memberId?: string },
+    executionOwner: { memberId: string; resolveSourceRef: () => string },
     onTeardownSuccess?: () => void,
     private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
     initialMcpConfig?: McpRuntimeSettings,
@@ -167,7 +167,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.sessionId = session.sessionId;
     this.onTeardownSuccess = onTeardownSuccess;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
-    this.toolAssembly = toolAssembly;
+    this.executionOwner = executionOwner;
     this.unsubscribeSession = session.subscribe((raw) => {
       this.observeExecutionEvidence(raw);
       this.publishSessionReferenceIfMaterialized();
@@ -195,7 +195,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   private executionService(): SdkExecutionService {
-    return new SdkExecutionService(this.toolAssembly.memberId ?? "", this.toolAssembly.roomId);
+    return new SdkExecutionService(this.executionOwner.memberId, this.executionOwner.resolveSourceRef());
   }
 
   private observeExecutionEvidence(raw: any): void {
@@ -670,23 +670,9 @@ export class PiSdkRuntime implements AgentRuntime {
   }
 
   async createAgent(opts: CreateAgentOpts): Promise<AgentHandle> {
-    const attempt = new SdkExecutionService(opts.member.id, opts.roomId).dispatch("session-create", "pi-sdk:createAgent");
-    let handle: PiSdkAgentHandle | undefined;
-    try {
-      handle = await this.createAgentInternal(opts);
-      attempt.settle();
-      return handle;
-    } catch (error) {
-      // Internal creation already cleans partial sessions. A fully created
-      // handle still needs teardown if durable acknowledgement itself fails.
-      if (handle) {
-        try { await handle.destroyAndWait(); }
-        catch (cleanupError) {
-          return attempt.fail(new AggregateError([error, cleanupError], "Runtime creation and cleanup failed"));
-        }
-      }
-      return attempt.fail(error);
-    }
+    // Session creation happens before a chat batch owns the instance. Durable
+    // input attempts are recorded when the scheduler dispatches the first batch.
+    return this.createAgentInternal(opts);
   }
 
   private async createAgentInternal(opts: CreateAgentOpts): Promise<PiSdkAgentHandle> {
@@ -695,8 +681,7 @@ export class PiSdkRuntime implements AgentRuntime {
     }
     const modelRef = opts.member.model;
     const piConfig = exportPiConfigForMember({
-      roomId: opts.roomId,
-      memberName: opts.member.id,
+      memberId: opts.member.id,
       modelRef,
       credentialId: opts.member.credentialId,
     });
@@ -708,7 +693,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
     const resolvedModel = `${provider}/${modelId}`;
 
-    const defaultAgentDir = resolvePiAgentDir(opts.roomId, opts.member.id);
+    const defaultAgentDir = resolvePiAgentDir(opts.member.id);
     const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
     const sessionDir = opts.sessionDir ?? join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
@@ -787,18 +772,15 @@ export class PiSdkRuntime implements AgentRuntime {
       appendSystemPrompt: appendBase,
     });
     const appendSystemPrompt = promptSources.appendSystemPrompt;
-    // Batch 6 §1: member-owned assets join the loader paths — skills dir
-    // (§1.1) and extensions dir (§1.3, directory present = loaded).
-    const memberAssets = memberDirLoaderAssetPaths(opts.member.id);
-    const skillPaths = [...opts.skillPaths.filter((p) => existsSync(p)), ...memberAssets.skills];
-    const mcpSettings = resolveMcpRuntimeSettings({ roomId: opts.roomId, member: opts.member });
+    const skillPaths = opts.resources.skillPaths.filter((path) => existsSync(path));
+    const mcpSettings = materializeMcpRuntimeSettings(opts.resources.mcp);
     let sessionObtained: AgentSession | null = null;
     try {
       // Managed extensions = member dir (unconditional) + platform packages on
       // the member's enable list (§1.3: list serves the two platform packs only).
       // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
       // member-owned extensions/ dir entries are the only managed extensions.
-      const managedExtensions = [...memberAssets.extensions];
+      const managedExtensions = [...opts.resources.extensionPaths];
       const activeExtensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
       const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
       const resourceLoader = new BossmodeResourceLoader({
@@ -821,11 +803,9 @@ export class PiSdkRuntime implements AgentRuntime {
       const transportSettings = applyRuntimeTransportSettings(settingsManager);
 
       const customTools = createBossmodeSdkTools({
-      roomId: opts.roomId,
-      memberId: opts.member.id,
-      scopeKind: opts.roomId.startsWith("dm:") ? "dm" : "room",
-      ...(opts.resolveChatId ? { resolveChatId: opts.resolveChatId } : {}),
-  });
+        memberId: opts.member.id,
+        resolveSourceRef: opts.resolveSourceRef,
+      });
       // Omit `tools` allowlist so pi keeps extension/custom tools enabled (SDK docs:
       // when tools is provided it becomes a lifetime allowlist and strips extension
       // tools like web_search/fetch_content). MCP is loaded once through its
@@ -872,7 +852,7 @@ export class PiSdkRuntime implements AgentRuntime {
         resourceLoader,
         runtimeParams,
         customTools.map((t) => t.name),
-        { roomId: opts.roomId, agentName: opts.member.name, roomMembers: opts.roomMembers, memberId: opts.member.id },
+        { memberId: opts.member.id, resolveSourceRef: opts.resolveSourceRef },
         () => this.handles.delete(handle),
         opts.onSessionChanged,
         mcpSettings,

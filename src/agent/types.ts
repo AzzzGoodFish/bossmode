@@ -11,14 +11,33 @@ export type { AgentMemberConfig };
 
 /** Build material for a member session, assembled outside the agent core.
  *  The app layer reads member state; agent code consumes only this snapshot. */
-export interface AgentMemberSnapshot {
-  /** Effective member config at assembly time (the memberRecordToConfig projection). */
-  config: AgentMemberConfig;
-  /** Resolved absolute skill directories. */
+export interface AgentPromptSnapshot {
+  agentPrompt: string;
+  envPrompt: string;
+  appendSystemPrompt: string[];
+  contractFingerprint: string;
+}
+
+export interface AgentResourceSnapshot {
+  skillNames: string[];
   skillPaths: string[];
-  /** Active workspace root (cwd for the runtime). */
+  extensionPaths: string[];
+  mcp: {
+    adapterPath: string;
+    runtimeDir: string;
+    config: Record<string, unknown>;
+    serverNames: string[];
+  };
+}
+
+/** Immutable build material captured by app before the agent core assembles a
+ * session. Chat source and roster are deliberately absent: one member runtime
+ * serves every conversation. */
+export interface AgentMemberSnapshot {
+  config: AgentMemberConfig;
+  prompt: AgentPromptSnapshot;
+  resources: AgentResourceSnapshot;
   workspaceRoot: string;
-  /** Stored session to resume, if any. */
   resumeSession?: CreateAgentOpts["resumeSession"];
 }
 
@@ -58,11 +77,11 @@ export interface RuntimeCapabilities {
 
 export interface CreateAgentOpts {
   cwd: string;
-  roomId: string;              // bossmode room ID (for tool callbacks)
-  /** ① B1: the chat a tool call targets. A member has one instance across
-   *  chats, so this resolves per call; defaults to `roomId`. */
-  resolveChatId?: () => string;
   member: AgentMemberConfig;
+  /** Opaque source currently being executed. It is set by the scheduler for
+   * each durable batch and must never be interpreted by the runtime adapter. */
+  resolveSourceRef: () => string;
+  resources: AgentResourceSnapshot;
 
   // Layered prompt content
   agentPrompt: string;       // Source agent role prompt only. Empty for builtin/general.
@@ -71,9 +90,6 @@ export interface CreateAgentOpts {
   skillPaths: string[];      // Skill directory paths
   skillNames?: string[];     // Resolved skill names for status display
   rulesPrompt?: string;      // Legacy compatibility; ignored by new prompt compiler.
-
-  roomMembers: string[];
-  callbacks: AgentCallbacks;
 
   // Session resume
   resumeSession?: { sessionId?: string; sessionFile?: string };
@@ -86,11 +102,6 @@ export interface CreateAgentOpts {
   readonly sessionId?: string;
   // Called whenever runtime reports session identity (initial + later changes after compact/fork)
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
-}
-
-export interface AgentCallbacks {
-  onChat: (message: string) => Promise<void>;
-  onMention: (target: string, message: string) => Promise<void>;
 }
 
 export interface AgentRuntimeParams {

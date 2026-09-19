@@ -30,18 +30,13 @@ export interface SessionSources {
   skills: string[];
   skillPaths: string[];
   cwd: string;
-  roomMembers: string[];
   runtimeName: string;
 }
 
 export interface AgentInstance {
   handle: AgentHandle;
-  /** ① B1: the chat currently being processed; one instance serves every chat. */
-  activeChat: { scopeId: string };
-  /** Conversation scope id: "room:<roomId>" | "dm:<memberId>" — chat owns the ScopeId alias. */
-  scopeId: string;
-  /** Room id when scope is room:*; empty string for dm. */
-  roomId: string;
+  /** Opaque source currently owned by the scheduler; null between batches. */
+  activeSourceRef: string | null;
   memberId: string;
   agentName: string; // current member name snapshot for display/mentions
   sourceAgent: string;
@@ -153,27 +148,31 @@ export function memberIdentityMeta(agentName: string, memberId: string): { membe
   return memberId && memberId !== agentName ? { memberId } : {};
 }
 
-/** ① B1: postMessage/transition target for a scope id — bare room id or dm:<id>. */
-export function chatTargetOf(scopeId: string): string {
-  return scopeId.startsWith("room:") ? scopeId.slice("room:".length) : scopeId;
-}
-
 export function transition(
   instance: AgentInstance,
-  roomId: string,
+  sourceRef: string | null,
   memberName: string,
   newStatus: AgentStatus,
   trigger: string,
 ): void {
   if (instance.status === newStatus) return;
-  const prev = instance.status;
+  const previous = instance.status;
   instance.status = newStatus;
-  // ① B1: status follows the chat the member is serving right now; callers pass
-  // the build-time room only as a fallback.
-  const chat = instance.activeChat?.scopeId || roomId;
-  const publishTo = chatTargetOf(chat);
-  logger.info("agent", "stateTransition", { member: memberName, from: prev, to: newStatus, trigger, chat });
-  statusSink?.(publishTo, { type: "agent:status", roomId: publishTo, agent: memberName, ...memberIdentityMeta(memberName, instance.memberId), status: newStatus });
+  const target = instance.activeSourceRef ?? sourceRef;
+  logger.info("agent", "stateTransition", {
+    member: memberName,
+    from: previous,
+    to: newStatus,
+    trigger,
+    ...(target ? { sourceRef: target } : {}),
+  });
+  if (target) statusSink?.(target, {
+    type: "agent:status",
+    roomId: target,
+    agent: memberName,
+    ...memberIdentityMeta(memberName, instance.memberId),
+    status: newStatus,
+  });
 }
 
 // -- Context usage (cache-only API + idle refresh push) --
