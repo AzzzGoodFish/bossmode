@@ -179,29 +179,6 @@ export async function startNativeOAuthConnection(input: StartOAuthConnectionRequ
   return launch(job);
 }
 
-export async function startOAuthLoginJob(input: { profileId?: string; profile?: Partial<ModelCredentialProfileInput>; providerId?: string; name?: string }): Promise<OAuthLoginJobPublic> {
-  if (!input.profile) {
-    return startNativeOAuthConnection({ providerId: input.providerId || "", profileId: input.profileId, name: input.name });
-  }
-
-  const job = getDatabase().transaction(() => {
-    const existing = input.profileId ? getModelCredentialProfile(input.profileId) : null;
-    const profileInput = {
-      ...(existing || {}),
-      ...(input.profile || {}),
-      id: input.profileId,
-      authType: "oauth" as const,
-      oauthProviderId: input.providerId || input.profile?.oauthProviderId || existing?.oauthProviderId,
-      apiKey: undefined,
-      oauthCredentials: undefined,
-    } as ModelCredentialProfileInput & { id?: string };
-    const providerId = validateOAuthProvider(profileInput.oauthProviderId);
-    validateInput(profileInput, existing || undefined, { allowIncompleteOAuth: true });
-    return createOAuthLoginJob(providerId, profileInput, input.profileId);
-  });
-  return launch(job);
-}
-
 export function getOAuthLoginJob(id: string): OAuthLoginJobPublic | null {
   const job = oauthJobs.get(id);
   return job ? sanitizeOAuthJob(job) : null;
