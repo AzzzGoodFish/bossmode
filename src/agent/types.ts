@@ -43,15 +43,6 @@ export interface CreateAgentOpts {
   sessionDir?: string;
   onSessionChanged?: (session: { sessionId?: string; sessionFile?: string }) => void;
 }
-export interface AgentRuntimeParams {
-  model?: string;
-  thinkingLevel?: string;
-  systemPrompt?: string;
-  skills?: string[];
-  extensions?: string[];
-  credentialId?: string;
-  credentialName?: string;
-}
 export interface RuntimePromptDispatch {
   attemptId: string;
   dispatchIndex: number;
@@ -68,8 +59,6 @@ export interface AgentHandle {
   destroyAndWait(): Promise<void>;
   waitForIdle(): Promise<void>;
   subscribe(fn: (event: AgentStreamEvent) => void): () => void;
-  readonly runtimeName: string;
-  readonly runtimeParams: AgentRuntimeParams;
   setModel(model: string, credentialId: string): void | Promise<void>;
   refreshModelRegistry(opts?: { allowNetwork?: boolean }): void | Promise<void>;
   setThinkingLevel(level: string): void;
@@ -95,9 +84,7 @@ export type AgentStreamEvent =
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
   | { type: "compaction_start"; reason?: "manual" | "threshold" | "overflow" | string }
   | { type: "compaction_end"; reason?: "manual" | "threshold" | "overflow" | string; aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }
-  | { type: "cli:stdout"; text: string }
-  | { type: "cli:stderr"; text: string }
-  | { type: "runtime_exit"; code: number | null; signal: string | null; stderrTail?: string; unexpected: boolean };
+;
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;

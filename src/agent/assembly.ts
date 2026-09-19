@@ -145,7 +145,6 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
           skills: [...snapshot.resources.skillNames],
           skillPaths: [...snapshot.resources.skillPaths],
           cwd: snapshot.workspaceRoot,
-          runtimeName: agentRuntime.name,
         },
         unsubscribe: () => {},
         eventBuffer: [],

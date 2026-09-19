@@ -81,13 +81,11 @@ async function applyModel(instance:AgentInstance,binding:{model:string;credentia
   if(!exportPiConfigForMember({memberId:instance.memberId,modelRef:model,credentialId:profile.id}))throw new Error(`No model credentials configured for ${model}`);
   await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setModel(model,profile.id);});
   instance.appliedModel=model;instance.appliedCredentialId=profile.id;
-  Object.assign(instance.handle.runtimeParams,{model,credentialId:profile.id,credentialName:profile.name});
   logger.info("agent","modelSwitchApplied",{member:instance.agentName,model,trigger});publishCurrentStatus(instance);
 }
 
 async function applyThinking(instance:AgentInstance,pending:PendingThinkingSwitch,trigger:string):Promise<void>{
   if(!memberRuntimeAllowed(instance.memberId))return;await trackMemberOperation(instance.memberId,async()=>{await instance.handle.setThinkingLevel(pending.thinkingLevel);});
-  instance.handle.runtimeParams.thinkingLevel=pending.thinkingLevel;
   logger.info("agent","thinkingSwitchApplied",{member:instance.agentName,thinkingLevel:pending.thinkingLevel,trigger});publishCurrentStatus(instance);
 }
 
@@ -104,7 +102,6 @@ async function refreshCredential(instance:AgentInstance,pending:PendingCredentia
     if(!exported){dropCredential(instance,`${pending.changeType}:${pending.profileId}`);return;}
     await trackMemberOperation(instance.memberId,async()=>{await instance.handle.refreshModelRegistry({allowNetwork:false});await instance.handle.setModel(instance.appliedModel,instance.appliedCredentialId!);});
     instance.appliedCredentialId=exported.profile?.id||instance.appliedCredentialId;
-    Object.assign(instance.handle.runtimeParams,{credentialId:instance.appliedCredentialId,credentialName:exported.profile?.name});
     logger.info("agent","credentialRefreshApplied",{member:instance.agentName,profileId:pending.profileId,trigger});
   }catch(error){if(pending.changeType==="profileDeleted")dropCredential(instance,String(error));else logger.warn("agent","credentialRefreshFailed",{member:instance.agentName,error:String(error)});}
 }

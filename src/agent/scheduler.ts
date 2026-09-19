@@ -431,9 +431,6 @@ export function wireInstanceEvents(instance: AgentInstance): void {
         drainQueuedInputsAsPrompt(instance, event.type);
         schedulerServices().flushPendingReload(instance);
       }
-    } else if (event.type === "runtime_exit" && event.unexpected) {
-      updateDispatchState(instance, "idle", event.type);
-      // Pending SQL inputs survive a runtime exit; uncertain dispatched work is never replayed.
     }
     if (newStatus) {
       if (newStatus === "idle" && event.type === "agent_end" && (event as any)._skipIdleTransition) {
@@ -464,23 +461,7 @@ export function wireInstanceEvents(instance: AgentInstance): void {
       instance.pendingErrorNotice = `Member "${memberName}" request failed.${detail}`;
     }
 
-    // Unexpected runtime exit: notify the conversation and drop the dead
-    // instance so the next activation respawns it.
-    if (event.type === "runtime_exit" && event.unexpected) {
-      const codeStr = event.code !== null ? `exit ${event.code}` : (event.signal ? `signal ${event.signal}` : "terminated");
-      const detail = event.stderrTail ? `\n${event.stderrTail}` : "";
-      instance.hadErrorInTurn = true;
-      instance.lastTurnError = `runtime ended unexpectedly (${codeStr})`;
-      // The event fact already transitions this dead runtime to inactive. Do not
-      // emit a contradictory idle status while removing the instance.
-      if (sourceRef) schedulerServices().postSystemNotice(sourceRef, `Member "${memberName}" runtime ended unexpectedly (${codeStr}).${detail}`);
-      logger.warn("agent", "instance removed after unexpected exit", {
-        member: memberName, sourceRef, code: event.code, signal: event.signal,
-      });
-      if (instances.get(key) === instance) instances.delete(key);
-      try { instance.unsubscribe(); } catch {}
-      try { instance.handle.destroy(); } catch {}
-    }
+
   });
   instance.unsubscribe = unsubscribe;
 }

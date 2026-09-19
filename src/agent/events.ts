@@ -133,7 +133,7 @@ export function handleAgentEvent(sourceRef:string|null,_agentName:string,instanc
   if(event.type==="message_update"){
     const state=streams.get(instanceKey)??{text:"",thinking:"",textOffset:0,thinkingOffset:0,pending:[]};if("text" in event&&event.text)state.text+=event.text;if("thinking" in event&&event.thinking)state.thinking+=event.thinking;streams.set(instanceKey,state);
   }
-  if(event.type==="message_update"||event.type==="tool_update"||event.type==="cli:stdout"||event.type==="cli:stderr"){
+  if(event.type==="message_update"||event.type==="tool_update"){
     if(sourceRef)eventSink?.(sourceRef,memberId,{type:"agent:event",roomId:sourceRef,memberId,event:{...eventForLog,ts:(eventForLog as any).ts??Date.now()}});
     return;
   }
@@ -147,7 +147,6 @@ export function handleAgentEvent(sourceRef:string|null,_agentName:string,instanc
       if(fact.event.type==="message_end"||(fact.event.type==="agent_end"&&!(fact.event as any).willRetry))usageRefreshHook?.(sourceRef,memberId);else if(fact.event.type==="compaction_end")usageRefreshHook?.(sourceRef,memberId);
     });
   }
-  if(fact.event.type==="runtime_exit")return (fact.event as any).unexpected?"inactive":undefined;
   if(fact.event.type==="agent_start")return "working";
   if(fact.event.type==="agent_end")return (fact.event as any).willRetry?undefined:"idle";
   return;

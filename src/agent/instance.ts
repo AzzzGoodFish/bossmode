@@ -16,7 +16,6 @@ export interface SessionSources {
   skills: string[];
   skillPaths: string[];
   cwd: string;
-  runtimeName: string;
 }
 export interface AgentInstance {
   handle: AgentHandle;

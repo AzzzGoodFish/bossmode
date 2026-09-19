@@ -20,7 +20,7 @@ import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import { shutdownSdkSession } from "./compaction.js";
-import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, ContextUsage, AgentRuntimeParams, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
+import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, ContextUsage, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 function classifyToolSource(name:string,bossmodeTools:ReadonlySet<string>,source?:{path?:string;source?:string;baseDir?:string}):string{
   if(BUILTIN_TOOL_NAMES.has(name))return "builtin";if(bossmodeTools.has(name))return "bossmode";
@@ -71,8 +71,7 @@ function sessionModelDiffers(sessionManager: SessionManager, provider: string, m
 }
 
 export class PiSdkAgentHandle implements AgentHandle {
-  readonly runtimeName = "pi-cli";
-  readonly runtimeParams: AgentRuntimeParams;
+  private modelRef:string;private credentialId:string;
   private listeners = new Set<(event: AgentStreamEvent) => void>();
   private mcpConfig?:McpRuntimeSettings;
   private unsubscribeSession: (() => void) | undefined;
@@ -95,7 +94,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private modelRegistry: ModelRegistry,
     private credentials: ModelCredentialBinding,
     private resourceLoader: BossmodeResourceLoader,
-    runtimeParams: AgentRuntimeParams,
+    modelRef:string,credentialId:string,
     bossmodeToolNames: Iterable<string>,
     executionOwner: { memberId: string; resolveSourceRef: () => string | null },
     onTeardownSuccess?: () => void,
@@ -103,7 +102,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     initialMcpConfig?: McpRuntimeSettings,
   ) {
     this.mcpConfig=initialMcpConfig;
-    this.runtimeParams = runtimeParams;
+    this.modelRef=modelRef;this.credentialId=credentialId;
     this.onTeardownSuccess = onTeardownSuccess;
     this.bossmodeToolNames = new Set(bossmodeToolNames);
     this.executionOwner = executionOwner;
@@ -278,7 +277,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
   private async refreshModelRegistryInternal(): Promise<void> {
     // Catalog network refresh belongs to the application service; the SDK consumes SQL snapshots.
-    const profileId = this.runtimeParams.credentialId;
+    const profileId = this.credentialId;
     await refreshDatabaseModelRuntime(this.session.modelRuntime, profileId);
   }
 
@@ -297,16 +296,14 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (!found) throw new Error(`Model not found: ${modelRef}`);
     const model = this.credentials.bind(found, profile);
     await this.credentials.run(model, () => this.session.setModel(model));
-    this.runtimeParams.model = normalizeModelRef(modelRef);
-    this.runtimeParams.credentialId = profile.id;
-    this.runtimeParams.credentialName = profile.name;
+    this.modelRef = normalizeModelRef(modelRef);
+    this.credentialId = profile.id;
   }
 
   setThinkingLevel(level: string): void {
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     try {
       this.session.setThinkingLevel(level as any);
-      this.runtimeParams.thinkingLevel = (this.session as any).thinkingLevel || level;
     }
     catch (err) { logger.warn("runtime:pi-sdk", "setThinkingLevel failed", { level, error: String(err) }); }
   }
@@ -314,7 +311,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
       const raw=await this.session.getContextUsage();
-      return mapContextUsage(raw, this.runtimeParams.model);
+      return mapContextUsage(raw, this.modelRef);
     } catch (err) {
       logger.warn("runtime:pi-sdk", "getContextUsage failed", { error: String(err) });
       return null;
@@ -362,7 +359,6 @@ export class PiSdkAgentHandle implements AgentHandle {
     // Supported SDK API rebuilds its base prompt from the resource loader.
     // Retain the exact active tools, session history, resources, and credentials.
     this.session.setActiveToolsByName(this.session.getActiveToolNames());
-    this.runtimeParams.systemPrompt = [sources.systemPrompt, ...sources.appendSystemPrompt].filter(Boolean).join("\n\n");
   }
 
   private resourceOperations = new Set<Promise<unknown>>();
@@ -555,23 +551,14 @@ export class PiSdkRuntime implements AgentRuntime {
         await session.setModel(model);
       }
 
-      const runtimeParams: AgentRuntimeParams = {
-        model: resolvedModel,
-        thinkingLevel: session.thinkingLevel || opts.member.thinkingLevel || "off",
-        // Panel metadata: bossmode-composed segments only (never pi built-in text).
-        systemPrompt: [rolePrompt, ...appendBase].filter(Boolean).join("\n\n"),
-        skills: opts.resources.skillNames.length?opts.resources.skillNames:skillPaths,
-        extensions: ["bossmode-sdk-tools", ...activeExtensionPaths, "pi-mcp-adapter"],
-        credentialId: piConfig.profile?.id,
-        credentialName: piConfig.profile?.name,
-      };
+
       let handle: PiSdkAgentHandle;
       handle = new PiSdkAgentHandle(
         session,
         modelRegistry,
         authStorageCredentials,
         resourceLoader,
-        runtimeParams,
+        resolvedModel,piConfig.profile.id,
         customTools.map((t) => t.name),
         { memberId: opts.member.id, resolveSourceRef: opts.resolveSourceRef },
         () => this.handles.delete(handle),
@@ -582,7 +569,7 @@ export class PiSdkRuntime implements AgentRuntime {
       logger.info("runtime:pi-sdk", "createAgent", {
         agent: opts.member.name,
         model: resolvedModel,
-        thinking: runtimeParams.thinkingLevel,
+        thinking: session.thinkingLevel || opts.member.thinkingLevel || "off",
         skills: skillPaths.length,
         transport: transportSettings.transport,
         websocketConnectTimeoutMs: transportSettings.websocketConnectTimeoutMs,
