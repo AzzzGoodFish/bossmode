@@ -95,7 +95,6 @@ export interface MemberHttpActions {
   readStats(memberId: string): unknown;
   readTokenTotal(memberId: string, sourceRef?: string): number;
   readActivity(memberId: string, options: { sourceRef?: string; beforeSeq?: number; limit?: number; types?: string[] }): unknown;
-  readStatus(memberId: string): unknown;
   stop(memberId: string): Promise<unknown> | unknown;
   compact(memberId: string): Promise<unknown> | unknown;
   reset(memberId: string): Promise<unknown> | unknown;
