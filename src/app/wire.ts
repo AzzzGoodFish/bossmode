@@ -145,7 +145,7 @@ export async function wireApiRoutes(): Promise<void> {
   ]);
 }
 import { configureToolChatSender } from "../agent/tools/tools.js";
-import type { MessageInput } from "../chat/messages.js";
+import { setMessageSink, type MessageInput } from "../chat/messages.js";
 
 export function wireMemberHttp(): () => void {
   return connectMemberHttpActions({
@@ -169,6 +169,10 @@ export function wireUsageHttp(): () => void {
 }
 
 export function wireChatHttp(): () => void {
+  setMessageSink((sourceRef, message) => {
+    const target = sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
+    broadcastToRoom(target, { type: "room:message", roomId: target, message: message as any });
+  });
   const disconnectHttp = connectChatHttpActions({
     postMessage: commitChatMessage,
     resetSession: (_sourceRef, memberId) => resetMemberSession(memberId),
@@ -187,7 +191,7 @@ export function wireChatHttp(): () => void {
   });
   configureToolChatSender((sourceRef, sender, content, mentions = [], extra = {}) =>
     commitChatMessage(sourceRef, { sender, content, mentions, ...extra } as MessageInput));
-  return () => { configureToolChatSender(undefined); disconnectHttp(); };
+  return () => { setMessageSink(undefined); configureToolChatSender(undefined); disconnectHttp(); };
 }
 
 export function wireAgentEvents(): () => void {

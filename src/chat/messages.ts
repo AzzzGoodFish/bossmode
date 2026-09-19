@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase, type Database } from "../data/database.js";
-import { enqueueOutbox } from "../data/outbox.js";
+import { claimOutbox, completeOutbox, enqueueOutbox } from "../data/outbox.js";
+import { logger } from "../kernel/logger.js";
 import type { JsonValue } from "../kernel/json.js";
 import type { RoomMessageAttachment } from "../files/attachments.js";
-import { storageScopeId } from "./conversations.js";
+import { parseConversation, storageScopeId } from "./conversations.js";
 
 export interface Message {
   id: string;
@@ -169,12 +170,42 @@ export function appendMessageInTransaction(db: Database, scope: string, input: M
     const payload = JSON.parse(JSON.stringify({ messageId: message.id, message })) as JsonValue;
     enqueueOutbox(tx, {
       kind: "message",
-      scopeId,
+      scopeId: parseConversation(scope)!.scopeId,
       dedupeKey: `message:${scopeId}:${message.id}`,
       payload,
       createdAt: message.ts,
     });
     return message;
+  });
+}
+
+export type MessageSink = (sourceRef: string, message: Message) => void;
+let messageSink: MessageSink | undefined;
+let dispatchScheduled = false;
+
+/** Connect the transport after startup. Delivery is post-commit and durable;
+ * failures remain pending for the next startup/timer rather than hot-looping. */
+export function setMessageSink(sink: MessageSink | undefined): void {
+  messageSink = sink;
+  if (sink) scheduleMessageDispatch();
+}
+export function scheduleMessageDispatch(): void {
+  if (dispatchScheduled || !messageSink) return;
+  dispatchScheduled = true;
+  queueMicrotask(() => {
+    dispatchScheduled = false;
+    try {
+      const rows = claimOutbox("message");
+      for (const row of rows) {
+        if (!row.scopeId) throw new Error(`Message outbox has no source: ${row.id}`);
+        const payload = row.payload as unknown as { messageId: string; message: Message };
+        messageSink?.(row.scopeId, payload.message);
+        completeOutbox(row.id);
+      }
+      if (rows.length === 500) scheduleMessageDispatch();
+    } catch (error) {
+      logger.error("chat", "durable message dispatch pending", { error: String(error) });
+    }
   });
 }
 

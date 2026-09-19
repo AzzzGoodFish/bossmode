@@ -3,9 +3,10 @@ import { coreFixture } from "./helpers/core-fixture.js";
 import { assertMemberScopeAccess, ensureDmScope, ensureMmScope, storeRoom } from "../src/chat/conversations.js";
 import { appendMessageWithAdmissions, confirmChatAdmission, listPendingChatAdmissions, repairPendingChatAdmission } from "../src/chat/delivery.js";
 import { getMemberCursor } from "../src/chat/cursors.js";
+import { scheduleMessageDispatch, setMessageSink } from "../src/chat/messages.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
-afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.close(); });
+afterEach(() => { setMessageSink(undefined); for (const fixture of fixtures.splice(0)) fixture.close(); });
 function setup() {
   const fixture = coreFixture(); fixtures.push(fixture);
   for (const [id, name] of [["mem_one", "One"], ["mem_two", "Two"]]) fixture.db.run(
@@ -40,6 +41,19 @@ describe("chat delivery v2", () => {
     expect(getMemberCursor("room:rm_test", "mem_one", fixture.db)).toBe(result.message.id);
     expect(confirmChatAdmission(fixture.db, result.admissions[0].chatToken, result.id)).toEqual({ confirmed: false, cursorConfirmed: false });
     expect(fixture.db.get<{status:string}>("SELECT status FROM chat_admissions")!.status).toBe("confirmed");
+  });
+
+  it("dispatches a committed message from the durable outbox with a canonical source", async () => {
+    const fixture = setup();
+    const delivered: Array<{ sourceRef: string; id: string }> = [];
+    setMessageSink((sourceRef, message) => delivered.push({ sourceRef, id: message.id }));
+    const result = appendMessageWithAdmissions(fixture.db, "room:rm_test", {
+      sender: "system", content: "committed", mentions: [],
+    });
+    scheduleMessageDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(delivered).toEqual([{ sourceRef: "room:rm_test", id: result.message.id }]);
+    expect(fixture.db.get<{ delivered_at: number | null }>("SELECT delivered_at FROM outbox")!.delivered_at).not.toBeNull();
   });
 
   it("repairs only explicit pending admission and never confirmed work", () => {

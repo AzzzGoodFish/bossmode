@@ -152,7 +152,7 @@ import { configureControls, applyPendingAfterPromptSettlement, interruptAccepted
 import { recoverRuntimeInputState, acceptAgentAdmission, acceptControlInput, pendingRuntimeInputOwners, cancelPendingRuntimeInputs, waitForInputSettlement, configureScheduler, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
 
 import { appendMessageWithAdmissions, confirmChatAdmission, dismissPendingReplies, listPendingChatAdmissions, listPendingReplies, repairPendingChatAdmission, type PreparedChatAdmission } from "../chat/delivery.js";
-import type { Message, MessageInput } from "../chat/messages.js";
+import { scheduleMessageDispatch, type Message, type MessageInput } from "../chat/messages.js";
 import { isBlankPersona } from "../member/profile.js";
 import { openRuntimeAdmission, memberRuntimeAllowed } from "../agent/instance.js";
 
@@ -160,8 +160,6 @@ import { logger } from "../kernel/logger.js";
 
 import * as roomStore from "../chat/conversations.js";
 import * as sessionStore from "../member/sessions.js";
-
-import { scheduleMessageDispatch } from "../chat/message-bus.js";
 
 import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, getRegistry, configureAssembly } from "../agent/assembly.js";
 
