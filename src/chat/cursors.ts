@@ -36,13 +36,6 @@ export function getUserReadCursor(scope: string, db: Database = getDatabase()): 
   return row ? userCursor(row) : null;
 }
 
-export function listUserReadCursors(db: Database = getDatabase()): Record<string, UserReadCursor> {
-  return Object.fromEntries(db.all<UserCursorRow>(USER_CURSOR_SELECT).map((row) => [
-    row.scope_id.includes(":") ? row.scope_id : `room:${row.scope_id}`,
-    userCursor(row),
-  ]));
-}
-
 export function setUserReadCursor(
   scope: string,
   patch: { messageId?: string | null; seq?: number | null },
@@ -75,14 +68,6 @@ export function getMemberCursor(scope: string, memberId: string, db: Database = 
     "SELECT value FROM read_cursors WHERE scope_id=? AND kind='member' AND actor_key=?",
     scopeId, memberId,
   )?.value ?? null;
-}
-
-export function listMemberCursors(scope: string, db: Database = getDatabase()): Record<string, string | null> {
-  const scopeId = storageScopeId(scope);
-  return Object.fromEntries(db.all<{ actor_key: string; value: string | null }>(
-    "SELECT actor_key,value FROM read_cursors WHERE scope_id=? AND kind='member'",
-    scopeId,
-  ).map((row) => [row.actor_key, row.value]));
 }
 
 export function setMemberCursor(
@@ -142,10 +127,3 @@ export function setDmMemberCursor(
   });
 }
 
-export function getDmMemberCursor(memberId: string, db: Database = getDatabase()): DmMemberCursor {
-  const scopeId = `dm:${memberId}`;
-  return {
-    messageId: getMemberCursor(scopeId, memberId, db),
-    seq: db.get<{ seq: number | null }>("SELECT seq FROM dm_member_cursor_sequences WHERE scope_id=?", scopeId)?.seq ?? null,
-  };
-}

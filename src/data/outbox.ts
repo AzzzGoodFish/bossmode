@@ -95,7 +95,3 @@ export function completeOutbox(id: number, completedAt = Date.now(), db: Databas
   return true;
 }
 
-export function isOutboxComplete(id: number, db: Database = getDatabase()): boolean {
-  if (!Number.isSafeInteger(id) || id < 1) return false;
-  return db.get<{ delivered_at: number | null }>("SELECT delivered_at FROM outbox WHERE id=?", id)?.delivered_at != null;
-}

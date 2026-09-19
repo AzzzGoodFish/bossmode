@@ -217,15 +217,6 @@ export function getRawEntry(entryId: string): { path: string; contentType: strin
   return { path: rel, contentType: contentTypeForPath(rel), data: readFileSync(abs) };
 }
 
-export function entryExists(docPath: string): boolean {
-  try {
-    const rel = normalizeDocPath(docPath);
-    return existsSync(absDocPath(rel));
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Write/overwrite a text document. If no extension is provided, `.md` is appended.
  * Creates intermediate directories. Frontmatter is not injected or parsed.
@@ -379,17 +370,6 @@ export function deleteFolder(
   cleanupEmptyParentDirs(dirname(abs));
 
   return { ok: true, deletedCount: deletedPaths.length, deletedPaths };
-}
-
-/**
- * Search documents by substring (case-insensitive) in title or content.
- * Returns matches with full content. Binary files are searchable by filename only.
- */
-export function searchEntries(query: string): KnowledgeEntry[] {
-  const q = query.toLowerCase();
-  return listEntries().filter((e) =>
-    e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q),
-  );
 }
 
 // -- Helpers --
