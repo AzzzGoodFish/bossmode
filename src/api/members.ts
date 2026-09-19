@@ -13,7 +13,7 @@ import { listMemberExtensions } from "../member/extensions.js";
 import { listMemberSkills } from "../member/skills.js";
 import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
-import { assertMemberScopeAccess, scopeIdOf } from "../chat/conversations.js";
+import { assertMemberScopeAccess } from "../chat/conversations.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
 
@@ -251,10 +251,10 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
     return;
   }
   const scopes: Array<{ scopeId: string; kind: string; label: string; status: string; lastActiveAt: number | null }> = [
-    { scopeId: scopeIdOf({ kind: "dm", memberId: m.id }), kind: "dm", label: "Direct message", status: "idle", lastActiveAt: null },
+    { scopeId: `dm:${m.id}`, kind: "dm", label: "Direct message", status: "idle", lastActiveAt: null },
   ];
   for (const room of roomStore.listRoomsForMember(m.id)) scopes.push({
-    scopeId: scopeIdOf({ kind: "room", roomId: room.id }), kind: "room", label: room.name,
+    scopeId: `room:${room.id}`, kind: "room", label: room.name,
     status: "idle", lastActiveAt: null,
   });
   sendJson(res, 200, { scopes });

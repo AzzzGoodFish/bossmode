@@ -424,20 +424,8 @@ export function conversationMember(id: string, retained = false): ConversationMe
   return memberDirectory.read(id, retained);
 }
 
-/**
- * 0.20 ConversationRef — unique scope key for sessions, activation, cursors, wait, memory.
- * Contract: docs/bossmode/architecture/contract-020-conversation-ref-and-rest-v1.md §1/§5/§6
- * Topic scopes were retired 2026-09-11 (plan-retire-topics-v2).
- */
-
-export type ConversationRef =
-  | { kind: "dm"; memberId: string }
-  | { kind: "room"; roomId: string };
-
-/** Serialized form used in storage keys, logs, URL `scope=` params. */
+/** Canonical serialized conversation source. */
 export type ScopeId = string;
-
-// "dm:<memberId>" | "room:<roomId>"
 
 const DM_PREFIX = "dm:";
 
@@ -504,31 +492,6 @@ export function storageScopeId(value: string): string {
   const ref = parseConversation(value);
   if (!ref) throw new Error(`Invalid conversation: ${value}`);
   return ref.kind === "room" ? ref.roomId : ref.scopeId;
-}
-
-export function scopeIdOf(ref: ConversationRef): ScopeId {
-  if (ref.kind === "dm") {
-    if (!ref.memberId) throw new Error("dm ConversationRef requires memberId");
-    return `${DM_PREFIX}${ref.memberId}`;
-  }
-  if (!ref.roomId) throw new Error("room ConversationRef requires roomId");
-  return `${ROOM_PREFIX}${ref.roomId}`;
-}
-
-/** Parse a ScopeId. Returns null on illegal input (never throws). */
-export function parseScopeId(s: string): ConversationRef | null {
-  if (typeof s !== "string" || !s) return null;
-  if (s.startsWith(DM_PREFIX)) {
-    const memberId = s.slice(DM_PREFIX.length);
-    if (!memberId || memberId.includes(":")) return null;
-    return { kind: "dm", memberId };
-  }
-  if (s.startsWith(ROOM_PREFIX)) {
-    const roomId = s.slice(ROOM_PREFIX.length);
-    if (!roomId || roomId.includes(":")) return null;
-    return { kind: "room", roomId };
-  }
-  return null;
 }
 
 /**
