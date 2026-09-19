@@ -45,6 +45,12 @@ export function importArchivedMessage(
     ON CONFLICT(scope_id,archive_ts) DO UPDATE SET has_messages=1`, scopeId, archiveTs);
 }
 
+export function recordMessageArchive(scope: string, archiveTs: number, db: Database = getDatabase()): void {
+  archiveTimestamp(archiveTs);
+  db.run(`INSERT INTO message_archives(scope_id,archive_ts,has_messages) VALUES(?,?,1)
+    ON CONFLICT(scope_id,archive_ts) DO UPDATE SET has_messages=1`, storageScopeId(scope), archiveTs);
+}
+
 export function readArchivedMessages(scope: string, archiveTs: number, db: Database = getDatabase()): Message[] {
   archiveTimestamp(archiveTs);
   return db.all<{ payload_json: string }>(

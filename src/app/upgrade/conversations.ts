@@ -8,11 +8,10 @@ import { importHistoricalEvent, readAgentEvent, type AgentHistoryEvent, rebuildE
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { archiveRawRetiredSource } from "./retirements.js";
-import { storeRoom } from "../../chat/conversations.js";
-import { MessageArchivesRepository, type ArchiveSummary } from "../../data/repositories/message-archives.js";
-import { UserCursorRepository } from "../../data/repositories/user-cursor-repository.js";
-import { importMessage, importMessageNextSequence, importArchivedMessage, writeMemberCursor, writeDmMemberCursor } from "../../data/repositories/message-repository.js";
-import { type Room, type RoomMessage } from "../../kernel/types.js";
+import { storeRoom, type Room } from "../../chat/conversations.js";
+import { importArchivedMessage, recordMessageArchive, saveArchiveSummary, type ArchiveSummary } from "../../chat/archives.js";
+import { setDmMemberCursor, setMemberCursor, setUserReadCursor, type UserReadCursor } from "../../chat/cursors.js";
+import { importMessage, importMessageNextSequence, type Message } from "../../chat/messages.js";
 
 /** Topic feature retired (fish #19358, 2026-09-11): topic scopes are never
  * imported. Legacy topic sources are consumed by the standard source-retire
@@ -183,10 +182,12 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   // source-retire flow retains no unhandled domain; no topic archive copy is written.
   if(e.kind==="topic-metadata"||retiredTopicScope(e.scopeId)){consumed.add(e.path);continue;}
   if(e.kind==="user-cursors"){
-   const cursors=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`);const repo=new UserCursorRepository(ctx.db);
+   const cursors=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`);
    for(const [key,cursor]of Object.entries(cursors)){
     if(retiredTopicScope(key))continue; // topic scope retired (fish #19358)
-    ensureImportedScope(ctx.db,key);repo.importCursor(key,cursor);
+    ensureImportedScope(ctx.db,key);
+    const value = cursor as UserReadCursor;
+    setUserReadCursor(key, { messageId: value.messageId, seq: value.seq }, ctx.db, value.updatedAt);
    }
    consumed.add(e.path);continue;
   }
@@ -223,23 +224,23 @@ export async function importLegacyConversations(ctx:UpgradeImportContext,entries
   }
   const scope=ensureImportedScope(ctx.db,e.scopeId,e.path.startsWith("rooms/")?e.path.split("/")[1]:undefined);
   if(e.kind==="message-archive-summary"){
-   new MessageArchivesRepository(ctx.db).saveSummary(scope,Number(e.archiveTimestamp),requireObject(read(e), `Invalid legacy conversation object: ${e.path}`) as ArchiveSummary);
+   saveArchiveSummary(scope,Number(e.archiveTimestamp),requireObject(read(e), `Invalid legacy conversation object: ${e.path}`) as unknown as ArchiveSummary,ctx.db);
   }else if(e.kind==="message-sequence")importMessageNextSequence(ctx.db,scope,read(e) as number);
   else if(e.kind==="member-cursors"){
    const cursors=requireObject(read(e), `Invalid legacy conversation object: ${e.path}`);for(const [actor,value]of Object.entries(cursors)){
     if(value!==null&&typeof value!=="string")throw new Error(`Invalid legacy member cursor: ${e.path}`);
-    writeMemberCursor(scope,actor,value,ctx.db,Math.trunc(e.mtimeMs));
+    setMemberCursor(scope,actor,value,ctx.db,Math.trunc(e.mtimeMs));
    }
   }else if(e.kind==="dm-member-cursor"){
-   if(!e.memberId)throw new Error("DM cursor has no member ID");writeDmMemberCursor(ctx.db,e.memberId,read(e) as any,Math.trunc(e.mtimeMs));
+   if(!e.memberId)throw new Error("DM cursor has no member ID");setDmMemberCursor(e.memberId,read(e) as any,ctx.db,Math.trunc(e.mtimeMs));
   }else if(e.kind!=="derived-event-stats"){
    const archiveTs=e.kind==="message-archive"?Number(e.archiveTimestamp):null;
-   if(e.kind==="message-archive")new MessageArchivesRepository(ctx.db).recordMessages(scope,archiveTs!);
+   if(e.kind==="message-archive")recordMessageArchive(scope,archiveTs!,ctx.db);
    let batch:Array<{ordinal:number;value:unknown}>=[];let bytes=0;
    const flush=()=>{
     ctx.db.transaction(tx=>{for(const row of batch){
-     if(e.kind==="messages")importMessage(tx,scope,row.value as RoomMessage);
-     else if(e.kind==="message-archive")importArchivedMessage(tx,scope,archiveTs!,row.ordinal-1,row.value as RoomMessage);
+     if(e.kind==="messages")importMessage(tx,scope,row.value as Message);
+     else if(e.kind==="message-archive")importArchivedMessage(tx,scope,archiveTs!,row.ordinal-1,row.value as Message);
     }});
     completed+=batch.length;batch=[];bytes=0;ctx.progress(completed);
    };
