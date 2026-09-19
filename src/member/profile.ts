@@ -2,12 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { memberDir, memberProfilePath, memberSkillsDir } from "../files/layout.js";
 import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
-import { getMember, updateMemberIdentity, MemberNotFoundError, type MemberRecord } from "./identity.js";
-const profilePublishers = new Set<(member: MemberRecord) => void>();
-export function onMemberProfileChanged(publish: (member: MemberRecord) => void): () => void {
-  profilePublishers.add(publish);
-  return () => { profilePublishers.delete(publish); };
-}
+import { getMember, updateMember, MemberNotFoundError } from "./identity.js";
 export const MEMBER_PROFILE_BUDGET_CHARS = 4000;
 export interface MemberProfile {
   /** Literal Markdown, with no metadata parsing or required headings. Empty at birth. */
@@ -70,7 +65,7 @@ export function updateProfileForMember(memberId: string, input: unknown) {
   const before = getMember(memberId);
   if (!before) throw new MemberNotFoundError(memberId);
   let member;
-  try { member = updateMemberIdentity(memberId, patch); }
+  try { member = updateMember(memberId, patch); }
   catch (error) {
     if ((error as Error).message === "reserved_member_name") throw new InvalidProfileError("all, user and system are reserved for group mentions, the human user and system messages.");
     if ((error as Error).message === "invalid_member_name") {
@@ -78,18 +73,6 @@ export function updateProfileForMember(memberId: string, input: unknown) {
     }
     throw error;
   }
-  const changed = member.name !== before.name || member.title !== before.title;
-  const warnings: string[] = [];
-  if (changed) {
-    getDatabase().afterCommit(() => {
-      for (const publish of [...profilePublishers]) {
-        try { publish(member); }
-        catch (error) {
-          logger.error("member-profile", "committed profile notification failed", { memberId, error: String(error) });
-          warnings.push("Profile was saved, but a live view could not be notified. Refresh that view.");
-        }
-      }
-    });
-  }
-  return { memberId, name: member.name, title: member.title ?? null, changed, ...(warnings.length ? { warnings } : {}) };
+  const changed=member.name!==before.name||member.title!==before.title;
+  return {memberId,name:member.name,title:member.title??null,changed};
 }

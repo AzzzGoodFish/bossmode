@@ -5,7 +5,7 @@ import { getBossmodeDir, memberDir, membersRoot, memberSkillsDir, memberExtensio
 import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
 import { ensureDmScope } from "../chat/conversations.js";
-import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
+import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, updateMember as persistMember, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
 import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot } from "../member/workspaces.js";
 import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../member/extensions.js";
 import { filterMcpConfigForServers, getAssignableMcpServerNames, getBossmodeMcpRuntimeDir, readMemberMcpConfig } from "../member/mcp.js";
@@ -55,7 +55,7 @@ export function createMemberWithPersona(input: CreateMemberInput, persona: strin
 }
 
 import { MemberArchiveService } from "../member/archive.js";
-import { quiesceMember } from "../agent/controls.js";
+import {quiesceMember,switchMemberModel,switchMemberThinkingLevel} from "../agent/controls.js";
 
 /** Session build material for the agent core: member config projection, resolved
  *  skill paths, workspace root and the stored session to resume. Assembled here
@@ -105,6 +105,8 @@ import { buildSkillCatalog } from "../member/skills.js";
 import { memberArchiveDir } from "../files/layout.js";
 import { directoryHasReadableEntries } from "../files/io.js";
 import { compileMemberPrompt, type MemberPromptSource } from "../agent/prompt.js";
+import {reloadMemberSession} from "../agent/assembly.js";
+import {validateProfilePatch} from "../member/profile.js";
 /** Capture member-owned prompt inputs once; compilation does not read storage. */
 export function loadMemberPromptSource(memberId: string, contextWindowTokens = 128_000): MemberPromptSource {
   const member = requireMember(memberId);
@@ -167,6 +169,21 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
   return message;
 }
 
+
+export interface MemberUpdatePatch{name?:string;title?:string|null;model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[];}
+export async function updateMember(memberId:string,patch:MemberUpdatePatch){
+  const before=requireMember(memberId),beforeModel=before.global.model??null;
+  if(patch.name!==undefined||patch.title!==undefined)validateProfilePatch({...patch.name!==undefined&&{name:patch.name},...patch.title!==undefined&&{title:patch.title??""}});
+  if(patch.model!==undefined&&(patch.model===null||!patch.model.trim()))throw new Error("invalid_model");
+  let modelSwitch:Awaited<ReturnType<typeof switchMemberModel>>|undefined;
+  if(patch.model!==undefined||patch.credentialId!==undefined){const current=getMemberConfiguration(memberId),model=patch.model??current.model,credentialId=patch.credentialId===undefined?current.credentialId:patch.credentialId;if(!model||!credentialId)throw new Error("invalid_binding");modelSwitch=await switchMemberModel(memberId,{model,credentialId});}
+  const global:Record<string,unknown>={};for(const key of ["thinkingLevel","skills","mcpServers"] as const)if(patch[key]!==undefined)global[key]=key==="thinkingLevel"?patch[key]??"off":patch[key];
+  const member=persistMember(memberId,{...(patch.name!==undefined&&{name:patch.name}),...(patch.title!==undefined&&{title:patch.title}),...(Object.keys(global).length&&{global})});
+  const thinkingSwitch=patch.thinkingLevel===undefined?undefined:await switchMemberThinkingLevel(memberId,patch.thinkingLevel??"off");
+  const resourceReload=patch.skills!==undefined||patch.mcpServers!==undefined?await reloadMemberSession(memberId,"member resources changed"):undefined;
+  if(!beforeModel&&modelSwitch?.model)void activateDmMember(memberId).catch(error=>logger.error("members","post-config DM activate failed",{memberId,error:String(error)}));
+  return {member,...modelSwitch&&{modelSwitch},...thinkingSwitch&&{thinkingSwitch},...resourceReload&&{resourceReload}};
+}
 
 export function memberRecordToConfig(memberId: string): AgentMemberConfig | null {
   const rec = getMember(memberId);

@@ -4,11 +4,11 @@ import { notifyMemberProfileChanged } from "../agent/instance.js";
 export function wireConfiguration(): () => void {
   return onCatalogChanged(async () => { await refreshAllInstanceModelRegistries(); });
 }
-import { onMemberProfileChanged } from "../member/profile.js";
+import {onMemberIdentityChanged} from "../member/identity.js";
 import { broadcastMemberProfileChanged } from "./ws.js";
 export function wireMemberProfiles(): () => void {
-  const stopRuntime = onMemberProfileChanged(member => notifyMemberProfileChanged(member));
-  const stopViews = onMemberProfileChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
+  const stopRuntime = onMemberIdentityChanged(member => notifyMemberProfileChanged(member));
+  const stopViews = onMemberIdentityChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
 }
 import { assertMemberScopeAccess,chatScopeAssetRoots,connectConversationMembers,ensureMmScope,isMmScopeId,listRoomsForMember,parseMmScopeId,parseScopeId,type ScopeId } from "../chat/conversations.js";

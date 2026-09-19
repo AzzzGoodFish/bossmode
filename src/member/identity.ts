@@ -109,26 +109,17 @@ export function retireMemberIdentity(id: string, path: string, timestamp: number
   if (!Number.isSafeInteger(timestamp)) throw new Error("invalid_archive_timestamp");
   db.run("UPDATE members SET archived_at=?,archive_path=? WHERE id=? AND archived_at IS NULL", timestamp, path, id);
 }
-export function updateMemberIdentity(id: string, patch: { name?: string; title?: string | null }): MemberRecord {
-  return getDatabase().transaction(() => {
-    const member = requireMember(id);
-    const name = patch.name === undefined ? member.name : normalizeMemberName(patch.name);
-    if (patch.name !== undefined && typeof patch.name !== "string") throw new Error("invalid_member_name");
-    if (patch.name !== undefined) validateMemberName(name);
-    if (patch.title !== undefined && patch.title !== null && typeof patch.title !== "string") throw new Error("invalid_member_title");
-    const title = patch.title === undefined ? member.title : patch.title?.trim() || undefined;
-    if (name === member.name && title === member.title) return member;
-    const next = { ...member, name, title, updatedAt: Date.now() };
-    storeMemberIdentity(next);
-    return next;
-  });
-}
-export function updateMember(id: string, patch: { agentTemplate?: string; global?: Partial<MemberGlobalConfig> }): MemberRecord {
-  return getDatabase().transaction(() => {
-    const member = requireMember(id);
-    const next = { ...member, agentTemplate: patch.agentTemplate ?? member.agentTemplate,
-      global: { ...member.global, ...patch.global }, updatedAt: Date.now() };
-    storeMemberIdentity(next);
+const memberChangeListeners=new Set<(member:MemberRecord)=>void>();
+export function onMemberIdentityChanged(listener:(member:MemberRecord)=>void):()=>void{memberChangeListeners.add(listener);return()=>memberChangeListeners.delete(listener);}
+export function updateMember(id:string,patch:{name?:string;title?:string|null;global?:Partial<MemberGlobalConfig>}):MemberRecord{
+  return getDatabase().transaction(db=>{
+    const member=requireMember(id,db),name=patch.name===undefined?member.name:normalizeMemberName(patch.name);
+    if(patch.name!==undefined){if(typeof patch.name!=="string")throw new Error("invalid_member_name");validateMemberName(name);}
+    if(patch.title!==undefined&&patch.title!==null&&typeof patch.title!=="string")throw new Error("invalid_member_title");
+    const title=patch.title===undefined?member.title:patch.title?.trim()||undefined,global={...member.global,...patch.global};
+    if(name===member.name&&title===member.title&&encodeConfig(global)===encodeConfig(member.global))return member;
+    const next={...member,name,title,global,updatedAt:Date.now()};storeMemberIdentity(next,db);
+    if(name!==member.name||title!==member.title)db.afterCommit(()=>{for(const listener of memberChangeListeners)try{listener(next);}catch{}});
     return next;
   });
 }

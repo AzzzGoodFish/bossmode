@@ -418,13 +418,11 @@ export class PiSdkRuntime implements AgentRuntime {
     const modelId = modelIdSlash >= 0 ? modelRef.slice(modelIdSlash + 1) : modelRef;
     const resolvedModel = `${provider}/${modelId}`;
 
-    const defaultAgentDir = resolvePiAgentDir(opts.member.id);
-    const runtimeAgentDir = piConfig?.agentDir || defaultAgentDir;
+    const runtimeAgentDir=piConfig.agentDir||resolvePiAgentDir(opts.member.id);
     const sessionDir = opts.sessionDir ?? join(runtimeAgentDir, "sessions");
     mkdirSync(runtimeAgentDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
 
-    if (!piConfig.profile) throw new Error(`No model credentials configured for ${resolvedModel}. Go to Settings → Model Credentials to add or import credentials.`);
     const authStorageCredentials = new ModelCredentialBinding(piConfig.profile);
     const runtime = await createDatabaseModelRuntime(authStorageCredentials, piConfig.profile.id);
     authStorageCredentials.attach(runtime);
@@ -435,7 +433,7 @@ export class PiSdkRuntime implements AgentRuntime {
     const model = authStorageCredentials.bind(foundModel, piConfig.profile);
     const authCheck = await modelRegistry.getApiKeyAndHeaders(model);
     if (!authCheck.ok) throw new Error(`Credential projection failed for ${resolvedModel}: ${authCheck.error}`);
-    if (!authCheck.apiKey && piConfig.profile?.authType !== "ambient") throw new Error(`Credential projection failed for ${resolvedModel}: no API key available for provider ${provider}`);
+    if (!authCheck.apiKey && piConfig.profile.authType !== "ambient") throw new Error(`Credential projection failed for ${resolvedModel}: no API key available for provider ${provider}`);
 
     let sessionManager: SessionManager;
     let appendConfiguredModelChange = false;
@@ -482,13 +480,7 @@ export class PiSdkRuntime implements AgentRuntime {
       sessionManager = SessionManager.create(opts.cwd, sessionDir);
     }
 
-    const rolePrompt = opts.agentPrompt.trim();
-    const appendBase = opts.appendSystemPrompt.filter(v => v.trim().length > 0);
-    const promptSources = resolvePiSystemPromptSources({
-      agentPrompt: opts.agentPrompt,
-      appendSystemPrompt: appendBase,
-    });
-    const appendSystemPrompt = promptSources.appendSystemPrompt;
+    const promptSources=resolvePiSystemPromptSources(opts);
     const skillPaths = opts.resources.skillPaths.filter((path) => existsSync(path));
     const mcpSettings = materializeMcpRuntimeSettings(opts.resources.mcp);
     let sessionObtained: AgentSession | null = null;
@@ -497,8 +489,7 @@ export class PiSdkRuntime implements AgentRuntime {
       // the member's enable list (§1.3: list serves the two platform packs only).
       // Batch 7 closeout (fish 2026-09-04): the platform extension store is gone —
       // member-owned extensions/ dir entries are the only managed extensions.
-      const managedExtensions = [...opts.resources.extensionPaths];
-      const activeExtensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
+      const activeExtensionPaths=[...opts.resources.extensionPaths,...(piConfig.extensionPaths??[])];
       const mcpFactory = await loadMcpFactory(mcpSettings.adapterPath!);
       const resourceLoader = new BossmodeResourceLoader({
         cwd: opts.cwd,
@@ -510,7 +501,7 @@ export class PiSdkRuntime implements AgentRuntime {
         additionalExtensionPaths: activeExtensionPaths,
         extensionFactories: [mcpFactory],
         systemPrompt: promptSources.systemPrompt,
-        appendSystemPrompt,
+        appendSystemPrompt:promptSources.appendSystemPrompt,
       }, promptSources);
       await resourceLoader.reload();
       assertHostedMcpLoaded(resourceLoader);
