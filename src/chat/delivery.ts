@@ -111,25 +111,22 @@ function captureJson(capture: CapturedMessage): string {
   return canonicalJson(value, "Invalid delivery JSON");
 }
 
-export function captureMessage(db: Database, capture: CapturedMessage, at: number): { inserted: boolean; capture: CapturedMessage } {
+function captureMessage(db: Database, capture: CapturedMessage, at: number): void {
   timestamp(at);
   const snapshotJson = captureJson(capture);
-  return db.transaction((tx) => {
-    const scope = tx.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", capture.scopeId);
-    if (!scope) throw new Error("Captured delivery scope does not exist");
-    if (scope.kind === "dm" ? capture.snapshot.targets.ordinary.length > 0 : capture.snapshot.targets.dm.length > 0) {
-      throw new Error("Delivery kind does not match scope");
-    }
-    const old = tx.get<{ snapshot_json: string }>(
-      "SELECT snapshot_json FROM delivery_captures WHERE scope_id=? AND message_id=?", capture.scopeId, capture.messageId,
-    );
-    if (old && old.snapshot_json !== snapshotJson) throw new Error("Conflicting captured message identity");
-    if (!old) tx.run(
-      "INSERT INTO delivery_captures(scope_id,message_id,snapshot_json,captured_at) VALUES(?,?,?,?)",
-      capture.scopeId, capture.messageId, snapshotJson, at,
-    );
-    return { inserted: !old, capture: { ...capture, snapshot: JSON.parse(snapshotJson) as CapturedDeliverySnapshot } };
-  });
+  const scope = db.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", capture.scopeId);
+  if (!scope) throw new Error("Captured delivery scope does not exist");
+  if (scope.kind === "dm" ? capture.snapshot.targets.ordinary.length > 0 : capture.snapshot.targets.dm.length > 0) {
+    throw new Error("Delivery kind does not match scope");
+  }
+  const old = db.get<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM delivery_captures WHERE scope_id=? AND message_id=?", capture.scopeId, capture.messageId,
+  );
+  if (old && old.snapshot_json !== snapshotJson) throw new Error("Conflicting captured message identity");
+  if (!old) db.run(
+    "INSERT INTO delivery_captures(scope_id,message_id,snapshot_json,captured_at) VALUES(?,?,?,?)",
+    capture.scopeId, capture.messageId, snapshotJson, at,
+  );
 }
 
 export function readCapture(scope: string, messageId: string, db: Database = getDatabase()): CapturedMessage | null {
@@ -141,16 +138,14 @@ export function readCapture(scope: string, messageId: string, db: Database = get
 }
 
 function acceptDelivery(db: Database, key: DeliveryKey, snapshot: CapturedDeliverySnapshot, at: number): boolean {
-  return db.transaction((tx) => {
-    const target = snapshot.targets[key.deliveryKind].find(actor => actor.actorKey === key.targetActorKey);
-    if (!target) throw new Error("Delivery actor is not a captured target");
-    const scope = tx.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", key.scopeId);
-    if ((scope?.kind === "dm") !== (key.deliveryKind === "dm")) throw new Error("Delivery kind does not match scope");
-    if (tx.get("SELECT 1 FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?", ...keyParams(key))) return false;
-    tx.run(`INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at)
-      VALUES(?,?,?,?,?,?)`, ...keyParams(key), target.memberId, at);
-    return true;
-  });
+  const target = snapshot.targets[key.deliveryKind].find(actor => actor.actorKey === key.targetActorKey);
+  if (!target) throw new Error("Delivery actor is not a captured target");
+  const scope = db.get<{ kind: string }>("SELECT kind FROM scopes WHERE id=?", key.scopeId);
+  if ((scope?.kind === "dm") !== (key.deliveryKind === "dm")) throw new Error("Delivery kind does not match scope");
+  if (db.get("SELECT 1 FROM captured_deliveries WHERE scope_id=? AND message_id=? AND target_actor_key=? AND delivery_kind=?", ...keyParams(key))) return false;
+  db.run(`INSERT INTO captured_deliveries(scope_id,message_id,target_actor_key,delivery_kind,target_member_id,accepted_at)
+    VALUES(?,?,?,?,?,?)`, ...keyParams(key), target.memberId, at);
+  return true;
 }
 
 function openReplies(db: Database, capture: CapturedMessage, at: number): void {
