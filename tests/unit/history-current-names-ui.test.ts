@@ -178,7 +178,7 @@ describe("current names in real rendered historical messages", () => {
     await act(async()=>root.render(createElement(View,{connected:true})));
     expect(authorNames()).toEqual(Array(3).fill("reconnect name"));
     expect(fetchMock).toHaveBeenCalledTimes(5);
-    expect(fetchMock.mock.calls.every(([url])=>url==="/api/members/identities")).toBe(true);
+    expect(fetchMock.mock.calls.every(([url])=>url==="/api/members")).toBe(true);
   });
 
 });
