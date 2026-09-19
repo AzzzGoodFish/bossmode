@@ -15,16 +15,6 @@ export interface Room {
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
 
-function writeRoom(room: Room): void { storeRoom(room, getDatabase()); }
-
-export function getRoomMembersFromRoom(room: Room): RoomMember[] {
-  return room.memberIds.flatMap(id => {
-    const member = conversationMember(id);
-    return member ? [{ id: member.id, name: member.name }] : [];
-  });
-}
-
-
 export function slugifyRoomDocsPath(input: string): string {
   const slug = String(input || "")
     .trim()
@@ -94,7 +84,7 @@ export function createRoom(name: string, memberIds: string[], opts?: {
   // their `rm_<uuid>` form (distinguishable by shape). Bounded retry on an occupied
   // identity; the mkdir below still fails loudly on any residual collision.
   let id = newRoomId();
-  for (let attempts = 0; attempts < 10 && (readStoredRoom(id, repository) || existsSync(roomDir(id))); attempts++) id = newRoomId();
+  for (let attempts = 0; attempts < 10 && (getRoom(id, repository) || existsSync(roomDir(id))); attempts++) id = newRoomId();
   const room: Room = {
     id, name, memberIds: ids,
     ...(leader ? { promptLeaderMemberId: leader } : {}),
@@ -106,20 +96,20 @@ export function createRoom(name: string, memberIds: string[], opts?: {
   mkdirSync(roomDir(room.id), { recursive: true });
   if (room.docsPath) mkdirSync(join(documentsRoot(), room.docsPath), { recursive: true });
   repository.transaction(() => {
-    writeRoom(room);
+    storeRoom(room);
     for (const id of ids) storeMemberCursor(room.id, id, null, undefined, repository);
   });
   return room;
 }
 
-export function getRoom(roomId: string): Room | null {
-  return readStoredRoom(roomId, getDatabase());
-}
-
 export function deleteRoom(roomId: string): boolean {
-  if (!deleteStoredRoom(roomId, getDatabase())) return false;
-  rmSync(roomDir(roomId), { recursive: true, force: true });
-  return true;
+  const removed = getDatabase().transaction(db => {
+    if (!getRoom(roomId, db)) return false;
+    db.run("DELETE FROM scopes WHERE kind='room' AND id=?", roomId);
+    return true;
+  });
+  if (removed) rmSync(roomDir(roomId), { recursive: true, force: true });
+  return removed;
 }
 
 export function updateRoom(roomId: string, patch: {
@@ -150,8 +140,11 @@ export function updateRoom(roomId: string, patch: {
 }
 
 export function getRoomMembers(roomId: string): RoomMember[] {
-  const room = readStoredRoom(roomId);
-  return room ? getRoomMembersFromRoom(room) : [];
+  const room = getRoom(roomId);
+  return room ? room.memberIds.flatMap(id => {
+    const member = conversationMember(id);
+    return member ? [{ id: member.id, name: member.name }] : [];
+  }) : [];
 }
 
 export function resolveRoomMember(roomId: string, memberId: string): RoomMember | null {
@@ -184,13 +177,12 @@ export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string)
 /** ⑤ A: room description (name + description) — product cap on every write. */
 export const ROOM_DESCRIPTION_MAX_CHARS = 2000;
 
-export function listRooms(): Room[] { return listStoredRooms(getDatabase()); }
-
-
-
 /** Member↔member chat scopes involving `memberId` (⑤ B). */
 export function listMmScopesForMember(memberId: string): string[] {
-  return readMemberChatScopes(memberId, getDatabase());
+  return getDatabase().all<{ id: string }>(
+    "SELECT id FROM scopes WHERE kind='mm' AND (member_id LIKE ? OR member_id LIKE ?) ORDER BY id",
+    `${memberId}|%`, `%|${memberId}`,
+  ).map(row => row.id);
 }
 
 // -- Member management --
@@ -218,7 +210,7 @@ export function inviteRoomMember(
     const identity = conversationMember(memberId);
     if (!identity) return { ok: false, code: "not_found", error: "Member not found" };
     room.memberIds.push(memberId);
-    writeRoom(room);
+    storeRoom(room);
     initializeMemberCursor(roomId, memberId);
     return { ok: true, member: { id: memberId, name: identity.name } };
   });
@@ -235,7 +227,7 @@ export function removeRoomMember(
     if (!member) return { ok: false, error: "Member is not in this room" };
     room.memberIds = room.memberIds.filter(id => id !== memberId);
     if (room.promptLeaderMemberId === memberId) delete room.promptLeaderMemberId;
-    writeRoom(room);
+    storeRoom(room);
     deleteMemberCursor(roomId, memberId);
     return { ok: true, removed: member };
   });
@@ -243,7 +235,7 @@ export function removeRoomMember(
 
 /** Remove active membership while retaining imported historical snapshots. */
 export function detachMemberFromConversations(memberId: string, db: Database): void {
-  for (const room of listStoredRooms(db)) {
+  for (const room of listRooms(db)) {
     if (!room.memberIds.includes(memberId) && room.promptLeaderMemberId !== memberId) continue;
     room.memberIds = room.memberIds.filter(id => id !== memberId);
     if (room.promptLeaderMemberId === memberId) delete room.promptLeaderMemberId;
@@ -252,9 +244,7 @@ export function detachMemberFromConversations(memberId: string, db: Database): v
   }
 }
 
-export interface ConversationMemberIdentity {
-  id: string; name: string; agentTemplate: string; createdAt: number; updatedAt: number;
-}
+export interface ConversationMemberIdentity { id: string; name: string }
 
 let memberDirectory: { read(id: string, retained?: boolean): ConversationMemberIdentity | null } | undefined;
 
@@ -271,20 +261,12 @@ export function conversationMember(id: string, retained = false): ConversationMe
 }
 
 /** Canonical serialized conversation source. */
-export type ScopeId = string;
-
-const DM_PREFIX = "dm:";
-
-const ROOM_PREFIX = "room:";
-
-const MM_PREFIX = "mm:";
-
 /** Canonical conversation identity used by all new chat capabilities. Bare room
  * ids remain the storage key; public/source refs always use `room:<id>`. */
 export type ConversationIdentity =
-  | { kind: "room"; scopeId: ScopeId; roomId: string }
-  | { kind: "dm"; scopeId: ScopeId; memberId: string }
-  | { kind: "mm"; scopeId: ScopeId; memberIds: [string, string] };
+  | { kind: "room"; scopeId: string; roomId: string }
+  | { kind: "dm"; scopeId: string; memberId: string }
+  | { kind: "mm"; scopeId: string; memberIds: [string, string] };
 
 /**
  * Member↔member private chat scope (⑤ B, 2026-09-15): `mm:` + the two member ids
@@ -293,16 +275,16 @@ export type ConversationIdentity =
  * `mem_<nanoid10>`), so the pair splits at the second `mem_` occurrence; canonical
  * order is enforced on parse.
  */
-export function mmScopeIdOf(memberA: string, memberB: string): ScopeId {
+export function mmScopeIdOf(memberA: string, memberB: string): string {
   if (!memberA || !memberB || memberA === memberB) throw new Error("mm scope requires two distinct member ids");
   const [a, b] = memberA < memberB ? [memberA, memberB] : [memberB, memberA];
-  return `${MM_PREFIX}${a}-${b}`;
+  return `mm:${a}-${b}`;
 }
 
 /** Parse a `mm:` scope id into its canonical [memberA, memberB] pair, or null. */
 export function parseMmScopeId(scope: string): [string, string] | null {
-  if (typeof scope !== "string" || !scope.startsWith(MM_PREFIX)) return null;
-  const body = scope.slice(MM_PREFIX.length);
+  if (typeof scope !== "string" || !scope.startsWith("mm:")) return null;
+  const body = scope.slice(3);
   const second = body.indexOf("mem_", 1);
   if (second <= 0 || body[second - 1] !== "-") return null;
   const a = body.slice(0, second - 1);
@@ -313,7 +295,7 @@ export function parseMmScopeId(scope: string): [string, string] | null {
 }
 
 export function isMmScopeId(scope: string): boolean {
-  return typeof scope === "string" && scope.startsWith(MM_PREFIX);
+  return typeof scope === "string" && scope.startsWith("mm:");
 }
 
 function validRoomId(value: string): boolean {
@@ -323,16 +305,16 @@ function validRoomId(value: string): boolean {
 /** Parse only canonical public/source refs. */
 export function parseConversation(value: string): ConversationIdentity | null {
   if (typeof value !== "string" || !value || value.includes("\0")) return null;
-  if (value.startsWith(DM_PREFIX)) {
-    const memberId = value.slice(DM_PREFIX.length);
+  if (value.startsWith("dm:")) {
+    const memberId = value.slice(3);
     return isMemberId(memberId) ? { kind: "dm", scopeId: value, memberId } : null;
   }
-  if (value.startsWith(MM_PREFIX)) {
+  if (value.startsWith("mm:")) {
     const memberIds = parseMmScopeId(value);
     return memberIds ? { kind: "mm", scopeId: value, memberIds } : null;
   }
-  if (!value.startsWith(ROOM_PREFIX)) return null;
-  const roomId = value.slice(ROOM_PREFIX.length);
+  if (!value.startsWith("room:")) return null;
+  const roomId = value.slice(5);
   return validRoomId(roomId) ? { kind: "room", scopeId: value, roomId } : null;
 }
 
@@ -360,9 +342,8 @@ export function isMemberId(id: string): boolean {
 interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null }
 
 interface RoomRow {
-  id: string; name: string; created_at: number; legacy_cwd: string | null;
-  docs_path: string | null; description: string | null; leader_member_id: string | null; leader_global_member_id: string | null;
-  roster_kind: "global" | "local" | "names"; has_local_records: number; has_rule_docs: number; has_overrides: number;
+  name: string; created_at: number; docs_path: string | null; description: string | null;
+  leader_member_id: string | null; leader_global_member_id: string | null; has_rule_docs: number;
 }
 
 export interface LegacyRoomImport {
@@ -451,7 +432,7 @@ export function importLegacyRoom(room: LegacyRoomImport, db: Database = getDatab
   });
 }
 
-export function readStoredRoom(id: string, db: Database = getDatabase()): Room | null {
+export function getRoom(id: string, db: Database = getDatabase()): Room | null {
   const row = db.get<RoomRow>("SELECT * FROM rooms WHERE id=?", id);
   if (!row) return null;
   const room: Room = {
@@ -467,24 +448,9 @@ export function readStoredRoom(id: string, db: Database = getDatabase()): Room |
   return room;
 }
 
-export function listStoredRooms(db: Database = getDatabase()): Room[] {
-    return db.all<{ id: string }>("SELECT id FROM rooms ORDER BY created_at DESC,id").map(r => readStoredRoom(r.id, db)!);
-  }
-
-export function deleteStoredRoom(id: string, db: Database = getDatabase()): boolean {
-    return db.transaction(() => {
-      if (!readStoredRoom(id, db)) return false;
-      db.run("DELETE FROM scopes WHERE kind='room' AND id=?", id);
-      return true;
-    });
-  }
-
-export function readMemberChatScopes(memberId: string, db: Database = getDatabase()): string[] {
-    return db.all<{ id: string }>(
-      "SELECT id FROM scopes WHERE kind='mm' AND (member_id LIKE ? OR member_id LIKE ?) ORDER BY id",
-      `${memberId}|%`, `%|${memberId}`,
-    ).map(r => r.id);
-  }
+export function listRooms(db: Database = getDatabase()): Room[] {
+  return db.all<{ id: string }>("SELECT id FROM rooms ORDER BY created_at DESC,id").map(row => getRoom(row.id, db)!);
+}
 
 export function listMmScopes(db: Database = getDatabase()): string[] {
     return db.all<{ id: string }>("SELECT id FROM scopes WHERE kind='mm' ORDER BY id").map(r => r.id);
@@ -515,7 +481,7 @@ export type ScopeAccess =
  * Throws Error with an explicit reason otherwise (not a member / not own DM /
  * unknown scope). Current rosters and explicit historical ID links are authoritative.
  */
-export function assertMemberScopeAccess(memberId: string, scopeId: ScopeId): ScopeAccess {
+export function assertMemberScopeAccess(memberId: string, scopeId: string): ScopeAccess {
   if (!conversationMember(memberId)) throw new Error(`Unknown member: ${memberId}`);
   const ref = parseConversation(scopeId);
   if (!ref) throw new Error(`Invalid conversation source: ${scopeId}`);
@@ -540,14 +506,14 @@ function changeRoom(id: string, change: (room: Room) => void): Room | null {
     const room = getRoom(id);
     if (!room) return null;
     change(room);
-    writeRoom(room);
+    storeRoom(room);
     return room;
   });
 }
 function changeRuleDocPaths(matches: (path: string) => boolean, replace: (path: string) => string | undefined, unique = true): number {
   return getDatabase().transaction(() => {
     let affected = 0;
-    for (const room of listStoredRooms()) {
+    for (const room of listRooms()) {
       if (!room.ruleDocs?.some(matches)) continue;
       const next = room.ruleDocs.map(path => matches(path) ? replace(path) : path);
       const filtered = next.filter((path): path is string => path !== undefined);

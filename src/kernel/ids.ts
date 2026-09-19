@@ -34,8 +34,3 @@ export function newRoomId(): string {
   return `${ROOM_ID_PREFIX}${generateShortId()}`;
 }
 
-const reShortMemberId = /^mem_[0-9a-z]{10}$/;
-const reShortRoomId = /^rm_[0-9a-z]{10}$/;
-export function isShortMemberId(value: string): boolean { return reShortMemberId.test(value); }
-export function isShortRoomId(value: string): boolean { return reShortRoomId.test(value); }
-

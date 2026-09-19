@@ -108,6 +108,14 @@ function describeEntry(rel: string, content: string, source = "user"): Knowledge
   const stat = statSync(absDocPath(rel));
   return { id: rel, title: deriveTitleFromContent(content, rel), content, source, createdAt: stat.ctimeMs, updatedAt: stat.mtimeMs };
 }
+function documentFile(path: string, textOnly = false): { rel: string; abs: string } | null {
+  try {
+    const rel = normalizeDocPath(path);
+    if (!isAllowedFile(rel) || (textOnly && !isTextFile(rel))) return null;
+    const abs = absDocPath(rel);
+    return existsSync(abs) && statSync(abs).isFile() ? { rel, abs } : null;
+  } catch { return null; }
+}
 
 // -- Document tree --
 
@@ -161,15 +169,10 @@ export function listEntries(): KnowledgeEntry[] {
 }
 
 export function getEntry(entryId: string): KnowledgeEntry | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isAllowedFile(rel) || !isTextFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return null;
-  try {
-    const content = readFileSync(abs, "utf-8");
-    return describeEntry(rel, content);
-  } catch { return null; }
+  const file = documentFile(entryId, true);
+  if (!file) return null;
+  try { return describeEntry(file.rel, readFileSync(file.abs, "utf-8")); }
+  catch { return null; }
 }
 
 export function getPathType(path: string): "file" | "folder" | null {
@@ -180,12 +183,8 @@ export function getPathType(path: string): "file" | "folder" | null {
 }
 
 export function getRawEntry(entryId: string): { path: string; contentType: string; data: Buffer } | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isAllowedFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  return { path: rel, contentType: contentTypeForPath(rel), data: readFileSync(abs) };
+  const file = documentFile(entryId);
+  return file ? { path: file.rel, contentType: contentTypeForPath(file.rel), data: readFileSync(file.abs) } : null;
 }
 
 /**
@@ -207,13 +206,10 @@ export function addEntry(title: string, content: string, source: string, path?: 
 }
 
 export function updateEntry(entryId: string, content: string): KnowledgeEntry | null {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return null; }
-  if (!isTextFile(rel)) return null;
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return null;
-  writeFileSync(abs, content, "utf-8");
-  return describeEntry(rel, content);
+  const file = documentFile(entryId, true);
+  if (!file) return null;
+  writeFileSync(file.abs, content, "utf-8");
+  return describeEntry(file.rel, content);
 }
 
 export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
@@ -232,12 +228,10 @@ export function writePngEntry(docPath: string, data: Buffer): KnowledgeEntry {
 }
 
 export function deleteEntry(entryId: string): boolean {
-  let rel: string;
-  try { rel = normalizeDocPath(entryId); } catch { return false; }
-  const abs = absDocPath(rel);
-  if (!existsSync(abs)) return false;
-  unlinkSync(abs);
-  cleanupEmptyParentDirs(dirname(abs));
+  const file = documentFile(entryId);
+  if (!file) return false;
+  unlinkSync(file.abs);
+  cleanupEmptyParentDirs(dirname(file.abs));
   return true;
 }
 
