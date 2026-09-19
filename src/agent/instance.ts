@@ -157,36 +157,31 @@ export const contextUsageCache = new Map<string, ContextUsage>();
 // DB-owned state; module import never initializes storage.
 import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
-export interface MountStale {since:number;fields:string[]}
-export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number;staleMounts?:MountStale}
+export interface RuntimeStateEntry {contractFingerprint?:string;contractVersion?:number;driftNotified?:number}
 interface RuntimeCheckpointRow {
   member_id: string; contract_fingerprint: string | null;
-  contract_version: number | null; drift_notified: number | null; stale_since: number | null;
+  contract_version:number|null;drift_notified:number|null;
 }
-function mapRuntimeCheckpoint(db: Database, row: RuntimeCheckpointRow): RuntimeStateEntry {
+function mapRuntimeCheckpoint(row:RuntimeCheckpointRow):RuntimeStateEntry {
   return {
     ...(row.contract_fingerprint === null ? {} : {contractFingerprint: row.contract_fingerprint}),
     ...(row.contract_version === null ? {} : {contractVersion: row.contract_version}),
     ...(row.drift_notified === null ? {} : {driftNotified: row.drift_notified}),
-    ...(row.stale_since === null ? {} : {staleMounts: {since: row.stale_since,
-      fields: db.all<{field: string}>("SELECT field FROM runtime_stale_fields WHERE member_id=? ORDER BY ordinal", row.member_id).map(item => item.field)}}),
   };
 }
 export function getRuntimeStateEntry(memberId: string, db: Database = getDatabase()): RuntimeStateEntry {
   const row = db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
-  return row ? mapRuntimeCheckpoint(db, row) : {};
+  return row ? mapRuntimeCheckpoint(row) : {};
 }
 /** Pure upgrade/runtime import with an explicit database and source timestamp. */
 export function importRuntimeStateEntry(db: Database, memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
   db.transaction(tx => {
     if (!tx.get("SELECT id FROM members WHERE id=?", memberId)) throw new Error(`Unknown execution member ID: ${memberId}`);
     tx.run(`INSERT INTO runtime_checkpoints(member_id,contract_fingerprint,contract_version,drift_notified,stale_since,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET contract_fingerprint=excluded.contract_fingerprint,
-      contract_version=excluded.contract_version, drift_notified=excluded.drift_notified, stale_since=excluded.stale_since, updated_at=excluded.updated_at`,
-    memberId, entry.contractFingerprint ?? null, entry.contractVersion ?? null, entry.driftNotified ?? null, entry.staleMounts?.since ?? null, updatedAt);
-    tx.run("DELETE FROM runtime_stale_fields WHERE member_id=?", memberId);
-    [...new Set(entry.staleMounts?.fields ?? [])].forEach((field, ordinal) =>
-      tx.run("INSERT INTO runtime_stale_fields(member_id,field,ordinal) VALUES(?,?,?)", memberId, field, ordinal));
+      VALUES(?,?,?,?,NULL,?) ON CONFLICT(member_id) DO UPDATE SET contract_fingerprint=excluded.contract_fingerprint,
+      contract_version=excluded.contract_version,drift_notified=excluded.drift_notified,stale_since=NULL,updated_at=excluded.updated_at`,
+      memberId,entry.contractFingerprint??null,entry.contractVersion??null,entry.driftNotified??null,updatedAt);
+    tx.run("DELETE FROM runtime_stale_fields WHERE member_id=?",memberId);
   });
 }
 
@@ -203,9 +198,6 @@ export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEnt
 }
 export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
   updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
-}
-export function clearStaleMounts(memberId: string): void {
-  updateRuntimeState(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }
 export function clearRuntimeStateEntry(memberId: string): void {
   getDatabase().run("DELETE FROM runtime_checkpoints WHERE member_id=?", memberId);

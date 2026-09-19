@@ -14,7 +14,6 @@ import {
   sessionPublishOwners,
   memberRuntimeAllowed,
   setContractFingerprint,
-  clearStaleMounts,
   currentProfileRevision,
   isMemberConfigured,
   formatRuntimeErrorMessage,
@@ -108,7 +107,6 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
 
     const compiled = snapshot.prompt;
     setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
-    clearStaleMounts(memberId);
     const sessionDir = mainSessionDirectory(memberId);
     const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
       if (canPublishSession()) assemblyServices().saveSession(memberId, member.runtime, session);
