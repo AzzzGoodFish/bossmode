@@ -177,7 +177,6 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
     name: rec.name,
     type: "agent",
     agent: rec.agentTemplate,
-    runtime: "pi-cli",
     model: eff.model || undefined,
     credentialId: eff.credentialId || undefined,
     thinkingLevel: (eff.thinkingLevel as string) || "off",

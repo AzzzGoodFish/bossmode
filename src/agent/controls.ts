@@ -2,7 +2,7 @@ import { getDatabase } from "../data/database.js";
 import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
-import { buildMemberAgentSession, getRegistry } from "./assembly.js";
+import { buildMemberAgentSession, getRuntime } from "./assembly.js";
 import { hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope, pendingRuntimeInputOwners } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
@@ -21,7 +21,7 @@ export interface ControlServices {
 let services: ControlServices | undefined;
 export function configureControls(next: ControlServices): void {
   if (shutdownRunning) throw new Error("Runtime shutdown is still in progress");
-  if (getRegistry() && (instances.size || pendingCreations.size || hasInputPumps())) throw new Error("Runtime initialization requires completed teardown");
+  if (getRuntime() && (instances.size || pendingCreations.size || hasInputPumps())) throw new Error("Runtime initialization requires completed teardown");
   shutdownSettlement = null;
   services = next;
 }
@@ -282,9 +282,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
       contextUsageCache.delete(key);
     }catch(error){errors.push(error);}
   }
-  for (const runtime of getRegistry()?.getAll() ?? []) {
-    try { await runtime.shutdownMember(memberId); } catch (error) { errors.push(error); }
-  }
+  try{await getRuntime()?.shutdownMember(memberId);}catch(error){errors.push(error);}
   await settleMemberOperations(memberId);
   if(errors.length)throw new AggregateError(errors,"Member quiescence incomplete");
 }
@@ -307,9 +305,7 @@ export async function shutdownAll(): Promise<void> {
     const {closeAllShellsForMember}=await import("./terminal.js");
     const resources = await Promise.allSettled([closeAllShellsForMember()]);
     for (const result of resources) if (result.status === "rejected") failures.push(result.reason);
-    for (const rt of getRegistry()?.getAll() ?? []) {
-      try { await rt.shutdownAll(); } catch (error) { failures.push(error); }
-    }
+    try{await getRuntime()?.shutdownAll();}catch(error){failures.push(error);}
     await settleMemberOperations();
     for (const instance of instances.values()) {try {instance.unsubscribe();}catch(error){failures.push(error);}}
     instances.clear(); pendingCreations.clear(); sessionPublishOwners.clear();

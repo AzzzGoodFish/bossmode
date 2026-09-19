@@ -18,7 +18,6 @@ import { initializeMemberRuntime } from "./wire.js";
 import { activeInstanceCount } from "../agent/instance.js";
 import { shutdownAll as shutdownAgents } from "../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../agent/scheduler.js";
-import { RuntimeRegistry } from "../agent/types.js";
 import { PiSdkRuntime } from "../agent/runtime/pi.js";
 import { logger } from "../kernel/logger.js";
 import { seedBuiltinAssets } from "../member/templates.js";
@@ -56,9 +55,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   await wireApiRoutes();
   seedBuiltinAssets();
   await recoverMemberArchives();
-  const registry = new RuntimeRegistry();
-  registry.register(new PiSdkRuntime());
-  initializeMemberRuntime(registry, loadAgentMemberSnapshot);
+  initializeMemberRuntime(new PiSdkRuntime(),loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeMembers = wireConversationMembers();

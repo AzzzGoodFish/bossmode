@@ -2,7 +2,7 @@ import { mainSessionDirectory } from "../files/layout.js";
 import { logger } from "../kernel/logger.js";
 const MEMBER_CONTRACT_VERSION=2;
 import { normalizeModelRef } from "../config/models.js";
-import type { AgentMemberSnapshot, RuntimeRegistry } from "./types.js";
+import type { AgentMemberSnapshot, AgentRuntime } from "./types.js";
 import {
   instances,
   instanceKey,
@@ -23,16 +23,16 @@ import { queueDepth, drainQueuedInputsAsPrompt, wireInstanceEvents } from "./sch
 export interface AssemblyServices {
   saveSession(memberId: string, runtime: string, session: { sessionId?: string; sessionFile?: string }): void;
 }
-let registry: RuntimeRegistry | null = null;
+let runtime: AgentRuntime | null = null;
 let memberSnapshotSource: ((memberId: string) => AgentMemberSnapshot | null) | null = null;
 let services: AssemblyServices | undefined;
 export function configureAssembly(
-  reg: RuntimeRegistry,
+  agentRuntime: AgentRuntime,
   loadSnapshot: (memberId: string) => AgentMemberSnapshot | null,
   deps: AssemblyServices,
 ): void {
   if (instances.size || pendingCreations.size) throw new Error("Session assembly initialization requires completed teardown");
-  registry = reg;
+  runtime = agentRuntime;
   memberSnapshotSource = loadSnapshot;
   services = deps;
 }
@@ -50,9 +50,7 @@ export function compileForMember(memberId: string): AgentMemberSnapshot["prompt"
   return snapshot.prompt;
 }
 
-export function getRegistry(): RuntimeRegistry | null {
-  return registry;
-}
+export function getRuntime():AgentRuntime|null{return runtime;}
 
 export async function buildMemberAgentSession(memberId: string): Promise<AgentInstance | null> {
   if (!memberRuntimeAllowed(memberId)) return null;
@@ -83,10 +81,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
   const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner;
   const canPublishInstance = () => canPublishSession() && memberRuntimeAllowed(memberId);
   const creation = (async (): Promise<AgentInstance | null> => {
-    if (!registry) {
-      logger.error("agent", "runtime registry not initialized");
-      return null;
-    }
+    const agentRuntime=runtime;if(!agentRuntime){logger.error("agent","runtime not initialized");return null;}
     const snapshot = memberSnapshot(memberId);
     if (!snapshot) {
       logger.error("agent", "member not found", { memberId });
@@ -97,22 +92,16 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
       logger.error("agent", "member unconfigured", { member: member.name, memberId });
       return null;
     }
-    const runtime = registry.get(member.runtime);
-    if (!runtime) {
-      logger.error("agent", "runtime not found", { member: member.name, runtime: member.runtime });
-      return null;
-    }
-
     const compiled = snapshot.prompt;
     setContractFingerprint(memberId, compiled.contractFingerprint, MEMBER_CONTRACT_VERSION);
     const sessionDir = mainSessionDirectory(memberId);
     const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
-      if (canPublishSession()) assemblyServices().saveSession(memberId, member.runtime, session);
+      if (canPublishSession()) assemblyServices().saveSession(memberId, agentRuntime.name, session);
     };
     const resolveSourceRef = () => instances.get(key)?.activeSourceRef ?? null;
 
     try {
-      const handle = await runtime.createAgent({
+      const handle = await agentRuntime.createAgent({
         cwd: snapshot.workspaceRoot,
         member,
         resolveSourceRef,
@@ -159,7 +148,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
           skills: [...snapshot.resources.skillNames],
           skillPaths: [...snapshot.resources.skillPaths],
           cwd: snapshot.workspaceRoot,
-          runtimeName: member.runtime,
+          runtimeName: agentRuntime.name,
         },
         unsubscribe: () => {},
         eventBuffer: [],
@@ -169,13 +158,13 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
       };
       wireInstanceEvents(instance);
       instances.set(key, instance);
-      logger.info("agent", "memberAgentCreated", { member: member.name, runtime: member.runtime, memberId });
+      logger.info("agent", "memberAgentCreated", { member: member.name, runtime: agentRuntime.name, memberId });
       return instance;
     } catch (error) {
       logger.error("agent", "failed to create member agent", {
         member: member.name,
         agent: member.agent,
-        runtime: member.runtime,
+        runtime: agentRuntime.name,
         error: formatRuntimeErrorMessage(error),
       });
       return null;

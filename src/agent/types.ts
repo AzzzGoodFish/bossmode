@@ -1,6 +1,6 @@
 export type AgentStatus="inactive"|"idle"|"working";
 export interface AgentMemberConfig {
-  id:string;name:string;type:"agent";agent:string;title?:string;model?:string;runtime:"pi-cli";
+  id:string;name:string;type:"agent";agent:string;title?:string;model?:string;
   skills?:string[];thinkingLevel:string;contextLimit?:number;credentialId?:string;mcpServers?:string[];createdAt?:number;
 }
 export interface AgentPromptSnapshot {
@@ -113,16 +113,4 @@ export interface ContextUsage {
   percentage: number;
   model: string;
   compacted?: boolean;
-}
-export class RuntimeRegistry {
-  private runtimes = new Map<string, AgentRuntime>();
-  register(runtime: AgentRuntime): void {
-    this.runtimes.set(runtime.name, runtime);
-  }
-  get(name: string): AgentRuntime | undefined {
-    return this.runtimes.get(name);
-  }
-  getAll(): AgentRuntime[] {
-    return Array.from(this.runtimes.values());
-  }
 }

@@ -26,7 +26,7 @@ import {recoverRuntimeInputState,configureScheduler} from "../agent/scheduler.js
 import {listPendingReplies,dismissPendingReplies} from "../chat/delivery.js";
 import {buildMemberAgentSession,maybeFlushPendingReload,compileForMember,configureAssembly} from "../agent/assembly.js";
 import {handleAgentEvent,type AgentHistoryEvent} from "../agent/events.js";
-import type {AgentMemberSnapshot,AgentStreamEvent,RuntimeRegistry} from "../agent/types.js";
+import type {AgentMemberSnapshot,AgentStreamEvent,AgentRuntime} from "../agent/types.js";
 const targetOf=(sourceRef:string)=>sourceRef.startsWith("room:")?sourceRef.slice(5):sourceRef;
 function emitAgentLocalEvent(sourceRef:string|null,memberId:string,event:AgentHistoryEvent):void{
   const instance=instances.get(instanceKey(memberId)),name=instance?.agentName??getMember(memberId)?.name??memberId;
@@ -36,14 +36,14 @@ function refreshProfileSources(instance:AgentInstance):void{
   if(!instance.profilePromptDirty)return;const member=getMember(instance.memberId);if(!member)throw new Error(`Member no longer exists: ${instance.memberId}`);
   instance.agentName=member.name;instance.sessionSources.member.name=member.name;instance.sessionSources.member.title=member.title;instance.sessionSources.compiled=compileForMember(member.id);
 }
-export function initializeMemberRuntime(registry:RuntimeRegistry,loadSnapshot:(memberId:string)=>AgentMemberSnapshot|null):void{
+export function initializeMemberRuntime(runtime:AgentRuntime,loadSnapshot:(memberId:string)=>AgentMemberSnapshot|null):void{
   configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);
   configureMcpFactoryLoader(async adapterPath=>{const loaded=await createJiti(import.meta.url).import(join(dirname(adapterPath),"host-factory.js")) as any;return {name:"pi-mcp-adapter",factory:loaded.createMcpAdapter({authStorage:createMcpOauthStorage(getDatabase())})};});
   configureControls({memberConfig:memberRecordToConfig,memberScopes:memberId=>[...listRoomsForMember(memberId).map(room=>`room:${room.id}`),...roomStore.listMmScopesForMember(memberId),`dm:${memberId}`],
     clearSession:sessionStore.clearCurrentSession,commitModelBinding:(memberId,binding)=>{updateMember(memberId,{global:binding});},emitEvent:emitAgentLocalEvent,
     postSystemNotice:(scopeId,text)=>{commitChatMessage(scopeId,{sender:"system",content:text,mentions:[]});},publishStatus:(scope,event)=>broadcastToRoom(targetOf(scope),event),
     publishReset:(scope,_name,event)=>scope.startsWith("dm:")?broadcastToAgentSubscribers(targetOf(scope),event):broadcastToRoom(targetOf(scope),event)});
-  recoverRuntimeInputState();openRuntimeAdmission();configureAssembly(registry,loadSnapshot,{saveSession:(memberId,runtime,session)=>sessionStore.saveCurrentSession(memberId,{runtime,...session})});
+  recoverRuntimeInputState();openRuntimeAdmission();configureAssembly(runtime,loadSnapshot,{saveSession:(memberId,runtime,session)=>sessionStore.saveCurrentSession(memberId,{runtime,...session})});
   configureScheduler({buildSession:buildMemberAgentSession,memberConfig:memberRecordToConfig,authorizeExecution:(memberId,sourceRef)=>{if(sourceRef===null)return true;if(!memberRuntimeAllowed(memberId))return false;try{assertMemberScopeAccess(memberId,sourceRef as any);return true;}catch{return false;}},
     postSystemNotice:(sourceRef,text)=>{commitChatMessage(sourceRef,{sender:"system",content:text,mentions:[]});},emitEvent:emitAgentLocalEvent,refreshProfileSources,
     applyPendingControls:applyPendingAfterPromptSettlement,interruptAccepted:(instance,sourceRef)=>interruptAcceptedInput(sourceRef,instance,"message_interrupt"),flushPendingReload:maybeFlushPendingReload,
