@@ -567,7 +567,7 @@ export async function getArtifactPreview(roomId: string, path: string): Promise<
 }
 
 export async function getAttachmentPreview(roomId: string, filename: string): Promise<ArtifactPreviewData> {
-  return apiFetch(`/api/rooms/${roomId}/attachments/${encodeURIComponent(filename)}/preview`);
+  return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments/${encodeURIComponent(filename)}/preview`);
 }
 
 export async function getArtifactRawBlob(roomId: string, path: string): Promise<Blob> {
@@ -575,7 +575,7 @@ export async function getArtifactRawBlob(roomId: string, path: string): Promise<
 }
 
 export async function getAttachmentRawBlob(roomId: string, filename: string): Promise<Blob> {
-  return apiFetchBlob(`/api/rooms/${roomId}/attachments/${encodeURIComponent(filename)}`);
+  return apiFetchBlob(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments/${encodeURIComponent(filename)}`);
 }
 
 export async function addKnowledgeEntry(
@@ -970,7 +970,7 @@ export async function uploadFile(roomId: string, file: File): Promise<UploadResu
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
   const res = await fetch(
-    `${BASE_URL}/api/rooms/${roomId}/upload?filename=${encodeURIComponent(file.name)}`,
+    `${BASE_URL}/api/conversations/${encodeURIComponent(`room:${roomId}`)}/attachments?filename=${encodeURIComponent(file.name)}`,
     { method: "POST", headers, body: file },
   );
 

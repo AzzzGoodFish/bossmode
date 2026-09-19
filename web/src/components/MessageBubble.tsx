@@ -62,15 +62,13 @@ function inferPreviewType(path: string): RoomMessageAttachment["previewType"] {
   return "download";
 }
 
-/** Build API URL for an attachment given roomId (or "dm:<memberId>" for DM scope). Falls back to legacy roomId-from-path. */
+/** Build the canonical conversation attachment URL, with room path fallback for historical messages. */
 function attachmentUrl(path: string, roomId?: string): string {
-  const filename = path.split("/").pop() || "";
-  if (roomId?.startsWith("dm:")) return `/api/dm/${encodeURIComponent(roomId.slice(3))}/attachments/${filename}`;
-  if (roomId?.startsWith("mm:")) return `/api/member-chats/${encodeURIComponent(roomId)}/attachments/${filename}`;
-  if (roomId) return `/api/rooms/${roomId}/attachments/${filename}`;
-  const roomMatch = path.match(/\/rooms\/([^/]+)\//);
-  if (roomMatch) return `/api/rooms/${roomMatch[1]}/attachments/${filename}`;
-  return "";
+  const filename = encodeURIComponent(path.split("/").pop() || "");
+  const fallbackRoom = path.match(/\/rooms\/([^/]+)\//)?.[1];
+  const scope = roomId ? (/^(room|dm|mm):/.test(roomId) ? roomId : `room:${roomId}`)
+    : fallbackRoom ? `room:${fallbackRoom}` : undefined;
+  return scope ? `/api/conversations/${encodeURIComponent(scope)}/attachments/${filename}` : "";
 }
 
 /** Parse content into text segments and attachment segments */

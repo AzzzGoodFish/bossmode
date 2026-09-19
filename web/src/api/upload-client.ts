@@ -35,10 +35,8 @@ export function uploadWithProgress(
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    // scope = room id, or "dm:<memberId>" for DM uploads (member-owned storage)
-    const url = scope.startsWith("dm:")
-      ? `/api/dm/${encodeURIComponent(scope.slice(3))}/upload?filename=${encodeURIComponent(file.name)}`
-      : `/api/rooms/${scope}/upload?filename=${encodeURIComponent(file.name)}`;
+    const sourceRef = /^(room|dm|mm):/.test(scope) ? scope : `room:${scope}`;
+    const url = `/api/conversations/${encodeURIComponent(sourceRef)}/attachments?filename=${encodeURIComponent(file.name)}`;
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) opts.onProgress?.(e.loaded, e.total);
