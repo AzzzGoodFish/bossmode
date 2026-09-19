@@ -122,23 +122,30 @@ export function deleteRoom(roomId: string): boolean {
   return true;
 }
 
-export function updateRoomName(roomId: string, name: string): Room | null {
-  return changeRoom(roomId, room => { room.name = name; });
-}
-
-export function updateRoomPromptLeader(roomId: string, memberId: string | null): Room | null {
+export function updateRoom(roomId: string, patch: {
+  name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null;
+}): Room | null {
+  if (!Object.keys(patch).length) throw new Error("Nothing to update");
   return changeRoom(roomId, room => {
-    if (!memberId) { delete room.promptLeaderMemberId; return; }
-    if (!room.memberIds.includes(memberId)) throw new Error("promptLeaderMemberId must be a current room member");
-    room.promptLeaderMemberId = memberId;
-  });
-}
-
-export function updateRoomDocsPath(roomId: string, docsPath: string | null): Room | null {
-  return changeRoom(roomId, room => {
-    const normalized = normalizeRoomDocsPath(docsPath);
-    if (normalized) room.docsPath = normalized;
-    else delete room.docsPath;
+    if (Object.hasOwn(patch, "name")) {
+      const name = patch.name?.trim();
+      if (!name) throw new Error("Room name is required");
+      room.name = name;
+    }
+    if (Object.hasOwn(patch, "description")) {
+      const description = String(patch.description ?? "").trim();
+      if (description.length > ROOM_DESCRIPTION_MAX_CHARS) throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
+      if (description) room.description = description; else delete room.description;
+    }
+    if (Object.hasOwn(patch, "promptLeaderMemberId")) {
+      const leader = patch.promptLeaderMemberId;
+      if (leader && !room.memberIds.includes(leader)) throw new Error("promptLeaderMemberId must be a current room member");
+      if (leader) room.promptLeaderMemberId = leader; else delete room.promptLeaderMemberId;
+    }
+    if (Object.hasOwn(patch, "docsPath")) {
+      const path = normalizeRoomDocsPath(patch.docsPath);
+      if (path) room.docsPath = path; else delete room.docsPath;
+    }
   });
 }
 
@@ -177,16 +184,6 @@ export function updateRuleDocPathsByPrefix(oldPrefix: string, newPrefix: string)
 /** ⑤ A: room description (name + description) — product cap on every write. */
 export const ROOM_DESCRIPTION_MAX_CHARS = 2000;
 
-/** Set or clear the room description. Empty string clears the field. */
-export function updateRoomDescription(roomId: string, description: string): Room | null {
-  return changeRoom(roomId, room => {
-    const next = String(description ?? "").trim();
-    if (next.length > ROOM_DESCRIPTION_MAX_CHARS) throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
-    if (next) room.description = next;
-    else delete room.description;
-  });
-}
-
 export function listRooms(): Room[] { return listStoredRooms(getDatabase()); }
 
 
@@ -196,25 +193,14 @@ export function listMmScopesForMember(memberId: string): string[] {
   return readMemberChatScopes(memberId, getDatabase());
 }
 
-// -- Cursors --
-export function setCursor(roomId: string, agentName: string, cursor: string | null): void {
-  storeMemberCursor(roomId, agentName, cursor, undefined, getDatabase());
-}
-
-export function deleteCursor(roomId: string, agentName: string): void {
-  deleteMemberCursor(roomId, agentName, getDatabase());
-}
-
 // -- Member management --
-
-
 
 function initializeMemberCursor(roomId: string, memberId: string): void {
   // Initialize cursor at the latest durable fact under the stable member ID.
   const latestId = getDatabase().get<{ id: string }>(
     "SELECT id FROM messages WHERE scope_id=? ORDER BY seq DESC LIMIT 1", roomId,
   )?.id ?? null;
-  setCursor(roomId, memberId, latestId);
+  storeMemberCursor(roomId, memberId, latestId);
 }
 
 /**
@@ -250,7 +236,7 @@ export function removeRoomMember(
     room.memberIds = room.memberIds.filter(id => id !== memberId);
     if (room.promptLeaderMemberId === memberId) delete room.promptLeaderMemberId;
     writeRoom(room);
-    deleteCursor(roomId, memberId);
+    deleteMemberCursor(roomId, memberId);
     return { ok: true, removed: member };
   });
 }

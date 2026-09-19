@@ -23,7 +23,6 @@ export interface UnreadSummary {
 export interface ChatContextSnapshot {
   sourceRef: string;
   kind: ConversationIdentity["kind"];
-  targetMember: { id: string; name: string };
   chatName: string;
   trigger: Message;
   replyTarget: Message | null;
@@ -122,7 +121,6 @@ export function captureChatContext(
   return {
     sourceRef: ref.scopeId,
     kind: ref.kind,
-    targetMember: { id: input.memberId, name: identity.name },
     chatName,
     trigger: structuredClone(trigger),
     replyTarget: replyTarget ? structuredClone(replyTarget) : null,

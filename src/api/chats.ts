@@ -7,15 +7,11 @@ import {
   inviteRoomMember,
   listMmScopes,
   listRooms,
-  normalizeRoomDocsPath,
   parseConversation,
   parseMmScopeId,
   removeRoomMember,
   resolveRoomMember,
-  updateRoomDescription,
-  updateRoomDocsPath,
-  updateRoomName,
-  updateRoomPromptLeader,
+  updateRoom,
   type Room,
 } from "../chat/conversations.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/cursors.js";
@@ -220,19 +216,8 @@ addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
     name?: string; description?: string | null;
     promptLeaderMemberId?: string | null; docsPath?: string | null;
   };
-  let updated: Room | null = room;
-  let changed = false;
-  try {
-    if (typeof body.name === "string" && body.name.trim() && body.name !== room.name) { updated = updateRoomName(room.id, body.name.trim()); changed = true; }
-    if (Object.hasOwn(body, "description")) { updated = updateRoomDescription(room.id, body.description ?? ""); changed = true; }
-    if (Object.hasOwn(body, "promptLeaderMemberId")) { updated = updateRoomPromptLeader(room.id, body.promptLeaderMemberId ?? null); changed = true; }
-    if (Object.hasOwn(body, "docsPath")) {
-      normalizeRoomDocsPath(body.docsPath);
-      updated = updateRoomDocsPath(room.id, body.docsPath ?? null); changed = true;
-    }
-  } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
-  if (!changed || !updated) return sendJson(response, 400, { error: "Nothing to update" });
-  sendJson(response, 200, roomResponse(updated));
+  const updated = await requestValue(() => updateRoom(room.id, body));
+  sendJson(response, 200, roomResponse(updated!));
 });
 
 function attachmentLocation(sourceRef: string): AttachmentLocation {
