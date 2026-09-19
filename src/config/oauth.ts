@@ -1,6 +1,6 @@
-import { type ModelCredentialProfileInput, type ModelRequestProfile, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
+import { type ModelCredentialProfileInput, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
 export interface OAuthLoginJobPublic {id:string;status:"starting"|"awaiting_input"|"awaiting_device"|"completed"|"failed"|"cancelled";providerId:string;authUrl?:string;userCode?:string;deviceCode?:OAuthDeviceCodeInfo;selectPrompt?:OAuthSelectPrompt;prompt:string;error?:string;profileId?:string;createdAt:number;updatedAt:number;}
-export interface StartOAuthConnectionRequest {providerId:string;profileId?:string;name?:string;requestProfile?:ModelRequestProfile;}
+export interface StartOAuthConnectionRequest {providerId:string;profileId?:string;name?:string;requestProfile?:"standard";}
 import { PiAiOAuthLoginAdapter } from "./pi-adapt/credentials.js";
 import { modelsForBuiltinProvider, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider } from "./catalog.js";
 import { getDatabase } from "../data/database.js";
