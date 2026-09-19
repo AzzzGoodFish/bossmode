@@ -46,20 +46,6 @@ export interface BossmodeConfig {
   };
 }
 
-// -- Agent Definition --
-
-export interface AgentDefinition {
-  name: string;
-  description: string;
-  systemPrompt: string;
-  avatar?: string;
-  tags: string[];
-  // Kept for backward compatibility — new agents may omit these.
-  // Member config takes precedence when present.
-  model?: string;
-  skills?: string[];
-}
-
 // -- Skill Definition --
 
 
@@ -94,10 +80,6 @@ export interface ModelDefinitionConfig {
   thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
   compat?: Record<string, unknown>;
   metadataSource?: ModelMetadataSource;
-}
-
-export interface ModelMetadataOverride {
-  contextWindow?: number;
 }
 
 export interface ModelCredentialModelCustomizations {
@@ -247,132 +229,6 @@ export interface AgentMemberConfig extends MemberBase {
   createdAt?: number;        // room member since (present for room-backed members)
 }
 
-export interface HumanMemberConfig extends MemberBase {
-  type: "human";
-}
-
-export type MemberConfig = AgentMemberConfig | HumanMemberConfig;
-
-// Backward-compatible type for legacy members.json without type field
-export interface LegacyMemberConfig {
-  id: string;
-  name: string;
-  agent: string;
-  model?: string;
-  runtime: AgentRuntimeName | "claude-cli";
-  thinkingLevel: string;
-  avatar?: string;
-  contextLimit?: number;
-  credentialId?: string;
-  mcpServers?: string[];
-  type?: "agent";
-  skills?: string[];
-}
-
-// -- Knowledge --
-//
-// 0.8.0: KnowledgeBase (per-project container) is removed. All documents live
-// in a single global tree: ~/.bossmode/knowledge/docs/. Users organize projects
-// by top-level folders (e.g. docs/bossmode/..., docs/freeu/...). Rooms pick
-// Legacy rooms may still preserve selected document paths in `ruleDocs`, but
-// Prompt Supplements v1 no longer injects them into agent prompts automatically.
-
-export interface KnowledgeEntry {
-  /** Document path relative to KB docs root, e.g. "architecture/overview.md". Acts as stable ID. */
-  id: string;
-  /** Human-readable title (from frontmatter, falls back to filename). */
-  title: string;
-  /** Markdown body (frontmatter stripped). */
-  content: string;
-  /** Creator identity (from frontmatter). Values: "user", agent name, etc. */
-  source: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** Lightweight tree node for UI document browsing. */
-export interface KnowledgeTreeNode {
-  /** File or folder path relative to docs root. */
-  path: string;
-  /** Display name (filename or folder name). */
-  name: string;
-  /** "file" or "folder". */
-  kind: "file" | "folder";
-  /** Title for files (derived from frontmatter or filename). */
-  title?: string;
-  /** Children for folders. */
-  children?: KnowledgeTreeNode[];
-}
-
-// -- Room --
-
-export interface RoomMemberConfig {
-  model?: string;
-  credentialId?: string;
-  thinkingLevel?: string;
-  contextLimit?: number;
-  skills?: string[];
-  mcpServers?: string[];
-  /** Enabled extension package names/ids. Default empty = none loaded. */
-  extensions?: string[];
-}
-
-export interface RoomMemberRecord {
-  /** Hidden stable globally unique room-member identity. */
-  id: string;
-  /** Owning room id. Persisted for API clarity; parent room remains authoritative. */
-  roomId?: string;
-  /** User-facing member name, unique inside the owning room, used for @ mentions. */
-  name: string;
-  /** Read-only source role/template name. */
-  sourceAgent: string;
-  /** Legacy/global member id this room member was migrated/created from, when available. */
-  sourceMemberId?: string;
-  avatar?: string;
-  config?: RoomMemberConfig;
-  createdAt: number;
-  updatedAt: number;
-  migratedFrom?: { memberName: string; memberId?: string };
-}
-
-export interface RoomMemberOverride extends RoomMemberConfig {}
-
-export interface Room {
-  id: string;
-  name: string;
-  /** Batch 7 P3 legacy: rooms no longer bind a cwd (sessions run in member
-   * workspaces). Kept as a read-tolerated field — it is only consumed by the
-   * attachment migration to find the legacy .bossmode-attachments dir, and it
-   * is peeled on the next room write. */
-  cwd?: string;
-  /** Compatibility/derived member names. v0.14 identity lives in roomMembers. */
-  members: string[];
-  /** Room leader room-member id. Rename-stable; may be absent for legacy rooms. */
-  promptLeaderMemberId?: string;
-  /** Default docs subtree prefix relative to ~/.bossmode/knowledge/docs/, e.g. "bossmode/". */
-  docsPath?: string;
-  /** ⑤ A: free-form room description (分工/合作细节/公告), ≤2000 chars on write.
-   * Not injected into prompts — read on demand via chat_info or the UI. */
-  description?: string;
-  /** Authoritative room-local members for v0.14+. */
-  roomMembers?: RoomMemberRecord[];
-  /**
-   * 0.20+: global member ids (mem_*) referenced by this room.
-   * Dual-written during migration alongside roomMembers; WS-B cutover reads this as source of truth.
-   */
-  globalMemberIds?: string[];
-  /** 0.20+: global member id of the room leader (mem_*), dual-written with promptLeaderMemberId. */
-  promptLeaderGlobalMemberId?: string;
-  createdAt: number;
-  /**
-   * Legacy selected document paths (relative to ~/.bossmode/knowledge/docs/).
-   * Preserved for migration/cascade compatibility; no longer prompt-injected.
-   */
-  ruleDocs?: string[];
-  /** Legacy room-scoped overrides keyed by member name. Read as migration source only. */
-  memberOverrides?: Record<string, RoomMemberOverride>;
-}
-
 // -- Message --
 
 /** Attachment metadata travels structurally; the canonical shape and preview
@@ -432,13 +288,6 @@ export interface RoomMessage {
 
 export type AgentStatus = "inactive" | "idle" | "working";
 
-export interface AgentStatusInfo {
-  name: string;
-  memberId?: string;
-  status: AgentStatus;
-  roomId: string | null;
-}
-
 export interface ContextUsage {
   totalTokens: number;
   rawMaxTokens: number;
@@ -446,19 +295,6 @@ export interface ContextUsage {
   model: string;
   /** True during the post-compact interval where SDK token counts are temporarily unavailable. */
   compacted?: boolean;
-}
-
-// -- Cursors --
-
-export type CursorMap = Record<string, string | null>; // agentName → last seen message id
-
-// -- Archive --
-
-export interface ArchiveSummary {
-  summary: string;
-  archivedCount: number;
-  range: [string, string]; // [firstId, lastId]
-  ts: number;
 }
 
 // -- Retired topic lifecycle cards (fish #19358): stored history only — the room
@@ -507,24 +343,3 @@ export type WsClientCommand =
   | { type: "unsubscribe:room"; roomId: string }
   | { type: "subscribe:agent"; roomId: string; agent: string; memberId?: string }
   | { type: "unsubscribe:agent"; roomId: string; agent: string; memberId?: string };
-
-// -- API Responses --
-
-export interface ApiError {
-  error: string;
-}
-
-// -- Session --
-
-export interface SessionToken {
-  token: string;
-  expiresAt: number;
-}
-
-// -- Agent Session (persisted) --
-
-export interface AgentSession {
-  runtime: string;
-  sessionId?: string;
-  sessionFile?: string;
-}
