@@ -93,14 +93,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
     }
     // No frontend build available
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(`
-      <!DOCTYPE html>
-      <html><body>
-        <h1>Bossmode</h1>
-        <p>Server is running. Frontend not built yet.</p>
-        <p>API available at <code>/api/</code></p>
-      </body></html>
-    `);
+    res.end("<!doctype html><title>Bossmode</title><h1>Bossmode</h1><p>Server is running. Frontend not built yet.</p><p>API: <code>/api/</code></p>");
   }
   // WebSocket
   createWebSocketServer(server);

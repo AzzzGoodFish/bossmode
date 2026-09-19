@@ -198,23 +198,7 @@ function cmdStatus(): void {
 
 
 function showHelp(): void {
-  console.log(`
-Usage: bossmode <command> [options]
-Commands:
-  on          Start the bossmode server (daemon mode)
-  off         Stop the bossmode server
-  status      Show server status
-Options (for 'on'):
-  --host <host>   Bind address (default: 127.0.0.1)
-  --port <port>   Port number (default: 8080)
-Options (global):
-  --version, -v   Show version
-Examples:
-  bossmode on
-  bossmode on --host 0.0.0.0 --port 1234
-  bossmode off
-  bossmode status
-`);
+  console.log("Usage: bossmode <on|off|status> [--host <host>] [--port <port>]\nGlobal: --version, -v\nExample: bossmode on --host 0.0.0.0 --port 1234");
 }
 
 // -- Main --

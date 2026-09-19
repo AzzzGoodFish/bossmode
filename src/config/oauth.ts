@@ -1,4 +1,4 @@
-import { type ModelCredentialProfileInput, type ModelRequestProfile, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, sanitizeOAuthCredentials, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
+import { type ModelCredentialProfileInput, type ModelRequestProfile, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
 export interface OAuthLoginJobPublic {id:string;status:"starting"|"awaiting_input"|"awaiting_device"|"completed"|"failed"|"cancelled";providerId:string;authUrl?:string;userCode?:string;deviceCode?:OAuthDeviceCodeInfo;selectPrompt?:OAuthSelectPrompt;prompt:string;error?:string;profileId?:string;createdAt:number;updatedAt:number;}
 export interface StartOAuthConnectionRequest {providerId:string;profileId?:string;name?:string;requestProfile?:ModelRequestProfile;}
 import { PiAiOAuthLoginAdapter } from "./pi-adapt/credentials.js";
@@ -129,7 +129,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
       }
       return saveModelCredentialProfile({
         ...job.profileInput, id: job.profileId, authType: "oauth", oauthProviderId: job.providerId,
-        oauthCredentials: sanitizeOAuthCredentials(credentials), apiKey: undefined,
+        oauthCredentials: credentials, apiKey: undefined,
       });
     });
     transition(job, { status: "completed", profileId: saved.id, authUrl: undefined, userCode: undefined,

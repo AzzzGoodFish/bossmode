@@ -178,9 +178,6 @@ export function hasCompleteOAuthCredentials(value: unknown): value is OAuthCrede
   return !!c && typeof c.access === "string" && c.access.length > 0 && typeof c.refresh === "string" && c.refresh.length > 0 && typeof c.expires === "number";
 }
 
-export function sanitizeOAuthCredentials(credentials: OAuthCredentials): OAuthCredentials {
-  return { ...credentials, access: credentials.access, refresh: credentials.refresh, expires: credentials.expires };
-}
 
 export function isNewerOAuthCredential(candidate: OAuthCredentials, current: unknown): boolean {
   if (!hasCompleteOAuthCredentials(current)) return true;
@@ -868,7 +865,7 @@ export async function modifyModelCredential(profileId: string, providerSlug: str
         const { type: _type, ...oauth } = next as { type: "oauth" } & OAuthCredentials;
         if (hasCompleteOAuthCredentials(oauth)) {
           if (!isNewerOAuthCredential(oauth, profile?.oauthCredentials)) return readModelCredential(profileId, providerSlug);
-          if (!updateCredentialSecret(profileId, providerSlug, revision, { oauthCredentials: sanitizeOAuthCredentials(oauth) }, now(), repo)) return readModelCredential(profileId, providerSlug);
+          if (!updateCredentialSecret(profileId, providerSlug, revision, { oauthCredentials: oauth }, now(), repo)) return readModelCredential(profileId, providerSlug);
         }
       } else if (next?.type === "api_key" && typeof next.key === "string" && next.key.length > 0) {
         if (!updateCredentialSecret(profileId, providerSlug, revision, { apiKey: next.key }, now(), repo)) return readModelCredential(profileId, providerSlug);
