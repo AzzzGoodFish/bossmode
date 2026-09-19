@@ -4,7 +4,7 @@ import { getRuntimeCapabilities } from "../app/member-actions.js";
 import { invalidateModelCredentialProfile } from "../agent/controls.js";
 import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, startOAuthLoginJob, submitOAuthLoginJobInput } from "../config/oauth.js";
 import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listPublicModelCredentialProfiles, refreshBuiltinCatalog, refreshModelCredentialProfileModels, saveModelCredentialProfile } from "../config/models.js";
-import { listBuiltinModelProviders, getCatalogStatus, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
+import { listBuiltinModelProviders, getCatalogSettingsPublic, getCatalogAutoRefreshIntervalDays, setCatalogAutoRefreshIntervalDays } from "../config/catalog.js";
 import { listAvailableModels } from "../config/models.js";
 
 // GET /api/capabilities — runtime capabilities

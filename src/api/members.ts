@@ -20,10 +20,9 @@ import {
 } from "../member/skills.js";
 import { readWorkspaces } from "../member/workspaces.js";
 import { readMemberSshPublicKey } from "../member/workspaces.js";
-import { assertMemberScopeAccess, parseScopeId, scopeIdOf, type ScopeId } from "../chat/conversations.js";
+import { assertMemberScopeAccess, scopeIdOf } from "../chat/conversations.js";
 import { switchMemberModel, switchMemberThinkingLevel } from "../agent/controls.js";
 import * as roomStore from "../chat/conversations.js";
-import { readMemberProfile } from "../member/profile.js";
 
 function publicMember(m: MemberRecord) {
   return {
@@ -62,12 +61,10 @@ addRoute("GET", "/api/contacts", async (_req, res) => {
   try {
     const rooms = roomStore.listRooms();
     let getMemberActiveScopes: ((id: string) => string[]) | null = null;
-    let getScopeLiveStatus: ((sid: string) => string) | null = null;
     let getMemberLiveStatus: ((id: string) => string) | null = null;
     try {
       const am = await import("../app/member-actions.js");
       getMemberActiveScopes = (id) => am.getMemberActiveScopes(id);
-      getScopeLiveStatus = (sid) => am.getScopeLiveStatus(sid);
       getMemberLiveStatus = (id) => am.getScopeLiveStatus(`dm:${id}`);
     } catch { /* runtime cold */ }
 

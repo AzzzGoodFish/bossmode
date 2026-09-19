@@ -194,7 +194,7 @@ export function chatScopeAssetRoots(scope: string): string[] {
 }
 
 /** Create membership and leadership together from existing stable contact IDs. */
-export function createRoom(name: string, cwd: string | undefined, memberIds: string[], ruleDocs?: string[], opts?: {
+export function createRoom(name: string, _cwd: string | undefined, memberIds: string[], ruleDocs?: string[], opts?: {
   promptLeaderMemberId?: string;
   docsPath?: string | null;
   description?: string | null;

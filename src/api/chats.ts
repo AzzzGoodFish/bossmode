@@ -12,7 +12,6 @@ import {
   parseMmScopeId,
   removeRoomMemberByRef,
   resolveRoomMemberRef,
-  scopeIdOf,
   updateRoomDescription,
   updateRoomDocsPath,
   updateRoomName,
