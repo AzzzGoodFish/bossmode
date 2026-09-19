@@ -9,12 +9,6 @@ export interface ArchiveSummary {
   ts: number;
 }
 
-export interface MessageArchive {
-  timestamp: number;
-  hasMessages: boolean;
-  hasSummary: boolean;
-}
-
 function archiveTimestamp(value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid archive timestamp");
 }
@@ -60,13 +54,6 @@ export function readArchivedMessages(scope: string, archiveTs: number, db: Datab
   ).map((row) => JSON.parse(row.payload_json) as Message);
 }
 
-export function listArchives(scope: string, db: Database = getDatabase()): MessageArchive[] {
-  return db.all<{ archive_ts: number; has_messages: number; summary_json: string | null }>(
-    "SELECT * FROM message_archives WHERE scope_id=? ORDER BY archive_ts DESC",
-    storageScopeId(scope),
-  ).map((row) => ({ timestamp: row.archive_ts, hasMessages: Boolean(row.has_messages), hasSummary: row.summary_json !== null }));
-}
-
 export function saveArchiveSummary(
   scope: string,
   timestamp: number,
@@ -78,15 +65,6 @@ export function saveArchiveSummary(
   db.run(`INSERT INTO message_archives(scope_id,archive_ts,summary_json) VALUES(?,?,?)
     ON CONFLICT(scope_id,archive_ts) DO UPDATE SET summary_json=excluded.summary_json`,
   storageScopeId(scope), timestamp, JSON.stringify(value));
-}
-
-export function readArchiveSummary(scope: string, timestamp: number, db: Database = getDatabase()): ArchiveSummary | null {
-  archiveTimestamp(timestamp);
-  const row = db.get<{ summary_json: string | null }>(
-    "SELECT summary_json FROM message_archives WHERE scope_id=? AND archive_ts=?",
-    storageScopeId(scope), timestamp,
-  );
-  return row?.summary_json ? JSON.parse(row.summary_json) as ArchiveSummary : null;
 }
 
 export function archiveMessages(
