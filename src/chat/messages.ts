@@ -214,7 +214,7 @@ export function appendMessage(scope: string, input: MessageInput): Message {
   return appendMessageInTransaction(getDatabase(), scope, input);
 }
 
-function normalizeHistoricalMessage(message: Message): Message {
+export function normalizeHistoricalMessage(message: Message): Message {
   if (typeof (message as unknown as Record<string, unknown>).needResponse !== "boolean") return message;
   const { needResponse: _retired, ...rest } = message;
   return rest;

@@ -2,8 +2,8 @@ import { memberDir, getBossmodeDir } from "../files/layout.js";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { getDatabase, type Database } from "../data/database.js";
-import { assertExecutionMember } from "../data/repositories/execution-identity.js";
-import type { AgentSession } from "../kernel/types.js";
+
+export interface AgentSession { runtime: string; sessionId?: string; sessionFile?: string }
 
 const SAFE_ID = /^[^/:\\]+$/;
 
@@ -117,7 +117,8 @@ export function readSessionAssociation(memberId: string, db: Database = getDatab
   }
 
 export function importSessionAssociation(a: SessionAssociation, db: Database = getDatabase()): void {
-    assertExecutionMember(db, a.memberId);
+    validateMemberId(a.memberId);
+    if (!db.get("SELECT id FROM members WHERE id=?",a.memberId)) throw new Error(`Unknown execution member ID: ${a.memberId}`);
     const file = a.session.sessionFile;
     if (!a.session.runtime || typeof a.session.runtime !== "string") throw new Error("Invalid session runtime");
     if (a.session.sessionId !== undefined && typeof a.session.sessionId !== "string") throw new Error("Invalid SDK session ID");

@@ -1,6 +1,6 @@
 import { getDatabase, type Database } from "../data/database.js";
 import { storageScopeId } from "./conversations.js";
-import { readMessages, validateMessage, type Message } from "./messages.js";
+import { normalizeHistoricalMessage, readMessages, validateMessage, type Message } from "./messages.js";
 
 export interface ArchiveSummary {
   summary: string;
@@ -34,6 +34,7 @@ export function importArchivedMessage(
 ): void {
   archiveTimestamp(archiveTs);
   if (!Number.isSafeInteger(ordinal) || ordinal < 0) throw new Error("Invalid archive ordinal");
+  message = normalizeHistoricalMessage(message);
   validateMessage(message);
   const scopeId = storageScopeId(scope);
   db.run(

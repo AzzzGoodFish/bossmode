@@ -1,5 +1,4 @@
 import { type Database } from "../../data/database.js";
-import { executionScopeId } from "../../data/repositories/execution-identity.js";
 import { type LegacySourceEntry, type UpgradeImportContext, readLegacyJson, readLegacyJsonl, readLegacyEventJsonl } from "./inventory.js";
 import { createHash } from "node:crypto";
 import { canonicalJson, requireObject } from "../../kernel/json.js";
@@ -8,7 +7,7 @@ import { importHistoricalEvent, readAgentEvent, type AgentHistoryEvent, rebuildE
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { archiveRawRetiredSource } from "./retirements.js";
-import { storeRoom, type Room } from "../../chat/conversations.js";
+import { parseConversation, storageScopeId, storeRoom, type Room } from "../../chat/conversations.js";
 import { importArchivedMessage, recordMessageArchive, saveArchiveSummary, type ArchiveSummary } from "../../chat/archives.js";
 import { setDmMemberCursor, setMemberCursor, setUserReadCursor, type UserReadCursor } from "../../chat/cursors.js";
 import { importMessage, importMessageNextSequence, type Message } from "../../chat/messages.js";
@@ -20,9 +19,11 @@ export function retiredTopicScope(scope:string|undefined):boolean{return !!scope
 
 /** Missing historical metadata does not justify inventing a current room or member. */
 export function ensureImportedScope(db:Database,input:string,_roomHint?:string):string{
- const id=executionScopeId(input);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;
- const kind=id.startsWith("dm:")?"dm":"room";
- db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,?,?,?)",id,kind,kind==="room"?id:null,kind==="dm"?id.slice(3):null);
+ const ref=parseConversation(input);if(!ref)throw new Error(`Invalid execution scope: ${input}`);
+ const id=storageScopeId(ref.scopeId);if(db.get("SELECT id FROM scopes WHERE id=?",id))return id;
+ if(ref.kind==="room")db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,'room',?,NULL)",id,ref.roomId);
+ else if(ref.kind==="dm")db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,'dm',NULL,?)",id,ref.memberId);
+ else db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES(?,'mm',NULL,?)",id,ref.memberIds.join("|"));
  return id;
 }
 
@@ -98,7 +99,7 @@ function planProvenEvents(sources: readonly ImportEventSource[]): Map<string,num
  const result = new Map<string,number>();
  const streams = new Map<string,ImportEventSource[]>();
  for (const source of sources) {
-  const scope = executionScopeId(source.entry.scopeId!);
+  const scope = storageScopeId(source.entry.scopeId!);
   const key = JSON.stringify([scope,source.owner]);
   const stream = streams.get(key) ?? [];
   stream.push(source);
@@ -113,7 +114,7 @@ function planProvenEvents(sources: readonly ImportEventSource[]): Map<string,num
    return row.proof===undefined?`legacy:${hash}:${row.ordinal}`:`legacy-proven:${row.proof}`;
   };
   for (const source of streamSources) {
-   const scope = executionScopeId(source.entry.scopeId!);
+   const scope = storageScopeId(source.entry.scopeId!);
    let previousId:string|undefined;
    for (const row of source.rows) {
     const event = requireObject(row.value,`Invalid legacy conversation object: ${source.entry.path}`);
@@ -154,7 +155,7 @@ function importPlannedEventRows(db:Database,sources:readonly ImportEventSource[]
  const occurrences=sources.flatMap(source=>source.rows.map(row=>{
   const hash=sourceHash(source.entry.path);
   const id=row.proof===undefined?`legacy:${hash}:${row.ordinal}`:`legacy-proven:${row.proof}`;
-  return {source,row,id,scope:executionScopeId(source.entry.scopeId!),sequence:sequenceByEventId.get(id)!};
+  return {source,row,id,scope:storageScopeId(source.entry.scopeId!),sequence:sequenceByEventId.get(id)!};
  }));
  occurrences.sort((a,b)=>a.scope.localeCompare(b.scope)||a.source.owner.localeCompare(b.source.owner)
   ||a.sequence-b.sequence||a.source.entry.path.localeCompare(b.source.entry.path)||a.row.ordinal-b.row.ordinal);

@@ -23,8 +23,19 @@ import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailabi
 import { importWorkspaceRegistry, importSshCredential } from "../../member/workspaces.js";
 import { isDeepStrictEqual } from "node:util";
 import { importRuntimeStateEntry } from "../../agent/instance.js";
-import { executionScopeId, importExecutionAmbiguity } from "../../data/repositories/execution-identity.js";
+import { storageScopeId } from "../../chat/conversations.js";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
+
+function importExecutionAmbiguity(db: UpgradeImportContext["db"], entry: {
+  sourcePath: string; sourceKey: string; domain: "session" | "runtime" | "cursor";
+  reason: string; recordJson: string; importedAt: number;
+}): void {
+  JSON.parse(entry.recordJson);
+  db.run(`INSERT INTO execution_import_ambiguities(source_path,source_key,domain,reason,record_json,imported_at)
+    VALUES(?,?,?,?,?,?) ON CONFLICT(source_path,source_key,domain) DO UPDATE SET
+    reason=excluded.reason,record_json=excluded.record_json,imported_at=excluded.imported_at`,
+  entry.sourcePath,entry.sourceKey,entry.domain,entry.reason,entry.recordJson,entry.importedAt);
+}
 
 function text(bytes: Uint8Array, path: string): string {
   try { return new TextDecoder("utf-8", {fatal:true}).decode(bytes); }
@@ -333,7 +344,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
     const split=key.lastIndexOf(":");const member=key.slice(split+1);const rawScope=key.slice(0,split);
     if(retiredTopicScope(rawScope))continue; // topic scope retired (fish #19358)
     if(split<1||!known(member)||e.memberId!==undefined&&e.memberId!==member){quarantine(e,key,"runtime",value,"unresolved-runtime-owner");continue;}
-    let scope:string;try{scope=executionScopeId(rawScope);}catch{quarantine(e,key,"runtime",value,"invalid-runtime-scope");continue;}
+    let scope:string;try{scope=storageScopeId(rawScope);}catch{quarantine(e,key,"runtime",value,"invalid-runtime-scope");continue;}
     ensureImportedScope(ctx.db,scope);
     const entry=requireObject(value, `Invalid legacy execution object: ${e.path}`);
     if(unique(`runtime:${scope}:${member}`,entry))importRuntimeStateEntry(ctx.db,member,entry,at);

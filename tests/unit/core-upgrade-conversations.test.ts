@@ -6,9 +6,10 @@ import {openDatabase,applyStorageMigrations,type Database} from "../../src/data/
 import {coreStorageMigrations} from "../../src/data/schema.js";
 import { discoverLegacyInventory } from "../../src/app/upgrade/inventory.js";
 import { importLegacyConversations } from "../../src/app/upgrade/conversations.js";
-import {readMessages,readArchivedMessages,appendMessageInTransaction} from "../../src/data/repositories/message-repository.js";
+import {readMessages,appendMessageInTransaction} from "../../src/chat/messages.js";
+import {readArchivedMessages} from "../../src/chat/archives.js";
+import {getUserReadCursor} from "../../src/chat/cursors.js";
 import { readStoredRoom } from "../../src/chat/conversations.js";
-import {UserCursorRepository} from "../../src/data/repositories/user-cursor-repository.js";
 import { prepareStorageUpgrade } from "../../src/app/upgrade/run.js";
 import { type UpgradeImportContext } from "../../src/app/upgrade/inventory.js";
 let db:Database|undefined;let root:string|undefined;
@@ -46,7 +47,7 @@ it("preserves room/DM facts, explicit empty rosters and independent cursors (ret
  const {existsSync,readdirSync}=await import("node:fs");
  expect(existsSync(join(root!,"archive"))).toBe(true);
  expect(readdirSync(join(root!,"archive")).some((n)=>n.startsWith("task-retirement-"))).toBe(true);
- expect(new UserCursorRepository(ctx.db).get(room.id)?.updatedAt).toBe(10);
+ expect(getUserReadCursor(room.id,ctx.db)?.updatedAt).toBe(10);
  expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
  expect(appendMessageInTransaction(ctx.db,room.id,{sender:"user",content:"next",mentions:[]}).seq).toBe(20);
 });
@@ -54,7 +55,7 @@ it("retains original nonblank event order, unknown event kinds and archived mess
  const events=[{type:"agent_start",ts:1},{type:"message_delta",value:"retained"},{type:"agent_end",ts:4}];
  const {ctx,entries}=setup({"rooms/room-one/room.json":JSON.stringify(room),"rooms/room-one/agent-events/old-label.jsonl":"\n"+events.map(e=>JSON.stringify(e)).join("\n\n")+"\n","rooms/room-one/archives/123.jsonl":JSON.stringify(message)+"\n","rooms/room-one/agent-events/old-label.stats.json":"invalid derived cache"});
  await importLegacyConversations(ctx,entries);
- expect(ctx.db.all<{seq:number;member_id:null;payload_json:string}>("SELECT seq,member_id,payload_json FROM agent_events ORDER BY seq").map(r=>({seq:r.seq,memberId:r.member_id,event:JSON.parse(r.payload_json)}))).toEqual(events.map((event,i)=>({seq:i+1,memberId:null,event})));
+ expect(ctx.db.all<{historical_seq:number;member_id:null;payload_json:string}>("SELECT historical_seq,member_id,payload_json FROM agent_events ORDER BY historical_seq").map(r=>({seq:r.historical_seq,memberId:r.member_id,event:JSON.parse(r.payload_json)}))).toEqual(events.map((event,i)=>({seq:i+1,memberId:null,event})));
  expect(readArchivedMessages(room.id,123,ctx.db)).toEqual([message]);expect(ctx.db.all("SELECT * FROM outbox")).toEqual([]);
 });
 it("retires obsolete response flags without recipient inference or historical execution",async()=>{
@@ -80,7 +81,7 @@ it("does not turn an ID-shaped event filename into a current member identity",as
  const {ctx,entries}=setup({"rooms/room-one/agent-events/mem_one.jsonl":JSON.stringify({type:"agent_end",ts:2})+"\n"});
  ctx.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES('mem_one','new-label','new-label','general','{}',1,1)");
  await importLegacyConversations(ctx,entries);
- expect(ctx.db.get("SELECT owner_key,member_id FROM agent_events")).toEqual({owner_key:"legacy-unresolved:mem_one",member_id:null});
+ expect(ctx.db.get("SELECT historical_owner_key,member_id FROM agent_events")).toEqual({historical_owner_key:"legacy-unresolved:mem_one",member_id:null});
 });
 it("rejects path ownership mismatches",async()=>{
  const {ctx,entries}=setup({"rooms/room-one/room.json":JSON.stringify({...room,id:"other"})});
@@ -99,7 +100,7 @@ it("quarantines terminated malformed runtime events with exact bytes and origina
  const bad='{"type":"tool_end","result":"truncated{"type":"agent_end"}\r\n';
  const {ctx,entries}=setup({[path]:JSON.stringify({type:"agent_start",ts:1})+"\n\n"+bad+JSON.stringify({type:"agent_end",ts:3})+"\n"});
  await importLegacyConversations(ctx,entries);
- const events=ctx.db.all<{id:string;payload_json:string}>("SELECT id,payload_json FROM agent_events ORDER BY seq");
+ const events=ctx.db.all<{id:string;payload_json:string}>("SELECT id,payload_json FROM agent_events ORDER BY historical_seq");
  expect(events.map(x=>JSON.parse(x.payload_json).type)).toEqual(["agent_start","agent_end"]);
  expect(events[0].id).toMatch(/:1$/);expect(events[1].id).toMatch(/:3$/);
  const stored=ctx.db.get<{value:string}>("SELECT value FROM storage_meta WHERE key LIKE 'legacy-invalid-event-v1:%'");
