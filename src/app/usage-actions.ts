@@ -1,5 +1,5 @@
-import {aggregateUsageRows,readUsageRows,type UsageRow,type UsageSeriesPoint,type UsageTotals} from "../agent/events.js";
-import {getRoom,listRooms} from "../chat/conversations.js";
+import {aggregateUsageRows,readUsageRows,type UsageRow,type UsageSeriesPoint,type UsageSourceSelection,type UsageTotals} from "../agent/events.js";
+import {listRoomSourceAssociations,type RoomSourceAssociation} from "../chat/conversations.js";
 import {getRetainedMember} from "../member/identity.js";
 
 export interface UsageReportQuery {from?:string;to?:string;member?:string;agent?:string;model?:string}
@@ -61,19 +61,38 @@ function report(rows:UsageRow[],meta:Map<string,MemberMeta>,query:UsageReportQue
     byAgent:[...agentGroups.values()].sort((a,b)=>b.inputTokens-a.inputTokens),
   };
 }
-function read(query:UsageReportQuery,sourceRef?:string):{rows:UsageRow[];meta:Map<string,MemberMeta>}{
-  const rows=readUsageRows({from:query.from,to:query.to,sourceRef}),meta=metadata(rows);
+function read(query:UsageReportQuery,sources?:UsageSourceSelection):{rows:UsageRow[];meta:Map<string,MemberMeta>}{
+  const rows=readUsageRows({from:query.from,to:query.to,...(sources===undefined?{}:{sources})}),meta=metadata(rows);
   return {rows:filtered(rows,query,meta),meta};
 }
+type RoomSourceIndex={sourceRefs:Map<string,string>;historicalSourceKeys:Map<string,string>};
+function roomSourceIndex(associations:readonly RoomSourceAssociation[]):RoomSourceIndex{
+  const sourceRefs=new Map<string,string>(),historicalSourceKeys=new Map<string,string>();
+  const indexAlias=(map:Map<string,string>,alias:string,roomId:string)=>{
+    const existing=map.get(alias);if(existing!==undefined&&existing!==roomId)throw new Error(`Conflicting room source association: ${alias}`);
+    map.set(alias,roomId);
+  };
+  for(const association of associations){
+    for(const sourceRef of association.sourceRefs)indexAlias(sourceRefs,sourceRef,association.roomId);
+    for(const sourceKey of association.historicalSourceKeys)indexAlias(historicalSourceKeys,sourceKey,association.roomId);
+  }
+  return {sourceRefs,historicalSourceKeys};
+}
+function associatedRoomId(row:UsageRow,index:RoomSourceIndex):string|null{
+  if(row.sourceRef!==null)return index.sourceRefs.get(row.sourceRef)??null;
+  return row.historicalSourceKey===null?null:index.historicalSourceKeys.get(row.historicalSourceKey)??null;
+}
 export function getRoomUsageReport(roomId:string,query:UsageReportQuery={}):UsageReport|null{
-  if(!getRoom(roomId))return null;
-  const {rows,meta}=read(query,`room:${roomId}`);return report(rows,meta,query);
+  const association=listRoomSourceAssociations().find(item=>item.roomId===roomId);if(!association)return null;
+  const {rows,meta}=read(query,{sourceRefs:association.sourceRefs,historicalSourceKeys:association.historicalSourceKeys});return report(rows,meta,query);
 }
 export function getPlatformUsageReport(query:UsageReportQuery={}):PlatformUsageReport{
-  const {rows,meta}=read(query),names=new Map(listRooms().map(room=>[room.id,room.name])),groups=new Map<string,UsageRoomBucket>();
+  const associations=listRoomSourceAssociations(),index=roomSourceIndex(associations),names=new Map(associations.map(room=>[room.roomId,room.roomName]));
+  const {rows,meta}=read(query),groups=new Map<string,UsageRoomBucket>();
   for(const row of rows){
-    const roomId=row.sourceRef?.startsWith("room:")?row.sourceRef.slice(5):row.sourceRef||row.historicalSourceKey||"historical-unattributed";
-    const bucket=groups.get(roomId)??{...empty(),roomId,roomName:names.get(roomId)};groups.set(roomId,bucket);add(bucket,row);
+    const associated=associatedRoomId(row,index);
+    const roomId=associated??(row.sourceRef?.startsWith("room:")?row.sourceRef.slice(5):row.sourceRef||row.historicalSourceKey||"historical-unattributed");
+    const bucket=groups.get(roomId)??{...empty(),roomId,roomName:associated?names.get(associated):undefined};groups.set(roomId,bucket);add(bucket,row);
   }
   return {...report(rows,meta,query),byRoom:[...groups.values()].sort((a,b)=>b.inputTokens-a.inputTokens)};
 }

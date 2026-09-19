@@ -3,8 +3,7 @@
  * must return the byte-identical compiled prompt the activation path injects.
  */
 import { describe, expect, it } from "vitest";
-import { join } from "node:path";
-import { closeTestServer, createTestServer, getTestBossmodeDir, jsonRequest, loginAndGetToken, setupTestWorkspace } from "../helpers/test-server.js";
+import {closeTestServer,createTestServer,jsonRequest,loginAndGetToken,setupTestWorkspace} from "../helpers/test-server.js";
 
 setupTestWorkspace();
 
@@ -18,9 +17,8 @@ describe("member system-prompt preview", () => {
     });
     const memberId = JSON.parse(created.body).member.memberId as string;
 
-    const cwd = getTestBossmodeDir();
     const room = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token, body: { name: "sysprompt-room", cwd, memberIds: [memberId] },
+      token,body:{name:"sysprompt-room",memberIds:[memberId]},
     });
     const roomId = JSON.parse(room.body).id as string;
     const scopeId = `room:${roomId}`;
@@ -37,20 +35,14 @@ describe("member system-prompt preview", () => {
     const { getMember } = await import("../../src/member/identity.js");
     const m = getMember(memberId)!;
     const compiled = previewMemberPrompt(m.id);
-    // Final text = compiled segments + pi's trailing cwd line (byte-exact;
-    // contract test in system-prompt-final.test.ts locks the full assembly).
-    expect(body.text.startsWith(compiled.fullPrompt)).toBe(true);
-    // Batch 7 P1: session cwd = active workspace root (original → member dir).
-    const { activeWorkspaceRoot } = await import("../../src/member/workspaces.js");
-    const sessionCwd = activeWorkspaceRoot(memberId);
-    expect(body.text.endsWith(`\nCurrent working directory: ${sessionCwd.replace(/\\/g, "/")}\n`)).toBe(true);
+    expect(body.text).toBe(compiled.fullPrompt);
     expect(body.contractFingerprint).toBe(compiled.contractFingerprint);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
     await closeTestServer(ts);
   });
 
-  it("rejects unknown member / bad scope / non-member scope", async () => {
+  it("supports an unscoped preview and rejects an unknown member",async()=>{
     const ts = await createTestServer();
     const token = await loginAndGetToken(ts.port);
 
@@ -58,25 +50,11 @@ describe("member system-prompt preview", () => {
       token, body: { name: "scope-bot" },
     });
     const memberId = JSON.parse(created.body).member.memberId as string;
-    const outsider = await jsonRequest(ts.port, "POST", "/api/members", {
-      token, body: { name: "outsider-bot" },
-    });
-    const outsiderId = JSON.parse(outsider.body).member.memberId as string;
-
-    const room = await jsonRequest(ts.port, "POST", "/api/rooms", {
-      token, body: { name: "sysprompt-room2", cwd: getTestBossmodeDir(), memberIds: [memberId] },
-    });
-    const roomId = JSON.parse(room.body).id as string;
-
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt`, { token })).status).toBe(400);
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=nonsense`, { token })).status).toBe(400);
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=topic:topic_missing`, { token })).status).toBe(400);
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${memberId}/system-prompt?scope=dm:${outsiderId}`, { token })).status).toBe(404);
-    expect((await jsonRequest(ts.port, "GET", `/api/members/${outsiderId}/system-prompt?scope=${encodeURIComponent(`room:${roomId}`)}`, { token })).status).toBe(404);
+    const unscoped=await jsonRequest(ts.port,"GET",`/api/members/${memberId}/system-prompt`,{token});
+    expect(unscoped.status).toBe(200);expect(JSON.parse(unscoped.body).scopeId).toBeNull();
     expect((await jsonRequest(ts.port, "GET", "/api/members/mem_does_not_exist/system-prompt?scope=dm:mem_does_not_exist", { token })).status).toBe(404);
 
     await jsonRequest(ts.port, "DELETE", `/api/members/${memberId}`, { token, body: { confirm: true } });
-    await jsonRequest(ts.port, "DELETE", `/api/members/${outsiderId}`, { token, body: { confirm: true } });
     await closeTestServer(ts);
   });
 });

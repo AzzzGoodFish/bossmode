@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it} from "vitest";
-import {aggregateUsageRows,appendMemberEvent,type UsageRow} from "../../src/agent/events.js";
+import {aggregateUsageRows,appendMemberEvent,importHistoricalEvent,readAgentEvent,rebuildEventAggregates,type UsageRow} from "../../src/agent/events.js";
 import {getPlatformUsageReport,getRoomUsageReport} from "../../src/app/usage-actions.js";
 import {createRoom} from "../../src/chat/conversations.js";
 import {coreFixture} from "../helpers/core-fixture.js";
@@ -26,6 +26,47 @@ describe("agent usage aggregation",()=>{
 });
 
 describe("app usage reports",()=>{
+  it("associates immutable historical room usage through the persisted short-ID map",()=>{
+    const fixture=coreFixture();fixtures.push(fixture);
+    const room=createRoom("Current Room",[]),ts=Date.UTC(2026,8,19);
+    fixture.db.run("INSERT INTO id_migration_map(kind,old_id,new_id,ts) VALUES('room',?,?,?)","legacy-room",room.id,ts);
+    const event={type:"message_end",ts,model:"legacy/model",usage:{inputTokens:4,outputTokens:2,cacheRead:1,cacheWrite:0,cost:0.5}} as any;
+    importHistoricalEvent(fixture.db,{id:"legacy-room-usage",sourceKey:"legacy-room",ownerKey:"unknown-owner",sourceSeq:1,event,ts});
+    importHistoricalEvent(fixture.db,{id:"unrelated-usage",sourceKey:"unrelated-room",ownerKey:"unknown-owner",sourceSeq:1,event:{...event,usage:{...event.usage,inputTokens:7}},ts});
+    rebuildEventAggregates(fixture.db);
+    const before=readAgentEvent("legacy-room-usage");
+    const rawBefore=fixture.db.get("SELECT historical_source_key,historical_owner_key,historical_seq,source_ref,payload_json FROM agent_events WHERE id=?","legacy-room-usage");
+    const receiptsBefore=fixture.db.all("SELECT * FROM event_usage_receipts ORDER BY event_id");
+
+    const report=getRoomUsageReport(room.id,{from:"2026-09-19",to:"2026-09-19",model:"legacy/model"})!;
+    expect(report.kpis).toMatchObject({inputTokens:4,outputTokens:2,cacheRead:1,turns:1});
+    expect(report.breakdown).toEqual([]);
+    expect(getRoomUsageReport(room.id,{member:"mem_missing"})!.kpis.turns).toBe(0);
+    expect(getRoomUsageReport(room.id,{model:"other/model"})!.kpis.turns).toBe(0);
+    const platform=getPlatformUsageReport();
+    expect(platform.kpis.inputTokens).toBe(11);
+    expect(platform.byRoom).toEqual(expect.arrayContaining([
+      expect.objectContaining({roomId:room.id,roomName:"Current Room",inputTokens:4}),
+      expect.objectContaining({roomId:"unrelated-room",inputTokens:7}),
+    ]));
+    expect(platform.byRoom.some(bucket=>bucket.roomId==="legacy-room")).toBe(false);
+    expect(readAgentEvent("legacy-room-usage")).toEqual(before);
+    expect(fixture.db.get("SELECT historical_source_key,historical_owner_key,historical_seq,source_ref,payload_json FROM agent_events WHERE id=?","legacy-room-usage")).toEqual(rawBefore);
+    expect(fixture.db.all("SELECT * FROM event_usage_receipts ORDER BY event_id")).toEqual(receiptsBefore);
+  });
+
+  it("returns no room rows when all otherwise matching aliases are ambiguous",()=>{
+    const fixture=coreFixture();fixtures.push(fixture);
+    const first=createRoom("First",[]),second=createRoom("Second",[]),ts=Date.UTC(2026,8,19);
+    fixture.db.run("INSERT INTO id_migration_map(kind,old_id,new_id,ts) VALUES('room',?,?,?)",first.id,second.id,ts);
+    importHistoricalEvent(fixture.db,{id:"ambiguous-usage",sourceKey:first.id,ownerKey:"unknown-owner",sourceSeq:1,event:{type:"message_end",ts,model:"legacy/model",usage:{inputTokens:9,outputTokens:0,cacheRead:0,cacheWrite:0,cost:0}} as any,ts});
+    rebuildEventAggregates(fixture.db);
+
+    expect(getRoomUsageReport(first.id)!.kpis.turns).toBe(0);
+    expect(getRoomUsageReport(second.id)!.kpis.turns).toBe(0);
+    expect(getPlatformUsageReport().kpis).toMatchObject({inputTokens:9,turns:1});
+  });
+
   it("joins member and room metadata, filters, and zero-fills reports",()=>{
     const fixture=coreFixture();fixtures.push(fixture);
     fixture.db.run("INSERT INTO members(id,name,name_key,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)","mem_a","Alice","alice","developer","{}",1,1);

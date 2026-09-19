@@ -99,11 +99,11 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
 
   it("description joins the identity sentence; an empty description is omitted", async () => {
     const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
-    const { updateMemberIdentity } = await import("../../src/member/identity.js");
-    updateMemberIdentity("mem_qa", { title: "Tester of prompts" });
+    const {updateMember}=await import("../../src/member/identity.js");
+    updateMember("mem_qa",{title:"Tester of prompts"});
     const withDescription = previewMemberPrompt("mem_qa");
     expect(withDescription.fullPrompt).toContain("I am qa (Tester of prompts), an AI teammate in Bossmode.");
-    updateMemberIdentity("mem_qa", { title: "" });
+    updateMember("mem_qa",{title:""});
     const without = previewMemberPrompt("mem_qa");
     expect(without.fullPrompt).toContain("I am qa, an AI teammate in Bossmode.");
     expect(without.fullPrompt).not.toContain("I am qa (");
@@ -135,7 +135,6 @@ describe("prompt compiler (prompt v2: Persona → How to work)", () => {
     expect(Buffer.from(compiled.sections.find((s) => s.id === "persona")!.content)).toEqual(Buffer.from(expected));
     // Reads and compilation do not trim or otherwise rewrite the file.
     expect(readMemberProfile("mem_qa").body).toBe(raw);
-    expect(readMemberProfile("mem_qa").raw).toBe(raw);
     expect(readFileSync(path, "utf-8")).toBe(raw);
   });
 

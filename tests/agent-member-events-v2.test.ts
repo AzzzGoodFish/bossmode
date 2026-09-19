@@ -90,6 +90,37 @@ describe("member event facts v2", () => {
     expect(readAgentEvent("same-sdk-id")?.event).toMatchObject({ text: "streamed", model: "fake:model" });
   });
 
+  it("filters usage by exact source aliases and treats an explicit empty selection as no rows",()=>{
+    const fixture=setup();
+    const event=(inputTokens:number)=>({type:"message_end",ts:1_000,text:"done",stopReason:"stop",model:"fake:model",usage:{inputTokens,outputTokens:0,cacheRead:0,cacheWrite:0,cost:0}} as any);
+    importHistoricalEvent(fixture.db,{id:"historical-match",sourceKey:"room-old",ownerKey:"owner",sourceSeq:1,event:event(2),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"explicit-match",sourceKey:"room-old",ownerKey:"owner",sourceSeq:2,memberId:"mem_events",sourceRef:"room:room-old",event:event(3),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"explicit-conflict",sourceKey:"room-old",ownerKey:"owner",sourceSeq:3,memberId:"mem_events",sourceRef:"room:other",event:event(5),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"unrelated",sourceKey:"unrelated",ownerKey:"owner",sourceSeq:1,event:event(7),ts:1_000});
+    rebuildEventAggregates(fixture.db);
+
+    const selected=readUsageRows({sources:{sourceRefs:["room:room-new","room:room-old"],historicalSourceKeys:["room-new","room-old"]}});
+    expect(selected.reduce((sum,row)=>sum+row.inputTokens,0)).toBe(5);
+    expect(readUsageRows({sources:{sourceRefs:[],historicalSourceKeys:[]}})).toEqual([]);
+    expect(readUsageRows({from:"1970-01-02",sources:{sourceRefs:["room:room-old"],historicalSourceKeys:["room-old"]}})).toEqual([]);
+    expect(readUsageRows().reduce((sum,row)=>sum+row.inputTokens,0)).toBe(17);
+  });
+
+  it("keeps legacy token rows untouched while events and receipts remain the usage authority",()=>{
+    const fixture=setup();
+    fixture.db.run(`INSERT INTO token_usage_daily(member_id,date,model,input_tokens,output_tokens,cache_read,cache_write,cost,turns)
+      VALUES('mem_events','2025-01-01','legacy/model',9,8,7,6,5,4)`);
+    fixture.db.exec("ALTER TABLE token_usage_daily RENAME TO historical_token_usage_daily");
+    appendMemberEvent({id:"current-usage",memberId:"mem_events",sourceRef:"room:rm_events",event:{
+      type:"message_end",ts:Date.UTC(2026,8,19),model:"current/model",usage:{inputTokens:3,outputTokens:2,cacheRead:1,cacheWrite:0,cost:0.25},
+    } as any});
+    rebuildEventAggregates(fixture.db);
+
+    expect(fixture.db.all("SELECT * FROM historical_token_usage_daily")).toEqual([expect.objectContaining({model:"legacy/model",input_tokens:9,turns:4})]);
+    expect(readUsageRows()).toEqual([expect.objectContaining({model:"current/model",inputTokens:3,turns:1})]);
+    expect(fixture.db.get<{n:number}>("SELECT COUNT(*) n FROM event_usage_receipts")!.n).toBe(1);
+  });
+
   it("keeps member statistics for null-source facts and routes only addressed facts", () => {
     const fixture = setup();
     appendMemberEvent({ id: "start", memberId: "mem_events", sourceRef: null, event: { type: "agent_start", ts: 1_000 } });

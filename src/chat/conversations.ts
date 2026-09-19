@@ -2,6 +2,11 @@ import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 export interface RoomMember { id: string; name: string }
+export type RoomWriteErrorReason = "member_not_found" | "leader_not_member";
+export class RoomWriteError extends Error {
+  readonly name = "RoomWriteError";
+  constructor(readonly reason: RoomWriteErrorReason, message: string) { super(message); }
+}
 export interface Room {
   id: string;
   name: string;
@@ -13,6 +18,7 @@ export interface Room {
 }
 import { newRoomId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
+import { readRoomIdMigrations } from "../data/id-migrations.js";
 import type { AttachmentLocation } from "../files/attachments.js";
 
 export function slugifyRoomDocsPath(input: string): string {
@@ -73,9 +79,13 @@ export function createRoom(name: string, memberIds: string[], opts?: {
     throw new Error("memberIds must contain stable member IDs");
   }
   const ids = [...new Set(memberIds)];
-  for (const id of ids) if (!conversationMember(id)) throw new Error(`Member not found: ${id}`);
+  for (const id of ids) {
+    if (!conversationMember(id)) throw new RoomWriteError("member_not_found", `Member not found: ${id}`);
+  }
   const leader = opts?.promptLeaderMemberId ?? ids[0];
-  if (leader && !ids.includes(leader)) throw new Error("leaderMemberId must be one of memberIds");
+  if (leader && !ids.includes(leader)) {
+    throw new RoomWriteError("leader_not_member", "leaderMemberId must be one of memberIds");
+  }
   const roomDescription = typeof opts?.description === "string" ? opts.description.trim() : "";
   if (roomDescription.length > ROOM_DESCRIPTION_MAX_CHARS) {
     throw new Error(`description must be ${ROOM_DESCRIPTION_MAX_CHARS} characters or fewer`);
@@ -129,7 +139,12 @@ export function updateRoom(roomId: string, patch: {
     }
     if (Object.hasOwn(patch, "promptLeaderMemberId")) {
       const leader = patch.promptLeaderMemberId;
-      if (leader && !room.memberIds.includes(leader)) throw new Error("promptLeaderMemberId must be a current room member");
+      if (leader && !conversationMember(leader)) {
+        throw new RoomWriteError("member_not_found", `Member not found: ${leader}`);
+      }
+      if (leader && !room.memberIds.includes(leader)) {
+        throw new RoomWriteError("leader_not_member", "promptLeaderMemberId must be a current room member");
+      }
       if (leader) room.promptLeaderMemberId = leader; else delete room.promptLeaderMemberId;
     }
     if (Object.hasOwn(patch, "docsPath")) {
@@ -181,13 +196,13 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
 export function inviteRoomMember(
   roomId: string,
   memberId: string,
-): { ok: true; member: RoomMember } | { ok: false; error: string; code: "not_found" | "duplicate" } {
+): { ok: true; member: RoomMember } | { ok: false; error: string; code: "room_not_found" | "member_not_found" | "duplicate" } {
   return getDatabase().transaction((): ReturnType<typeof inviteRoomMember> => {
     const room = getRoom(roomId);
-    if (!room) return { ok: false, code: "not_found", error: "Room not found" };
+    if (!room) return { ok: false, code: "room_not_found", error: "Room not found" };
     if (room.memberIds.includes(memberId)) return { ok: false, code: "duplicate", error: "Member already in this room" };
     const identity = conversationMember(memberId);
-    if (!identity) return { ok: false, code: "not_found", error: "Member not found" };
+    if (!identity) return { ok: false, code: "member_not_found", error: "Member not found" };
     room.memberIds.push(memberId);
     storeRoom(room);
     initializeMemberCursor(roomId, memberId);
@@ -429,6 +444,52 @@ export function getRoom(id: string, db: Database = getDatabase()): Room | null {
 
 export function listRooms(db: Database = getDatabase()): Room[] {
   return db.all<{ id: string }>("SELECT id FROM rooms ORDER BY created_at DESC,id").map(row => getRoom(row.id, db)!);
+}
+
+export interface RoomSourceAssociation {
+  roomId: string;
+  roomName: string;
+  sourceRefs: readonly string[];
+  historicalSourceKeys: readonly string[];
+}
+
+/** Current-room-bounded, exact aliases for immutable historical source identity. */
+export function listRoomSourceAssociations(db: Database = getDatabase()): RoomSourceAssociation[] {
+  const rooms = listRooms(db);
+  const candidates = new Map(rooms.map(room => [room.id, {
+    sourceRefs: new Set([`room:${room.id}`]),
+    historicalSourceKeys: new Set([room.id]),
+  }]));
+  for (const mapping of readRoomIdMigrations(db)) {
+    const target = candidates.get(mapping.newId);
+    if (!target) continue;
+    target.sourceRefs.add(`room:${mapping.oldId}`);
+    target.historicalSourceKeys.add(mapping.oldId);
+  }
+  const sourceOwners = new Map<string, Set<string>>();
+  const historicalOwners = new Map<string, Set<string>>();
+  for (const [roomId, candidate] of candidates) {
+    for (const alias of candidate.sourceRefs) {
+      const owners = sourceOwners.get(alias) ?? new Set<string>();
+      owners.add(roomId);
+      sourceOwners.set(alias, owners);
+    }
+    for (const alias of candidate.historicalSourceKeys) {
+      const owners = historicalOwners.get(alias) ?? new Set<string>();
+      owners.add(roomId);
+      historicalOwners.set(alias, owners);
+    }
+  }
+  return rooms.map(room => {
+    const candidate = candidates.get(room.id)!;
+    return {
+      roomId: room.id,
+      roomName: room.name,
+      sourceRefs: [...candidate.sourceRefs].filter(alias => sourceOwners.get(alias)?.size === 1).sort(),
+      historicalSourceKeys: [...candidate.historicalSourceKeys]
+        .filter(alias => historicalOwners.get(alias)?.size === 1).sort(),
+    };
+  });
 }
 
 export function listMmScopes(db: Database = getDatabase()): string[] {

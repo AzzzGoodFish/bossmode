@@ -7,21 +7,20 @@ import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
-let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
-beforeEach(async () => {
-  dir = process.env.BOSSMODE_DIR!;
-  mkdirSync(join(dir, "members"), { recursive: true });
+let fixture:ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>;
+let unwire:()=>void=()=>{};
+beforeEach(async()=>{
   vi.resetModules();
-  fixture = (await import("../helpers/core-fixture.js")).coreFixture();
-  const { importMemberRecord } = await import("../../src/app/member-actions.js");
-  importMemberRecord({ id: MEMBER, name: "wsbot", agentTemplate: "general",
-    unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
-    global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
-    createdAt: 1, updatedAt: 1 });
+  fixture=(await import("../helpers/core-fixture.js")).coreFixture();dir=fixture.root;
+  mkdirSync(join(dir,"members"),{recursive:true});
+  const {insertMemberIdentity}=await import("../../src/member/identity.js");
+  insertMemberIdentity({id:MEMBER,name:"wsbot",agentTemplate:"general",global:{model:null,credentialId:null,thinkingLevel:null,skills:[],mcpServers:[]},createdAt:1,updatedAt:1});
+  const {configureTerminalWorkspaces}=await import("../../src/agent/terminal.js");
+  const {getWorkspace,getActiveWorkspace}=await import("../../src/member/workspaces.js");
+  configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);
+  unwire=()=>configureTerminalWorkspaces(undefined);
 });
-afterEach(() => {
-  fixture.close();
-});
+afterEach(()=>{unwire();fixture.close();});
 
 const MEMBER = "mem_ws_a";
 
@@ -73,7 +72,7 @@ describe("workspace registry", () => {
 describe("file tools (original workspace)", () => {
   it("relative paths resolve against the member dir; write→read→edit round-trip", async () => {
     seedMemberDir();
-    const ft = await import("../../src/agent/tools/file-tools.js");
+    const ft = await import("../../src/agent/tools.js");
     const w = await ft.workspaceWriteTool(MEMBER, { path: "notes/a.txt", content: "line1\nline2\nline3" });
     expect(w.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Wrote") });
     expect(existsSync(join(dir, "members", MEMBER, "notes", "a.txt"))).toBe(true);
@@ -136,7 +135,7 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
       expect(created.ok).toBe(true);
       reg.useWorkspace(MEMBER, "web1");
 
-      const ft = await import("../../src/agent/tools/file-tools.js");
+      const ft = await import("../../src/agent/tools.js");
       const w = await ft.workspaceWriteTool(MEMBER, { path: "conf/app.conf", content: "mode=prod\n" });
       expect((w.content[0] as any).text).toContain("ssh:web1");
       expect(remoteFiles.get("/srv/app/conf/app.conf")).toBe("mode=prod\n");
@@ -161,7 +160,7 @@ describe("Workspace prompt chapter", () => {
     const compiled = previewMemberPrompt(MEMBER);
     expect(compiled.fullPrompt).toContain("## Workspace");
     expect(compiled.fullPrompt).toContain("workspace_list");
-    expect(compiled.envPrompt).not.toContain("Current workspace:");
+    expect(compiled.fullPrompt).not.toContain("Current workspace:");
   });
 });
 
@@ -183,27 +182,19 @@ describe("ssh public key regression (qa rc.16 ③)", () => {
 
 describe("SSH credentials for legacy members", () => {
   it("the member credential capability creates a missing SQL key once", async () => {
-    const reg = await import("../../src/member/identity.js"), __reg_app_member_actions = await import("../../src/app/member-actions.js");
-    const { ensureMemberSshKeyPair, memberSshKeyPath, readMemberSshPublicKey } = await import("../../src/member/workspaces.js");
-    const { readSshCredential } = await import("../../src/member/workspaces.js");
-    // Import a pre-key member rather than deleting current authoritative credentials.
-    const legacy = __reg_app_member_actions.importMemberRecord({ id: "mem_legacy", name: "legacybot", agentTemplate: "general",
-      unifiedModel: true, unifiedExtensions: true, scopeOverrides: {},
-      global: { model: null, credentialId: null, thinkingLevel: null, skills: [], mcpServers: [] },
-      createdAt: 1, updatedAt: 1 });
-    const credentials = fixture.db;
-    expect(readSshCredential(legacy.id, credentials)).toBeNull();
-    const first = ensureMemberSshKeyPair(legacy.id);
-    expect(first).toMatch(/^ssh-ed25519 /);
+    const {insertMemberIdentity}=await import("../../src/member/identity.js");
+    const {prepareMemberSshCredential,importSshCredential,memberSshKeyPath,readMemberSshPublicKey,readSshCredential}=await import("../../src/member/workspaces.js");
+    const legacy={id:"mem_legacy",name:"legacybot",agentTemplate:"general",global:{model:null,credentialId:null,thinkingLevel:null,skills:[],mcpServers:[]},createdAt:1,updatedAt:1};
+    insertMemberIdentity(legacy);const credentials=fixture.db;
+    expect(readSshCredential(legacy.id,credentials)).toBeNull();
+    const first=prepareMemberSshCredential(legacy.id);
+    expect(first.publicKey).toMatch(/^ssh-ed25519 /);
     expect(existsSync(memberSshKeyPath(legacy.id))).toBe(false);
-    const key = readSshCredential(legacy.id, credentials)!;
-    expect(key.privateKey).toContain("PRIVATE KEY");
-    const pub = readMemberSshPublicKey(legacy.id);
-    expect(pub).toMatch(/^ssh-ed25519 /);
-
-    // Credential material remains stable on a repeat.
-    expect(ensureMemberSshKeyPair(legacy.id)).toBe(first);
-    expect(readSshCredential(legacy.id, credentials)).toEqual(key);
+    expect(first.privateKey).toContain("PRIVATE KEY");
+    expect(readMemberSshPublicKey(legacy.id)).toBeNull();
+    importSshCredential(legacy.id,first,credentials);
+    expect(readMemberSshPublicKey(legacy.id)).toBe(first.publicKey.trim());
+    expect(readSshCredential(legacy.id,credentials)).toEqual(first);
   });
 
 });

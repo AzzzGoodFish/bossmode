@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { logger, formatSpawnArgs } from "../../src/kernel/logger.js";
+import { logger } from "../../src/kernel/logger.js";
 
 describe("logger", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -49,36 +49,5 @@ describe("logger", () => {
     const line = logSpy.mock.calls[0][0] as string;
     // ISO format: 2026-03-25T...Z
     expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
-  });
-});
-
-describe("formatSpawnArgs", () => {
-  it("formats args one per line with indentation", () => {
-    const result = formatSpawnArgs("pi", ["--mode", "rpc", "--model", "sonnet"]);
-    expect(result).toBe(
-      "  command: pi\n" +
-      "    --mode rpc\n" +
-      "    --model sonnet",
-    );
-  });
-
-  it("redacts --system-prompt and --append-system-prompt values", () => {
-    const longPrompt = "x".repeat(4000);
-    const result = formatSpawnArgs("pi", [
-      "--system-prompt", longPrompt,
-      "--model", "sonnet",
-      "--append-system-prompt", "team rules here",
-    ]);
-    expect(result).toContain("--system-prompt <4000 chars>");
-    expect(result).toContain("--model sonnet");
-    expect(result).toContain("--append-system-prompt <15 chars>");
-    expect(result).not.toContain("xxxx");
-    expect(result).not.toContain("team rules here");
-  });
-
-  it("handles standalone flags without values", () => {
-    const result = formatSpawnArgs("pi", ["--no-session", "--no-extensions"]);
-    expect(result).toContain("    --no-session");
-    expect(result).toContain("    --no-extensions");
   });
 });

@@ -12,8 +12,7 @@ it("global PATCH publishes committed profile to authenticated clients and reject
     const created = await request("POST", "/api/members", { name: "Api before", title: "Original" });
     const id = JSON.parse(created.body).member.memberId;
     const rooms = await import("../../src/chat/conversations.js");
-    const room = rooms.createRoom("Profile API", undefined, []);
-    rooms.stampGlobalMemberIds(room.id, [id]);
+    const room=rooms.createRoom("Profile API",[id]);
     ws = new WebSocket(`${server.wsUrl}?token=${token}`);
     await new Promise<void>((resolve, reject) => { ws!.once("open", resolve); ws!.once("error", reject); });
     const received: any[] = [];
@@ -25,8 +24,7 @@ it("global PATCH publishes committed profile to authenticated clients and reject
     expect(await profileEvent).toEqual({ type: "member:profile", memberId: id, name: "接口 成员", title: null });
     expect(JSON.parse(changed.body).member).toMatchObject({ memberId: id, name: "接口 成员", title: null });
     const denied = await request("PATCH", `/api/rooms/${room.id}/members/${id}`, { name: "must not rename" });
-    expect(denied.status).toBe(400);
-    expect(JSON.parse(denied.body).error).toBe("member_profile_is_global");
+    expect(denied.status).toBe(404);
     for (const name of ["all", "USER", " system "]) {
       const bad = await request("POST", "/api/members", { name });
       expect(bad.status, bad.body).toBe(400);
@@ -35,10 +33,9 @@ it("global PATCH publishes committed profile to authenticated clients and reject
     expect((await request("PATCH", `/api/members/${id}`, { title: 42 })).status).toBe(400);
     expect(JSON.parse((await request("GET", `/api/members/${id}`)).body).member.name).toBe("接口 成员");
     expect(received.filter(e => e.type === "member:profile")).toHaveLength(1);
-    const unicodeRoom = await request("POST", "/api/rooms", { name: "Unicode room", memberIds: [id], leaderMemberId: id });
+    const unicodeRoom=await request("POST","/api/rooms",{name:"Unicode room",memberIds:[id]});
     expect(unicodeRoom.status, unicodeRoom.body).toBe(200);
-    const otherRoom = rooms.createRoom("Invite renamed member", undefined, []);
-    rooms.stampGlobalMemberIds(otherRoom.id, []);
+    const otherRoom=rooms.createRoom("Invite renamed member",[]);
     const invite = await request("POST", `/api/rooms/${otherRoom.id}/members`, { memberId: id });
     expect(invite.status, invite.body).toBe(200);
     expect(rooms.getRoomMembers(otherRoom.id).map(member => member.id)).toEqual([id]);

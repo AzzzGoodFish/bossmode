@@ -63,11 +63,6 @@ function applyEventUsage(db:Database,fact:EventFact):void{
   const u=usageOf(fact.event);if(!u)return;
   const total=[u.inputTokens,u.outputTokens,u.cacheRead,u.cacheWrite].reduce<number>((sum,n)=>sum+(typeof n==="number"&&Number.isFinite(n)&&n>0?n:0),0);
   db.run("INSERT INTO event_usage_receipts(event_id,total_tokens) VALUES(?,?)",fact.id,total);
-  if(!fact.memberId)return;
-  db.run(`INSERT INTO token_usage_daily(member_id,date,model,input_tokens,output_tokens,cache_read,cache_write,cost,turns) VALUES(?,?,?,?,?,?,?,?,1)
-    ON CONFLICT(member_id,date,model) DO UPDATE SET input_tokens=input_tokens+excluded.input_tokens,
-    output_tokens=output_tokens+excluded.output_tokens,cache_read=cache_read+excluded.cache_read,
-    cache_write=cache_write+excluded.cache_write,cost=cost+excluded.cost,turns=turns+1`,fact.memberId,new Date(fact.ts).toISOString().slice(0,10),(fact.event as any).model?.trim()||(fact.event as any).model||"unknown",u.inputTokens||0,u.outputTokens||0,u.cacheRead||0,u.cacheWrite||0,u.cost||0);
 }
 function insertOutbox(db:Database,fact:EventFact):void{
   if(!fact.sourceRef||!fact.memberId)return;
@@ -154,7 +149,7 @@ export function handleAgentEvent(sourceRef:string|null,_agentName:string,instanc
 
 export function rebuildEventAggregates(db:Database=getDatabase()):void{
   db.transaction(tx=>{
-    tx.exec("DELETE FROM member_statistics; DELETE FROM token_usage_daily; DELETE FROM event_usage_receipts");
+    tx.exec("DELETE FROM member_statistics; DELETE FROM event_usage_receipts");
     const stats=new Map<string,{turns:number;tools:number;active:number;starts:Map<string,number>;input:number;output:number;read:number;write:number;cost:number;updated:number}>();
     for(const row of tx.all<EventRow>(`${EVENT_SELECT} ORDER BY member_id,CASE WHEN historical_seq IS NULL THEN 1 ELSE 0 END,historical_source_key,historical_owner_key,historical_seq,member_seq,id`)){
       const fact=decode(row),event=fact.event,u=usageOf(event),stream=fact.historicalSourceKey&&fact.historicalOwnerKey?`${fact.historicalSourceKey}\0${fact.historicalOwnerKey}`:`member:${fact.memberId}`;
@@ -177,11 +172,17 @@ export interface UsageRow {
   memberId:string|null;historicalOwnerKey:string|null;sourceRef:string|null;historicalSourceKey:string|null;
   date:string;model:string;inputTokens:number;outputTokens:number;cacheRead:number;cacheWrite:number;cost:number;turns:number;
 }
-export function readUsageRows(options:{from?:string;to?:string;sourceRef?:string}={}):UsageRow[]{
+export interface UsageSourceSelection {sourceRefs:readonly string[];historicalSourceKeys:readonly string[];}
+export function readUsageRows(options:{from?:string;to?:string;sources?:UsageSourceSelection}={}):UsageRow[]{
   const clauses:string[]=[];const parameters:unknown[]=[];
   if(options.from){clauses.push("date(e.ts/1000,'unixepoch')>=?");parameters.push(options.from);}
   if(options.to){clauses.push("date(e.ts/1000,'unixepoch')<=?");parameters.push(options.to);}
-  if(options.sourceRef){clauses.push("e.source_ref=?");parameters.push(options.sourceRef);}
+  if(options.sources){
+    const sourceRefs=[...new Set(options.sources.sourceRefs)],historicalKeys=[...new Set(options.sources.historicalSourceKeys)],matches:string[]=[];
+    if(sourceRefs.length){matches.push(`e.source_ref IN (${sourceRefs.map(()=>"?").join(",")})`);parameters.push(...sourceRefs);}
+    if(historicalKeys.length){matches.push(`(e.source_ref IS NULL AND e.historical_source_key IN (${historicalKeys.map(()=>"?").join(",")}))`);parameters.push(...historicalKeys);}
+    clauses.push(matches.length?`(${matches.join(" OR ")})`:"0");
+  }
   const where=clauses.length?` AND ${clauses.join(" AND ")}`:"";
   return getDatabase().all<any>(`SELECT e.member_id AS memberId,e.historical_owner_key AS historicalOwnerKey,
     e.source_ref AS sourceRef,e.historical_source_key AS historicalSourceKey,date(e.ts/1000,'unixepoch') AS date,

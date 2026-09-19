@@ -6,11 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 // caught history reads / list_tasks swallowing ok:false). Batch 3 keeps
 // the rule for chat_send / chat_read / chat_search / chat_list and the
 // bossmode gateway `call` path.
-vi.mock("../../src/agent/tools/tools.js", () => ({
-  handleToolCallback: vi.fn(async () => ({ ok: false, error: "boom: explicit error" })),
-}));
+vi.mock("../../src/agent/tools.js",async(importOriginal)=>{
+  const actual=await importOriginal<typeof import("../../src/agent/tools.js")>();
+  return {...actual,handleToolCallback:vi.fn(async()=>({ok:false,error:"boom: explicit error"}))};
+});
 
-import { handleToolCallback } from "../../src/agent/tools/tools.js";
+import {handleToolCallback} from "../../src/agent/tools.js";
 import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 
 // Defensive contract: every custom tool must serialize its JSON Schema with an
@@ -19,7 +20,7 @@ import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 // OpenAI→Anthropic conversion) silently return an empty stream for such tools,
 // surfacing as "Stream ended without finish_reason".
 describe("createBossmodeSdkTools schema normalization", () => {
-  const tools = createBossmodeSdkTools({ roomId: "r1", memberId: "mem-tester" });
+  const tools = createBossmodeSdkTools({memberId:"mem-tester",resolveSourceRef:()=>"room:r1"});
 
   it("emits a `required` array on every tool's parameters", () => {
     expect(tools.length).toBeGreaterThan(0);
@@ -59,7 +60,7 @@ describe("createBossmodeSdkTools schema normalization", () => {
 });
 
 describe("createBossmodeSdkTools error surfacing", () => {
-  const tools = createBossmodeSdkTools({ roomId: "r1", memberId: "mem-tester" });
+  const tools = createBossmodeSdkTools({memberId:"mem-tester",resolveSourceRef:()=>"room:r1"});
 
   it("chat_read surfaces backend ok:false as a thrown error", async () => {
     const tool = tools.find((t) => t.name === "chat_read")!;
@@ -83,7 +84,7 @@ describe("createBossmodeSdkTools error surfacing", () => {
 });
 
 describe("bossmode gateway", () => {
-  const gateway = createBossmodeSdkTools({ roomId: "r1", memberId: "mem-tester" }).find((t) => t.name === "bossmode")!;
+  const gateway = createBossmodeSdkTools({memberId:"mem-tester",resolveSourceRef:()=>"room:r1"}).find((t) => t.name === "bossmode")!;
   const run = async (params: Record<string, unknown>) => {
     const result = (await (gateway.execute as any)("g", params)) as { content: Array<{ text: string }> };
     return result.content[0].text;
@@ -135,7 +136,7 @@ describe("bossmode gateway", () => {
       .rejects.toThrow("boom: explicit error");
     expect(handleToolCallback).toHaveBeenCalledWith(
       "member_info",
-      "r1",
+      "room:r1",
       "mem-tester",
       { member: "qa" },
       expect.objectContaining({ memberId: "mem-tester" }),
@@ -145,17 +146,17 @@ describe("bossmode gateway", () => {
   // ① B1: a member has one instance across chats, so a tool call must target the
   // chat of the turn being processed rather than the one the instance was built for.
   it("targets the live chat from the resolver, not the build-time room", async () => {
-    const live = createBossmodeSdkTools({ roomId: "room-a", memberId: "mem-tester", resolveChatId: () => "dm:mem-tester" });
+    const live = createBossmodeSdkTools({memberId:"mem-tester",resolveSourceRef:()=>"dm:mem-tester"});
     vi.mocked(handleToolCallback).mockClear();
     const send = live.find((tool) => tool.name === "chat_send")!;
     await expect((send.execute as any)("c1", { to: "user", message: "hi" })).rejects.toThrow("boom: explicit error");
     expect(handleToolCallback).toHaveBeenCalledWith("chat_send", "dm:mem-tester", "mem-tester", expect.anything(), expect.anything());
 
     // Without a resolver the build-time chat stays the fallback.
-    const fallback = createBossmodeSdkTools({ roomId: "room-a", memberId: "mem-tester" });
+    const fallback = createBossmodeSdkTools({memberId:"mem-tester",resolveSourceRef:()=>"room:room-a"});
     vi.mocked(handleToolCallback).mockClear();
     const sendFallback = fallback.find((tool) => tool.name === "chat_send")!;
     await expect((sendFallback.execute as any)("c2", { to: "user", message: "hi" })).rejects.toThrow("boom: explicit error");
-    expect(handleToolCallback).toHaveBeenCalledWith("chat_send", "room-a", "mem-tester", expect.anything(), expect.anything());
+    expect(handleToolCallback).toHaveBeenCalledWith("chat_send","room:room-a","mem-tester",expect.anything(),expect.anything());
   });
 });
