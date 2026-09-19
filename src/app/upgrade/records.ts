@@ -22,7 +22,7 @@ import { importRemoteCatalog, importProviderOverlays, readRemoteCatalog } from "
 import { importMcpConfiguration, importMemberMcpConfiguration, importMcpAvailability } from "../../member/mcp.js";
 import { importWorkspaceRegistry, importSshCredential } from "../../member/workspaces.js";
 import { isDeepStrictEqual } from "node:util";
-import { RuntimeRepository } from "../../agent/instance.js";
+import { importRuntimeStateEntry } from "../../agent/instance.js";
 import { executionScopeId, importExecutionAmbiguity } from "../../data/repositories/execution-identity.js";
 import { ensureImportedScope, retiredTopicScope } from "./conversations.js";
 
@@ -303,7 +303,6 @@ export function importLegacySettings(ctx:UpgradeImportContext,entries:readonly L
  * replayed by this adapter. */
 export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly LegacySourceEntry[]):Set<string>{
  ctx.db.assertOutsideTransaction();const consumed=new Set<string>();
- const runtime=new RuntimeRepository(ctx.db);
  const seen=new Map<string,unknown>();
  const unique=(key:string,value:unknown)=>{
   if(!seen.has(key)){seen.set(key,value);return true;}
@@ -337,7 +336,7 @@ export function importLegacyExecution(ctx:UpgradeImportContext,entries:readonly 
     let scope:string;try{scope=executionScopeId(rawScope);}catch{quarantine(e,key,"runtime",value,"invalid-runtime-scope");continue;}
     ensureImportedScope(ctx.db,scope);
     const entry=requireObject(value, `Invalid legacy execution object: ${e.path}`);
-    if(unique(`runtime:${scope}:${member}`,entry))runtime.importEntry(member,entry,at);
+    if(unique(`runtime:${scope}:${member}`,entry))importRuntimeStateEntry(ctx.db,member,entry,at);
    }
   }
   consumed.add(e.path);

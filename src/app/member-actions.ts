@@ -148,60 +148,79 @@ export function previewMemberPrompt(memberId: string, contextWindowTokens?: numb
 
 import { configureControls, applyPendingAfterPromptSettlement, interruptAcceptedInput, destroyInstance } from "../agent/controls.js";
 
-import { recoverRuntimeInputState, acceptRuntimeInput, acceptControlInput, pendingRuntimeInputOwners, runtimeInputOwner, cancelPendingRuntimeInputs, waitForInputSettlement, configureScheduler, pumpRuntimeInputs, type PreparedRuntimeInput } from "../agent/scheduler.js";
+import { recoverRuntimeInputState, acceptAgentAdmission, acceptControlInput, pendingRuntimeInputOwners, cancelPendingRuntimeInputs, waitForInputSettlement, configureScheduler, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";
 
-import {ReplyObligationRepository,type ReplyDisposition} from "../data/repositories/reply-obligation-repository.js";
-import type {CapturedMessage} from "../data/repositories/delivery-repository.js";
+import { appendMessageWithAdmissions, confirmChatAdmission, dismissPendingReplies, listPendingChatAdmissions, listPendingReplies, repairPendingChatAdmission, type PreparedChatAdmission } from "../chat/delivery.js";
+import type { Message, MessageInput } from "../chat/messages.js";
 import { isBlankPersona } from "../member/profile.js";
-import type {MentionActivationCtx} from "../chat/router.js";
-
 import { openRuntimeAdmission, memberRuntimeAllowed } from "../agent/instance.js";
 
 import { logger } from "../kernel/logger.js";
 
-import { isSystemNoticeHiddenFromMembers } from "../kernel/runtime-error-limit.js";
 import * as roomStore from "../chat/conversations.js";
 import * as sessionStore from "../member/sessions.js";
 
-import * as attachmentStore from "../files/attachment-store.js";
-import { postMessage, getMessagesSince } from "../chat/message-bus.js";
-import { initRouter } from "../chat/router.js";
+import { scheduleMessageDispatch } from "../chat/message-bus.js";
 
 import { buildMemberAgentSession, reloadMemberSession, maybeFlushPendingReload, compileForMember, getRegistry, configureAssembly } from "../agent/assembly.js";
 
 import { isMmScopeId, parseMmScopeId, scopeIdOf, parseScopeId, type ScopeId } from "../chat/conversations.js";
 import { listRoomsForMember } from "../chat/conversations.js";
 import { applyMemberConfigPatch, updateMember } from "../member/identity.js";
-import { readAllDmMessages } from "../chat/dm-message-store.js";
 import { handleAgentEvent as processEvent, loadEventsFromDisk } from "../agent/events.js";
-import { loadScopeMessages } from "../agent/tools/tools.js";
-
 import { clearRuntimeStateEntry } from "../agent/instance.js";
-import {
-  wrapRoomContextMessage,
-  wrapRoomMessagesTranscript,
-  resolveSenderRole,
-  type SenderRole,
-} from "../agent/prompt.js";
 import type { AgentHistoryEvent } from "../agent/events.js";
 import type { RuntimeRegistry } from "../agent/types.js";
 import type { AgentStreamEvent, AgentMemberConfig } from "../agent/types.js";
 
-import type { AgentStatus, RoomMessage, ContextUsage } from "../kernel/types.js";
+import type { AgentStatus, ContextUsage } from "../kernel/types.js";
 import { contextCompactionWarningCache, contextUsageCache, instanceKey, instances, isCompactUsageDrop, memberIdentityMeta, pendingCreations, shouldKeepCompactedMarker, type AgentInstance } from "../agent/instance.js";
 
 const chatTargetOf = (sourceRef: string): string => sourceRef.startsWith("room:") ? sourceRef.slice(5) : sourceRef;
+const canonicalSourceRef = (value: string): string => value.startsWith("room:") || value.startsWith("dm:") || value.startsWith("mm:") ? value : `room:${value}`;
+const runtimeInputOwner = (sourceRef: string, memberId: string) => ({ scopeId: canonicalSourceRef(sourceRef), targetActorKey: memberId });
+
+/** Compose chat acceptance, agent enqueue and cursor confirmation in the caller's transaction. */
+export function acceptPreparedChatAdmission(db: Database, admission: PreparedChatAdmission) {
+  const { chatToken, ...agentAdmission } = admission;
+  const receipt = acceptAgentAdmission(db, agentAdmission);
+  confirmChatAdmission(db, chatToken, receipt.inputId);
+  if (receipt.enqueued) db.afterCommit(() => {
+    void wakeAgent(admission.memberId, receipt).catch(error =>
+      logger.error("agent", "accepted chat input wake failed", { memberId: admission.memberId, inputId: receipt.inputId, error: String(error) }));
+  });
+  return receipt;
+}
+
+export function repairPendingAgentAdmissions(): number {
+  const db=getDatabase();let repaired=0;
+  for(const candidate of listPendingChatAdmissions(db))db.transaction(tx=>{
+    const admission=repairPendingChatAdmission(tx,candidate.sourceRef,candidate.chatToken.messageId,candidate.memberId);
+    if(!admission)return;
+    acceptPreparedChatAdmission(tx,admission);repaired++;
+  });
+  return repaired;
+}
+
+export function commitChatMessage(sourceRef: string, input: MessageInput): Message {
+  const message = getDatabase().transaction(tx => {
+    const prepared = appendMessageWithAdmissions(tx, sourceRef, input);
+    for (const admission of prepared.admissions) acceptPreparedChatAdmission(tx, admission);
+    return prepared.message;
+  });
+  scheduleMessageDispatch();
+  return message;
+}
 
 export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   configureControls({
     memberConfig: memberRecordToConfig,
     resolveMember: resolveRoomMember,
     memberScopes: memberScopesFor,
-    privateScope: memberId => scopeIdOf({ kind: "dm", memberId }),
     clearSession: sessionStore.clearCurrentSession,
     commitModelBinding: (memberId, binding) => { updateMember(memberId, { global: binding }); },
     emitEvent: emitAgentLocalEvent,
-    postSystemNotice: (scopeId, text) => { postMessage(scopeId, "system", text); },
+    postSystemNotice: (scopeId, text) => { commitChatMessage(scopeId, { sender: "system", content: text, mentions: [] }); },
     publishStatus: broadcastToRoom,
     publishReset: (scopeId, memberName, event) => {
       if (scopeId.startsWith("dm:")) broadcastToAgentSubscribers(chatTargetOf(scopeId), memberName, event);
@@ -216,77 +235,22 @@ export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (membe
   configureScheduler({
     buildSession: buildMemberAgentSession,
     memberConfig: memberRecordToConfig,
-    postSystemNotice: (sourceRef, text) => { postMessage(sourceRef, "system", text); },
+    authorizeExecution: (memberId, sourceRef) => sourceRef === null || memberScopeAllowsExecution(sourceRef, memberId),
+    postSystemNotice: (sourceRef, text) => { commitChatMessage(sourceRef, { sender: "system", content: text, mentions: [] }); },
     emitEvent: emitAgentLocalEvent,
     refreshProfileSources,
     applyPendingControls: applyPendingAfterPromptSettlement,
+    interruptAccepted: (instance, sourceRef) => interruptAcceptedInput(sourceRef, instance, "message_interrupt"),
     flushPendingReload: maybeFlushPendingReload,
     reloadSession: reloadMemberSession,
+    hasPendingReply: (db, memberId, sourceRef, replySources) =>
+      listPendingReplies(sourceRef, memberId, db).some(reply => replySources.includes(reply.messageId)),
+    dismissReplies: (db, memberId, sourceRef, diagnosis, disposition) => {
+      if (!sourceRef) return;
+      dismissPendingReplies(sourceRef, memberId, disposition, diagnosis, Date.now(), undefined, db);
+    },
   });
-}
-
-function filterAgentVisibleMessages(messages: RoomMessage[], _memberName: string): RoomMessage[] {
-  // fish 2026-08-04: members never see system notices — neither runtime
-  // failures nor non-error system prompts. Typed task/knowledge events stay.
-  return messages.filter((message) => !isSystemNoticeHiddenFromMembers(message));
-}
-
-/** Last visible message that mentions this member (the @ that fired the
- * activation); -1 when nothing mentions (steer/system activations). */
-function isOwnMessage(message: RoomMessage, memberId: string, memberName: string): boolean {
-  return message.senderMemberId !== undefined ? message.senderMemberId === memberId
-    : !memberId.startsWith("mem_") && message.sender === memberName;
-}
-
-function lastMentionTriggerIndex(messages: RoomMessage[], memberName: string, memberId: string): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (Array.isArray(message.mentionMemberIds)) {
-      if (message.mentionMemberIds.includes(memberId)) return i;
-    } else if (!memberId.startsWith("mem_") && message.mentions?.includes(memberName)) return i;
-  }
-  return -1;
-}
-
-/** One-line unread-backlog hint for hybrid injection (fish-approved spec
- * msg:#14818). Null when there is no backlog (the common path). Senders are
- * user-first, then by count desc; task/knowledge event counts are omitted
- * when zero; system notices are already filtered out upstream. */
-export function buildUnreadBacklogHint(backlog: RoomMessage[], opts?: { total?: number; fromSeq?: number }): string | null {
-  if (backlog.length === 0) return null;
-  const first = (backlog[0] as { seq?: number }).seq;
-  const last = (backlog[backlog.length - 1] as { seq?: number }).seq;
-  const bySender = new Map<string, number>();
-  let taskEvents = 0;
-  let knowledgeEvents = 0;
-  for (const m of backlog) {
-    const sender = m.sender || "unknown";
-    bySender.set(sender, (bySender.get(sender) ?? 0) + 1);
-    const type = (m as { type?: string }).type;
-    if (type === "task_event") taskEvents += 1;
-    else if (type === "knowledge_event") knowledgeEvents += 1;
-  }
-  const ordered = [...bySender.entries()].sort((a, b) => {
-    if (a[0] === "user") return -1;
-    if (b[0] === "user") return 1;
-    return b[1] - a[1];
-  });
-  const senders = ordered.map(([s, c]) => `${s}×${c}`).join(", ");
-  const events: string[] = [];
-  if (taskEvents > 0) events.push(`${taskEvents} task events`);
-  if (knowledgeEvents > 0) events.push(`${knowledgeEvents} knowledge updates`);
-  const eventClause = events.length > 0 ? ` — incl. ${events.join(", ")}` : "";
-  const total = opts?.total ?? backlog.length;
-  const truncated = total > backlog.length;
-  const fromSeq = opts?.fromSeq ?? (typeof first === "number" ? first - 1 : 0);
-  const range = truncated
-    ? `you have ${total} unread (latest ${backlog.length}, No.${first}–No.${last})`
-    : `you have ${backlog.length} unread messages (No.${first}–No.${last})`;
-  return `[Earlier in this room ${range}: ${senders}${eventClause}. Read them with chat_read (from_seq ${fromSeq}); reading marks them seen.]`;
-}
-
-function roomScopeId(roomId: string): ScopeId {
-  return scopeIdOf({ kind: "room", roomId });
+  repairPendingAgentAdmissions();
 }
 
 /** Current SQL scope access, separate from immutable historical execution ownership. */
@@ -294,7 +258,7 @@ function memberHasScopeAccess(scopeValue: string, memberId: string): boolean {
   const scope = runtimeInputOwner(scopeValue, memberId).scopeId;
   if (scope.startsWith("dm:")) return scope === `dm:${memberId}`;
   if (isMmScopeId(scope)) return Boolean(parseMmScopeId(scope)?.includes(memberId));
-  return !!scope && !!roomStore.resolveRoomMemberRef(scope, memberId);
+  return scope.startsWith("room:") && !!roomStore.resolveRoomMemberRef(chatTargetOf(scope), memberId);
 }
 function memberScopeAllowsExecution(scopeValue: string, memberId: string): boolean {
   return memberRuntimeAllowed(memberId) && memberHasScopeAccess(scopeValue, memberId);
@@ -334,19 +298,12 @@ export function getScopeLiveStatus(scopeId: ScopeId): "idle" | "working" | "inac
  * chat, so the build scope says nothing about where it is active).
  */
 export function getMemberActiveScopes(globalMemberId: string): ScopeId[] {
-  const scopes = new Set<string>(pendingRuntimeInputOwners(globalMemberId));
+  const scopes = new Set<string>(pendingRuntimeInputOwners(globalMemberId).filter((scope): scope is string => scope !== null));
   const instance = instances.get(instanceKey(globalMemberId));
   if (instance?.activeSourceRef && (instance.status === "working" || instance.dispatchState !== "idle")) {
     scopes.add(instance.activeSourceRef);
   }
   return [...scopes] as ScopeId[];
-}
-
-function currentRuntimeName(memberId: string, initialName: string): string {
-  if (!memberId.startsWith("mem_")) return initialName;
-  const member = getMember(memberId);
-  if (!member) throw new Error(`Member no longer exists: ${memberId}`);
-  return member.name;
 }
 
 function refreshProfileSources(instance: AgentInstance): void {
@@ -361,197 +318,9 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.compiled = compiled;
 }
 
-// -- Format messages --
-
-function renderMessageForAgent(roomId: string, msg: RoomMessage): RoomMessage {
-  if (!msg.attachments?.length) return msg;
-  const lines: string[] = [];
-  for (const attachment of msg.attachments) {
-    try {
-      const absPath = attachmentStore.getAttachmentPath(roomId, attachment.storedFilename);
-      lines.push(`Attachment: [original filename: ${attachment.originalFilename}](${absPath})`);
-    } catch {
-      lines.push(`Attachment: [original filename: ${attachment.originalFilename}](unavailable)`);
-    }
-  }
-  const content = msg.content?.trim() ? `${msg.content}\n${lines.join("\n")}` : lines.join("\n");
-  return { ...msg, content };
-}
-
-function formatMessagesForAgent(roomId: string, messages: RoomMessage[], receiver: string, roomName: string): string {
-  if (messages.length === 0) return "";
-
-  const items = messages.map((raw) => {
-    const m = renderMessageForAgent(roomId, raw);
-    return { msg: m, role: resolveSenderRole(m.sender) as SenderRole };
-  });
-
-  // Resolve replyTo targets from the full scope so quotes work even when the
-  // original is outside the current activation window (plan-reply-to-v1 §3).
-  let scopeById: Map<string, RoomMessage> | null = null;
-  const lookup = (ref: { seq: number; messageId: string }): RoomMessage | undefined => {
-    if (!scopeById) {
-      try {
-        const all = loadScopeMessages(roomId);
-        scopeById = new Map(all.filter(m=>!isSystemNoticeHiddenFromMembers(m)).map((m) => [m.id, m]));
-      } catch {
-        scopeById = new Map();
-      }
-    }
-    return scopeById.get(ref.messageId);
-  };
-
-  // Single message → single-message envelope.
-  if (items.length === 1) {
-    return wrapRoomContextMessage(items[0].msg, { kind: "room", id: roomId, name: roomName }, items[0].role, lookup);
-  }
-
-  // Multiple messages → shared transcript envelope (each message keeps its own
-  // full sub-header with seq + timestamp so it can be referenced individually).
-  return wrapRoomMessagesTranscript(
-    items.map((i) => ({ msg: i.msg, role: i.role })),
-    { kind: "room", id: roomId, name: roomName },
-    lookup,
-  );
-}
-
 // Only current member configuration selects skills, including an explicit empty list.
 export function resolveSkills(member: AgentMemberConfig): string[] {
   return member.skills ?? [];
-}
-
-// -- Activation --
-
-type ReplyContext = { needResponse?: string[]; needResponseMemberIds?: string[]; senderName?: string; senderOrigin?: "user"|"member"|"system"|"unresolved" };
-
-function replyObligation(memberId: string, memberName: string, ctx?: ReplyContext) {
-  const isUser = ctx?.senderOrigin !== undefined ? ctx.senderOrigin === "user" : ctx?.senderName === "user";
-  const listed = ctx?.needResponseMemberIds !== undefined
-    ? ctx.needResponseMemberIds.includes(memberId)
-    : (ctx?.needResponse || []).some(name => name === memberName || name === memberId);
-  const explicitFyi = isUser && Array.isArray(ctx?.needResponse) && ctx.needResponse.length === 0;
-  const replyDebt = !explicitFyi && (isUser || !ctx || listed);
-  const banner = replyDebt ? (isUser || !ctx
-    ? "[REPLY EXPECTED] Respond using the chat tool."
-    : `[REPLY EXPECTED] ${ctx.senderName} expects your reply — respond with the chat tool.`) : undefined;
-  return { replyDebt, banner };
-}
-
-const INTERRUPT_INPUT_BANNER="Your previous turn was interrupted by this message. Commands in terminals keep running. Check terminal_list for running commands and use terminal_wait to collect their results before continuing dependent work.";
-
-function prepareScopeInput(scopeValue:string,memberId:string,ctx?:ReplyContext,capture?:CapturedMessage):{payload:PreparedRuntimeInput;replyExpected:boolean;onAccepted?:()=>void}|null{
-  const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
-  const rec=getMember(memberId);if(!rec)throw new Error(`Member not found: ${memberId}`);
-  const replyExpected=capture
-    ?new ReplyObligationRepository(getDatabase()).listPending(scope,memberId).some(x=>x.messageId===capture.messageId)
-    :replyObligation(memberId,rec.name,ctx).replyDebt;
-  const senderName=capture?.snapshot.origin==="member"?String(capture.snapshot.message.sender):ctx?.senderName;
-  const senderIsMember=capture?capture.snapshot.origin==="member":!!ctx&&ctx.senderOrigin!=="user"&&ctx.senderName!=="user";
-  const banner=replyExpected?(senderIsMember&&senderName?`[REPLY EXPECTED] ${senderName} expects your reply — respond with the chat tool.`:"[REPLY EXPECTED] Respond using the chat tool."):undefined;
-  const captured=capture?.snapshot.message as unknown as RoomMessage|undefined;
-  if(scope.startsWith("dm:")){
-    const all=readAllDmMessages(memberId).filter(m=>!isSystemNoticeHiddenFromMembers(m));
-    // Private messages are delivered to this member immediately; the turn carries only the
-    // target message itself. Earlier history stays available through chat_read.
-    const target=captured??all.at(-1);
-    // ① D1: every delivered message carries its source chat id and sender id;
-    // this private chat is `dm:<memberId>`.
-    const dmLabel=`dm:${memberId}`;
-    const delivered=target?(target.sender==="user"?`[User] ${target.content}`:`[Member \`${target.sender}\`${target.senderMemberId?` (${target.senderMemberId})`:''}] ${target.content}`):undefined;
-    let prompt:string;
-    if(delivered)prompt=`You are in a private chat with the user (${dmLabel}). New message:\n\n${delivered}${replyExpected?"\n\nRespond to the latest user message with the chat tool.":""}`;
-    else if(isBlankPersona(readMemberProfile(memberId)))prompt=`You are in a private chat with the user (${dmLabel}). You just came online with a blank persona (your persona.md body is empty). Your first action must be a chat call: introduce yourself by name in one short line, say you are starting from a blank slate, and ask what they want you around for. Do not call other tools first. After they answer, write what you learned in persona.md as free-form Markdown. No frontmatter or particular headings are required.`;
-    else prompt=`You are in a private chat with the user (${dmLabel}). They just opened the conversation. Greet briefly with the chat tool, or wait for their request.`;
-    return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"dm-activate"},replyExpected};
-  }
-  if(scope.startsWith("mm:")){
-    // ⑤ B: member↔member private chat — mirror the DM delivery-only path for the peer.
-    const pair=parseMmScopeId(scope);
-    if(!pair||!pair.includes(memberId))throw new Error(`Member chat scope does not include member ${memberId}`);
-    const otherId=pair.find(id=>id!==memberId)!;
-    const otherName=getMember(otherId)?.name??otherId;
-    const all=loadScopeMessages(scope).filter(m=>!isSystemNoticeHiddenFromMembers(m));
-    const target=captured??all.at(-1);
-    const delivered=target?`[Member \`${target.sender}\`${target.senderMemberId?` (${target.senderMemberId})`:''}] ${target.content}`:undefined;
-    let prompt:string;
-    if(delivered)prompt=`You are in a private chat with member \`${otherName}\` (${scope}). New message:\n\n${delivered}${replyExpected?"\n\nRespond to the latest message with the chat tool.":""}`;
-    else prompt=`You are in a private chat with member \`${otherName}\` (${scope}). They just opened it — reply with the chat tool, or wait for their next message.`;
-    return {payload:{prompt:[banner,prompt].filter(Boolean).join("\n\n"),source:"private_instruction",trigger:"mm-activate"},replyExpected};
-  }
-  const parent=scope;
-  const room=roomStore.getRoom(parent);if(!room)throw new Error("Room not found");
-  const member=resolveRoomMember(parent,memberId);if(!member)throw new Error("Member is not in the room");
-  const cursor=roomStore.getCursors(parent)[memberId];
-  const all=getMessagesSince(parent,cursor??null);
-  const visible=filterAgentVisibleMessages(all,rec.name);
-  const index=lastMentionTriggerIndex(visible,rec.name,memberId);
-  const trigger=captured??visible[index>=0?index:visible.length-1];
-  if(!trigger)return null;
-  let formatted=trigger?formatMessagesForAgent(scope,[trigger],rec.name,room.name):"";
-  if(trigger){
-    const backlog=visible.filter(m=>m.id!==trigger.id&&(m.seq??0)<(trigger.seq??Number.MAX_SAFE_INTEGER)&&!isOwnMessage(m,memberId,rec.name));
-    const limit=(member as any).contextLimit||50;
-    const hint=buildUnreadBacklogHint(backlog.slice(-limit),backlog.length>limit?{total:backlog.length,fromSeq:(backlog[0].seq??1)-1}:undefined);
-    if(hint)formatted=`${hint}\n\n${formatted}`;
-  }
-  return {payload:{prompt:[banner,formatted].filter(Boolean).join("\n\n"),source:"room_mention",trigger:"activate"},replyExpected,onAccepted:()=>{
-    if(trigger?.id){
-      const current=roomStore.getCursors(parent)[memberId];
-      const currentMessage=current?loadScopeMessages(scope).find(m=>m.id===current):undefined;
-      if(!currentMessage||(currentMessage.seq??0)<=(trigger.seq??Number.MAX_SAFE_INTEGER)){
-        roomStore.setCursor(parent,memberId,trigger.id);
-      }
-    }
-  }};
-}
-
-/** Admission is synchronous. The outbox may acknowledge only after this returns. */
-function admitCapturedActivation(scopeValue:string,memberId:string,ctx:MentionActivationCtx):void{
-  const scope=runtimeInputOwner(scopeValue,memberId).scopeId;
-  const active=instances.get(instanceKey(memberId));
-  const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
-  const target=ctx.capture.snapshot.targets[ctx.deliveryKind].find(actor=>actor.actorKey===memberId);
-  const scopeAllowed=memberHasScopeAccess(scope,memberId);
-  const unavailable=target?.memberId!==memberId||!scopeAllowed||!memberRuntimeAllowed(memberId)||!getMember(memberId);
-  // ① B3: @everyone reaches everyone — a busy member is interrupted and
-  // re-delivered just like any other message, never skipped.
-  const skipped=unavailable;
-  let prepared:ReturnType<typeof prepareScopeInput>;
-  const receipt=acceptRuntimeInput(ctx.capture,{scopeId:scope,messageId:ctx.capture.messageId,targetActorKey:memberId,deliveryKind:ctx.deliveryKind},()=>{
-    if(skipped)return {prompt:"",source:"system",trigger:"not-dispatched"};
-    prepared=prepareScopeInput(scope,memberId,ctx,ctx.capture);
-    if(!prepared)throw new Error("Captured message has no executable input");
-    const payload={...prepared.payload};
-    if(busy&&!active!.compacting)payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${payload.prompt}`;
-    return payload;
-  },{placement:(busy&&!active?.compacting)?"front":"tail",onAccepted:()=>prepared?.onAccepted?.(),...(skipped?{skip:{diagnosis:"member unavailable",disposition:"cancelled" as ReplyDisposition}}:{})});
-  if(receipt.input.status!=="pending"){
-    return;
-  }
-  if(receipt.accepted&&busy&&!active!.compacting){
-    interruptAcceptedInput(scope,active!,"message_interrupt");
-  }
-  void pumpRuntimeInputs(scope,memberId).catch(error=>logger.error("router","accepted input execution failed",{scopeId:scope,memberId,error:String(error)}));
-}
-
-async function activateControl(scope:string,memberId:string,ctx?:ReplyContext):Promise<void>{
-  if(!memberRuntimeAllowed(memberId))return;
-  const prepared=prepareScopeInput(scope,memberId,ctx);
-  if(!prepared){
-    await buildMemberAgentSession(memberId);
-    return;
-  }
-  const active=instances.get(instanceKey(memberId));
-  const busy=!!active&&(active.status==="working"||active.dispatchState!=="idle");
-  if(busy&&!active!.compacting)prepared.payload.prompt=`${INTERRUPT_INPUT_BANNER}\n\n${prepared.payload.prompt}`;
-  const {input}=acceptControlInput(scope,memberId,prepared.payload,prepared.replyExpected,busy?"front":"tail",prepared.onAccepted);
-  if(busy&&!active!.compacting)interruptAcceptedInput(scope,active!,"message_interrupt");
-  const running=pumpRuntimeInputs(scope,memberId);
-  if(!busy&&!active?.compacting)await waitForInputSettlement(input,running);else void running.catch(error=>logger.error("agent","control input failed",{memberId,error:String(error)}));
-}
-export async function activateAgent(roomId:string,memberRef:string,ctx?:ReplyContext):Promise<void>{
-  const member=resolveRoomMember(roomId,memberRef);if(!member)return;
-  return activateControl(roomId,member.id,ctx);
 }
 
 // -- Model switching --
@@ -759,13 +528,14 @@ export function getAgentEventHistory(roomId: string, memberRef: string): AgentHi
 }
 
 function emitAgentLocalEvent(
-  roomId: string,
+  sourceRef: string | null,
   memberRef: string,
   event: AgentHistoryEvent,
   identity?: { memberId: string; agentName: string },
 ): void {
-  const scopedMember = roomId.startsWith("dm:") ? getMember(memberRef) : null;
-  const member = identity ? undefined : scopedMember ?? roomStore.resolveRoomMemberRef(roomId, memberRef);
+  const scopedMember = sourceRef?.startsWith("dm:") ? getMember(memberRef) : null;
+  const roomId = sourceRef ? chatTargetOf(sourceRef) : null;
+  const member = identity ? undefined : scopedMember ?? (roomId ? roomStore.resolveRoomMemberRef(roomId, memberRef) : undefined);
   // Prefer live instance identity, then the global member record for DM.
   const keyHint = instanceKey(member?.id || memberRef);
   const instance = instances.get(keyHint);
@@ -773,7 +543,7 @@ function emitAgentLocalEvent(
   const agentName = identity?.agentName || member?.name || instance?.agentName || memberRef;
   // Use the same authoritative, commit-safe event/outbox path as SDK events.
   // Failed persistence is not a successful activity notification.
-  processEvent(roomId,agentName,keyHint,event as AgentStreamEvent,instance?.eventBuffer ?? [],memberId);
+  processEvent(sourceRef,agentName,keyHint,event as AgentStreamEvent,instance?.eventBuffer ?? [],memberId);
 
 }
 
@@ -820,12 +590,11 @@ export function resetAgentSession(roomId: string, memberRef: string): { ok: true
   destroyInstance(memberId, {preservePending:true});
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
-    cancelPendingRuntimeInputs(runtimeInputOwner(scopeId,memberId),"session reset");
+    cancelPendingRuntimeInputs(memberId,"session reset",scopeId);
     sessionStore.clearCurrentSession(memberId);
     clearRuntimeStateEntry(memberId);
     if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
-    emitAgentLocalEvent(ref?.kind === "room" ? ref.roomId : scopeId, memberId,
-      {type:"system",text:message},{memberId,agentName});
+    emitAgentLocalEvent(scopeId, memberId, {type:"system",text:message},{memberId,agentName});
   });
   if (ref) {
     const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
@@ -873,37 +642,17 @@ export function memberRecordToConfig(memberId: string): AgentMemberConfig | null
   };
 }
 
-/**
- * Activate a member in their DM scope (user message path — no @ required).
- * Builds context from recent DM messages and prompts the runtime.
- */
-export async function activateDmMember(memberId:string,ctx?:ReplyContext):Promise<void>{return activateControl(`dm:${memberId}`,memberId,ctx);}
-
-/** Single mention-router wiring for production server + acceptance tests (canonical room:/dm: scopes only). */
-export function wireMentionRouter():()=>void{
-  return initRouter({mention:admitCapturedActivation});
-}
-
-// Conversation routing stays at the application boundary, not in session assembly.
-function sessionConversation(member: AgentMemberConfig, activeChat: { scopeId: string }) {
-  const memberId = member.id;
-  const ref = parseScopeId(activeChat.scopeId);
-  const chatTarget = () => chatTargetOf(activeChat.scopeId);
-  const memberName = () => currentRuntimeName(memberId, member.name);
-  const roomMembers = ref?.kind === "room" ? roomStore.getRoom(ref.roomId)?.members ?? [] : [member.name];
-  const callbacks = {
-    onChat: async (message: string) => {
-      postMessage(chatTarget(), memberName(), message, [], { senderMemberId: memberId });
-    },
-    onMention: async (targetMember: string, message: string) => {
-      const current = parseScopeId(activeChat.scopeId);
-      const target = current?.kind === "room" ? roomStore.resolveRoomMemberRef(current.roomId, targetMember) : null;
-      postMessage(chatTarget(), memberName(), message, current?.kind === "room" ? [targetMember] : [], {
-        senderMemberId: memberId, ...(current?.kind === "room" ? { mentionMemberIds: target ? [target.id] : [] } : {}),
-      });
-    },
-  };
-  return { roomMembers, callbacks };
+/** Activate a newly created member in its explicit user DM. Ordinary DM
+ * messages enter through the chat admission transaction instead. */
+export async function activateDmMember(memberId:string):Promise<void>{
+  if(!memberRuntimeAllowed(memberId))return;
+  const member=getMember(memberId);if(!member)return;
+  const sourceRef=`dm:${memberId}`;
+  const prompt=isBlankPersona(readMemberProfile(memberId))
+    ?`You are in a private chat with the user (${sourceRef}). Introduce yourself briefly with chat_send and ask what they want you around for.`
+    :`You are in a private chat with the user (${sourceRef}). Greet briefly with chat_send, or wait for their request.`;
+  const {input}=acceptControlInput(sourceRef,memberId,{prompt,source:"private_instruction",trigger:"dm-activate",replySources:[]},false);
+  await waitForInputSettlement(input,pumpRuntimeInputs(memberId));
 }
 
 import { MemberNotFoundError } from "../member/identity.js";

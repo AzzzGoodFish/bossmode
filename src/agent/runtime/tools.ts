@@ -146,17 +146,16 @@ function renderGatewayDescribe(entry: GatewayEntry): string {
 export function createBossmodeSdkTools(opts: {
   memberId: string;
   /** Opaque source of the batch currently being executed. */
-  resolveSourceRef: () => string;
+  resolveSourceRef: () => string | null;
 }): ToolDefinition[] {
   if (!opts.memberId) throw new Error("Trusted memberId is required to construct member tools.");
-  const sourceRefOf = () => {
-    const sourceRef = opts.resolveSourceRef();
-    if (!sourceRef) throw new Error("No active input source for member tool call");
-    return sourceRef;
-  };
   const call = async (tool: string, params: Record<string, any>, signal?: AbortSignal) => {
+    const sourceRef = opts.resolveSourceRef();
+    const needsCurrentChat = (tool === "chat_send" && !String(params?.to ?? "").trim())
+      || ((tool === "chat_read" || tool === "chat_search") && !String(params?.chat ?? "").trim());
+    if (!sourceRef && needsCurrentChat) throw new Error("This tool call needs a current chat or an explicit target");
     const { handleToolCallback } = await import("../tools/tools.js");
-    return handleToolCallback(tool, sourceRefOf(), opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
+    return handleToolCallback(tool, sourceRef ?? "", opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
   const specs = new Map(DIRECT_TOOL_SPECS.map((spec) => [spec.name, spec]));

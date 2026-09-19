@@ -3,7 +3,6 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { postMessage } from "../../chat/message-bus.js";
 import * as messageStore from "../../chat/message-store.js";
 import * as roomStore from "../../chat/conversations.js";
 import { getMember, resolveMemberRef } from "../../member/identity.js";
@@ -12,13 +11,21 @@ import { unknownMemberToolMessage } from "../tools.js";
 import { readAllDmMessages } from "../../chat/dm-message-store.js";
 import { chatScopeRoomId, isMmScopeId, mmScopeIdOf, parseMmScopeId, scopeIdOf, type ScopeId } from "../../chat/conversations.js";
 import type { RoomMessage } from "../../kernel/types.js";
-import { parseMentions, parseMentionMemberIds } from "../../chat/router.js";
+import { parseMentions } from "../../chat/delivery.js";
 import { isSystemNoticeHiddenFromMembers } from "../../kernel/runtime-error-limit.js";
 import { logger } from "../../kernel/logger.js";
 import { processAgentAttachments } from "../../chat/attachments.js";
 import * as attachmentStore from "../../files/attachment-store.js";
 import { renderQueryRowsForMember, type QueryRow } from "./query-render.js";
 import { displayFilename, inferAttachmentPreviewType, type RoomMessageAttachment } from "../../files/attachments.js";
+
+export type ToolChatSender = (sourceRef: string, sender: string, content: string, mentions?: string[], extra?: Record<string, unknown>) => unknown;
+let toolChatSender: ToolChatSender | undefined;
+export function configureToolChatSender(sender: ToolChatSender | undefined): void { toolChatSender = sender; }
+function postMessage(sourceRef: string, sender: string, content: string, mentions: string[] = [], extra?: Record<string, unknown>): unknown {
+  if (!toolChatSender) throw new Error("Agent chat tools are not connected");
+  return toolChatSender(sourceRef, sender, content, mentions, extra);
+}
 
 /** Max chars for tool result text. ~6K tokens, aligned with CLI output constraints. */
 const MAX_RESULT_CHARS = 25_000;
@@ -123,11 +130,8 @@ function mentionInfoFromText(message: string, roomMembers: Array<{ id: string; n
   mentions: string[];
   mentionMemberIds: string[];
 } {
-  const names = roomMembers.map((member) => member.name);
-  const byName = new Map(roomMembers.map((member) => [member.name, member.id]));
-  const mentions = parseMentions(message, names);
-  const toIds = (list: string[]) => list.map((name) => byName.get(name)).filter((id): id is string => Boolean(id));
-  return { mentions, mentionMemberIds: mentions.includes("all") ? roomMembers.map(member => member.id) : toIds(mentions) };
+  const parsed = parseMentions(message, roomMembers);
+  return { mentions: parsed.labels, mentionMemberIds: parsed.memberIds };
 }
 
 function messageMeta(meta: {
@@ -235,7 +239,7 @@ export async function handleToolCallback(
   };
   if (context?.memberId) {
     if (!boundActor()) return { ok: false, error: "Member not found", code: "not_found" };
-    if (context.memberId.startsWith("mem_")) {
+    if (context.memberId.startsWith("mem_") && roomId) {
       try { assertMemberScopeAccess(context.memberId, toolScopeId(roomId)); }
       catch (error) { return { ok: false, error: (error as Error).message, code: "scope_access_denied" }; }
     }
@@ -303,6 +307,10 @@ export async function handleToolCallback(
       const target = resolveChatTarget(roomId, sendActor, params?.to);
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
+      if (context?.memberId?.startsWith("mem_")) {
+        try { assertMemberScopeAccess(context.memberId, toolScopeId(targetRoomId)); }
+        catch (error) { return { ok: false, error: (error as Error).message, code: "scope_access_denied" }; }
+      }
 
       // Resolve target IDs before attachment IO; names may be reused while it awaits.
       const rosterId = chatScopeRoomId(targetRoomId) || targetRoomId;
@@ -388,6 +396,10 @@ export async function handleToolCallback(
       const target = resolveChatTarget(roomId, qActor, params?.chat);
       if (!target.ok) return { ok: false, error: target.error };
       const targetRoomId = target.roomId;
+      if (context?.memberId?.startsWith("mem_")) {
+        try { assertMemberScopeAccess(context.memberId, toolScopeId(targetRoomId)); }
+        catch (error) { return { ok: false, error: (error as Error).message, code: "scope_access_denied" }; }
+      }
 
       // Split-tool discipline: read never searches text, search always does.
       const queryText = params?.query !== undefined ? String(params.query) : "";

@@ -104,9 +104,9 @@ export interface TestServer {
 export async function createTestServer(): Promise<TestServer> {
   const { getDatabase } = await import("../../src/data/database.js");
   getDatabase(); // The caller must explicitly bootstrap storage before service consumers.
-  const { handleApiRequest } = await import("../../src/api/index.js");
+  const { handleApiRequest } = await import("../../src/api/http.js");
   const { createWebSocketServer } = await import("../../src/app/server/ws.js");
-  const { initializeMemberRuntime, wireMentionRouter } = await ({ ...await import("../../src/app/member-actions.js"), ...await import("../../src/agent/controls.js"), ...await import("../../src/agent/assembly.js"), ...await import("../../src/agent/instance.js"), ...await import("../../src/agent/scheduler.js") });
+  const { initializeMemberRuntime } = await import("../../src/app/member-actions.js");
   const { RuntimeRegistry } = await import("../../src/agent/types.js");
   const { MockRuntime } = await import("./mock-runtime.js");
 
@@ -116,10 +116,13 @@ export async function createTestServer(): Promise<TestServer> {
   registry.register(new MockRuntime("pi-cli"));
   initializeMemberRuntime(registry, loadMemberPromptSource, loadAgentMemberSnapshot);
 
-  // Same mention-router as production — scope routing stays on one code path.
-  const stopRouter = wireMentionRouter();
+  const wiring = await import("../../src/app/wire.js");
+  await wiring.wireApiRoutes();
+  const stopChat = wiring.wireChatHttp();
+  const stopMemberHttp = wiring.wireMemberHttp();
+  const stopRouter = () => { stopChat(); stopMemberHttp(); };
   // Same output wiring as production — agent facts reach WS and chat on one code path.
-  const stopAgentEvents = (await import("../../src/app/wire.js")).wireAgentEvents();
+  const stopAgentEvents = wiring.wireAgentEvents();
 
   const server = http.createServer(async (req, res) => {
     try {

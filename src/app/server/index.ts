@@ -11,13 +11,13 @@ import type { BossmodeConfig } from "../../kernel/types.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
-import { handleApiRequest } from "../../api/index.js";
+import { handleApiRequest } from "../../api/http.js";
 import { createWebSocketServer, shutdownWebSocket } from "./ws.js";
 
 import { removePidFile, writePidFile } from "../pid.js";
 import { ensurePiCatalogWarm } from "../../config/catalog.js";
 import { startCatalogAutoRefreshScheduler } from "../../config/models.js";
-import { initializeMemberRuntime, getActiveInstanceCount, wireMentionRouter } from "../member-actions.js";
+import { initializeMemberRuntime, getActiveInstanceCount } from "../member-actions.js";
 import { shutdownAll as shutdownAgents } from "../../agent/controls.js";
 import { resumePendingRuntimeInputs } from "../../agent/scheduler.js";
 
@@ -25,7 +25,7 @@ import { RuntimeRegistry } from "../../agent/types.js";
 import { PiSdkRuntime } from "../../agent/runtime/pi.js";
 import { logger } from "../../kernel/logger.js";
 import { seedBuiltinAssets } from "../../member/templates.js";
-import { wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireAgentEvents } from "../wire.js";
+import { wireApiRoutes, wireConfiguration, wireMemberProfiles, wireMemberConfigPatches, wireConversationMembers, wireMemberHttp, wireChatHttp, wireAgentEvents } from "../wire.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -61,6 +61,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
 }
 
 async function startApplication(opts: ServerOptions): Promise<void> {
+  await wireApiRoutes();
   seedBuiltinAssets();
 
   await recoverMemberArchives();
@@ -73,10 +74,10 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   const unsubscribeProfiles = wireMemberProfiles();
   const unsubscribeConfigPatches = wireMemberConfigPatches();
   const unsubscribeMembers = wireConversationMembers();
+  const unsubscribeMemberHttp = wireMemberHttp();
+  const unsubscribeChats = wireChatHttp();
   const unsubscribeAgentEvents = wireAgentEvents();
 
-  // Initialize communication router (room + DM activation).
-  const unsubscribeRouter = wireMentionRouter();
 
   const webDistDir = join(import.meta.dirname, "../../../web/dist");
 
@@ -125,11 +126,12 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   function cleanupOwnedResources(): Promise<void> {
     if (cleanupSettlement) return cleanupSettlement;
     accepting = false;
-    unsubscribeRouter();
     unsubscribeConfiguration();
     unsubscribeProfiles();
     unsubscribeConfigPatches();
     unsubscribeAgentEvents();
+    unsubscribeChats();
+    unsubscribeMemberHttp();
     const closingWebSocket = shutdownWebSocket();
     const closingHttp = closeHttpServer(server);
     cleanupSettlement = (async () => {

@@ -12,7 +12,7 @@ import {
   type AgentSession,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
-import { SdkExecutionService, type SdkExecutionAttempt } from "../scheduler.js";
+import { dispatchSdkExecution, type SdkExecutionAttempt } from "../scheduler.js";
 import { logger } from "../../kernel/logger.js";
 import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.js";
 import { getModelCredentialProfile } from "../../config/models.js";
@@ -148,7 +148,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   private sessionReferencePublished = false;
   /** Live set of bossmode custom tool names (from createBossmodeSdkTools) — sole source for "bossmode" classification. */
   private bossmodeToolNames: Set<string>;
-  private executionOwner: { memberId: string; resolveSourceRef: () => string };
+  private executionOwner: { memberId: string; resolveSourceRef: () => string | null };
 
   constructor(
     private session: AgentSession,
@@ -157,7 +157,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     private resourceLoader: BossmodeResourceLoader,
     runtimeParams: AgentRuntimeParams,
     bossmodeToolNames: Iterable<string>,
-    executionOwner: { memberId: string; resolveSourceRef: () => string },
+    executionOwner: { memberId: string; resolveSourceRef: () => string | null },
     onTeardownSuccess?: () => void,
     private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
     initialMcpConfig?: McpRuntimeSettings,
@@ -194,8 +194,8 @@ export class PiSdkAgentHandle implements AgentHandle {
     this.publishSessionReferenceIfMaterialized();
   }
 
-  private executionService(): SdkExecutionService {
-    return new SdkExecutionService(this.executionOwner.memberId, this.executionOwner.resolveSourceRef());
+  private dispatchExecution(operation: "input" | "external", reference: string, beforeDispatch?: (attemptId: string) => void): SdkExecutionAttempt {
+    return dispatchSdkExecution(this.executionOwner.memberId, this.executionOwner.resolveSourceRef(), operation, reference, beforeDispatch);
   }
 
   private observeExecutionEvidence(raw: any): void {
@@ -225,7 +225,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   }
 
   private async dispatchCompact(isCancelled?: () => boolean): Promise<void> {
-    const attempt = this.executionService().dispatch("external", "pi-sdk:session.compact");
+    const attempt = this.dispatchExecution("external", "pi-sdk:session.compact");
     this.compactAttempts.add(attempt);
     try {
       await attempt.run(async () => {
@@ -424,7 +424,7 @@ export class PiSdkAgentHandle implements AgentHandle {
           if (options?.beforeDispatch?.constructor.name === "AsyncFunction") {
             throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
           }
-          const attempt = this.executionService().dispatch("input", "pi-sdk:session.prompt", options?.beforeDispatch
+          const attempt = this.dispatchExecution("input", "pi-sdk:session.prompt", options?.beforeDispatch
             ? attemptId => options.beforeDispatch!({ attemptId, dispatchIndex, message: dispatchMessage })
             : undefined);
           dispatchIndex++;

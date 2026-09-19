@@ -5,7 +5,7 @@ import { logger } from "../kernel/logger.js";
 import { getModelCredentialProfile, normalizeModelRef, assertModelAvailable } from "../config/models.js";
 import { exportPiConfigForMember } from "../config/pi-adapt/credentials.js";
 import { buildMemberAgentSession, maybeFlushPendingReload, getRegistry } from "./assembly.js";
-import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, runtimeInputOwner, invalidateInputScope } from "./scheduler.js";
+import { queueDepth, hasInputPumps, drainQueuedInputsAsPrompt, cancelPendingRuntimeInputs, invalidateInputScope } from "./scheduler.js";
 import { settleMemberShellWaits } from "./terminal/shell-manager.js";
 import { instances, instanceKey, cancelledCreations, pendingCreations, memberSwitchGates, pendingCreationsFor, sessionPublishOwners, contextUsageCache, contextCompactionWarningCache, formatRuntimeErrorMessage, memberRuntimeAllowed, runtimeIsStopping, closeRuntimeAdmission, updateDispatchState, transition, memberIdentityMeta, trackMemberOperation, settleMemberOperations, clearRuntimeStateEntry, type AgentInstance, type PendingThinkingSwitch, type PendingCredentialRefresh, type AgentStatusBroadcast } from "./instance.js";
 import type { AgentMemberConfig } from "./types.js";
@@ -15,10 +15,9 @@ export interface ControlServices {
   memberConfig(memberId: string): AgentMemberConfig | null;
   resolveMember(scopeId: string, memberRef: string): { id: string; name: string } | null | undefined;
   memberScopes(memberId: string): string[];
-  privateScope(memberId: string): string;
   clearSession(memberId: string): void;
   commitModelBinding(memberId: string, binding: { model: string; credentialId: string }): void;
-  emitEvent(scopeId: string, memberId: string, event: AgentHistoryEvent, identity?: { memberId: string; agentName: string }): void;
+  emitEvent(sourceRef: string | null, memberId: string, event: AgentHistoryEvent, identity?: { memberId: string; agentName: string }): void;
   postSystemNotice(scopeId: string, message: string): void;
   publishStatus(scopeId: string, event: AgentStatusBroadcast): void;
   publishReset(scopeId: string, memberName: string, event: AgentStatusBroadcast): void;
@@ -54,9 +53,7 @@ function noticeCurrentSource(instance: AgentInstance, message: string): void {
 }
 
 function cancelMemberPending(memberId: string, diagnosis: string): void {
-  for (const row of getDatabase().all<{ sourceRef: string }>(
-    "SELECT DISTINCT scope_id AS sourceRef FROM queued_inputs WHERE target_actor_key=? AND status='pending'", memberId,
-  )) cancelPendingRuntimeInputs(runtimeInputOwner(row.sourceRef, memberId), diagnosis);
+  cancelPendingRuntimeInputs(memberId, diagnosis);
 }
 
 let shutdownSettlement: Promise<void> | null = null;
@@ -496,14 +493,14 @@ export async function switchMemberThinkingLevel(memberId: string, thinkingLevel:
  * old prompt settling and compaction actually starting. Shell processes are
  * never killed — blocking shell waits are settled so the member's turn can
  * end, but the commands keep running in the PTY. */
-export async function compactMember(scopeId: string, memberId: string): Promise<{ ok: boolean; action: string }> {
+export async function compactMember(scopeId: string | null, memberId: string): Promise<{ ok: boolean; action: string }> {
   let instance: AgentInstance | undefined = instances.get(instanceKey(memberId)) ?? undefined;
   if (!instance) {
     // The room /compact command can arrive before any activation — build the
     // session (no prompt) so there is something to compact. Unresolvable or
     // unconfigured members still fail honestly.
     instance = (await buildMemberAgentSession(memberId)) ?? undefined;
-    if (!instance) throw new Error(`No active session in this scope — nothing to compact (${scopeId})`);
+    if (!instance) throw new Error(`No active member session to compact (${memberId})`);
   }
   if (instance.compacting) throw new Error("Compaction is already in progress for this session");
   if (!instance.handle.compact) throw new Error("Runtime does not support manual compaction");
@@ -576,7 +573,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   const memberId = member?.id || memberRef;
   const memberName = member?.name || memberRef;
   const key = instanceKey(memberId);
-  cancelPendingRuntimeInputs(runtimeInputOwner(roomId,memberId),"explicit stop");
+  cancelPendingRuntimeInputs(memberId,"explicit stop",roomId);
   const instance = instances.get(key);
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
@@ -587,7 +584,7 @@ export function abortAgent(roomId: string, memberRef: string): { ok: boolean; ac
   // Abort via stdin protocol, keep instance alive. Public idle waits for runtime agent_end.
   instance.handle.abort();
   updateDispatchState(instance, "aborting", "abort");
-  if(instance.activeSourceRef)cancelPendingRuntimeInputs(runtimeInputOwner(instance.activeSourceRef,instance.memberId),"explicit stop");
+  if(instance.activeSourceRef)cancelPendingRuntimeInputs(instance.memberId,"explicit stop",instance.activeSourceRef);
   logger.info("agent", "aborted", { member: memberName, memberId, roomId });
   return { ok: true, action: "aborted" };
 }
@@ -609,7 +606,7 @@ function teardownMemberInstance(memberId: string): void {
 
 /** Stop the member's current work; queued work in every chat is cancelled. */
 export function abortMember(memberId: string): { ok: boolean; action: string } {
-  for (const scope of controlServices().memberScopes(memberId)) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "explicit stop");
+  cancelPendingRuntimeInputs(memberId, "explicit stop");
   const instance = instances.get(instanceKey(memberId));
   if (!instance) return { ok: false, action: "not_found" };
   if (instance.status !== "working" && instance.dispatchState === "idle") return { ok: true, action: "already_idle" };
@@ -622,9 +619,7 @@ export function abortMember(memberId: string): { ok: boolean; action: string } {
 
 /** Compact the member's session: the chat being served, else the member DM. */
 export async function compactMemberById(memberId: string): Promise<{ ok: boolean; action: string }> {
-  const instance = instances.get(instanceKey(memberId));
-  const scope = instance?.activeSourceRef || controlServices().privateScope(memberId);
-  return compactMember(scope, memberId);
+  return compactMember(null, memberId);
 }
 
 /** Reset the member's session from any interface. */
@@ -634,7 +629,7 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
   const scopes = controlServices().memberScopes(memberId);
   const message = "Session reset. Next activation will start fresh.";
   getDatabase().transaction(() => {
-    for (const scope of scopes) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "session reset");
+    cancelPendingRuntimeInputs(memberId, "session reset");
     controlServices().clearSession(memberId);
   });
   teardownMemberInstance(memberId);
@@ -643,14 +638,14 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
     const statusEvent = { type: "agent:status" as const, roomId: scope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     controlServices().publishReset(scope, agentName, statusEvent);
   }
-  controlServices().emitEvent(controlServices().privateScope(memberId), memberId, { type: "system", text: message }, { memberId, agentName });
+  controlServices().emitEvent(null, memberId, { type: "system", text: message }, { memberId, agentName });
   logger.info("agent", "memberSessionReset", { memberId, member: agentName });
   return { ok: true, message };
 }
 
 /** Restart the member's runtime: drop it; the next activation rebuilds. */
 export function restartMember(memberId: string): { ok: true; message: string } {
-  for (const scope of controlServices().memberScopes(memberId)) cancelPendingRuntimeInputs(runtimeInputOwner(scope, memberId), "member restart");
+  cancelPendingRuntimeInputs(memberId, "member restart");
   teardownMemberInstance(memberId);
   logger.info("agent", "memberRestarted", { memberId });
   return { ok: true, message: "Member restarted. Next activation will start a fresh runtime." };
@@ -700,7 +695,7 @@ function requestInstanceStop(instance: AgentInstance,preservePending=false): voi
 export async function quiesceMember(memberId: string): Promise<void> {
   if (memberRuntimeAllowed(memberId)) throw new Error("member_admission_must_close_before_quiescence");
   const errors: unknown[] = [];
-  for(const row of getDatabase().all<{scope:string}>("SELECT DISTINCT scope_id scope FROM queued_inputs WHERE target_actor_key=? AND status='pending'",memberId))cancelPendingRuntimeInputs(runtimeInputOwner(row.scope,memberId),"member archived");
+  cancelPendingRuntimeInputs(memberId,"member archived");
   settleMemberShellWaits(memberId);
   const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}

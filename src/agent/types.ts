@@ -80,7 +80,7 @@ export interface CreateAgentOpts {
   member: AgentMemberConfig;
   /** Opaque source currently being executed. It is set by the scheduler for
    * each durable batch and must never be interpreted by the runtime adapter. */
-  resolveSourceRef: () => string;
+  resolveSourceRef: () => string | null;
   resources: AgentResourceSnapshot;
 
   // Layered prompt content

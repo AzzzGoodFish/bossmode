@@ -200,7 +200,6 @@ export function shouldKeepCompactedMarker(previous: ContextUsage | undefined, ne
 import { getDatabase } from "../data/database.js";
 import type { Database } from "../data/database.js";
 import type { MountStale, RuntimeStateEntry, RuntimeStateMap } from "../data/types.js";
-import { assertExecutionMember } from "../data/repositories/execution-identity.js";
 
 export type { MountStale, RuntimeStateEntry, RuntimeStateMap };
 
@@ -209,57 +208,50 @@ interface RuntimeCheckpointRow {
   contract_version: number | null; drift_notified: number | null; stale_since: number | null;
 }
 
-/** One checkpoint per member (① B8 / C3). Exported for the upgrade importer, which runs against its own database handle. */
-export class RuntimeRepository {
-  constructor(private readonly db: Database) {}
-  private map(r: RuntimeCheckpointRow): RuntimeStateEntry {
-    return {
-      ...(r.contract_fingerprint === null ? {} : {contractFingerprint: r.contract_fingerprint}),
-      ...(r.contract_version === null ? {} : {contractVersion: r.contract_version}),
-      ...(r.drift_notified === null ? {} : {driftNotified: r.drift_notified}),
-      ...(r.stale_since === null ? {} : {staleMounts: {since: r.stale_since,
-        fields: this.db.all<{field: string}>("SELECT field FROM runtime_stale_fields WHERE member_id=? ORDER BY ordinal", r.member_id).map(f => f.field)}}),
-    };
-  }
-  get(memberId: string): RuntimeStateEntry {
-    const r = this.db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
-    return r ? this.map(r) : {};
-  }
-  list(): RuntimeStateMap {
-    return Object.fromEntries(this.db.all<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints")
-      .map(r => [r.member_id, this.map(r)]));
-  }
-  /** Pure import with the source's timestamp (or importer-declared source mtime). */
-  importEntry(memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
-    this.db.transaction(tx => {
-      assertExecutionMember(tx, memberId);
-      tx.run(`INSERT INTO runtime_checkpoints(member_id,contract_fingerprint,contract_version,drift_notified,stale_since,updated_at)
-        VALUES(?,?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET contract_fingerprint=excluded.contract_fingerprint,
-        contract_version=excluded.contract_version, drift_notified=excluded.drift_notified, stale_since=excluded.stale_since, updated_at=excluded.updated_at`,
-      memberId, entry.contractFingerprint ?? null, entry.contractVersion ?? null, entry.driftNotified ?? null, entry.staleMounts?.since ?? null, updatedAt);
-      tx.run("DELETE FROM runtime_stale_fields WHERE member_id=?", memberId);
-      [...new Set(entry.staleMounts?.fields ?? [])].forEach((field, i) => {
-        tx.run("INSERT INTO runtime_stale_fields(member_id,field,ordinal) VALUES(?,?,?)", memberId, field, i);
-      });
-    });
-  }
-  update(memberId: string, change: (current: RuntimeStateEntry) => RuntimeStateEntry | undefined, updatedAt: number): void {
-    this.db.transaction(() => {
-      const next = change(this.get(memberId));
-      if (next) this.importEntry(memberId, next, updatedAt);
-    });
-  }
-  clear(memberId: string): void {
-    this.db.run("DELETE FROM runtime_checkpoints WHERE member_id=?", memberId);
-  }
+function mapRuntimeCheckpoint(db: Database, row: RuntimeCheckpointRow): RuntimeStateEntry {
+  return {
+    ...(row.contract_fingerprint === null ? {} : {contractFingerprint: row.contract_fingerprint}),
+    ...(row.contract_version === null ? {} : {contractVersion: row.contract_version}),
+    ...(row.drift_notified === null ? {} : {driftNotified: row.drift_notified}),
+    ...(row.stale_since === null ? {} : {staleMounts: {since: row.stale_since,
+      fields: db.all<{field: string}>("SELECT field FROM runtime_stale_fields WHERE member_id=? ORDER BY ordinal", row.member_id).map(item => item.field)}}),
+  };
 }
 
-function runtimeRepository(): RuntimeRepository { return new RuntimeRepository(getDatabase()); }
+export function getRuntimeStateEntry(memberId: string, db: Database = getDatabase()): RuntimeStateEntry {
+  const row = db.get<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints WHERE member_id=?", memberId);
+  return row ? mapRuntimeCheckpoint(db, row) : {};
+}
 
-export function readRuntimeState(): RuntimeStateMap { return runtimeRepository().list(); }
-export function getRuntimeStateEntry(memberId: string): RuntimeStateEntry { return runtimeRepository().get(memberId); }
+export function readRuntimeState(db: Database = getDatabase()): RuntimeStateMap {
+  return Object.fromEntries(db.all<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints")
+    .map(row => [row.member_id, mapRuntimeCheckpoint(db, row)]));
+}
+
+/** Pure upgrade/runtime import with an explicit database and source timestamp. */
+export function importRuntimeStateEntry(db: Database, memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
+  db.transaction(tx => {
+    if (!tx.get("SELECT id FROM members WHERE id=?", memberId)) throw new Error(`Unknown execution member ID: ${memberId}`);
+    tx.run(`INSERT INTO runtime_checkpoints(member_id,contract_fingerprint,contract_version,drift_notified,stale_since,updated_at)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET contract_fingerprint=excluded.contract_fingerprint,
+      contract_version=excluded.contract_version, drift_notified=excluded.drift_notified, stale_since=excluded.stale_since, updated_at=excluded.updated_at`,
+    memberId, entry.contractFingerprint ?? null, entry.contractVersion ?? null, entry.driftNotified ?? null, entry.staleMounts?.since ?? null, updatedAt);
+    tx.run("DELETE FROM runtime_stale_fields WHERE member_id=?", memberId);
+    [...new Set(entry.staleMounts?.fields ?? [])].forEach((field, ordinal) =>
+      tx.run("INSERT INTO runtime_stale_fields(member_id,field,ordinal) VALUES(?,?,?)", memberId, field, ordinal));
+  });
+}
+
+function updateRuntimeState(memberId: string, change: (current: RuntimeStateEntry) => RuntimeStateEntry | undefined, updatedAt: number): void {
+  const db = getDatabase();
+  db.transaction(tx => {
+    const next = change(getRuntimeStateEntry(memberId, tx));
+    if (next) importRuntimeStateEntry(tx, memberId, next, updatedAt);
+  });
+}
+
 export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEntry): void {
-  runtimeRepository().update(memberId, current => ({...current, ...patch}), Date.now());
+  updateRuntimeState(memberId, current => ({...current, ...patch}), Date.now());
 }
 export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
   updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
@@ -269,14 +261,16 @@ export function markDriftNotified(memberId: string, version: number): void {
 }
 export function markStaleMounts(memberId: string, fields: string[]): void {
   const now = Date.now();
-  runtimeRepository().update(memberId, current => ({...current, staleMounts: {
+  updateRuntimeState(memberId, current => ({...current, staleMounts: {
     since: now, fields: [...new Set([...(current.staleMounts?.fields ?? []), ...fields])],
   }}), now);
 }
 export function clearStaleMounts(memberId: string): void {
-  runtimeRepository().update(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
+  updateRuntimeState(memberId, current => current.staleMounts ? ({...current, staleMounts: undefined}) : undefined, Date.now());
 }
-export function clearRuntimeStateEntry(memberId: string): void { runtimeRepository().clear(memberId); }
+export function clearRuntimeStateEntry(memberId: string): void {
+  getDatabase().run("DELETE FROM runtime_checkpoints WHERE member_id=?", memberId);
+}
 
 // -- Runtime admission and public failure messages --
 let stopping = false;

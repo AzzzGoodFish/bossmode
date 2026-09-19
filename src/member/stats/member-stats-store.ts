@@ -1,4 +1,4 @@
-import { readStats, hasStats, rebuildEventAggregates } from "../../data/repositories/event-repository.js";
+import { readStats, hasStats, rebuildEventAggregates } from "../../agent/events.js";
 import type { MemberStats } from "../../data/types.js";
 
 export type { MemberStats };
@@ -7,7 +7,9 @@ function emptyStats(): MemberStats {
   return { turns: 0, toolCalls: 0, activeMs: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };
 }
 
-export const readMemberStats = readStats;
+export function readMemberStats(scopeOrMemberId: string, memberId?: string): MemberStats {
+  return readStats(memberId ?? scopeOrMemberId);
+}
 export function computeStatsFromEvents(events: Array<{ type: string; ts?: number; usage?: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; cost?: number } }>): MemberStats {
   const stats = emptyStats();
   let openStartTs: number | undefined;
@@ -33,7 +35,9 @@ export function computeStatsFromEvents(events: Array<{ type: string; ts?: number
   return stats;
 }
 
-export const statsFileExists = hasStats;
+export function statsFileExists(scopeOrMemberId: string, memberId?: string): boolean {
+  return hasStats(memberId ?? scopeOrMemberId);
+}
 /** Retained migration call surface; file-derived input is never made authoritative.
  * Parent removes old startup backfills and runs rebuildEventAggregates after strict import.
  */

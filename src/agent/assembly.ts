@@ -89,7 +89,8 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
 
   const publicationOwner = {};
   sessionPublishOwners.set(key, publicationOwner);
-  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner && memberRuntimeAllowed(memberId);
+  const canPublishSession = () => sessionPublishOwners.get(key) === publicationOwner;
+  const canPublishInstance = () => canPublishSession() && memberRuntimeAllowed(memberId);
   const creation = (async (): Promise<AgentInstance | null> => {
     if (!registry) {
       logger.error("agent", "runtime registry not initialized");
@@ -118,11 +119,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
     const onSessionChanged = (session: { sessionId?: string; sessionFile?: string }) => {
       if (canPublishSession()) assemblyServices().saveSession(memberId, member.runtime, session);
     };
-    const resolveSourceRef = () => {
-      const sourceRef = instances.get(key)?.activeSourceRef;
-      if (!sourceRef) throw new Error(`Member ${memberId} has no active input source`);
-      return sourceRef;
-    };
+    const resolveSourceRef = () => instances.get(key)?.activeSourceRef ?? null;
 
     try {
       const handle = await runtime.createAgent({
@@ -140,7 +137,7 @@ export async function buildMemberAgentSession(memberId: string): Promise<AgentIn
         onSessionChanged,
       });
 
-      if (!canPublishSession()) {
+      if (!canPublishInstance()) {
         if (!handle.destroyAndWait) throw new Error("Runtime cannot confirm rejected builder cleanup");
         await handle.destroyAndWait();
         return null;
