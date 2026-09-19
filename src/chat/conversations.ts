@@ -2,7 +2,6 @@ import { documentsRoot, memberDir, roomDir } from "../files/layout.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { latestMessage } from "../data/repositories/message-repository.js";
 export interface RoomMemberConfig {
   model?: string;
   credentialId?: string;
@@ -515,8 +514,10 @@ export function deleteCursor(roomId: string, agentName: string): void {
 
 
 function initializeMemberCursor(roomId: string, memberId: string): void {
-  // Initialize cursor at latest message under stable memberId.
-  const latestId = latestMessage(roomId)?.id ?? null;
+  // Initialize cursor at the latest durable fact under the stable member ID.
+  const latestId = getDatabase().get<{ id: string }>(
+    "SELECT id FROM messages WHERE scope_id=? ORDER BY seq DESC LIMIT 1", roomId,
+  )?.id ?? null;
   setCursor(roomId, memberId, latestId);
 }
 

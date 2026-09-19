@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { getDatabase, type Database } from "../data/database.js";
 import { readConfig } from "../config/settings.js";
-import type { SessionToken } from "../kernel/types.js";
 
+export interface SessionToken { token: string; expiresAt: number }
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
