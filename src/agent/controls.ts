@@ -13,7 +13,6 @@ import type { AgentHistoryEvent } from "./events.js";
 
 export interface ControlServices {
   memberConfig(memberId: string): AgentMemberConfig | null;
-  resolveMember(scopeId: string, memberRef: string): { id: string; name: string } | null | undefined;
   memberScopes(memberId: string): string[];
   clearSession(memberId: string): void;
   commitModelBinding(memberId: string, binding: { model: string; credentialId: string }): void;
@@ -182,7 +181,6 @@ export async function compactMember(scopeId: string | null, memberId: string): P
       try { instance.handle.abort(); } catch { /* already stopped */ }
       await instance.handle.waitForIdle();
       // Stop landed in the gap (old prompt finished, compact not started):
-      // abortAgent marked dispatchState "aborting" — honor it, do not compact.
       if (instance.dispatchState === "aborting" || !memberRuntimeAllowed(memberId)) {
         logger.info("agent", "manualCompactStoppedBeforeStart", { member: instance.agentName, sourceRef: activeSource(instance) });
         return { ok: false, action: "stopped" };
@@ -225,13 +223,7 @@ export async function compactMember(scopeId: string | null, memberId: string): P
 
 // -- Abort --
 
-export function abortAgent(roomId:string,memberRef:string):{ok:boolean;action:string}{
-  const member=controlServices().resolveMember(roomId,memberRef);return abortMember(member?.id??memberRef);
-}
-
 /** Drop the member's live runtime (teardown only; no SQL side effects). */
-function teardownMemberInstance(memberId:string):void{destroyInstance(memberId);}
-
 /** Stop the member's current work; queued work in every chat is cancelled. */
 export function abortMember(memberId: string): { ok: boolean; action: string } {
   cancelPendingRuntimeInputs(memberId, "explicit stop");
@@ -260,9 +252,9 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
     cancelPendingRuntimeInputs(memberId, "session reset");
     controlServices().clearSession(memberId);
   });
-  teardownMemberInstance(memberId);
+  destroyInstance(memberId);
+  clearRuntimeStateEntry(memberId);
   for (const scope of scopes) {
-    clearRuntimeStateEntry(memberId);
     const statusEvent = { type: "agent:status" as const, roomId: scope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
     controlServices().publishReset(scope, agentName, statusEvent);
   }
@@ -274,7 +266,7 @@ export function resetMemberSession(memberId: string): { ok: true; message: strin
 /** Restart the member's runtime: drop it; the next activation rebuilds. */
 export function restartMember(memberId: string): { ok: true; message: string } {
   cancelPendingRuntimeInputs(memberId, "member restart");
-  teardownMemberInstance(memberId);
+  destroyInstance(memberId);
   logger.info("agent", "memberRestarted", { memberId });
   return { ok: true, message: "Member restarted. Next activation will start a fresh runtime." };
 }

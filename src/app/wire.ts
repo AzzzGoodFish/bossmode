@@ -31,7 +31,7 @@ export function wireConversationMembers(): () => void {
 }
 
 import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, readUsageRows, setAgentEventSink, setToolActivityHook, setContextUsageRefreshHook } from "../agent/events.js";
-import { abortAgent, abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
+import { abortMember, compactMember, compactMemberById, resetMemberSession, restartMember } from "../agent/controls.js";
 import { setStatusSink } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
 import { commitChatMessage, getAgentContextUsage, getAgentStatus, getMemberActiveTools, getMemberBusyState, getRoomAgentStatuses, getScopeLiveStatus, previewMemberPrompt, refreshContextUsage, setRuntimeViewSink } from "./member-actions.js";
@@ -260,7 +260,7 @@ export function wireChatHttp(): () => void {
   const disconnectHttp = connectChatHttpActions({
     postMessage: commitChatMessage,
     resetSession: (_sourceRef, memberId) => resetMemberSession(memberId),
-    abort: (sourceRef, memberId) => abortAgent(sourceRef, memberId),
+    abort: (_sourceRef, memberId) => abortMember(memberId),
     compact: compactMember,
     readContextUsage: (sourceRef, memberId) => getAgentContextUsage(sourceRef, memberId),
     readEvents: (sourceRef, memberId, limit, before) => loadEventsPaginated(sourceRef, memberId, limit, before),

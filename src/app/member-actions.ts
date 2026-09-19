@@ -200,7 +200,6 @@ export function initializeMemberRuntime(reg: RuntimeRegistry, loadSnapshot: (mem
   });
   configureControls({
     memberConfig: memberRecordToConfig,
-    resolveMember: resolveRoomMember,
     memberScopes: memberScopesFor,
     clearSession: sessionStore.clearCurrentSession,
     commitModelBinding: (memberId, binding) => { updateMember(memberId, { global: binding }); },
