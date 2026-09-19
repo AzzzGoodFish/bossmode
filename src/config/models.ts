@@ -229,17 +229,6 @@ export function validateInput(input: ModelCredentialProfileInput, existing?: Mod
     const baseUrlOverride = input.authType === "api_key" ? normalizeOptionalBaseUrl(input.baseUrl) : undefined;
     const catalogModels = modelsForBuiltinProvider(input.providerSlug, baseUrlOverride);
     if (catalogModels.length === 0) throw new Error(`No built-in models found for provider: ${input.providerSlug}`);
-    if (input.modelCustomizations !== undefined) {
-      const catalogIds = new Set(catalogModels.map((m) => m.id));
-      const addedIds = new Set<string>();
-      for (const added of input.modelCustomizations.addedModels || []) {
-        const id = added.id?.trim();
-        if (!id) continue;
-        if (catalogIds.has(id)) throw new Error(`Model "${id}" is already in the provider catalog.`);
-        if (addedIds.has(id)) throw new Error(`Duplicate model id: ${id}`);
-        addedIds.add(id);
-      }
-    }
     const modelCustomizations = input.modelCustomizations !== undefined
       ? sanitizeModelCustomizations(input.modelCustomizations, catalogModels)
       : input.models
@@ -304,27 +293,12 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
     const duplicate = profiles.find((p) => p.providerSlug === valid.providerSlug && p.id !== input.id && (!allowsDuplicateProvider || (p.profileKind ?? "custom_endpoint") !== "builtin_provider"));
     if (duplicate) throw new Error(`Provider slug already exists: ${valid.providerSlug}`);
     const ts = now();
-    const profile: ModelCredentialProfile = {
-      id: input.id || randomUUID().slice(0, 8),
-      profileKind: valid.profileKind,
-      name: valid.name,
-      providerSlug: valid.providerSlug,
-      protocol: valid.protocol,
-      baseUrl: valid.baseUrl,
-      authType: valid.authType,
-      apiKey: valid.authType === "api_key" ? resolveApiKeyForSave(valid, existing) : undefined,
-      oauthProviderId: valid.authType === "oauth" ? valid.oauthProviderId : undefined,
-      oauthCredentials: valid.authType === "oauth" ? (valid.oauthCredentials ?? existing?.oauthCredentials) : undefined,
-      requestProfile: valid.requestProfile,
-      authHeader: valid.authHeader,
-      headers: valid.headers ?? existing?.headers,
-      enabled: valid.enabled ?? existing?.enabled ?? true,
-      isDefault: valid.isDefault ?? existing?.isDefault ?? false,
-      models: valid.models,
-      modelCustomizations: valid.modelCustomizations,
-      createdAt: existing?.createdAt ?? ts,
-      updatedAt: ts,
-    };
+    const {apiKey:_apiKey,oauthCredentials:_oauth,headers,enabled,isDefault,...fields}=valid;
+    const profile:ModelCredentialProfile={...fields,id:input.id||randomUUID().slice(0,8),
+      apiKey:valid.authType==="api_key"?resolveApiKeyForSave(valid,existing):undefined,
+      oauthCredentials:valid.authType==="oauth"?(valid.oauthCredentials??existing?.oauthCredentials):undefined,
+      headers:headers??existing?.headers,enabled:enabled??existing?.enabled??true,isDefault:isDefault??existing?.isDefault??false,
+      createdAt:existing?.createdAt??ts,updatedAt:ts};
     const replaced = existing ? profiles.map((p) => p.id === existing.id ? profile : p) : [...profiles, profile];
     const next = profile.isDefault
       ? replaced.map((p) => p.id !== profile.id && p.providerSlug === profile.providerSlug ? { ...p, isDefault: false } : p)
