@@ -2,7 +2,6 @@
 import { addRoute, sendJson } from "./http.js";
 import { getRoom, listRooms } from "../chat/conversations.js";
 import { getRetainedMember } from "../member/identity.js";
-import { logger } from "../kernel/logger.js";
 
 export interface UsageFactRow {
   memberId: string | null;
@@ -27,32 +26,20 @@ export function connectUsageHttpQueries(queries: UsageHttpQueries): () => void {
   return () => { if (usageQueries === queries) usageQueries = undefined; };
 }
 
-interface RollupRow {
-  member_id: string | null;
-  date: string;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read: number;
-  cache_write: number;
-  cost: number;
-  turns: number;
-}
-
 // Platform-level rollup row carries its room so cross-room aggregation can group
 // by room without a second query.
-interface RollupRowWithRoom extends RollupRow {
-  room_id: string;
+interface UsageReportRow extends UsageFactRow {
+  roomId: string;
 }
 
 interface UsageTotals { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; turns: number }
 function emptyTotals(): UsageTotals { return { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }; }
-function addTotals(total: UsageTotals, row: RollupRow): void {
-  total.inputTokens += row.input_tokens; total.outputTokens += row.output_tokens;
-  total.cacheRead += row.cache_read; total.cacheWrite += row.cache_write;
+function addTotals(total: UsageTotals, row: UsageFactRow): void {
+  total.inputTokens += row.inputTokens; total.outputTokens += row.outputTokens;
+  total.cacheRead += row.cacheRead; total.cacheWrite += row.cacheWrite;
   total.cost += row.cost; total.turns += row.turns;
 }
-function grouped<R extends RollupRow, T extends UsageTotals>(
+function grouped<R extends UsageFactRow, T extends UsageTotals>(
   rows: R[], keyOf: (row: R) => string | undefined, create: (row: R) => T,
 ): T[] {
   const groups = new Map<string, T>();
@@ -117,7 +104,7 @@ export function fillSeriesGaps(
  * tests; the route handler wraps it with query + identity join.
  */
 export function aggregateUsage(
-  rows: RollupRow[],
+  rows: UsageFactRow[],
   memberMeta: Map<string, { name: string; agent: string }>,
 ): { kpis: Kpis; series: any[]; breakdown: BreakdownRow[]; byAgent: AgentBucket[] } {
   const kpis = emptyKpis();
@@ -135,31 +122,31 @@ export function aggregateUsage(
       seriesMap.set(r.date, s);
     }
     s.cost += r.cost;
-    s.inputTokens += r.input_tokens;
-    s.outputTokens += r.output_tokens;
-    s.cacheRead += r.cache_read;
+    s.inputTokens += r.inputTokens;
+    s.outputTokens += r.outputTokens;
+    s.cacheRead += r.cacheRead;
     addToBucket((s.byModel[r.model] ||= emptyBucket()), r);
     // Per-day tokens by agent identity — drives the agent-colored trend (v3).
-    if (r.member_id) {
-      const agent = memberMeta.get(r.member_id)?.agent || r.member_id;
-      s.byAgent[agent] = (s.byAgent[agent] || 0) + r.input_tokens + r.output_tokens + r.cache_read + r.cache_write;
+    if (r.memberId) {
+      const agent = memberMeta.get(r.memberId)?.agent || r.memberId;
+      s.byAgent[agent] = (s.byAgent[agent] || 0) + r.inputTokens + r.outputTokens + r.cacheRead + r.cacheWrite;
     }
   }
   const series = [...seriesMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  const breakdown = grouped<RollupRow, BreakdownRow>(rows,
-    r => r.member_id ? `${r.member_id}\u0000${r.model}` : undefined,
-    r => ({ ...emptyTotals(), memberId: r.member_id!, memberName: memberMeta.get(r.member_id!)?.name,
-      agent: memberMeta.get(r.member_id!)?.agent, model: r.model }));
-  const byAgent = grouped<RollupRow, AgentBucket>(rows,
-    r => r.member_id ? memberMeta.get(r.member_id)?.agent || r.member_id : undefined,
-    r => ({ ...emptyTotals(), agent: memberMeta.get(r.member_id!)?.agent || r.member_id! }));
+  const breakdown = grouped<UsageFactRow, BreakdownRow>(rows,
+    r => r.memberId ? `${r.memberId}\u0000${r.model}` : undefined,
+    r => ({ ...emptyTotals(), memberId: r.memberId!, memberName: memberMeta.get(r.memberId!)?.name,
+      agent: memberMeta.get(r.memberId!)?.agent, model: r.model }));
+  const byAgent = grouped<UsageFactRow, AgentBucket>(rows,
+    r => r.memberId ? memberMeta.get(r.memberId)?.agent || r.memberId : undefined,
+    r => ({ ...emptyTotals(), agent: memberMeta.get(r.memberId!)?.agent || r.memberId! }));
 
   return { kpis, series, breakdown, byAgent };
 }
 
 function readReport(options: { from?: string; to?: string; sourceRef?: string } = {}): {
-  rows: RollupRowWithRoom[];
+  rows: UsageReportRow[];
   memberMeta: Map<string, { name: string; agent: string }>;
   roomNames: Map<string, string>;
 } {
@@ -171,20 +158,8 @@ function readReport(options: { from?: string; to?: string; sourceRef?: string } 
     if (member) memberMeta.set(id, { name: member.name, agent: member.agentTemplate });
   }
   const roomNames = new Map(listRooms().map((room) => [room.id, room.name]));
-  const rows = facts.map((row): RollupRowWithRoom => ({
-    member_id: row.memberId,
-    date: row.date,
-    model: row.model,
-    input_tokens: row.inputTokens,
-    output_tokens: row.outputTokens,
-    cache_read: row.cacheRead,
-    cache_write: row.cacheWrite,
-    cost: row.cost,
-    turns: row.turns,
-    room_id: row.sourceRef?.startsWith("room:")
-      ? row.sourceRef.slice("room:".length)
-      : row.sourceRef || row.historicalSourceKey || "historical-unattributed",
-  }));
+  const rows = facts.map((row): UsageReportRow => ({ ...row, roomId: row.sourceRef?.startsWith("room:")
+    ? row.sourceRef.slice("room:".length) : row.sourceRef || row.historicalSourceKey || "historical-unattributed" }));
   return { rows, memberMeta, roomNames };
 }
 
@@ -203,17 +178,12 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
   const agentFilter = url.searchParams.get("agent") || undefined;
   const modelFilter = url.searchParams.get("model") || undefined;
 
-  let report: ReturnType<typeof readReport>;
-  try { report = readReport({sourceRef: `room:${roomId}`, from, to}); }
-  catch (err) {
-    logger.error("db", "usage query failed", {roomId, error: String(err)});
-    sendJson(res, 500, {error: "usage query failed"}); return;
-  }
+  const report = readReport({ sourceRef: `room:${roomId}`, from, to });
   const { memberMeta } = report;
   let rows = report.rows;
-  if (memberFilter) rows = rows.filter((row) => row.member_id === memberFilter);
+  if (memberFilter) rows = rows.filter((row) => row.memberId === memberFilter);
   if (modelFilter) rows = rows.filter((row) => row.model === modelFilter);
-  if (agentFilter) rows = rows.filter((row) => row.member_id !== null && memberMeta.get(row.member_id)?.agent === agentFilter);
+  if (agentFilter) rows = rows.filter((row) => row.memberId !== null && memberMeta.get(row.memberId)?.agent === agentFilter);
 
   const agg = aggregateUsage(rows, memberMeta);
 
@@ -231,7 +201,7 @@ addRoute("GET", "/api/rooms/:id/usage", async (req, res, params) => {
  * room" layer). Identity join uses each room's own member→agent map.
  */
 export function aggregatePlatformUsage(
-  rows: RollupRowWithRoom[],
+  rows: UsageReportRow[],
   memberMeta: Map<string, { name: string; agent: string }>,
   roomNames: Map<string, string>,
 ): {
@@ -245,8 +215,8 @@ export function aggregatePlatformUsage(
   // member ids are globally unique (rm_<uuid>) so cross-room mixing is safe.
   const base = aggregateUsage(rows, memberMeta);
 
-  const byRoom = grouped(rows, r => r.room_id,
-    r => ({ ...emptyTotals(), roomId: r.room_id, roomName: roomNames.get(r.room_id) }));
+  const byRoom = grouped(rows, r => r.roomId,
+    r => ({ ...emptyTotals(), roomId: r.roomId, roomName: roomNames.get(r.roomId) }));
 
   return { ...base, byRoom };
 }
@@ -258,16 +228,11 @@ addRoute("GET", "/api/usage", async (req, res) => {
   const agentFilter = url.searchParams.get("agent") || undefined;
   const modelFilter = url.searchParams.get("model") || undefined;
 
-  let report: ReturnType<typeof readReport>;
-  try { report = readReport({from, to}); }
-  catch (err) {
-    logger.error("db", "platform usage query failed", {error: String(err)});
-    sendJson(res, 500, {error: "usage query failed"}); return;
-  }
+  const report = readReport({ from, to });
   const { memberMeta, roomNames } = report;
   let rows = report.rows;
   if (modelFilter) rows = rows.filter((row) => row.model === modelFilter);
-  if (agentFilter) rows = rows.filter((row) => row.member_id !== null && memberMeta.get(row.member_id)?.agent === agentFilter);
+  if (agentFilter) rows = rows.filter((row) => row.memberId !== null && memberMeta.get(row.memberId)?.agent === agentFilter);
 
   const { kpis, series, breakdown, byAgent, byRoom } = aggregatePlatformUsage(rows, memberMeta, roomNames);
 
@@ -292,11 +257,11 @@ interface ModelBucket {
 function emptyBucket(): ModelBucket {
   return { cost: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0 };
 }
-function addToBucket(b: ModelBucket, r: RollupRow): void {
+function addToBucket(b: ModelBucket, r: UsageFactRow): void {
   b.cost += r.cost;
-  b.inputTokens += r.input_tokens;
-  b.outputTokens += r.output_tokens;
-  b.cacheRead += r.cache_read;
+  b.inputTokens += r.inputTokens;
+  b.outputTokens += r.outputTokens;
+  b.cacheRead += r.cacheRead;
 }
 
 interface BreakdownRow extends UsageTotals { memberId: string; memberName?: string; agent?: string; model: string }
