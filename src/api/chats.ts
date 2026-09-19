@@ -16,7 +16,6 @@ import {
   updateRoomDocsPath,
   updateRoomName,
   updateRoomPromptLeader,
-  updateRoomRuleDocs,
   type Room,
 } from "../chat/conversations.js";
 import { getUserReadCursor, setUserReadCursor } from "../chat/cursors.js";
@@ -163,9 +162,6 @@ addRoute("POST", "/api/conversations/:scope/reset-session", async (request, resp
   if (!target) return;
   sendJson(response, 200, { ...await connected().resetSession(target.sourceRef, target.memberId) as object, scopeId: target.sourceRef });
 });
-addRoute("POST", "/api/conversations/:scope/reload", async (_request, response) => {
-  sendJson(response, 410, { error: "gone", message: "Reload retired — activation recompiles the latest prompt" });
-});
 addRoute("POST", "/api/conversations/:scope/abort", async (request, response, params) => {
   const target = requireConversationTarget(params.scope, request, response);
   if (!target) return;
@@ -219,14 +215,14 @@ addRoute("GET", "/api/rooms", async (_request, response) => {
 addRoute("POST", "/api/rooms", async (request, response) => {
   const body = await parseBody(request) as {
     name?: string; memberIds?: unknown; leaderMemberId?: string | null; description?: string;
-    ruleDocs?: string[]; docsPath?: string | null;
+    docsPath?: string | null;
   };
   if (typeof body.name !== "string" || !body.name.trim()) return sendJson(response, 400, { error: "name is required" });
   if (!Array.isArray(body.memberIds) || body.memberIds.some((id) => typeof id !== "string" || !id || id.trim() !== id)) {
     return sendJson(response, 400, { error: "memberIds must contain stable member IDs" });
   }
   try {
-    const room = createRoom(body.name.trim(), undefined, body.memberIds as string[], body.ruleDocs, {
+    const room = createRoom(body.name.trim(), undefined, body.memberIds as string[], undefined, {
       promptLeaderMemberId: body.leaderMemberId ?? undefined,
       docsPath: body.docsPath,
       description: body.description,
@@ -248,7 +244,7 @@ addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
   const room = getRoom(params.id);
   if (!room) return sendJson(response, 404, { error: "Room not found" });
   const body = await parseBody(request) as {
-    name?: string; description?: string | null; ruleDocs?: string[];
+    name?: string; description?: string | null;
     promptLeaderMemberId?: string | null; docsPath?: string | null;
   };
   let updated: Room | null = room;
@@ -256,7 +252,6 @@ addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {
   try {
     if (typeof body.name === "string" && body.name.trim() && body.name !== room.name) { updated = updateRoomName(room.id, body.name.trim()); changed = true; }
     if (Object.hasOwn(body, "description")) { updated = updateRoomDescription(room.id, body.description ?? ""); changed = true; }
-    if (Array.isArray(body.ruleDocs)) { updated = updateRoomRuleDocs(room.id, body.ruleDocs); changed = true; }
     if (Object.hasOwn(body, "promptLeaderMemberId")) { updated = updateRoomPromptLeader(room.id, body.promptLeaderMemberId ?? null); changed = true; }
     if (Object.hasOwn(body, "docsPath")) {
       normalizeRoomDocsPath(body.docsPath);

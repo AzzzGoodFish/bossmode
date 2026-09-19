@@ -7,7 +7,6 @@ import { existsSync, statSync } from "node:fs";
 import { addRoute, sendJson, parseBody } from "./http.js";
 import * as knowledgeStore from "../knowledge/documents.js";
 import * as roomStore from "../chat/conversations.js";
-import { logger } from "../kernel/logger.js";
 
 function detectPathType(path: string): "file" | "folder" | null {
   try {
@@ -19,6 +18,12 @@ function detectPathType(path: string): "file" | "folder" | null {
   } catch {
     return null;
   }
+}
+
+function queryPath(req: { url?: string }, res: Parameters<typeof sendJson>[0]): string | null {
+  const path = new URL(req.url || "", "http://localhost").searchParams.get("path");
+  if (!path) sendJson(res, 400, { error: "path query parameter is required" });
+  return path;
 }
 
 function inferTargetPath(from: string, to: string): string {
@@ -37,14 +42,7 @@ function moveOne(from: string, to: string): { ok: boolean; type?: "file" | "fold
   if (sourceType === "file") {
     const moved = knowledgeStore.moveEntry(from, resolvedTo);
     if (!moved) return { ok: false, error: "Source not found or destination conflicts" };
-    const affected = roomStore.updateRuleDocPaths(from, moved.id);
-    if (affected > 0) {
-      logger.info("knowledge-api", "updated room ruleDocs refs after move", {
-        from,
-        to: moved.id,
-        affectedRooms: affected,
-      });
-    }
+    roomStore.updateRuleDocPaths(from, moved.id);
     return { ok: true, type: "file", to: moved.id };
   }
 
@@ -53,16 +51,7 @@ function moveOne(from: string, to: string): { ok: boolean; type?: "file" | "fold
     return { ok: false, error: movedFolder.error || "Folder move failed" };
   }
 
-  const affected = roomStore.updateRuleDocPathsByPrefix(from, resolvedTo);
-  if (affected > 0) {
-    logger.info("knowledge-api", "updated room ruleDocs refs after folder move", {
-      from,
-      to: resolvedTo,
-      affectedRooms: affected,
-      movedFiles: movedFolder.movedFiles.length,
-    });
-  }
-
+  roomStore.updateRuleDocPathsByPrefix(from, resolvedTo);
   return { ok: true, type: "folder", to: resolvedTo };
 }
 
@@ -72,19 +61,21 @@ function deleteOne(path: string): { ok: boolean; type?: "file" | "folder"; error
 
   if (type === "file") {
     if (!knowledgeStore.deleteEntry(path)) return { ok: false, error: "Document not found" };
-    const affected = roomStore.updateRuleDocPaths(path);
-    if (affected > 0) {
-      logger.info("knowledge-api", "updated room ruleDocs refs after delete", { path, affectedRooms: affected });
-    }
+    roomStore.updateRuleDocPaths(path);
     return { ok: true, type: "file" };
   }
 
   const result = knowledgeStore.deleteFolder(path);
   if (!result.ok) return { ok: false, error: "Folder not found" };
-  for (const deletedPath of result.deletedPaths) {
-    roomStore.updateRuleDocPaths(deletedPath);
-  }
+  for (const deletedPath of result.deletedPaths) roomStore.updateRuleDocPaths(deletedPath);
   return { ok: true, type: "folder" };
+}
+
+function batch(paths: string[], action: (path: string) => { ok: boolean }): { count: number; failed: string[] } {
+  const failed: string[] = [];
+  let count = 0;
+  for (const path of paths) action(path).ok ? count++ : failed.push(path);
+  return { count, failed };
 }
 
 // -- Tree + flat list --
@@ -129,9 +120,8 @@ addRoute("POST", "/api/knowledge/entries", async (req, res) => {
 // -- Single-doc read / update / delete (path via query string) --
 
 addRoute("GET", "/api/knowledge/raw", async (req, res) => {
-  const url = new URL(req.url || "", "http://localhost");
-  const path = url.searchParams.get("path");
-  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const path = queryPath(req, res);
+  if (!path) return;
   const raw = knowledgeStore.getRawEntry(path);
   if (!raw) { sendJson(res, 404, { error: "Document not found" }); return; }
   res.writeHead(200, {
@@ -163,18 +153,16 @@ addRoute("POST", "/api/knowledge/upload", async (req, res) => {
 });
 
 addRoute("GET", "/api/knowledge/entry", async (req, res) => {
-  const url = new URL(req.url || "", "http://localhost");
-  const path = url.searchParams.get("path");
-  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const path = queryPath(req, res);
+  if (!path) return;
   const entry = knowledgeStore.getEntry(path);
   if (!entry) { sendJson(res, 404, { error: "Document not found" }); return; }
   sendJson(res, 200, entry);
 });
 
 addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
-  const url = new URL(req.url || "", "http://localhost");
-  const path = url.searchParams.get("path");
-  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const path = queryPath(req, res);
+  if (!path) return;
   const body = (await parseBody(req)) as { title?: string; content?: string };
   if (!body.title || body.content === undefined) {
     sendJson(res, 400, { error: "title and content are required" });
@@ -190,9 +178,8 @@ addRoute("PUT", "/api/knowledge/entry", async (req, res) => {
 });
 
 addRoute("DELETE", "/api/knowledge/entry", async (req, res) => {
-  const url = new URL(req.url || "", "http://localhost");
-  const path = url.searchParams.get("path");
-  if (!path) { sendJson(res, 400, { error: "path query parameter is required" }); return; }
+  const path = queryPath(req, res);
+  if (!path) return;
   try {
     const result = deleteOne(path);
     if (!result.ok) {
@@ -232,18 +219,8 @@ addRoute("POST", "/api/knowledge/batch-move", async (req, res) => {
     return;
   }
 
-  const failed: string[] = [];
-  let moved = 0;
-  for (const path of body.paths) {
-    const result = moveOne(path, body.destination);
-    if (!result.ok) {
-      failed.push(path);
-      continue;
-    }
-    moved += 1;
-  }
-
-  sendJson(res, 200, { ok: true, moved, failed });
+  const result = batch(body.paths, path => moveOne(path, body.destination!));
+  sendJson(res, 200, { ok: true, moved: result.count, failed: result.failed });
 });
 
 addRoute("POST", "/api/knowledge/batch-delete", async (req, res) => {
@@ -253,16 +230,6 @@ addRoute("POST", "/api/knowledge/batch-delete", async (req, res) => {
     return;
   }
 
-  const failed: string[] = [];
-  let deleted = 0;
-  for (const path of body.paths) {
-    const result = deleteOne(path);
-    if (!result.ok) {
-      failed.push(path);
-      continue;
-    }
-    deleted += 1;
-  }
-
-  sendJson(res, 200, { ok: true, deleted, failed });
+  const result = batch(body.paths, deleteOne);
+  sendJson(res, 200, { ok: true, deleted: result.count, failed: result.failed });
 });

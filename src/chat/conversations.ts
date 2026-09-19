@@ -231,16 +231,6 @@ export function resolveRoomMemberRef(roomId: string, ref: string): RoomMemberRec
 }
 
 
-
-export function updateRoomRuleDocs(roomId: string, ruleDocs: string[]): Room | null {
-  return changeRoom(roomId, room => {
-    if (ruleDocs.length) room.ruleDocs = ruleDocs;
-    else delete room.ruleDocs;
-    delete (room as any).ruleIds;
-    delete (room as any).knowledgeBaseId;
-  });
-}
-
 /**
  * Cascade update room.ruleDocs references when a knowledge doc path changes.
  * - Move: oldPath -> newPath
