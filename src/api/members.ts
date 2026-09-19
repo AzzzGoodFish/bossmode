@@ -261,19 +261,10 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
   const scopes: Array<{ scopeId: string; kind: string; label: string; status: string; lastActiveAt: number | null }> = [
     { scopeId: scopeIdOf({ kind: "dm", memberId: m.id }), kind: "dm", label: "Direct message", status: "idle", lastActiveAt: null },
   ];
-  for (const room of roomStore.listRooms()) {
-    const inGlobal = room.globalMemberIds?.includes(m.id);
-    const inLegacy = roomStore.getRoomMembers(room.id).some((rm) => rm.name === m.name);
-    if (inGlobal || inLegacy) {
-      scopes.push({
-        scopeId: scopeIdOf({ kind: "room", roomId: room.id }),
-        kind: "room",
-        label: room.name,
-        status: "idle",
-        lastActiveAt: null,
-      });
-    }
-  }
+  for (const room of roomStore.listRoomsForMember(m.id)) scopes.push({
+    scopeId: scopeIdOf({ kind: "room", roomId: room.id }), kind: "room", label: room.name,
+    status: "idle", lastActiveAt: null,
+  });
   sendJson(res, 200, { scopes });
 });
 
