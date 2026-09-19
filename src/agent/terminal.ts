@@ -23,6 +23,7 @@ export type TerminalWorkspace =
 export type TerminalWorkspaceResolver=(memberId:string,workspaceId?:string)=>TerminalWorkspace|undefined;
 let resolveTerminalWorkspace:TerminalWorkspaceResolver|undefined;
 export function configureTerminalWorkspaces(resolve:TerminalWorkspaceResolver|undefined):void{resolveTerminalWorkspace=resolve;}
+export function memberTerminalWorkspace(memberId:string,workspaceId?:string):TerminalWorkspace|undefined{return resolveTerminalWorkspace?.(memberId,workspaceId);}
 
 /** A timeout is an explicit cleanup failure, never confirmation of release. */
 export async function awaitResourceClose(closed:Promise<void>,label:string):Promise<void>{

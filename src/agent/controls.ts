@@ -697,7 +697,7 @@ export async function quiesceMember(memberId: string): Promise<void> {
   const errors: unknown[] = [];
   cancelPendingRuntimeInputs(memberId,"member archived");
   settleMemberShellWaits(memberId);
-  const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+  const {dropSftpConnectionsForMember}=await import("./tools.js");
   try {await dropSftpConnectionsForMember(memberId);}catch(error){errors.push(error);}
   for (const instance of instances.values()) if (instance.memberId===memberId) {
     try {requestInstanceStop(instance);} catch(error){errors.push(error);}
@@ -728,7 +728,7 @@ export async function shutdownAll(): Promise<void> {
   closeRuntimeAdmission(); shutdownRunning = true;
   shutdownSettlement = (async () => {
     const failures: unknown[] = [];
-    const {dropSftpConnectionsForMember}=await import("./tools/file-tools.js");
+    const {dropSftpConnectionsForMember}=await import("./tools.js");
     try {await dropSftpConnectionsForMember();}catch(error){failures.push(error);}
     for (const instance of instances.values()) {
       try { requestInstanceStop(instance); } catch (error) { failures.push(error); }

@@ -247,10 +247,6 @@ function escapeLabel(text: string): string {
   return String(text).replace(/"/g, "\\\"");
 }
 
-export function resolveSenderRole(sender: string): SenderRole {
-  return sender === "user" ? "user" : "member";
-}
-
 /** Map internal sender id to the human-visible display name for envelopes. */
 function senderDisplayName(sender: string): string {
   return sender === "user" ? getUserDisplayName() : sender;
@@ -312,26 +308,4 @@ function bodyWithReply(
   const quote = formatReplyQuoteBlock(msg, lookup);
   if (!quote) return msg.content;
   return `${quote}\n\n${msg.content}`;
-}
-
-/** Wrap a single room message for agent consumption (single-message envelope). */
-export function wrapRoomContextMessage(
-  msg: RoomMessage,
-  chat: ChatLabel,
-  senderRole: SenderRole,
-  lookup?: (ref: { seq: number; messageId: string }) => RoomMessage | undefined | null,
-): string {
-  const header = `[Message from room "${escapeLabel(chat.name)}" (${chatRefOf(chat)}). ${subHeader(senderRole, msg.sender, msg).slice(1, -1)}]`;
-  return `${header}\n\n${bodyWithReply(msg, lookup)}`;
-}
-
-/** Wrap a batch of room messages as a shared transcript (multi-message envelope). */
-export function wrapRoomMessagesTranscript(
-  messages: Array<{ msg: RoomMessage; role: SenderRole }>,
-  chat: ChatLabel,
-  lookup?: (ref: { seq: number; messageId: string }) => RoomMessage | undefined | null,
-): string {
-  const header = `[Messages from room "${escapeLabel(chat.name)}" (${chatRefOf(chat)})]`;
-  const parts = messages.map(({ msg, role }) => `${subHeader(role, msg.sender, msg)}\n\n${bodyWithReply(msg, lookup)}`);
-  return `${header}\n\n${parts.join("\n\n\n")}`;
 }

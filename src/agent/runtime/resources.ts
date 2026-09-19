@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentResourceSnapshot } from "../types.js";
 import { logger } from "../../kernel/logger.js";
-import { DefaultResourceLoader, type ResourceLoader, type AgentSession, formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, type ResourceLoader, type AgentSession, type ExtensionFactory, formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";
+
+export type McpFactoryLoader=(adapterPath:string)=>Promise<{name:string;factory:ExtensionFactory}>;
+let mcpFactoryLoader:McpFactoryLoader|undefined;
+export function configureMcpFactoryLoader(loader:McpFactoryLoader|undefined):void{mcpFactoryLoader=loader;}
+export function loadMcpFactory(adapterPath:string){if(!mcpFactoryLoader)throw new Error("MCP runtime is not connected");return mcpFactoryLoader(adapterPath);}
 
 // pi SDK prompt utilities — runtime adapter zone. Re-exported so prompt assembly never imports @earendil-works/* directly.
 export { formatSkillsForPrompt, loadProjectContextFiles, loadSkills } from "@earendil-works/pi-coding-agent";

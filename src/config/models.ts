@@ -840,28 +840,6 @@ export function normalizeModelRef(modelRef: string): string {
   return aliases[modelRef.toLowerCase()] || modelRef;
 }
 
-export function listConfiguredModels(): ModelOption[] {
-  return loadModelCredentialProfiles()
-    .filter((p) => p.enabled)
-    .filter((p) => p.authType !== "oauth" || hasCompleteOAuthCredentials(p.oauthCredentials))
-    .flatMap((p) => p.models.map((m) => ({
-      ref: `${p.providerSlug}/${m.id}`,
-      providerSlug: p.providerSlug,
-      modelId: m.id,
-      displayName: m.name,
-      profileId: p.id,
-      profileName: p.name,
-      profileBaseUrl: p.baseUrl,
-      protocol: p.protocol,
-      contextWindow: m.contextWindow,
-      maxTokens: m.maxTokens,
-      reasoning: m.reasoning,
-      input: m.input,
-      metadataSource: m.metadataSource,
-      credentialStatus: p.authType === "none" ? "no_auth" : p.authType === "ambient" ? "ambient" : (p.apiKey || p.oauthCredentials ? "configured" : "missing"),
-    })));
-}
-
 function modelOptionFromProfile(profile: ModelCredentialProfile, model: any): AvailableModelOption {
   const modelId = String(model.id);
   return {

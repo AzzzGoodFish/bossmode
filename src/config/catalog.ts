@@ -506,20 +506,6 @@ let remoteFetchedAt: number | null = null;
 
 let providerOverlays: Record<string, ProviderModelsStoreEntry> | null = null;
 
-export function setBundledCatalogLoader(fn: () => any[]): void {
-  bundledLoader = fn;
-}
-
-export function setPiCatalogModelsForTests(models: any[] | null): void {
-  testModels = models;
-}
-
-export function setCatalogNetworkRefreshForTests(
-  fn: null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>),
-): void {
-  networkRefreshForTests = fn;
-}
-
 export function getCatalogNetworkRefreshForTests(): null | (() => Promise<{ source: CatalogRefreshSource; error?: string }>) {
   return networkRefreshForTests;
 }
@@ -566,10 +552,6 @@ export function getCatalogModels(): any[] {
   return getCatalog().models;
 }
 
-export function catalogForProvider(providerSlug: string): any[] {
-  return getCatalogModels().filter((m) => m?.provider === providerSlug);
-}
-
 export function commitRemoteCatalog(models: any[], fetchedAt: number = Date.now()): void {
   if (!Array.isArray(models) || models.length === 0) {
     logger.warn("catalog", "commitRemoteCatalog ignored empty models");
@@ -594,56 +576,8 @@ export function retainLastGoodCatalog(reason: string, error?: string): CatalogSn
   return snap;
 }
 
-export function clearRemoteCatalogMemoryForTests(): void {
-  remoteModels = null;
-  remoteFetchedAt = null;
-  providerOverlays = null;
-}
-
 export function commitProviderOverlays(overlays: Record<string, ProviderModelsStoreEntry>): void {
   importProviderOverlays(overlays, getDatabase());
-}
-
-
-
-export function getProviderOverlays(): Record<string, ProviderModelsStoreEntry> {
-  if (providerOverlays && Object.keys(providerOverlays).length > 0) {
-    return providerOverlays;
-  }
-  const disk = readProviderOverlays(getDatabase());
-  if (disk && Object.keys(disk).length > 0) {
-    return disk;
-  }
-  // Synthesize from flat catalog so export still seeds something after hydrate-only.
-  const snap = getCatalog();
-  if (snap.source !== "remote" || !snap.models.length) return {};
-  const lastModified = snap.fetchedAt && snap.fetchedAt > 0 ? snap.fetchedAt : Date.now();
-  const checkedAt = lastModified;
-  const byProvider = new Map<string, any[]>();
-  for (const m of snap.models) {
-    const p = m?.provider ? String(m.provider) : "";
-    if (!p) continue;
-    if (!byProvider.has(p)) byProvider.set(p, []);
-    byProvider.get(p)!.push(m);
-  }
-  const out: Record<string, ProviderModelsStoreEntry> = {};
-  for (const [providerId, models] of byProvider) {
-    out[providerId] = { models, lastModified, checkedAt };
-  }
-  return out;
-}
-
-export function clearProviderOverlaysMemoryForTests(): void {
-  providerOverlays = null;
-}
-
-export function setProviderOverlaysMemoryForTests(overlays: Record<string, ProviderModelsStoreEntry> | null): void {
-  providerOverlays = overlays;
-}
-
-export function setRemoteCatalogMemoryForTests(models: any[] | null, fetchedAt: number | null = Date.now()): void {
-  remoteModels = models;
-  remoteFetchedAt = models && models.length ? fetchedAt : null;
 }
 
 export function formatCatalogFreshness(snap: CatalogSnapshot = getCatalog()): string {

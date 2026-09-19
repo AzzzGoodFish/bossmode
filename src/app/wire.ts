@@ -24,8 +24,8 @@ export function wireMemberConfigPatches(): () => void {
   return () => setGlobalConfigPatchObserver(undefined);
 }
 
-import { connectConversationMembers } from "../chat/conversations.js";
-import { readMemberIdentity } from "../member/identity.js";
+import { assertMemberScopeAccess, connectConversationMembers, ensureMmScope, isMmScopeId, listRoomsForMember, mmScopeIdOf } from "../chat/conversations.js";
+import { getMember, listMembers, readMemberIdentity, resolveMemberRef } from "../member/identity.js";
 export function wireConversationMembers(): () => void {
   return connectConversationMembers(readMemberIdentity);
 }
@@ -144,8 +144,11 @@ export async function wireApiRoutes(): Promise<void> {
     import("../api/usage.js"),
   ]);
 }
-import { configureToolChatSender } from "../agent/tools/tools.js";
-import { setMessageSink, type MessageInput } from "../chat/messages.js";
+import { configureAgentToolHost } from "../agent/tools.js";
+import { pageMessages, searchMessages, setMessageSink, type MessageInput } from "../chat/messages.js";
+import { parseMentions } from "../chat/delivery.js";
+import { updateProfileForMember } from "../member/profile.js";
+import { createWorkspace, readWorkspaces, removeWorkspace, useWorkspace } from "../member/workspaces.js";
 
 export function wireMemberHttp(): () => void {
   return connectMemberHttpActions({
@@ -166,6 +169,64 @@ export function wireMemberHttp(): () => void {
 
 export function wireUsageHttp(): () => void {
   return connectUsageHttpQueries({ readUsageRows });
+}
+
+function resolveToolChat(memberId:string,current:string|null,value:unknown):string{
+  const ref=String(value??"").trim();
+  if(!ref){if(!current)throw new Error("This tool call needs a current chat or an explicit target");return current;}
+  if(ref==="user"||ref==="dm"||ref===memberId)return `dm:${memberId}`;
+  if(ref.startsWith("room:")||ref.startsWith("dm:")||isMmScopeId(ref)){assertMemberScopeAccess(memberId,ref);return ref;}
+  const direct=roomStore.getRoom(ref);
+  if(direct&&roomStore.resolveRoomMemberRef(ref,memberId))return `room:${ref}`;
+  const named=listRoomsForMember(memberId).filter(room=>room.name.toLowerCase()===ref.toLowerCase());
+  if(named.length===1)return `room:${named[0].id}`;
+  if(named.length>1)throw new Error(`Multiple chats named "${ref}"; use the chat id`);
+  const peer=resolveMemberRef(ref);
+  if(peer){if(peer.id===memberId)return `dm:${memberId}`;return ensureMmScope(memberId,peer.id);}
+  throw new Error(`Chat not found: ${ref}`);
+}
+
+async function executeAgentHostTool(input:{tool:string;params:Record<string,unknown>;memberId:string;currentSourceRef:string|null}):Promise<unknown>{
+  const {tool,params,memberId,currentSourceRef}=input;
+  const member=getMember(memberId);if(!member)return {ok:false,error:"Member not found",code:"not_found"};
+  if(tool==="profile_read")return {ok:true,member:{id:member.id,name:member.name,description:member.title??""}};
+  if(tool==="profile_update"){
+    try{const result=updateProfileForMember(memberId,{name:params.name,title:params.description});return {ok:true,member:{id:result.memberId,name:result.name,description:result.title??""},changed:result.changed};}
+    catch(error){return {ok:false,error:(error as Error).message};}
+  }
+  if(tool==="chat_send"){
+    const target=resolveToolChat(memberId,currentSourceRef,params.to),message=String(params.message??"");
+    if(Array.isArray(params.attachments)&&params.attachments.length)return {ok:false,error:"Attachments are temporarily unavailable"};
+    if(!message.trim())return {ok:false,error:"message must be a non-empty string"};
+    const roomId=target.startsWith("room:")?target.slice(5):null;
+    const mentions=roomId?parseMentions(message,roomStore.getRoomMembers(roomId)): {labels:[],memberIds:[]};
+    const saved=commitChatMessage(target,{sender:member.name,senderMemberId:memberId,content:message,mentions:mentions.labels,mentionMemberIds:mentions.memberIds});
+    return {ok:true,messageId:saved.id,sourceRef:target};
+  }
+  if(tool==="chat_read"){
+    const target=resolveToolChat(memberId,currentSourceRef,params.chat);
+    return {ok:true,chat:target,messages:pageMessages(target,{limit:Number(params.limit)||50,fromSeq:params.from_seq===undefined?undefined:Number(params.from_seq),before:params.before?String(params.before):undefined,around:params.around_seq?String(params.around_seq):undefined})};
+  }
+  if(tool==="chat_search"){
+    const target=resolveToolChat(memberId,currentSourceRef,params.chat);
+    const after=params.after?Date.parse(String(params.after)):undefined,before=params.before?Date.parse(String(params.before)):undefined;
+    return {ok:true,chat:target,...searchMessages(target,{query:String(params.query??""),from:params.from?String(params.from):undefined,after:Number.isFinite(after)?after:undefined,before:Number.isFinite(before)?before:undefined,limit:Number(params.limit)||50})};
+  }
+  if(tool==="chat_list"){
+    const rooms=listRoomsForMember(memberId).map(room=>({type:"room",id:`room:${room.id}`,name:room.name,description:room.description??""}));
+    const chats=[{type:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms];
+    const query=String(params.query??"").toLowerCase(),filtered=query?chats.filter(chat=>`${chat.id} ${chat.name} ${chat.description}`.toLowerCase().includes(query)):chats;
+    const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,chats:filtered.slice(offset,offset+limit),total:filtered.length};
+  }
+  if(tool==="member_list"){
+    const query=String(params.query??"").toLowerCase();let members=listMembers().map(item=>({id:item.id,name:item.name,description:item.title??""}));if(query)members=members.filter(item=>`${item.id} ${item.name} ${item.description}`.toLowerCase().includes(query));const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,members:members.slice(offset,offset+limit),total:members.length};
+  }
+  if(tool==="member_info"){const target=resolveMemberRef(String(params.member??""));return target?{ok:true,member:{id:target.id,name:target.name,description:target.title??""}}:{ok:false,error:"Member not found"};}
+  if(tool==="workspace_list")return {ok:true,...readWorkspaces(memberId)};
+  if(tool==="workspace_create")return createWorkspace(memberId,params as any);
+  if(tool==="workspace_use")return useWorkspace(memberId,String(params.id??""));
+  if(tool==="workspace_remove")return removeWorkspace(memberId,String(params.id??""));
+  return {ok:false,error:`Unsupported tool: ${tool}`};
 }
 
 export function wireChatHttp(): () => void {
@@ -189,9 +250,8 @@ export function wireChatHttp(): () => void {
     scopeStatus: sourceRef => getScopeLiveStatus(sourceRef),
     roomStatuses: roomId => getRoomAgentStatuses(roomId),
   });
-  configureToolChatSender((sourceRef, sender, content, mentions = [], extra = {}) =>
-    commitChatMessage(sourceRef, { sender, content, mentions, ...extra } as MessageInput));
-  return () => { setMessageSink(undefined); configureToolChatSender(undefined); disconnectHttp(); };
+  configureAgentToolHost(executeAgentHostTool);
+  return () => { setMessageSink(undefined); configureAgentToolHost(undefined); disconnectHttp(); };
 }
 
 export function wireAgentEvents(): () => void {

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createJiti } from "jiti";
 import { getDatabase, type Database } from "../data/database.js";
 import { getBossmodeDir, memberDir, membersRoot, memberSkillsDir, memberExtensionsDir } from "../files/layout.js";
 import { syncMemberBirthAssets } from "../member/assets.js";
@@ -10,7 +11,8 @@ import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential,
 import { configureTerminalWorkspaces } from "../agent/terminal.js";
 import { resolveGlobalSkillPaths } from "../member/skills.js";
 import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../member/extensions.js";
-import { filterMcpConfigForServers, getAssignableMcpServerNames, getBossmodeMcpRuntimeDir, readMemberMcpConfig } from "../member/mcp.js";
+import { createMcpOauthStorage, filterMcpConfigForServers, getAssignableMcpServerNames, getBossmodeMcpRuntimeDir, readMemberMcpConfig } from "../member/mcp.js";
+import { configureMcpFactoryLoader } from "../agent/runtime/resources.js";
 import { getCurrentSession } from "../member/sessions.js";
 import type { AgentMemberSnapshot } from "../agent/types.js";
 import { writeMemberProfileSkeleton } from "../member/profile.js";
@@ -20,19 +22,6 @@ function insertWithDm(record: MemberRecord): void {
     insertMemberIdentity(record);
     ensureDmScope(record.id);
   });
-}
-/** Import a normalized identity and its private-chat anchor, without preparing live assets. */
-export function importMemberRecord(record: MemberRecord): MemberRecord {
-  if (!record || typeof record.id !== "string" || !/^mem_[a-zA-Z0-9_-]+$/.test(record.id) ||
-      typeof record.name !== "string" || record.name !== normalizeMemberName(record.name) ||
-      !record.name || record.name.length > 64 || /[/\0]/.test(record.name) ||
-      typeof record.agentTemplate !== "string" || !record.agentTemplate ||
-      !record.global || typeof record.global !== "object" || Array.isArray(record.global) ||
-      !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt) ||
-      (record.title !== undefined && typeof record.title !== "string")) throw new Error("invalid_member_record");
-  validateMemberName(record.name);
-  insertWithDm(record);
-  return getMember(record.id)!;
 }
 export function createMember(input: CreateMemberInput): MemberRecord { return createMemberWithPersona(input, ""); }
 /** All owned files precede the one identity/document/workspace/SSH/chat transaction. */
@@ -69,13 +58,6 @@ export function createMemberWithPersona(input: CreateMemberInput, persona: strin
     throw error;
   }
   return record;
-}
-
-/** Test cleanup still respects retained-history foreign keys. Never an archive operation. */
-export function deleteMemberForTests(id: string): void {
-  getDatabase().assertOutsideTransaction();
-  deleteMemberIdentity(id);
-  rmSync(memberDir(id), { recursive: true, force: true });
 }
 
 import { MemberArchiveService } from "../member/archive.js";
@@ -213,6 +195,10 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
 
 export function initializeMemberRuntime(reg: RuntimeRegistry, loadPrompt: (memberId: string) => MemberPromptSource, loadSnapshot: (memberId: string) => AgentMemberSnapshot | null): void {
   configureTerminalWorkspaces((memberId,workspaceId)=>(workspaceId?getWorkspace(memberId,workspaceId):getActiveWorkspace(memberId))??undefined);
+  configureMcpFactoryLoader(async adapterPath=>{
+    const loaded=await createJiti(import.meta.url).import(join(dirname(adapterPath),"host-factory.js")) as any;
+    return {name:"pi-mcp-adapter",factory:loaded.createMcpAdapter({authStorage:createMcpOauthStorage(getDatabase())})};
+  });
   configureControls({
     memberConfig: memberRecordToConfig,
     resolveMember: resolveRoomMember,
@@ -318,11 +304,6 @@ function refreshProfileSources(instance: AgentInstance): void {
   instance.sessionSources.compiled = compiled;
 }
 
-// Only current member configuration selects skills, including an explicit empty list.
-export function resolveSkills(member: AgentMemberConfig): string[] {
-  return member.skills ?? [];
-}
-
 // -- Model switching --
 
 /**
@@ -359,22 +340,6 @@ function persistConfigPatch(roomId: string, memberId: string, patch: RoomMemberC
   roomStore.updateRoomMemberOverride(roomId, memberId, patch);
 }
 
-/** Persist a config patch for a room member (resolves ref → member id, routes by authority). */
-export function persistRoomMemberConfigPatch(roomId: string, memberRef: string, patch: RoomMemberConfigPatch): void {
-  const member = resolveRoomMember(roomId, memberRef);
-  const memberId = member?.id || memberRef;
-  persistConfigPatch(roomId, memberId, patch);
-}
-
-// -- Status --
-
-/** Read-only live-instance lookup by scope (batch 6 reload surface + tests). */
-export function getAgentInstanceForScope(scopeId: string, memberId: string): AgentInstance | null {
-  const instance = instances.get(instanceKey(memberId)) ?? null;
-  if (instance?.profilePromptDirty) refreshProfileSources(instance);
-  return instance;
-}
-
 export function getAgentStatus(roomId: string, memberRef: string): AgentStatus {
   const member = resolveRoomMember(roomId, memberRef);
   const memberId = member?.id || memberRef;
@@ -400,21 +365,6 @@ export function getRoomAgentStatuses(roomId: string): Record<string, AgentStatus
   const result: Record<string, AgentStatus> = {};
   for (const member of roomStore.getRoomMembers(roomId)) result[member.name] = getAgentStatus(roomId, member.id);
   return result;
-}
-
-export function broadcastMemberStatus(roomId: string, memberRef: string): void {
-  const member = resolveRoomMember(roomId, memberRef);
-  if (!member) return;
-  const key = instanceKey(member.id);
-  const instance = instances.get(key);
-  const status = instance?.status ?? "inactive";
-  broadcastToRoom(roomId, {
-    type: "agent:status",
-    roomId,
-    agent: member.name,
-    ...memberIdentityMeta(member.name, member.id),
-    status,
-  });
 }
 
 // -- Context usage (cache-only API + idle refresh push) --
@@ -518,15 +468,6 @@ export function refreshContextUsage(roomId: string, memberRef: string, options: 
   }
 }
 
-export const refreshContextUsageOnIdle = refreshContextUsage;
-
-// -- Event history --
-
-export function getAgentEventHistory(roomId: string, memberRef: string): AgentHistoryEvent[] {
-  const member = resolveRoomMember(roomId, memberRef);
-  return loadEventsFromDisk(roomId, member?.id || memberRef);
-}
-
 function emitAgentLocalEvent(
   sourceRef: string | null,
   memberRef: string,
@@ -576,33 +517,6 @@ export function getMemberInstances(memberName: string): Array<{
     }
   }
   return result;
-}
-
-export function resetAgentSession(roomId: string, memberRef: string): { ok: true; message: string } {
-  const scopeId = roomId.startsWith("dm:") ? roomId : `room:${roomId}`;
-  const ref = parseScopeId(scopeId);
-  const resolved = ref?.kind === "room" ? resolveRoomMember(ref.roomId, memberRef) : undefined;
-  const memberId = resolved?.id || memberRef;
-  const key = instanceKey(memberId);
-  const instance = instances.get(key);
-  const agentName = resolved?.name || instance?.agentName || memberRecordToConfig(memberId)?.name || memberRef;
-
-  destroyInstance(memberId, {preservePending:true});
-  const message = "Session reset. Next activation will start fresh.";
-  getDatabase().transaction(() => {
-    cancelPendingRuntimeInputs(memberId,"session reset",scopeId);
-    sessionStore.clearCurrentSession(memberId);
-    clearRuntimeStateEntry(memberId);
-    if (ref?.kind === "room") roomStore.setCursor(ref.roomId, memberId, null);
-    emitAgentLocalEvent(scopeId, memberId, {type:"system",text:message},{memberId,agentName});
-  });
-  if (ref) {
-    const eventScope = ref.kind === "room" ? ref.roomId : scopeId;
-    const statusEvent = { type: "agent:status" as const, roomId: eventScope, agent: agentName, ...memberIdentityMeta(agentName, memberId), status: "inactive" as const };
-    if (ref.kind === "dm") broadcastToAgentSubscribers(eventScope, agentName, statusEvent);
-    else broadcastToRoom(eventScope, statusEvent);
-  }
-  return { ok: true, message };
 }
 
 // -- Member-level operations (① B5) --
@@ -691,12 +605,6 @@ export function resolveRoomMember(roomId: string, memberRef: string): AgentMembe
   const roomMember = roomStore.resolveRoomMemberRef(roomId, memberRef);
   if (roomMember) return toAgentMemberConfig(roomMember);
   return null;
-}
-
-export function resolveRoomMembers(roomId: string, memberRefs?: string[]): AgentMemberConfig[] {
-  const roomMembers = roomStore.getRoomMembers(roomId);
-  if (roomMembers.length > 0) return roomMembers.map(toAgentMemberConfig).filter((m): m is AgentMemberConfig => Boolean(m));
-  return (memberRefs || []).map((name) => resolveRoomMember(roomId, name)).filter((m): m is AgentMemberConfig => Boolean(m));
 }
 
 import type { WsServerEvent } from "../kernel/types.js";

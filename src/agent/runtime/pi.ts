@@ -18,7 +18,7 @@ import type { AgentMemberConfig, PiTransportSetting } from "../../kernel/types.j
 import { getModelCredentialProfile } from "../../config/models.js";
 import { createDatabaseModelRuntime, refreshDatabaseModelRuntime, exportPiConfigForMember, resolvePiAgentDir } from "../../config/pi-adapt/credentials.js";
 import { normalizeModelRef } from "../../config/models.js";
-import { loadDatabaseMcpFactory } from "./mcp-factory.js";
+import { loadMcpFactory } from "./resources.js";
 import { BossmodeResourceLoader, resolvePiSystemPromptSources, assertHostedMcpLoaded, bindMcpExtension, materializeMcpRuntimeSettings, type McpRuntimeSettings } from "./resources.js";
 import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
@@ -782,7 +782,7 @@ export class PiSdkRuntime implements AgentRuntime {
       // member-owned extensions/ dir entries are the only managed extensions.
       const managedExtensions = [...opts.resources.extensionPaths];
       const activeExtensionPaths = [...managedExtensions, ...(piConfig?.extensionPaths ?? [])];
-      const mcpFactory = await loadDatabaseMcpFactory(mcpSettings.adapterPath!);
+      const mcpFactory = await loadMcpFactory(mcpSettings.adapterPath!);
       const resourceLoader = new BossmodeResourceLoader({
         cwd: opts.cwd,
         agentDir: runtimeAgentDir,

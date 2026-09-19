@@ -223,11 +223,6 @@ export function getRuntimeStateEntry(memberId: string, db: Database = getDatabas
   return row ? mapRuntimeCheckpoint(db, row) : {};
 }
 
-export function readRuntimeState(db: Database = getDatabase()): RuntimeStateMap {
-  return Object.fromEntries(db.all<RuntimeCheckpointRow>("SELECT * FROM runtime_checkpoints")
-    .map(row => [row.member_id, mapRuntimeCheckpoint(db, row)]));
-}
-
 /** Pure upgrade/runtime import with an explicit database and source timestamp. */
 export function importRuntimeStateEntry(db: Database, memberId: string, entry: RuntimeStateEntry, updatedAt: number): void {
   db.transaction(tx => {
@@ -255,9 +250,6 @@ export function updateRuntimeStateEntry(memberId: string, patch: RuntimeStateEnt
 }
 export function setContractFingerprint(memberId: string, fingerprint: string, contractVersion: number): void {
   updateRuntimeStateEntry(memberId, {contractFingerprint: fingerprint, contractVersion, driftNotified: undefined});
-}
-export function markDriftNotified(memberId: string, version: number): void {
-  updateRuntimeStateEntry(memberId, {driftNotified: version});
 }
 export function markStaleMounts(memberId: string, fields: string[]): void {
   const now = Date.now();

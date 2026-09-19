@@ -1,6 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
-import { renderQueryRowsForMember } from "../tools/query-render.js";
+import { renderQueryRowsForMember } from "../tools.js";
 import {
   DIRECT_TOOL_SPECS,
   GATEWAY_TOOL_SPECS,
@@ -154,7 +154,7 @@ export function createBossmodeSdkTools(opts: {
     const needsCurrentChat = (tool === "chat_send" && !String(params?.to ?? "").trim())
       || ((tool === "chat_read" || tool === "chat_search") && !String(params?.chat ?? "").trim());
     if (!sourceRef && needsCurrentChat) throw new Error("This tool call needs a current chat or an explicit target");
-    const { handleToolCallback } = await import("../tools/tools.js");
+    const { handleToolCallback } = await import("../tools.js");
     return handleToolCallback(tool, sourceRef ?? "", opts.memberId, params, { memberId: opts.memberId, ...(signal ? {signal} : {}) });
   };
 
