@@ -90,6 +90,22 @@ describe("member event facts v2", () => {
     expect(readAgentEvent("same-sdk-id")?.event).toMatchObject({ text: "streamed", model: "fake:model" });
   });
 
+  it("filters usage by exact source aliases and treats an explicit empty selection as no rows",()=>{
+    const fixture=setup();
+    const event=(inputTokens:number)=>({type:"message_end",ts:1_000,text:"done",stopReason:"stop",model:"fake:model",usage:{inputTokens,outputTokens:0,cacheRead:0,cacheWrite:0,cost:0}} as any);
+    importHistoricalEvent(fixture.db,{id:"historical-match",sourceKey:"room-old",ownerKey:"owner",sourceSeq:1,event:event(2),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"explicit-match",sourceKey:"room-old",ownerKey:"owner",sourceSeq:2,memberId:"mem_events",sourceRef:"room:room-old",event:event(3),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"explicit-conflict",sourceKey:"room-old",ownerKey:"owner",sourceSeq:3,memberId:"mem_events",sourceRef:"room:other",event:event(5),ts:1_000});
+    importHistoricalEvent(fixture.db,{id:"unrelated",sourceKey:"unrelated",ownerKey:"owner",sourceSeq:1,event:event(7),ts:1_000});
+    rebuildEventAggregates(fixture.db);
+
+    const selected=readUsageRows({sources:{sourceRefs:["room:room-new","room:room-old"],historicalSourceKeys:["room-new","room-old"]}});
+    expect(selected.reduce((sum,row)=>sum+row.inputTokens,0)).toBe(5);
+    expect(readUsageRows({sources:{sourceRefs:[],historicalSourceKeys:[]}})).toEqual([]);
+    expect(readUsageRows({from:"1970-01-02",sources:{sourceRefs:["room:room-old"],historicalSourceKeys:["room-old"]}})).toEqual([]);
+    expect(readUsageRows().reduce((sum,row)=>sum+row.inputTokens,0)).toBe(17);
+  });
+
   it("keeps member statistics for null-source facts and routes only addressed facts", () => {
     const fixture = setup();
     appendMemberEvent({ id: "start", memberId: "mem_events", sourceRef: null, event: { type: "agent_start", ts: 1_000 } });

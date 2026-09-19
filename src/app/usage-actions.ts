@@ -1,5 +1,5 @@
-import {aggregateUsageRows,readUsageRows,type UsageRow,type UsageSeriesPoint,type UsageTotals} from "../agent/events.js";
-import {getRoom,listRooms} from "../chat/conversations.js";
+import {aggregateUsageRows,readUsageRows,type UsageRow,type UsageSeriesPoint,type UsageSourceSelection,type UsageTotals} from "../agent/events.js";
+import {listRoomSourceAssociations,type RoomSourceAssociation} from "../chat/conversations.js";
 import {getRetainedMember} from "../member/identity.js";
 
 export interface UsageReportQuery {from?:string;to?:string;member?:string;agent?:string;model?:string}
@@ -61,19 +61,41 @@ function report(rows:UsageRow[],meta:Map<string,MemberMeta>,query:UsageReportQue
     byAgent:[...agentGroups.values()].sort((a,b)=>b.inputTokens-a.inputTokens),
   };
 }
-function read(query:UsageReportQuery,sourceRef?:string):{rows:UsageRow[];meta:Map<string,MemberMeta>}{
-  const rows=readUsageRows({from:query.from,to:query.to,sourceRef}),meta=metadata(rows);
+function read(query:UsageReportQuery,sources?:UsageSourceSelection):{rows:UsageRow[];meta:Map<string,MemberMeta>}{
+  const rows=readUsageRows({from:query.from,to:query.to,...(sources===undefined?{}:{sources})}),meta=metadata(rows);
   return {rows:filtered(rows,query,meta),meta};
 }
+type RoomSourceIndex={sourceRefs:Map<string,string|null>;historicalSourceKeys:Map<string,string|null>};
+function roomSourceIndex(associations:readonly RoomSourceAssociation[]):RoomSourceIndex{
+  const sourceRefs=new Map<string,string|null>(),historicalSourceKeys=new Map<string,string|null>();
+  const addAlias=(map:Map<string,string|null>,alias:string,roomId:string)=>{
+    if(!map.has(alias))map.set(alias,roomId);else if(map.get(alias)!==roomId)map.set(alias,null);
+  };
+  for(const association of associations){
+    for(const sourceRef of association.sourceRefs)addAlias(sourceRefs,sourceRef,association.roomId);
+    for(const sourceKey of association.historicalSourceKeys)addAlias(historicalSourceKeys,sourceKey,association.roomId);
+  }
+  return {sourceRefs,historicalSourceKeys};
+}
+function associatedRoomId(row:UsageRow,index:RoomSourceIndex):string|null{
+  if(row.sourceRef!==null)return index.sourceRefs.get(row.sourceRef)??null;
+  return row.historicalSourceKey===null?null:index.historicalSourceKeys.get(row.historicalSourceKey)??null;
+}
 export function getRoomUsageReport(roomId:string,query:UsageReportQuery={}):UsageReport|null{
-  if(!getRoom(roomId))return null;
-  const {rows,meta}=read(query,`room:${roomId}`);return report(rows,meta,query);
+  const associations=listRoomSourceAssociations(),association=associations.find(item=>item.roomId===roomId);if(!association)return null;
+  const index=roomSourceIndex(associations),sources={
+    sourceRefs:association.sourceRefs.filter(value=>index.sourceRefs.get(value)===roomId),
+    historicalSourceKeys:association.historicalSourceKeys.filter(value=>index.historicalSourceKeys.get(value)===roomId),
+  };
+  const {rows,meta}=read(query,sources);return report(rows,meta,query);
 }
 export function getPlatformUsageReport(query:UsageReportQuery={}):PlatformUsageReport{
-  const {rows,meta}=read(query),names=new Map(listRooms().map(room=>[room.id,room.name])),groups=new Map<string,UsageRoomBucket>();
+  const associations=listRoomSourceAssociations(),index=roomSourceIndex(associations),names=new Map(associations.map(room=>[room.roomId,room.roomName]));
+  const {rows,meta}=read(query),groups=new Map<string,UsageRoomBucket>();
   for(const row of rows){
-    const roomId=row.sourceRef?.startsWith("room:")?row.sourceRef.slice(5):row.sourceRef||row.historicalSourceKey||"historical-unattributed";
-    const bucket=groups.get(roomId)??{...empty(),roomId,roomName:names.get(roomId)};groups.set(roomId,bucket);add(bucket,row);
+    const associated=associatedRoomId(row,index);
+    const roomId=associated??(row.sourceRef?.startsWith("room:")?row.sourceRef.slice(5):row.sourceRef||row.historicalSourceKey||"historical-unattributed");
+    const bucket=groups.get(roomId)??{...empty(),roomId,roomName:associated?names.get(associated):undefined};groups.set(roomId,bucket);add(bucket,row);
   }
   return {...report(rows,meta,query),byRoom:[...groups.values()].sort((a,b)=>b.inputTokens-a.inputTokens)};
 }

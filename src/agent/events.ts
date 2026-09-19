@@ -177,11 +177,17 @@ export interface UsageRow {
   memberId:string|null;historicalOwnerKey:string|null;sourceRef:string|null;historicalSourceKey:string|null;
   date:string;model:string;inputTokens:number;outputTokens:number;cacheRead:number;cacheWrite:number;cost:number;turns:number;
 }
-export function readUsageRows(options:{from?:string;to?:string;sourceRef?:string}={}):UsageRow[]{
+export interface UsageSourceSelection {sourceRefs:readonly string[];historicalSourceKeys:readonly string[];}
+export function readUsageRows(options:{from?:string;to?:string;sources?:UsageSourceSelection}={}):UsageRow[]{
   const clauses:string[]=[];const parameters:unknown[]=[];
   if(options.from){clauses.push("date(e.ts/1000,'unixepoch')>=?");parameters.push(options.from);}
   if(options.to){clauses.push("date(e.ts/1000,'unixepoch')<=?");parameters.push(options.to);}
-  if(options.sourceRef){clauses.push("e.source_ref=?");parameters.push(options.sourceRef);}
+  if(options.sources){
+    const sourceRefs=[...new Set(options.sources.sourceRefs)],historicalKeys=[...new Set(options.sources.historicalSourceKeys)],matches:string[]=[];
+    if(sourceRefs.length){matches.push(`e.source_ref IN (${sourceRefs.map(()=>"?").join(",")})`);parameters.push(...sourceRefs);}
+    if(historicalKeys.length){matches.push(`(e.source_ref IS NULL AND e.historical_source_key IN (${historicalKeys.map(()=>"?").join(",")}))`);parameters.push(...historicalKeys);}
+    clauses.push(matches.length?`(${matches.join(" OR ")})`:"0");
+  }
   const where=clauses.length?` AND ${clauses.join(" AND ")}`:"";
   return getDatabase().all<any>(`SELECT e.member_id AS memberId,e.historical_owner_key AS historicalOwnerKey,
     e.source_ref AS sourceRef,e.historical_source_key AS historicalSourceKey,date(e.ts/1000,'unixepoch') AS date,
