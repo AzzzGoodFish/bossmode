@@ -16,115 +16,6 @@ import { logger } from "../kernel/logger.js";
 // Description scope: capability + mechanical facts only (no usage guidance —
 // that belongs to the prompt layers).
 
-export const MEMBER_DIRECT_TOOL_NAMES = [
-  "chat_send",
-  "chat_read",
-  "chat_search",
-  "chat_list",
-  "bossmode",
-  "workspace_list",
-  "workspace_create",
-  "workspace_use",
-  "workspace_remove",
-  "read",
-  "write",
-  "edit",
-  "terminal_create",
-  "terminal_exec",
-  "terminal_read",
-  "terminal_wait",
-  "terminal_list",
-  "terminal_close",
-  "reload",
-] as const;
-
-export const MEMBER_GATEWAY_TOOL_NAMES = [
-  "chat_info",
-  "chat_create",
-  "chat_edit",
-  "member_list",
-  "member_info",
-  "profile_read",
-  "profile_update",
-] as const;
-
-// Canonical description for the `chat_send` tool used by agent tool definitions;
-// the @mention contract stays in a single source of truth.
-export function buildChatSendToolDescription(): string {
-  return `Send a message to one chat.
-- to (required): target chat — id or name; your private chat with the user is "dm:<your member id>" (or "user"). Private chats need no prior creation.
-- message (required): text content.
-- attachments (optional): local file paths, copied into that chat's attachment store.`;
-}
-
-export const CHAT_SEND_TO_PARAM_DESCRIPTION = "Target chat id or name; your private chat with the user is \"dm:<your member id>\" (or \"user\").";
-
-export const CHAT_SEND_MESSAGE_PARAM_DESCRIPTION = "Message to post. @name activates that member (exact match required; a plain name never activates).";
-
-export const CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION = "Local file paths to attach. Files are copied to the target chat's attachment store.";
-
-export const CHAT_READ_DESCRIPTION = `Read an ordered window of messages from one chat.
-
-- chat (required): chat id or name — see chat_list.
-- Window: latest by default; from_seq / around_seq position it, before / after bound it by time, limit sizes it.
-- output: "file" writes the full window to a temp markdown file instead of returning it inline.
-
-chat_search locates messages; read opens the context — feed a hit's seq to around_seq or from_seq.`;
-
-export const CHAT_SEARCH_DESCRIPTION = `Search one chat's messages by text, sender or time; returns hits (seq, sender, time, snippet), newest first.
-
-- chat (required): chat id or name — see chat_list.
-- query (required): case-insensitive text to find.
-- from / before / after / limit narrow the search.
-
-search locates; read opens the context — feed a hit's seq to chat_read around_seq or from_seq.`;
-
-export const CHAT_LIST_DESCRIPTION = `List the chats you participate in: type, name, id (and description). query filters by keyword; limit (default 50) and offset page through the list.`;
-
-export const BOSSMODE_GATEWAY_DESCRIPTION = `Bossmode capabilities beyond the hot tools. \`list\` what is available, \`describe\` one capability's parameters, then \`call\` it with \`args\`. The hot tools (chat_send, chat_read, chat_search, chat_list) are registered directly — call them directly, not through here.`;
-
-export const CHAT_INFO_DESCRIPTION = `One chat's details: name, description, and members (group chat) or counterpart (private chat). chat is an id or name.`;
-
-export const CHAT_CREATE_DESCRIPTION = `Create a group chat: name, optional description, initial members (creator included). Private chats need no creation — chat_send opens one directly.`;
-
-export const CHAT_EDIT_DESCRIPTION = `Edit a group chat: rename, update description, add or remove members by member id. Removing a member stops deliveries to them; history and memory are retained. chat is an id or name.`;
-
-export const MEMBER_LIST_DESCRIPTION = `List members: id, name, description. query filters by keyword; limit (default 50) and offset page through the list.`;
-
-export const MEMBER_INFO_DESCRIPTION = `One member's name, description and current status. member is a name or id. Read-only: never activates or notifies.`;
-
-export const PROFILE_READ_DESCRIPTION = `Read your own profile: name, description and member id.`;
-
-export const PROFILE_UPDATE_DESCRIPTION = `Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`;
-
-export const TERMINAL_CREATE_DESCRIPTION = `Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`;
-
-export const TERMINAL_EXEC_DESCRIPTION = `Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`;
-
-export const TERMINAL_READ_DESCRIPTION = `Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`;
-
-export const TERMINAL_WAIT_DESCRIPTION = `Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion.`;
-
-export const TERMINAL_LIST_DESCRIPTION = `List your terminals with running exec, alive state, and buffered line counts.`;
-
-export const TERMINAL_CLOSE_DESCRIPTION = `Close a terminal and kill its process. Running commands receive a close signal.`;
-
-export const WORKSPACE_LIST_DESCRIPTION = `List your workspaces with the active one marked.`;
-
-export const WORKSPACE_CREATE_DESCRIPTION = `Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`;
-
-export const WORKSPACE_USE_DESCRIPTION = `Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`;
-
-export const WORKSPACE_REMOVE_DESCRIPTION = `Remove a workspace by id. The builtin original workspace cannot be removed.`;
-
-export const WORKSPACE_READ_DESCRIPTION = `Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
-
-export const WORKSPACE_WRITE_DESCRIPTION = `Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
-
-export const WORKSPACE_EDIT_DESCRIPTION = `Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`;
-
-export const RELOAD_DESCRIPTION = `Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`;
-
 // Parameter descriptions shared across runtimes
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
@@ -171,7 +62,7 @@ export const PARAM_DESCRIPTIONS = {
 // Gateway capability specs (name + label + description + parameters + example);
 // the runtime adapter executes them through the same dispatch as direct tools.
 export interface GatewayToolSpec {
-  name: (typeof MEMBER_GATEWAY_TOOL_NAMES)[number];
+  name: string;
   label: string;
   description: string;
   parameters: TSchema;
@@ -182,7 +73,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "chat_info",
     label: "Chat Info",
-    description: CHAT_INFO_DESCRIPTION,
+    description: `One chat's details: name, description, and members (group chat) or counterpart (private chat). chat is an id or name.`,
     parameters: Type.Object({
       chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
     }, { additionalProperties: false }),
@@ -191,7 +82,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "chat_create",
     label: "Chat Create",
-    description: CHAT_CREATE_DESCRIPTION,
+    description: `Create a group chat: name, optional description, initial members (creator included). Private chats need no creation — chat_send opens one directly.`,
     parameters: Type.Object({
       name: Type.String({ description: "Chat name." }),
       description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.chatDescription })),
@@ -202,7 +93,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "chat_edit",
     label: "Chat Edit",
-    description: CHAT_EDIT_DESCRIPTION,
+    description: `Edit a group chat: rename, update description, add or remove members by member id. Removing a member stops deliveries to them; history and memory are retained. chat is an id or name.`,
     parameters: Type.Object({
       chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
       name: Type.Optional(Type.String({ description: "New chat name." })),
@@ -215,7 +106,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "member_list",
     label: "Member List",
-    description: MEMBER_LIST_DESCRIPTION,
+    description: `List members: id, name, description. query filters by keyword; limit (default 50) and offset page through the list.`,
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
       limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
@@ -226,7 +117,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "member_info",
     label: "Member Info",
-    description: MEMBER_INFO_DESCRIPTION,
+    description: `One member's name, description and current status. member is a name or id. Read-only: never activates or notifies.`,
     parameters: Type.Object({
       member: Type.String({ description: PARAM_DESCRIPTIONS.memberRef }),
     }, { additionalProperties: false }),
@@ -235,14 +126,14 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
   {
     name: "profile_read",
     label: "Profile Read",
-    description: PROFILE_READ_DESCRIPTION,
+    description: `Read your own profile: name, description and member id.`,
     parameters: Type.Object({}, { additionalProperties: false }),
     example: {},
   },
   {
     name: "profile_update",
     label: "Profile Update",
-    description: PROFILE_UPDATE_DESCRIPTION,
+    description: `Update your own profile: name and/or description. An empty description clears it. Returns the stored profile and whether it changed.`,
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileName })),
       description: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.profileDescription })),
@@ -254,7 +145,7 @@ export const GATEWAY_TOOL_SPECS: GatewayToolSpec[] = [
 // Direct tool specs (name + label + description + parameters); the runtime
 // adapter binds each spec to its execution path and registers it with the SDK.
 export interface DirectToolSpec {
-  name: (typeof MEMBER_DIRECT_TOOL_NAMES)[number];
+  name: string;
   label: string;
   description: string;
   parameters: TSchema;
@@ -264,17 +155,26 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "chat_send",
     label: "Chat Send",
-    description: buildChatSendToolDescription(),
+    description: `Send a message to one chat.
+- to (required): target chat — id or name; your private chat with the user is "dm:<your member id>" (or "user"). Private chats need no prior creation.
+- message (required): text content.
+- attachments (optional): local file paths, copied into that chat's attachment store.`,
     parameters: Type.Object({
-      to: Type.String({ description: CHAT_SEND_TO_PARAM_DESCRIPTION }),
-      message: Type.String({ description: CHAT_SEND_MESSAGE_PARAM_DESCRIPTION }),
-      attachments: Type.Optional(Type.Array(Type.String(), { description: CHAT_SEND_ATTACHMENTS_PARAM_DESCRIPTION })),
+      to: Type.String({ description: "Target chat id or name; your private chat with the user is \"dm:<your member id>\" (or \"user\")." }),
+      message: Type.String({ description: "Message to post. @name activates that member (exact match required; a plain name never activates)." }),
+      attachments: Type.Optional(Type.Array(Type.String(), { description: "Local file paths to attach. Files are copied to the target chat's attachment store." })),
     }, { additionalProperties: false }),
   },
   {
     name: "chat_read",
     label: "Chat Read",
-    description: CHAT_READ_DESCRIPTION,
+    description: `Read an ordered window of messages from one chat.
+
+- chat (required): chat id or name — see chat_list.
+- Window: latest by default; from_seq / around_seq position it, before / after bound it by time, limit sizes it.
+- output: "file" writes the full window to a temp markdown file instead of returning it inline.
+
+chat_search locates messages; read opens the context — feed a hit's seq to around_seq or from_seq.`,
     parameters: Type.Object({
       chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
       from_seq: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.from_seq })),
@@ -288,7 +188,13 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "chat_search",
     label: "Chat Search",
-    description: CHAT_SEARCH_DESCRIPTION,
+    description: `Search one chat's messages by text, sender or time; returns hits (seq, sender, time, snippet), newest first.
+
+- chat (required): chat id or name — see chat_list.
+- query (required): case-insensitive text to find.
+- from / before / after / limit narrow the search.
+
+search locates; read opens the context — feed a hit's seq to chat_read around_seq or from_seq.`,
     parameters: Type.Object({
       chat: Type.String({ description: PARAM_DESCRIPTIONS.chatRef }),
       query: Type.String({ description: PARAM_DESCRIPTIONS.query }),
@@ -301,7 +207,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "chat_list",
     label: "Chat List",
-    description: CHAT_LIST_DESCRIPTION,
+    description: `List the chats you participate in: type, name, id (and description). query filters by keyword; limit (default 50) and offset page through the list.`,
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.listQuery })),
       limit: Type.Optional(Type.Number({ description: PARAM_DESCRIPTIONS.listLimit })),
@@ -311,7 +217,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "bossmode",
     label: "Bossmode",
-    description: BOSSMODE_GATEWAY_DESCRIPTION,
+    description: `Bossmode capabilities beyond the hot tools. \`list\` what is available, \`describe\` one capability's parameters, then \`call\` it with \`args\`. The hot tools (chat_send, chat_read, chat_search, chat_list) are registered directly — call them directly, not through here.`,
     parameters: Type.Object({
       action: Type.String({ description: PARAM_DESCRIPTIONS.gatewayAction }),
       tool: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.gatewayTool })),
@@ -321,13 +227,13 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "workspace_list",
     label: "Workspace List",
-    description: WORKSPACE_LIST_DESCRIPTION,
+    description: `List your workspaces with the active one marked.`,
     parameters: Type.Object({}),
   },
   {
     name: "workspace_create",
     label: "Workspace Create",
-    description: WORKSPACE_CREATE_DESCRIPTION,
+    description: `Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`,
     parameters: Type.Object({
       id: Type.String({ description: "Workspace id — letters, digits, dot, dash, underscore." }),
       host: Type.String({ description: PARAM_DESCRIPTIONS.sshHost }),
@@ -341,19 +247,19 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "workspace_use",
     label: "Workspace Use",
-    description: WORKSPACE_USE_DESCRIPTION,
+    description: `Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`,
     parameters: Type.Object({ id: Type.String({ description: "Workspace id to activate." }) }),
   },
   {
     name: "workspace_remove",
     label: "Workspace Remove",
-    description: WORKSPACE_REMOVE_DESCRIPTION,
+    description: `Remove a workspace by id. The builtin original workspace cannot be removed.`,
     parameters: Type.Object({ id: Type.String({ description: "Workspace id to remove." }) }),
   },
   {
     name: "read",
     label: "Read File",
-    description: WORKSPACE_READ_DESCRIPTION,
+    description: `Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,
     parameters: Type.Object({
       path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
       offset: Type.Optional(Type.Number({ description: "Line number to start from (1-indexed)." })),
@@ -364,7 +270,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "write",
     label: "Write File",
-    description: WORKSPACE_WRITE_DESCRIPTION,
+    description: `Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,
     parameters: Type.Object({
       path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
       content: Type.String({ description: "Full file content to write." }),
@@ -374,7 +280,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "edit",
     label: "Edit File",
-    description: WORKSPACE_EDIT_DESCRIPTION,
+    description: `Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,
     parameters: Type.Object({
       path: Type.String({ description: "File path — relative resolves against the active workspace root." }),
       edits: Type.Array(Type.Object({
@@ -387,7 +293,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "terminal_create",
     label: "Terminal Create",
-    description: TERMINAL_CREATE_DESCRIPTION,
+    description: `Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`,
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalName })),
       workspace: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.workspaceId })),
@@ -397,7 +303,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "terminal_exec",
     label: "Terminal Exec",
-    description: TERMINAL_EXEC_DESCRIPTION,
+    description: `Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,
     parameters: Type.Object({
       terminalId: Type.String({ description: "Terminal id from terminal_create / terminal_list." }),
       command: Type.Optional(Type.String({ description: PARAM_DESCRIPTIONS.terminalCommand })),
@@ -408,7 +314,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "terminal_read",
     label: "Terminal Read",
-    description: TERMINAL_READ_DESCRIPTION,
+    description: `Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`,
     parameters: Type.Object({
       terminalId: Type.String({ description: "Terminal id." }),
       exec: Type.Optional(Type.String({ description: "Exec id (e.g. e3) — returns that command's lines." })),
@@ -419,7 +325,7 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "terminal_wait",
     label: "Terminal Wait",
-    description: TERMINAL_WAIT_DESCRIPTION,
+    description: `Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion.`,
     parameters: Type.Object({
       terminalId: Type.String({ description: "Terminal id." }),
       exec: Type.String({ description: "Exec id (e.g. e3) — the command to wait for." }),
@@ -429,19 +335,19 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   {
     name: "terminal_list",
     label: "Terminal List",
-    description: TERMINAL_LIST_DESCRIPTION,
+    description: `List your terminals with running exec, alive state, and buffered line counts.`,
     parameters: Type.Object({}),
   },
   {
     name: "terminal_close",
     label: "Terminal Close",
-    description: TERMINAL_CLOSE_DESCRIPTION,
+    description: `Close a terminal and kill its process. Running commands receive a close signal.`,
     parameters: Type.Object({ terminalId: Type.String({ description: "Terminal id to close." }) }),
   },
   {
     name: "reload",
     label: "Reload",
-    description: RELOAD_DESCRIPTION,
+    description: `Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`,
     parameters: Type.Object({}),
   },
 ];
@@ -451,7 +357,6 @@ export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
  * One renderer for both output modes: inline SDK text and markdown file export.
  * Row shape = the tool's JSON projection (seq/sender/content/ts/replyTo/attachments).
  */
-
 
 /** Same mapping as the activation envelope (message-envelope.ts): user → display name. */
 function senderDisplayName(sender: string): string {
