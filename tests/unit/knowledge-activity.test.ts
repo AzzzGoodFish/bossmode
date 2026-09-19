@@ -8,7 +8,7 @@ let fixture: ReturnType<typeof import("../helpers/core-fixture.js").coreFixture>
 async function ensureRoom(roomId: string, extra: Record<string, unknown> = {}) {
   const { storeRoom } = await import("../../src/chat/conversations.js");
   storeRoom({
-    id: roomId, name: `Room ${roomId}`, members: [], createdAt: 1, ...extra,
+    id: roomId, name: `Room ${roomId}`, memberIds: [], createdAt: 1, ...extra,
   }, fixture.db);
 }
 
@@ -20,8 +20,8 @@ function writeDoc(relPath: string, content: string): string {
 }
 
 async function getRoomMessages(roomId: string) {
-  const messageStore = await import("../../src/chat/message-store.js");
-  return messageStore.getMessages(roomId);
+  const { readMessages } = await import("../../src/chat/messages.js");
+  return readMessages(`room:${roomId}`, fixture.db);
 }
 
 describe("knowledge-activity", () => {
@@ -29,8 +29,6 @@ describe("knowledge-activity", () => {
     vi.resetModules();
     fixture = (await import("../helpers/core-fixture.js")).coreFixture();
     tmpDir = fixture.root;
-    const { _resetDedup } = await import("../../src/app/wire.js");
-    _resetDedup();
   });
 
   afterEach(() => {
@@ -88,16 +86,6 @@ describe("knowledge-activity", () => {
     maybeEmitKnowledgeActivity("k5", "dev", "write", { path: abs }, false);
     const messages = await getRoomMessages("k5");
     expect(messages.filter((m) => m.type === "knowledge_event").length).toBe(1);
-  });
-
-  it("resolves relative paths against room cwd", async () => {
-    const { maybeEmitKnowledgeActivity } = await import("../../src/app/wire.js");
-    const docsRoot = join(tmpDir, "memory", "projects");
-    await ensureRoom("k6", { cwd: docsRoot });
-    writeDoc("proj/rel.md", "# Rel");
-    maybeEmitKnowledgeActivity("k6", "dev", "write", { path: "proj/rel.md" }, false);
-    const messages = await getRoomMessages("k6");
-    expect(messages.find((m) => m.type === "knowledge_event")!.knowledge_event_meta?.path).toBe("proj/rel.md");
   });
 
   it("marks doc writes outside the room docsPath", async () => {

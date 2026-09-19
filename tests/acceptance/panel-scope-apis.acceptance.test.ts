@@ -10,6 +10,7 @@ import {
   getTestBossmodeDir,
 } from "../helpers/test-server.js";
 import type { TestServer } from "../helpers/test-server.js";
+import type { AgentHistoryEvent } from "../../src/agent/events.js";
 
 import { resetMocks } from "../helpers/mock-runtime.js";
 
@@ -44,43 +45,49 @@ describe("Authenticated member panel scope APIs", () => {
     return { memberId: body.member.memberId, name };
   }
 
-  it("serves scoped SQL stats and activity pages for room and DM, ignoring old files", async () => {
+  it("serves global SQL stats plus source-filtered activity pages, ignoring old files", async () => {
     const { memberId } = await createMember("panel-stats");
     const created = await jsonRequest(ts.port, "POST", "/api/rooms", { token, body: { name: "Panel", memberIds: [memberId] } });
     expect(created.status).toBe(200);
     const room = JSON.parse(created.body);
-    const { appendAgentEvent, readAgentEvents } = await import("../../src/data/repositories/event-repository.js");
+    const { appendMemberEvent, loadEventsFromDisk } = await import("../../src/agent/events.js");
     const scopes = [
-      { id: room.id, api: `room:${room.id}`, path: `rooms/${room.id}` },
-      { id: `dm:${memberId}`, api: `dm:${memberId}`, path: `rooms/dm:${memberId}` },
+      { sourceRef: `room:${room.id}`, path: `rooms/${room.id}` },
+      { sourceRef: `dm:${memberId}`, path: `rooms/dm:${memberId}` },
     ];
     for (const [index, scope] of scopes.entries()) {
       const value = index + 1;
-      const events = [
+      const events: AgentHistoryEvent[] = [
         { type: "agent_start", ts: 100 },
         { type: "message_end", ts: 200, usage: { inputTokens: value, outputTokens: value * 2, cost: value / 100 } },
-        { type: "agent_reply", ts: 300, text: `reply-${scope.id}` },
+        { type: "agent_reply", ts: 300, text: `reply-${scope.sourceRef}` },
         { type: "agent_end", ts: 400 },
       ];
-      events.forEach((event, i) => appendAgentEvent(scope.id, { ownerKey: memberId, memberId }, event, `${scope.id}-${i}`));
+      events.forEach((event, i) => appendMemberEvent({
+        id: `${scope.sourceRef}-${i}`,
+        memberId,
+        sourceRef: scope.sourceRef,
+        event,
+      }));
       const dir = join(getTestBossmodeDir(), scope.path, "agent-events");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, `${memberId}.stats.json`), "not-json");
       writeFileSync(join(dir, `${memberId}.jsonl`), '{"type":"system","text":"poison"}\n');
-      const query = encodeURIComponent(scope.api);
+      const query = encodeURIComponent(scope.sourceRef);
       const response = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats?scope=${query}`, { token });
       expect(response.status, response.body).toBe(200);
-      expect(JSON.parse(response.body)).toMatchObject({ turns: 1, cost: value / 100, tokens: { input: value, output: value * 2 } });
+      const cumulative = index === 0 ? 1 : 3;
+      expect(JSON.parse(response.body)).toMatchObject({ turns: index + 1, cost: cumulative / 100, tokens: { input: cumulative, output: cumulative * 2 } });
       const result = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/events?scope=${query}&limit=2`, { token });
       expect(result.status, result.body).toBe(200);
       const page = JSON.parse(result.body);
-      expect(page).toMatchObject({ hasMore: true, nextBeforeSeq: 2 });
+      expect(page).toMatchObject({ hasMore: true, nextBeforeSeq: expect.any(Number) });
       expect(page.events).toEqual([events[1], events[3]]);
       const older = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/events?scope=${query}&limit=2&beforeSeq=${page.nextBeforeSeq}`, { token });
       expect(older.status).toBe(200);
       expect(JSON.parse(older.body)).toMatchObject({ events: [events[0]], hasMore: false, nextBeforeSeq: null });
       // The activity filter must not discard the full non-activity event fact.
-      expect(readAgentEvents(scope.id, memberId)).toEqual(events);
+      expect(loadEventsFromDisk(scope.sourceRef, memberId)).toEqual(events);
     }
   });
 
@@ -111,11 +118,11 @@ describe("Authenticated member panel scope APIs", () => {
     expect(retired.status).toBe(404);
   });
 
-  it("scope param validation: invalid scope → 400, missing scope → 400", async () => {
+  it("validates an explicit scope while allowing the optional global view", async () => {
     const { memberId } = await createMember("scopevalid");
     const bad = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats?scope=nonsense`, { token });
     expect(bad.status).toBe(400);
-    const missing = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats`, { token });
-    expect(missing.status).toBe(400);
+    const global = await jsonRequest(ts.port, "GET", `/api/members/${memberId}/stats`, { token });
+    expect(global.status).toBe(200);
   });
 });

@@ -158,6 +158,26 @@ describe("current names in real rendered historical messages", () => {
     expect(hints.empty).toBe("");expect(hints.missing).toBe("");
     expect(Object.hasOwn(hints,"__proto__")).toBe(true);expect(hints["__proto__"]).toBe("");
   });
+  it("cold-loads archived final names by ID without confusing a new member that reused the old name", async () => {
+    const archived = Object.freeze({sender:"Alpha",senderMemberId:"mem_archived_alpha",content:"historical"});
+    const replacement = Object.freeze({sender:"Alpha",senderMemberId:"mem_replacement_alpha",content:"current"});
+    const fetchMock = vi.fn().mockResolvedValue({ok:true,json:async()=>({members:[
+      {id:archived.senderMemberId,name:"Alpha2"},
+      {id:replacement.senderMemberId,name:"Alpha"},
+    ]})});
+    vi.stubGlobal("fetch",fetchMock);
+    function View() {
+      directory.useMemberIdentityDirectory(true);
+      return createElement("div",null,
+        createElement(MessageBubble,{...archived,key:"archived"}),
+        createElement(MessageBubble,{...replacement,key:"replacement"}));
+    }
+    await act(async()=>root.render(createElement(View)));
+    expect(authorNames()).toEqual(["Alpha2","Alpha"]);
+    expect(archived.sender).toBe("Alpha");
+    expect(replacement.sender).toBe("Alpha");
+    expect(fetchMock).toHaveBeenCalledWith("/api/members/identities",expect.anything());
+  });
   it("shares directory loading, retains names on failure, retries and reloads on reconnect", async () => {
     vi.useFakeTimers({toFake:["setTimeout","setInterval","clearTimeout","clearInterval"]});
     const ok = (name: string) => ({ok:true,json:async()=>({members:[{id:"mem_directory",name}]})});
