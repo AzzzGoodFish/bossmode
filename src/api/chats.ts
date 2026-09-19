@@ -4,14 +4,14 @@ import {
   deleteRoom,
   getRoom,
   getRoomMembers,
-  inviteGlobalMember,
+  inviteRoomMember,
   listMmScopes,
   listRooms,
   normalizeRoomDocsPath,
   parseConversation,
   parseMmScopeId,
-  removeRoomMemberByRef,
-  resolveRoomMemberRef,
+  removeRoomMember,
+  resolveRoomMember,
   updateRoomDescription,
   updateRoomDocsPath,
   updateRoomName,
@@ -28,7 +28,7 @@ import {
   type MessageInput,
 } from "../chat/messages.js";
 import { attachmentExists, displayFilename, inferAttachmentPreviewType, type AttachmentLocation, type RoomMessageAttachment } from "../files/attachments.js";
-import { getMember, listMembers, resolveMemberRef } from "../member/identity.js";
+import { getMember, listMembers } from "../member/identity.js";
 import { logger } from "../kernel/logger.js";
 import { addRoute, HttpError, parseBody, requestUrl, requestValue, sendJson, type RouteHandler } from "./http.js";
 
@@ -138,18 +138,15 @@ function conversationTarget(rawScope: string, request: { url?: string }): Conver
     const member = getMember(ref.memberId);
     return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
   }
-  const memberRef = requestUrl(request).searchParams.get("memberId")
-    || requestUrl(request).searchParams.get("member") || "";
-  if (!memberRef) return null;
+  const memberId = requestUrl(request).searchParams.get("memberId") || "";
+  if (!memberId) return null;
   if (ref.kind === "room") {
     if (!getRoom(ref.roomId)) return null;
-    const member = resolveRoomMemberRef(ref.roomId, memberRef);
+    const member = resolveRoomMember(ref.roomId, memberId);
     return member ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
   }
-  const member = resolveMemberRef(memberRef);
-  return member && ref.memberIds.includes(member.id)
-    ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name }
-    : null;
+  const member = getMember(memberId);
+  return member && ref.memberIds.includes(member.id) ? { sourceRef: ref.scopeId, memberId: member.id, memberName: member.name } : null;
 }
 type TargetHandler = (request: Parameters<RouteHandler>[0], response: Parameters<RouteHandler>[1], target: ConversationTarget) => Promise<void>;
 function addTargetRoute(method: string, path: string, handler: TargetHandler): void {
@@ -206,7 +203,7 @@ addRoute("POST", "/api/rooms", async (request, response) => {
     return sendJson(response, 400, { error: "memberIds must contain stable member IDs" });
   }
   try {
-    const room = createRoom(body.name.trim(), undefined, body.memberIds as string[], undefined, {
+    const room = createRoom(body.name.trim(), body.memberIds as string[], {
       promptLeaderMemberId: body.leaderMemberId ?? undefined,
       docsPath: body.docsPath,
       description: body.description,
@@ -349,14 +346,12 @@ addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => 
   const body = await parseBody(request) as { memberId?: string };
   const member = body.memberId ? getMember(body.memberId) : null;
   if (!member) return sendJson(response, 404, { error: "Member not found" });
-  const result = inviteGlobalMember(params.id, { id: member.id, name: member.name, agentTemplate: member.agentTemplate });
+  const result = inviteRoomMember(params.id, member.id);
   if (!result.ok) return sendJson(response, result.code === "duplicate" ? 409 : 400, { error: result.error });
   sendJson(response, 200, getRoom(params.id));
 });
-addRoute("DELETE", "/api/rooms/:id/members/:memberRef", async (_request, response, params) => {
-  const member = resolveRoomMemberRef(params.id, params.memberRef);
-  if (!member) return sendJson(response, 404, { error: "Member is not in this room" });
-  const result = removeRoomMemberByRef(params.id, params.memberRef, { globalMemberId: member.sourceMemberId ?? member.id });
+addRoute("DELETE", "/api/rooms/:id/members/:memberId", async (_request, response, params) => {
+  const result = removeRoomMember(params.id, params.memberId);
   if (!result.ok) return sendJson(response, 404, { error: result.error });
   sendJson(response, 200, getRoom(params.id));
 });

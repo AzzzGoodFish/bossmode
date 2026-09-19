@@ -75,11 +75,6 @@ export function getRoomMembersFromRoom(room: Room): RoomMemberRecord[] {
 
 
 
-export function normalizeMemberName(name: string): string {
-  return name.trim();
-}
-
-
 export function slugifyRoomDocsPath(input: string): string {
   const slug = String(input || "")
     .trim()
@@ -122,15 +117,15 @@ export function roomMemberAssetRoots(roomId: string): string[] {
 
 /** Asset roots for any chat scope: rooms use their roster; dm/mm use the participant members. */
 export function chatScopeAssetRoots(scope: string): string[] {
-  const pair = parseMmScopeId(scope);
-  if (pair) return memberAssetRoots(pair);
-  if (scope.startsWith(DM_PREFIX)) return memberAssetRoots([scope.slice(DM_PREFIX.length)]);
-  const roomId = chatScopeRoomId(scope);
-  return roomId ? roomMemberAssetRoots(roomId) : [];
+  const ref = parseConversation(scope);
+  if (!ref) return [];
+  if (ref.kind === "mm") return memberAssetRoots(ref.memberIds);
+  if (ref.kind === "dm") return memberAssetRoots([ref.memberId]);
+  return roomMemberAssetRoots(ref.roomId);
 }
 
 /** Create membership and leadership together from existing stable contact IDs. */
-export function createRoom(name: string, _cwd: string | undefined, memberIds: string[], ruleDocs?: string[], opts?: {
+export function createRoom(name: string, memberIds: string[], opts?: {
   promptLeaderMemberId?: string;
   docsPath?: string | null;
   description?: string | null;
@@ -160,7 +155,6 @@ export function createRoom(name: string, _cwd: string | undefined, memberIds: st
     docsPath: normalizeRoomDocsPath(opts?.docsPath) || slugifyRoomDocsPath(name),
     ...(roomDescription ? { description: roomDescription } : {}),
     createdAt: Date.now(),
-    ...(ruleDocs?.length ? { ruleDocs } : {}),
   };
   // Working directories belong to member workspaces; cwd is not persisted.
   mkdirSync(roomDir(room.id), { recursive: true });
@@ -206,18 +200,8 @@ export function updateRoomDocsPath(roomId: string, docsPath: string | null): Roo
   });
 }
 
-function findRoomMemberByNameInRoom(room: Room, name: string): RoomMemberRecord | null {
-  const normalized = normalizeMemberName(name);
-  return getRoomMembersFromRoom(room).find((member) => member.name === normalized) || null;
-}
-
-function findRoomMemberByIdInRoom(room: Room, id: string): RoomMemberRecord | null {
-  return getRoomMembersFromRoom(room).find((member) => member.id === id) || null;
-}
-
-function findRoomMemberByRefInRoom(room: Room, ref: string): RoomMemberRecord | null {
-  const members = getRoomMembersFromRoom(room);
-  return members.find(member => member.id === ref) || members.find(member => member.name === normalizeMemberName(ref)) || null;
+function findRoomMemberByIdInRoom(room: Room, memberId: string): RoomMemberRecord | null {
+  return getRoomMembersFromRoom(room).find(member => member.id === memberId || member.sourceMemberId === memberId) || null;
 }
 
 export function getRoomMembers(roomId: string): RoomMemberRecord[] {
@@ -225,9 +209,9 @@ export function getRoomMembers(roomId: string): RoomMemberRecord[] {
   return room ? getRoomMembersFromRoom(room) : [];
 }
 
-export function resolveRoomMemberRef(roomId: string, ref: string): RoomMemberRecord | null {
+export function resolveRoomMember(roomId: string, memberId: string): RoomMemberRecord | null {
   const room = readStoredRoom(roomId);
-  return room ? findRoomMemberByRefInRoom(room, ref) : null;
+  return room ? findRoomMemberByIdInRoom(room, memberId) : null;
 }
 
 
@@ -305,62 +289,36 @@ function initializeMemberCursor(roomId: string, memberId: string): void {
  * 0.20 invite: attach an existing global member to a room (by mem_ id).
  * Uses stable identity from the member registry and replaces relational membership.
  */
-export function inviteGlobalMember(
+export function inviteRoomMember(
   roomId: string,
-  global: { id: string; name: string; agentTemplate: string },
-): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "invalid" | "duplicate" } {
-  return getDatabase().transaction((): ReturnType<typeof inviteGlobalMember> => {
+  memberId: string,
+): { ok: true; member: RoomMemberRecord } | { ok: false; error: string; code: "not_found" | "duplicate" } {
+  return getDatabase().transaction((): ReturnType<typeof inviteRoomMember> => {
     const room = getRoom(roomId);
     if (!room) return { ok: false, code: "not_found", error: "Room not found" };
-    if ((room.globalMemberIds || []).includes(global.id)) {
-      return { ok: false, code: "duplicate", error: "Member already in this room" };
-    }
-    const identity = conversationMember(global.id);
+    if ((room.globalMemberIds || []).includes(memberId)) return { ok: false, code: "duplicate", error: "Member already in this room" };
+    const identity = conversationMember(memberId);
     if (!identity) return { ok: false, code: "not_found", error: "Member not found" };
-    const memberName = identity.name;
-    if (getRoomMembersFromRoom(room).some((m) => m.name === memberName)) {
-      return { ok: false, code: "duplicate", error: "Member name already exists in this room" };
-    }
-    const agentName = identity.agentTemplate;
-    // Existing DB members join by ID. No room-local copies or second name rule.
-    room.globalMemberIds = [...(room.globalMemberIds || []), global.id];
+    room.globalMemberIds = [...(room.globalMemberIds || []), memberId];
     room.members = room.globalMemberIds.map(id => conversationMember(id)?.name).filter((name): name is string => Boolean(name));
     writeRoom(room);
-    initializeMemberCursor(roomId, global.id);
-    const synthesized = getRoomMembers(roomId).find((m) => m.id === global.id || m.sourceMemberId === global.id);
-    if (!synthesized) {
-      return {
-        ok: true,
-        member: {
-          id: global.id,
-          roomId,
-          name: memberName,
-          sourceAgent: agentName,
-          sourceMemberId: global.id,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      };
-    }
-    return { ok: true, member: synthesized };
+    initializeMemberCursor(roomId, memberId);
+    return { ok: true, member: { id: memberId, roomId, name: identity.name, sourceAgent: identity.agentTemplate,
+      sourceMemberId: memberId, createdAt: identity.createdAt, updatedAt: identity.updatedAt } };
   });
 }
 
-export function removeRoomMemberByRef(
+export function removeRoomMember(
   roomId: string,
-  memberRef: string,
-  opts?: { globalMemberId?: string },
+  memberId: string,
 ): { ok: true; removed: RoomMemberRecord } | { ok: false; error: string } {
-  return getDatabase().transaction((): ReturnType<typeof removeRoomMemberByRef> => {
+  return getDatabase().transaction((): ReturnType<typeof removeRoomMember> => {
     const room = getRoom(roomId);
     if (!room) return { ok: false, error: "Room not found" };
-    const member = findRoomMemberByRefInRoom(room, memberRef);
+    const member = findRoomMemberByIdInRoom(room, memberId);
     if (!member) return { ok: false, error: "Member is not in this room" };
-
-    const gid = opts?.globalMemberId
-      || (member.sourceMemberId?.startsWith("mem_") ? member.sourceMemberId : undefined)
-      || (member.id.startsWith("mem_") ? member.id : undefined)
-      || (memberRef.startsWith("mem_") ? memberRef : undefined);
+    const gid = member.sourceMemberId?.startsWith("mem_") ? member.sourceMemberId
+      : member.id.startsWith("mem_") ? member.id : undefined;
 
     // G3: membership authority is globalMemberIds
     if (gid) {
@@ -492,16 +450,6 @@ export function storageScopeId(value: string): string {
   const ref = parseConversation(value);
   if (!ref) throw new Error(`Invalid conversation: ${value}`);
   return ref.kind === "room" ? ref.roomId : ref.scopeId;
-}
-
-/**
- * Room id owning chat-scope assets (roster, attachments): `room:<id>` or a bare
- * room id → room id; DM scopes → null (no room-owned assets).
- */
-export function chatScopeRoomId(scopeOrRoomId: string): string | null {
-  if (scopeOrRoomId.startsWith(DM_PREFIX)) return null;
-  if (scopeOrRoomId.startsWith(MM_PREFIX)) return null;
-  return scopeOrRoomId.startsWith(ROOM_PREFIX) ? scopeOrRoomId.slice(ROOM_PREFIX.length) : scopeOrRoomId;
 }
 
 /** Wide member-id check: recognizes legacy `mem_<uuid>` and current `mem_<nanoid10>` ids. */
