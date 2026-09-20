@@ -425,10 +425,10 @@ export function wireInstanceEvents(instance: AgentInstance): void {
           }
         }
       }
-    } else if (event.type === "compaction_start") {
+    } else if (event.type === "compaction_start" || event.type === "context_recovery_start") {
       instance.compacting = true;
       transition(instance, sourceRef, memberName, "working", event.type);
-    } else if (event.type === "compaction_end") {
+    } else if (event.type === "compaction_end" || event.type === "context_recovery_end") {
       instance.compacting = false;
       if (!instance.turnActive) {
         transition(instance, sourceRef, memberName, "idle", event.type);

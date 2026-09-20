@@ -20,6 +20,7 @@ import { ModelCredentialBinding } from "../../config/pi-adapt/credentials.js";
 import { createBossmodeSdkTools } from "./tools.js";
 import { mapContextUsage, mapPiAgentEvent } from "./events.js";
 import { shutdownSdkSession } from "./compaction.js";
+import { ContextRecovery, isRecoveryBoundary } from "./context-recovery.js";
 import type { AgentRuntime, AgentHandle, AgentStreamEvent, CreateAgentOpts, ContextUsage, MemberActiveToolInfo, RuntimePromptOptions } from "../types.js";
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
 function classifyToolSource(name:string,bossmodeTools:ReadonlySet<string>,source?:{path?:string;source?:string;baseDir?:string}):string{
@@ -97,6 +98,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     modelRef:string,credentialId:string,
     bossmodeToolNames: Iterable<string>,
     executionOwner: { memberId: string; resolveSourceRef: () => string | null },
+    private contextRecovery: ContextRecovery,
     onTeardownSuccess?: () => void,
     private onSessionMaterialized?: (session: { sessionId?: string; sessionFile?: string }) => void,
     initialMcpConfig?: McpRuntimeSettings,
@@ -116,7 +118,7 @@ export class PiSdkAgentHandle implements AgentHandle {
         }
         if (raw.type === "compaction_end") this.manualCompactionOutcome.aborted = raw.aborted;
       }
-      const mapped = mapPiAgentEvent(raw);
+      const mapped = mapPiAgentEvent(raw, { automaticRecovery: true });
       if (mapped) this.emit(mapped);
       if (raw.type === "agent_start" && (this.promptAbortIntent?.aborted || this.destroyed)) {
         // SDK 0.82.1 creates activeRun before awaiting this public event. Re-abort
@@ -204,10 +206,11 @@ export class PiSdkAgentHandle implements AgentHandle {
   private async promptInternal(message:string,options?:RuntimePromptOptions):Promise<void>{
     this.promptAbortIntent={aborted:false};
     try{
+      this.contextRecovery.throwIfFailed();
       if(options?.beforeDispatch?.constructor.name==="AsyncFunction")throw new Error("SDK beforeDispatch hook must be synchronous; promises are not allowed");
       const attempt=this.dispatchExecution("input","pi-sdk:session.prompt",options?.beforeDispatch?attemptId=>options.beforeDispatch!({attemptId,dispatchIndex:0,message}):undefined);
       this.promptAttempt=attempt;if(this.promptAbortIntent.aborted||this.destroyed)attempt.interrupt("Runtime abort requested before SDK preflight");
-      await attempt.run(()=>this.session.prompt(message,{source:"external" as any})).catch(error=>{this.emit({type:"message_end",text:"",stopReason:"error",errorMessage:error.message||String(error)});throw error;});
+      await attempt.run(async()=>{await this.session.prompt(message,{source:"external" as any});this.contextRecovery.throwIfFailed();}).catch(error=>{this.emit({type:"message_end",text:"",stopReason:"error",errorMessage:error.message||String(error)});throw error;});
     }finally{this.promptAttempt=null;this.promptAbortIntent=null;this.publishSessionReferenceIfMaterialized();}
   }
 
@@ -311,7 +314,7 @@ export class PiSdkAgentHandle implements AgentHandle {
   async getContextUsage(): Promise<ContextUsage | null> {
     try {
       const raw=await this.session.getContextUsage();
-      return mapContextUsage(raw, this.modelRef);
+      return mapContextUsage(raw, this.modelRef, isRecoveryBoundary(this.contextRecovery.currentBoundary()));
     } catch (err) {
       logger.warn("runtime:pi-sdk", "getContextUsage failed", { error: String(err) });
       return null;
@@ -502,6 +505,7 @@ export class PiSdkRuntime implements AgentRuntime {
       // member-owned extensions/ dir entries are the only managed extensions.
       const activeExtensionPaths=[...opts.resources.extensionPaths,...(piConfig.extensionPaths??[])];
       const mcpFactory = await loadMcpFactory(mcpSettings.adapterPath!);
+      const contextRecovery = new ContextRecovery(sessionManager, opts.resolveSourceRef);
       const resourceLoader = new BossmodeResourceLoader({
         cwd: opts.cwd,
         agentDir: runtimeAgentDir,
@@ -510,12 +514,13 @@ export class PiSdkRuntime implements AgentRuntime {
         noSkills: true,
         additionalSkillPaths: skillPaths,
         additionalExtensionPaths: activeExtensionPaths,
-        extensionFactories: [mcpFactory],
+        extensionFactories: [mcpFactory, contextRecovery.extension],
         systemPrompt: promptSources.systemPrompt,
         appendSystemPrompt:promptSources.appendSystemPrompt,
       }, promptSources);
       await resourceLoader.reload();
       assertHostedMcpLoaded(resourceLoader);
+      contextRecovery.assertInstalled(resourceLoader);
       // DefaultResourceLoader.reload() reloads SettingsManager and clears its
       // in-memory overrides. Apply runtime transport afterwards, immediately
       // before the SDK session is created.
@@ -545,6 +550,7 @@ export class PiSdkRuntime implements AgentRuntime {
         excludeTools: ["bash"],
       });
       sessionObtained = session;
+      contextRecovery.install(session);
 
       authStorageCredentials.followSession(() => session.model);
       await bindMcpExtension(session, { configPath: mcpSettings.configPath, agent: opts.member.name });
@@ -563,6 +569,7 @@ export class PiSdkRuntime implements AgentRuntime {
         resolvedModel,piConfig.profile.id,
         customTools.map((t) => t.name),
         { memberId: opts.member.id, resolveSourceRef: opts.resolveSourceRef },
+        contextRecovery,
         () => this.handles.delete(handle),
         opts.onSessionChanged,
         mcpSettings,

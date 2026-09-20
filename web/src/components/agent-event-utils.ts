@@ -177,7 +177,18 @@ export function compactionEndDetail(event: AgentEvent): string {
   return truncateText(result?.summary ?? tokens, 78);
 }
 
-export function formatCompactionPreview(event: AgentEvent): string {
+export function formatContextBoundaryPreview(event: AgentEvent): string {
+  if (event.type === "context_recovery_start" || event.type === "context_recovery_end") {
+    return JSON.stringify({
+      reason: event.reason,
+      aborted: event.aborted,
+      willRetry: event.willRetry,
+      errorMessage: event.errorMessage,
+      tokensBefore: event.tokensBefore,
+      estimatedTokensAfter: event.estimatedTokensAfter,
+      recoveryPrompt: event.recoveryPrompt,
+    }, null, 2);
+  }
   const result = event.result !== undefined ? event.result : {
     reason: event.reason,
     aborted: event.aborted,
@@ -201,6 +212,14 @@ export function summarizeAgentEvent(event?: AgentEvent): ActionSummary {
       return { kind: "tool-error", label: `ERROR · ${tool.label}`, detail: truncateText(event.result ?? event.text ?? "failed", 78), ts };
     }
     return { kind: "tool-done", label: `DONE · ${tool.label}`, detail: tool.detail || truncateText(event.result ?? event.text ?? "completed", 78), ts };
+  }
+  if (event.type === "context_recovery_start") {
+    return { kind: "tool-running", label: "RESETTING CONTEXT", detail: compactionReasonLabel(event.reason), ts };
+  }
+  if (event.type === "context_recovery_end") {
+    if (event.errorMessage) return { kind: "tool-error", label: "CONTEXT RESET FAILED", detail: truncateText(event.errorMessage, 78), ts };
+    if (event.aborted) return { kind: "system", label: "CONTEXT RESET CANCELLED", detail: compactionReasonLabel(event.reason), ts };
+    return { kind: "tool-done", label: "RECOVERY REQUESTED", detail: "Context cleared; session and chat history remain available", ts };
   }
   if (event.type === "compaction_start") {
     return { kind: "tool-running", label: "COMPACTING · context", detail: compactionReasonLabel(event.reason), ts };
@@ -256,6 +275,7 @@ export function eventSearchText(event: AgentEvent): string {
     obj.file_path,
     obj.path,
     event.reason,
+    event.recoveryPrompt,
     event.errorMessage,
     event.text,
     event.thinking,
@@ -267,8 +287,9 @@ export function isToolEvent(event: AgentEvent): boolean {
   return event.type === "tool_start" || event.type === "tool_end";
 }
 
-export function isCompactionEvent(event: AgentEvent): boolean {
-  return event.type === "compaction_start" || event.type === "compaction_end";
+export function isContextBoundaryEvent(event: AgentEvent): boolean {
+  return event.type === "compaction_start" || event.type === "compaction_end" ||
+    event.type === "context_recovery_start" || event.type === "context_recovery_end";
 }
 
 export function isReplyEvent(event: AgentEvent): boolean {
