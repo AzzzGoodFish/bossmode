@@ -156,8 +156,9 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
 describe("Workspace prompt chapter", () => {
   it("compile carries the Workspace chapter (per-chat current-workspace line retired with prompt v2)", async () => {
     seedMemberDir();
-    const { previewMemberPrompt } = await import("../../src/app/member-actions.js");
-    const compiled = previewMemberPrompt(MEMBER);
+    const { loadMemberPromptSource } = await import("../../src/app/member-actions.js");
+    const { compileMemberPrompt } = await import("../../src/agent/prompt.js");
+    const compiled = compileMemberPrompt(loadMemberPromptSource(MEMBER));
     expect(compiled.fullPrompt).toContain("## Workspace");
     expect(compiled.fullPrompt).toContain("workspace_list");
     expect(compiled.fullPrompt).not.toContain("Current workspace:");

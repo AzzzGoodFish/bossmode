@@ -121,9 +121,6 @@ export function loadMemberPromptSource(memberId: string, contextWindowTokens = 1
     archiveAvailable: directoryHasReadableEntries(memberArchiveDir(memberId)),
   };
 }
-export function previewMemberPrompt(memberId: string, contextWindowTokens?: number) {
-  return compileMemberPrompt(loadMemberPromptSource(memberId, contextWindowTokens));
-}
 export type MemberSystemPromptRead =
   | { available: true; text: string; contractFingerprint: string }
   | { available: false; reason: "instance_not_running" };
