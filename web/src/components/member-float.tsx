@@ -694,7 +694,7 @@ export function SystemPromptSection({ member, scope, liveStatus }: {
       ) : doc === null ? (
         <div className={assetEmptyClass}>Loading…</div>
       ) : !doc.available ? (
-        <div className={assetEmptyClass}>成员运行后才有内容</div>
+        <div className={assetEmptyClass}>Run this member to view its system prompt.</div>
       ) : (
         <div className="rounded-lg border border-line-soft bg-inset/50 px-3 py-2 max-h-[340px] overflow-y-auto">
           <div className="whitespace-pre-wrap font-mono text-[11.5px] text-ink-3 leading-relaxed">{doc.text}</div>

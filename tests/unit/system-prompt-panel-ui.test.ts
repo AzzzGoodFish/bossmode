@@ -102,7 +102,7 @@ describe("live system prompt panel", () => {
       scopeId: scope.scopeId,
     });
     await render("inactive");
-    expect(container.textContent).toContain("成员运行后才有内容");
+    expect(container.textContent).toContain("Run this member to view its system prompt.");
     expect(hasCopyButton()).toBe(false);
 
     api.getMemberSystemPrompt.mockResolvedValueOnce({
@@ -132,7 +132,7 @@ describe("live system prompt panel", () => {
       scopeId: scope.scopeId,
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
-    expect(container.textContent).toContain("成员运行后才有内容");
+    expect(container.textContent).toContain("Run this member to view its system prompt.");
     expect(container.textContent).not.toContain("SDK current prompt with cwd and skills");
     expect(hasCopyButton()).toBe(false);
   });
