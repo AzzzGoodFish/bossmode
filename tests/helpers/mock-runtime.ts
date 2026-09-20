@@ -42,8 +42,9 @@ export function resetMocks(): void {
 
 export class MockAgentHandle implements AgentHandle {
   private listeners = new Set<(event: AgentStreamEvent) => void>();
+  private destroyed = false;
 
-  constructor() {
+  constructor(public systemPrompt = "Mock system prompt") {
     liveHandles.push(this);
   }
 
@@ -75,6 +76,8 @@ export class MockAgentHandle implements AgentHandle {
   async refreshModelRegistry():Promise<void>{}
   setThinkingLevel():void{}
   async getContextUsage():Promise<ContextUsage|null>{return null;}
+  async readSystemPrompt():Promise<string|null>{await Promise.resolve();return this.destroyed?null:this.systemPrompt;}
+  isDestroyed():boolean{return this.destroyed;}
   refreshPrompt():void{}
   getActiveTools():MemberActiveToolInfo[]{return [];}
 
@@ -86,9 +89,10 @@ export class MockAgentHandle implements AgentHandle {
     return Promise.resolve();
   }
 
-  async destroyAndWait(): Promise<void> { this.abort(); await this.waitForIdle(); this.destroy(); }
+  async destroyAndWait(): Promise<void> { this.destroyed = true; this.abort(); await this.waitForIdle(); this.destroy(); }
 
   destroy(): void {
+    this.destroyed = true;
     this.listeners.clear();
     const index = liveHandles.indexOf(this);
     if (index >= 0) liveHandles.splice(index, 1);

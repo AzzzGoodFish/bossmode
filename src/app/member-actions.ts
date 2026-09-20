@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDatabase, type Database } from "../data/database.js";
@@ -55,7 +56,7 @@ export function createMemberWithPersona(input: CreateMemberInput, persona: strin
 }
 
 import { MemberArchiveService } from "../member/archive.js";
-import {quiesceMember,switchMemberModel,switchMemberThinkingLevel} from "../agent/controls.js";
+import {quiesceMember,readAgentSystemPrompt,switchMemberModel,switchMemberThinkingLevel} from "../agent/controls.js";
 
 /** Session build material for the agent core: member config projection, resolved
  *  skill paths, workspace root and the stored session to resume. Assembled here
@@ -122,6 +123,16 @@ export function loadMemberPromptSource(memberId: string, contextWindowTokens = 1
 }
 export function previewMemberPrompt(memberId: string, contextWindowTokens?: number) {
   return compileMemberPrompt(loadMemberPromptSource(memberId, contextWindowTokens));
+}
+export type MemberSystemPromptRead =
+  | { available: true; text: string; contractFingerprint: string }
+  | { available: false; reason: "instance_not_running" };
+/** Read the prompt owned by the currently published runtime instance. */
+export async function readMemberSystemPrompt(memberId:string):Promise<MemberSystemPromptRead>{
+  requireMember(memberId);
+  const result=await readAgentSystemPrompt(memberId);
+  if(!result.available)return result;
+  return {...result,contractFingerprint:createHash("sha1").update(result.text,"utf8").digest("hex")};
 }
 
 import { acceptAgentAdmission, acceptControlInput, waitForInputSettlement, pumpRuntimeInputs, wakeAgent } from "../agent/scheduler.js";

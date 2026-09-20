@@ -63,6 +63,10 @@ export interface AgentHandle {
   refreshModelRegistry(opts?: { allowNetwork?: boolean }): void | Promise<void>;
   setThinkingLevel(level: string): void;
   getContextUsage(): Promise<ContextUsage | null>;
+  /** Read the SDK session's current prompt without constructing or refreshing it. */
+  readSystemPrompt(): Promise<string | null>;
+  /** Lifecycle guard for reads while an instance is being torn down. */
+  isDestroyed(): boolean;
   refreshPrompt(opts: { agentPrompt: string; appendSystemPrompt: string[] }): void;
   getActiveTools(): MemberActiveToolInfo[];
 }

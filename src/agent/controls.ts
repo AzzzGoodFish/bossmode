@@ -59,6 +59,25 @@ export async function refreshAgentContextUsage(memberId:string):Promise<ContextU
   const key=instanceKey(memberId),instance=instances.get(key);if(!instance)return null;
   const usage=await instance.handle.getContextUsage();if(!usage||instances.get(key)!==instance)return null;contextUsageCache.set(key,usage);return usage;
 }
+export type AgentSystemPromptRead =
+  | { available: true; text: string }
+  | { available: false; reason: "instance_not_running" };
+export async function readAgentSystemPrompt(memberId:string):Promise<AgentSystemPromptRead>{
+  const key=instanceKey(memberId),instance=instances.get(key);
+  if(!instance)return {available:false,reason:"instance_not_running"};
+  const handle=instance.handle;
+  let text:string|null;
+  try{text=await handle.readSystemPrompt();}
+  catch(error){
+    if(handle.isDestroyed()||instances.get(key)!==instance)return {available:false,reason:"instance_not_running"};
+    throw error;
+  }
+  // Rebuild currently keeps the old instance published while awaiting teardown.
+  // Both handle lifetime and instance identity must still match after the async read.
+  if(text===null||handle.isDestroyed()||instances.get(key)!==instance||instance.handle!==handle)
+    return {available:false,reason:"instance_not_running"};
+  return {available:true,text};
+}
 export function getMemberActiveTools(memberId:string):{sessionActive:boolean;tools:MemberActiveToolInfo[];message?:string}{
   const handle=instances.get(instanceKey(memberId))?.handle;if(!handle)return {sessionActive:false,tools:[],message:"Start or Reload this member to see active tools."};return {sessionActive:true,tools:handle.getActiveTools()||[]};
 }

@@ -318,6 +318,17 @@ export class PiSdkAgentHandle implements AgentHandle {
     }
   }
 
+  isDestroyed(): boolean { return this.destroyed; }
+
+  async readSystemPrompt(): Promise<string | null> {
+    // Yield before the read so teardown requested in the same turn wins. The
+    // public SDK getter is the sole prompt authority; never rebuild its text.
+    await Promise.resolve();
+    if (this.destroyed) return null;
+    const text = this.session.systemPrompt;
+    return this.destroyed ? null : text;
+  }
+
   getActiveTools(): MemberActiveToolInfo[] {
     if (this.destroyed) return [];
     try {
