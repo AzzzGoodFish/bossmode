@@ -293,7 +293,7 @@ export class PiSdkAgentHandle implements AgentHandle {
     if (!profile || !profile.enabled || profile.providerSlug !== provider) {
       throw new Error(`Invalid credential binding for ${modelRef}`);
     }
-    await this.credentials.runProfile(profile, () => refreshDatabaseModelRuntime(this.session.modelRuntime, profile.id));
+    await this.credentials.runProfile(profile, () => refreshDatabaseModelRuntime(this.session.modelRuntime, profile.id, { skipUnchanged: true }));
     if (this.destroyed) throw new Error("Runtime instance is destroyed");
     const found = this.modelRegistry.find(provider, modelId);
     if (!found) throw new Error(`Model not found: ${modelRef}`);

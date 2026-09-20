@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { ensureDmScope, ensureMmScope, mmScopeIdOf, parseMmScopeId, storeRoom } from "../src/chat/conversations.js";
 import { setUserReadCursor } from "../src/chat/cursors.js";
 import {
   importMessage,
+  countUserUnreadAndMention,
+  readMessages,
   pageMessages,
   queryMessages,
   readConversationListState,
@@ -78,6 +80,21 @@ describe("canonical member chat queries", () => {
 });
 
 describe("conversation list read model", () => {
+  it("matches legacy mixed-sequence cursor semantics without hydrating history", () => {
+    const { fixture, scope } = setup();
+    importMessage(fixture.db, scope, { id: "unsequenced", ts: 7000, sender: "Alpha", content: "legacy @Fish", mentions: [] });
+    const messages = readMessages(scope, fixture.db);
+    const all = vi.spyOn(fixture.db, "all");
+    for (const [messageId, seq] of [[null, null], ["m3", null], ["gone", null], ["m1", 3], [null, 6], [null, 99]] as const) {
+      setUserReadCursor(scope, { messageId, seq }, fixture.db);
+      for (const login of ["fish", "Fish", ""]) {
+        expect(readConversationListState(scope, login, fixture.db)).toMatchObject(countUserUnreadAndMention(messages, messageId, seq, login));
+      }
+    }
+    expect(all).not.toHaveBeenCalled();
+    all.mockRestore();
+  });
+
   it("uses one ordered canonical member-private scope and rejects malformed pairs", () => {
     expect(mmScopeIdOf("mem_beta", "mem_alpha")).toBe("mm:mem_alpha-mem_beta");
     expect(parseMmScopeId("mm:mem_alpha-mem_beta")).toEqual(["mem_alpha", "mem_beta"]);

@@ -1,5 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
+import { terminalToolResult } from "./tool-output.js";
 import { renderQueryRowsForMember } from "../tools.js";
 import {
   DIRECT_TOOL_SPECS,
@@ -157,12 +158,12 @@ export function createBossmodeSdkTools(opts: {
     // shadow pi's built-ins by name; relative paths follow the active
     // workspace root). File tool results pass through untouched so image
     // content blocks survive.
-    ...(["workspace_list","workspace_create","workspace_use","workspace_remove","terminal_create","terminal_read","terminal_list","terminal_close","reload"] as const).map(name=>defineTool({
+    ...(["workspace_list","workspace_create","workspace_use","workspace_remove","terminal_create","terminal_list","terminal_close","reload"] as const).map(name=>defineTool({
       ...specOf(name),execute:async(_id,params)=>textResult(truncate(JSON.stringify(await call(name,params as any),null,2))),
     })),
     ...(["read","write","edit"] as const).map(name=>defineTool({...specOf(name),execute:async(_id,params)=>(await call(name,params as any)) as any})),
-    ...(["terminal_exec","terminal_wait"] as const).map(name=>defineTool({
-      ...specOf(name),execute:async(_id,params,signal)=>textResult(truncate(JSON.stringify(await call(name,params as any,signal),null,2))),
+    ...(["terminal_exec","terminal_read","terminal_wait"] as const).map(name=>defineTool({
+      ...specOf(name),execute:async(_id,params,signal)=>terminalToolResult(await call(name,params as any,signal)),
     })),
   ];
 

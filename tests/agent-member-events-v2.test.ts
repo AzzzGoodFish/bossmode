@@ -1,12 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { MockAgentHandle } from "./helpers/mock-runtime.js";
 import { instances, instanceKey, type AgentInstance } from "../src/agent/instance.js";
 import { wireInstanceEvents } from "../src/agent/scheduler.js";
-import { appendMemberEvent, handleAgentEvent, importHistoricalEvent, readAgentEvent, readStats, readUsageRows, rebuildEventAggregates } from "../src/agent/events.js";
+import { appendMemberEvent, handleAgentEvent, importHistoricalEvent, loadEventsPaginated, loadEventsFromDisk, pageActivity, setAgentEventSink, readAgentEvent, readStats, readUsageRows, rebuildEventAggregates } from "../src/agent/events.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
 afterEach(() => {
+  setAgentEventSink(undefined);
   instances.clear();
   for (const fixture of fixtures.splice(0)) fixture.close();
 });
@@ -35,6 +36,64 @@ function liveInstance(handle: MockAgentHandle): AgentInstance {
 }
 
 describe("member event facts v2", () => {
+  it("pages historical order plus live facts without parsing off-page payloads", () => {
+    const fixture = setup();
+    const sourceRef = "room:rm_events";
+    for (const seq of [3, 1, 2]) importHistoricalEvent(fixture.db, {
+      id: `old-${seq}`, sourceKey: "old", ownerKey: "owner", sourceSeq: seq,
+      memberId: "mem_events", sourceRef, event: { type: "system", text: `old-${seq}` }, ts: seq,
+    });
+    appendMemberEvent({ id: "new", memberId: "mem_events", sourceRef, event: { type: "system", text: "new", ts: 4 } });
+    const all = loadEventsFromDisk(sourceRef, "mem_events");
+    for (const before of [undefined, 3, 1, 0, -1, 100]) {
+      const end = before === undefined ? all.length : Math.max(0, Math.min(before, all.length));
+      expect(loadEventsPaginated(sourceRef, "mem_events", 2, before)).toEqual({
+        events: all.slice(Math.max(0, end - 2), end), total: 4, hasMore: end > 2,
+      });
+    }
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      expect(loadEventsPaginated(sourceRef, "mem_events", 1).events).toEqual([all[3]]);
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally { parse.mockRestore(); }
+  });
+
+  it("preserves oversized event payloads and tool identity in history, activity and broadcasts", async () => {
+    const fixture = setup();
+    const sourceRef = "room:rm_events";
+    const result = "界".repeat(400_000);
+    appendMemberEvent({ id: "huge", memberId: "mem_events", sourceRef, event: {
+      type: "tool_end", toolName: "read", toolCallId: "call", result, isError: false,
+    } });
+    const page = loadEventsPaginated(sourceRef, "mem_events", 80);
+    expect(page.events[0]).toMatchObject({ type: "tool_end", toolName: "read", toolCallId: "call", result, isError: false });
+    expect(page.events[0]).not.toHaveProperty("truncated");
+    expect(pageActivity("mem_events").events).toEqual(page.events);
+    const sent: unknown[] = [];
+    setAgentEventSink((_source, _member, payload) => sent.push(payload.event));
+    await new Promise<void>(resolve => queueMicrotask(resolve));
+    expect(sent).toEqual(page.events);
+    expect(readAgentEvent("huge", fixture.db)?.event).toMatchObject({ result });
+  });
+
+  it("preserves large transient tool and message updates during WebSocket delivery", () => {
+    setup();
+    const sent: unknown[] = [];
+    setAgentEventSink((_source, _member, payload) => sent.push(payload.event));
+    const partialResult = { content: [{ type: "text", text: "x".repeat(1_000_000) }] };
+    handleAgentEvent("room:rm_events", "Events", "instance", {
+      type: "tool_update", toolName: "read", toolCallId: "call", partialResult,
+    }, [], "mem_events");
+    const text = "text".repeat(10_000), thinking = "thought".repeat(10_000);
+    handleAgentEvent("room:rm_events", "Events", "instance", { type: "message_update", text, thinking }, [], "mem_events");
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ type: "tool_update", toolName: "read", toolCallId: "call", partialResult });
+    expect((sent[0] as { partialResult: unknown }).partialResult).toBe(partialResult);
+    expect(sent[1]).toMatchObject({ type: "message_update", text, thinking });
+    // Seal this test's stream so later fixtures cannot inherit its deltas.
+    handleAgentEvent("room:rm_events", "Events", "instance", { type: "message_end" }, [], "mem_events");
+  });
+
   it("persists source-less lifecycle without creating routed outbox work", () => {
     const fixture = setup();
     const handle = new MockAgentHandle();

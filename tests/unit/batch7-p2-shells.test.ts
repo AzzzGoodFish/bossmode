@@ -4,7 +4,8 @@
  * dead honesty, member scoping. These tests spawn REAL terminals (node-pty).
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { createBossmodeSdkTools } from "../../src/agent/runtime/tools.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +31,77 @@ async function fresh() {
 }
 
 describe("persistent terminal (real PTY)", () => {
+  it("SDK exec/read/wait spill complete output past ring eviction, with files readable after close", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) throw new Error(created.error);
+    const terminalId = created.terminalId;
+    await sm.execInShell({ memberId: "mem_sh", shell: terminalId, command: "echo READY", blockUntilMs: 8000 });
+    const tools = createBossmodeSdkTools({ memberId: "mem_sh", resolveSourceRef: () => null });
+    const files = new Set<string>();
+    const run = async (name: string, params: Record<string, unknown>, signal?: AbortSignal) => {
+      const result = await tools.find(tool => tool.name === name)!.execute(name, params, signal) as any;
+      if (result.details.fullOutputPath) files.add(result.details.fullOutputPath);
+      expect(Buffer.byteLength(result.content[0].text)).toBeLessThanOrEqual(50 * 1024);
+      return JSON.parse(result.content[0].text);
+    };
+    try {
+      const done = await run("terminal_exec", { terminalId, command: "seq 1 12000; false", blockSeconds: 8 });
+      expect(done).toMatchObject({ ok: true, status: "done", exitCode: 1, outputTruncated: true });
+      const raw = await sm.waitShell({ memberId: "mem_sh", shell: terminalId, exec: done.exec });
+      if (!raw.ok || raw.status !== "done") throw new Error("Command did not finish");
+      expect(readFileSync(done.fullOutputPath, "utf8")).toBe(raw.output);
+      expect(raw.output.slice(0, 8)).toMatch(/^\r?1\r?\n/);
+      expect(raw.output.slice(-16)).toMatch(/12000\r?\n$/);
+      const waited = await run("terminal_wait", { terminalId, exec: done.exec });
+      expect(waited).toMatchObject({ status: "done", exitCode: 1, outputTruncated: true });
+      expect(readFileSync(waited.fullOutputPath, "utf8")).toBe(raw.output);
+      const read = await run("terminal_read", { terminalId, exec: done.exec });
+      expect(read).toMatchObject({ status: "done", exitCode: 1, outputTruncated: true, truncated: false });
+      const fullLines = readFileSync(read.fullOutputPath, "utf8").split("\n");
+      expect(fullLines).toHaveLength(12000);
+      expect(fullLines[0]).toBe(`${done.lineStart}: ${raw.output.split("\n")[0]}`);
+      expect(fullLines.at(-1)).toBe(`${done.lineEnd}: 12000\r`);
+      const ring = sm.readShell({ memberId: "mem_sh", shell: terminalId, fromLine: done.lineStart });
+      expect(ring.ok && ring.truncated).toBe(true);
+      await sm.closeShell("mem_sh", terminalId);
+      const recovered = await tools.find(tool => tool.name === "read")!.execute("recover", { path: done.fullOutputPath, workspace: "original", offset: 11999, limit: 2 }) as any;
+      expect(recovered.content[0].text).toContain("11999\r\n12000");
+    } finally { for (const path of files) rmSync(path, { force: true }); }
+  }, 15000);
+
+  it("an aborted SDK wait returns bounded progress without stopping the command or losing its final output", async () => {
+    const sm = await fresh();
+    const created = await sm.createShell({ memberId: "mem_sh" });
+    if (!created.ok) throw new Error(created.error);
+    const terminalId = created.terminalId;
+    const started = await sm.execInShell({ memberId: "mem_sh", shell: terminalId, command: "seq 1 4000; sleep 1; echo FINISHED", blockUntilMs: 0 });
+    if (!started.ok) throw new Error(started.error);
+    await vi.waitFor(() => {
+      const read = sm.readShell({ memberId: "mem_sh", shell: terminalId, exec: started.exec });
+      expect(read.ok && read.lines.length).toBeGreaterThanOrEqual(4000);
+    });
+    const tools = createBossmodeSdkTools({ memberId: "mem_sh", resolveSourceRef: () => null });
+    const wait = tools.find(tool => tool.name === "terminal_wait")!;
+    const files = new Set<string>();
+    const controller = new AbortController();
+    try {
+      const pending = wait.execute("wait", { terminalId, exec: started.exec, blockSeconds: 0 }, controller.signal);
+      controller.abort();
+      const early = await pending as any;
+      if (early.details.fullOutputPath) files.add(early.details.fullOutputPath);
+      const progress = JSON.parse(early.content[0].text);
+      expect(progress).toMatchObject({ status: "running", outputTruncated: true });
+      expect(Buffer.byteLength(early.content[0].text)).toBeLessThanOrEqual(50 * 1024);
+      const done = await wait.execute("finish", { terminalId, exec: started.exec, blockSeconds: 0 }) as any;
+      if (done.details.fullOutputPath) files.add(done.details.fullOutputPath);
+      const final = JSON.parse(done.content[0].text);
+      expect(final).toMatchObject({ status: "done", exitCode: 0, outputTruncated: true });
+      expect(readFileSync(final.fullOutputPath, "utf8")).toContain("FINISHED");
+      expect(readFileSync(progress.fullOutputPath, "utf8")).not.toContain("FINISHED");
+    } finally { for (const path of files) rmSync(path, { force: true }); }
+  }, 15000);
+
   it("one multiline submission stays busy through its last command and preserves shell state", async () => {
     const sm = await fresh();
     const created = await sm.createShell({ memberId: "mem_sh" });

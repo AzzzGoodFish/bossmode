@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { awaitResourceClose, memberTerminalWorkspace, createShell, execInShell, readShell, waitShell, listShells, closeShell, type TerminalWorkspace } from "./terminal.js";
 import { memberRuntimeAllowed } from "./instance.js";
 import { logger } from "../kernel/logger.js";
+import { readTextOutput, TOOL_OUTPUT_LIMIT } from "./runtime/tool-output.js";
 export const PARAM_DESCRIPTIONS = {
   workspaceId: "Optional workspace id (see workspace_list). Omit to use the active workspace.",
   sshHost: "Remote host (hostname or IP).",
@@ -41,7 +42,7 @@ export const PARAM_DESCRIPTIONS = {
   workspaceDescription: "Short human-readable description.",
   filePath: "File path — relative paths resolve against the selected workspace.",
   fileOffset: "Line number to start from (1-indexed).",
-  fileLimit: "Maximum lines to read (default 2000).",
+  fileLimit: `Maximum lines to read (output capped at ${TOOL_OUTPUT_LIMIT}).`,
   fileContent: "Full file content to write.",
   fileEdits: "Exact-match text replacements to apply in order.",
   fileEditOldText: "Exact text to find; it must match exactly once.",
@@ -116,13 +117,13 @@ search locates; read opens the context — feed a hit's seq to chat_read around_
   directSpec("workspace_create","Workspace Create",`Register an ssh workspace (remote machine + directory). Use the id later in file tools via the workspace parameter, or make it active with workspace_use.`,parameterSchema("id:s host:s user:s port?:n keyPath?:s root?:s description?:s",{id:"workspaceRegistrationId",description:"workspaceDescription"})),
   directSpec("workspace_use","Workspace Use",`Switch your active workspace. Relative paths in read/write/edit resolve against the active workspace root.`,parameterSchema("id:s",{id:"workspaceTargetId"})),
   directSpec("workspace_remove","Workspace Remove",`Remove a workspace by id. The builtin original workspace cannot be removed.`,parameterSchema("id:s",{id:"workspaceTargetId"})),
-  directSpec("read","Read File",`Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s offset?:n limit?:n workspace?:s",{path:"filePath",offset:"fileOffset",limit:"fileLimit"})),
+  directSpec("read","Read File",`Read a text file (or image on the original workspace). Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace. Text output is capped at ${TOOL_OUTPUT_LIMIT}. Use the returned offset to continue; oversized single lines include a terminal_exec fallback.`,parameterSchema("path:s offset?:n limit?:n workspace?:s",{path:"filePath",offset:"fileOffset",limit:"fileLimit"})),
   directSpec("write","Write File",`Write a file, creating parent directories as needed. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s content:s workspace?:s",{path:"filePath",content:"fileContent"})),
   directSpec("edit","Edit File",`Apply exact-match text replacements to a file. Every edit's oldText must match exactly once. Relative paths resolve against the active workspace root; pass workspace (id) to target another workspace.`,parameterSchema("path:s edits:edits workspace?:s",{path:"filePath",edits:"fileEdits"})),
   directSpec("terminal_create","Terminal Create",`Open a persistent terminal in a workspace. cwd and environment persist across commands; long-running processes keep running between tool calls. Defaults to the active workspace.`,parameterSchema("name?:s workspace?:s cwd?:s",{name:"terminalName"})),
-  directSpec("terminal_exec","Terminal Exec",`Run a command in a persistent terminal and get its exact output plus exit code. Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,parameterSchema("terminalId:s command?:s keys?:s blockSeconds?:n",{terminalId:"terminalId"})),
-  directSpec("terminal_read","Terminal Read",`Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads.`,parameterSchema("terminalId:s exec?:s fromLine?:n toLine?:n",{terminalId:"terminalId",exec:"terminalExecId",fromLine:"terminalFromLine",toLine:"terminalToLine"})),
-  directSpec("terminal_wait","Terminal Wait",`Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion.`,parameterSchema("terminalId:s exec:s blockSeconds?:n",{terminalId:"terminalId",exec:"terminalExecId",blockSeconds:"terminalWaitBlockSeconds"})),
+  directSpec("terminal_exec","Terminal Exec",`Run a command in a persistent terminal and get its output plus exit code. Output is capped at ${TOOL_OUTPUT_LIMIT}; oversized output returns the tail and a full-output snapshot path (read with workspace=original). Commands that take longer than blockSeconds (default 10, in seconds) return as running — collect the rest later with terminal_read. keys sends a control key (ctrl-c, ctrl-z, ctrl-d) instead of a command. One command at a time per terminal: while an exec is running, a new command is rejected with the current exec id — wait (terminal_wait), read (terminal_read), send ctrl-c, or use another terminal for independent work.`,parameterSchema("terminalId:s command?:s keys?:s blockSeconds?:n",{terminalId:"terminalId"})),
+  directSpec("terminal_read","Terminal Read",`Read output from a persistent terminal: by exec id (its exact output lines) or by absolute line range. Line numbers are the stable reference standard across reads. Output is capped at ${TOOL_OUTPUT_LIMIT}; oversized output returns the tail and a full-output snapshot path (read with workspace=original).`,parameterSchema("terminalId:s exec?:s fromLine?:n toLine?:n",{terminalId:"terminalId",exec:"terminalExecId",fromLine:"terminalFromLine",toLine:"terminalToLine"})),
+  directSpec("terminal_wait","Terminal Wait",`Wait for a command (exec) on a persistent terminal to finish. Done returns its exit code, line range and output; if the wait budget runs out first it returns running with the progress so far — wait again or snapshot with terminal_read. Default wait 30 seconds; blockSeconds 0 waits until completion. Output is capped at ${TOOL_OUTPUT_LIMIT}; oversized output returns the tail and a full-output snapshot path (read with workspace=original).`,parameterSchema("terminalId:s exec:s blockSeconds?:n",{terminalId:"terminalId",exec:"terminalExecId",blockSeconds:"terminalWaitBlockSeconds"})),
   directSpec("terminal_list","Terminal List",`List your terminals with running exec, alive state, and buffered line counts.`,parameterSchema("")),
   directSpec("terminal_close","Terminal Close",`Close a terminal and kill its process. Running commands receive a close signal.`,parameterSchema("terminalId:s",{terminalId:"terminalId"})),
   directSpec("reload","Reload",`Rebuild your session in the current scope with freshly loaded assets (persona, skills, MCP, extensions, model config). Conversation history is preserved. Use after editing your persona.md, skills, or mcp.json. Queued until your current turn finishes if you are mid-run.`,parameterSchema("")),
@@ -340,8 +341,8 @@ export async function workspaceReadTool(memberId: string, args: { path?: string;
   const resolution = resolveWorkspacePath(memberId, String(args.path ?? ""), args.workspace);
   if ("error" in resolution) return toolError(resolution.error);
   const { workspace, path } = resolution;
-  const offset = args.offset && args.offset > 0 ? args.offset : 1;
-  const limit = args.limit && args.limit > 0 ? args.limit : 2000;
+  const offset = args.offset && args.offset > 0 ? Math.floor(args.offset) || 1 : 1;
+  const limit = args.limit && args.limit > 0 ? Math.max(1, Math.floor(args.limit)) : undefined;
   try {
     const ext=path.slice(path.lastIndexOf(".")).toLowerCase(),image=workspace.kind==="original"&&IMAGE_EXTENSIONS.has(ext);
     const buf=await readWorkspaceBytes(memberId,workspace,path,image||workspace.kind==="ssh"?MAX_READ_BYTES:Number.MAX_SAFE_INTEGER);
@@ -349,9 +350,8 @@ export async function workspaceReadTool(memberId: string, args: { path?: string;
       const mimeType=ext===".jpg"||ext===".jpeg"?"image/jpeg":ext===".png"?"image/png":ext===".gif"?"image/gif":ext===".webp"?"image/webp":"image/bmp";
       return {content:[{type:"image",data:buf.toString("base64"),mimeType}],details:{path,workspace:workspace.id,bytes:buf.length}};
     }
-    const lines=buf.toString("utf-8").split("\n"),sliced=lines.slice(offset-1,offset-1+limit);
-    const note=offset-1+limit<lines.length?`\n[${sliced.length} of ${lines.length} lines shown — pass offset=${offset+limit} for more]`:"";
-    return textResult(sliced.join("\n")+note,{path,workspace:workspace.id,lines:sliced.length,...(workspace.kind==="ssh"?{remote:true}:{})});
+    const result = readTextOutput(buf.toString("utf-8"), path, offset, limit);
+    return textResult(result.text, { path, workspace: workspace.id, ...result.details, ...(workspace.kind === "ssh" ? { remote: true } : {}) });
   } catch (err: any) {
     logger.warn("file-tools", "read failed", { memberId, workspace: workspace.id, path, error: String(err?.message || err) });
     return toolError(err?.message || String(err));

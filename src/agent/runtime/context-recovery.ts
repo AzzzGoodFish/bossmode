@@ -18,10 +18,17 @@ type RecoveryHookResult = { cancel?: boolean; compaction?: Awaited<ReturnType<Ag
 /** The complete work log remains on disk; only its active context is replaced. */
 export function recoveryPrompt(sessionFile: string, sourceRef: string | null, boundaryId: string): string {
   const chat = sourceRef ? ` for ${JSON.stringify(sourceRef)}` : " for your current task";
-  return "Your context window reached its limit; no summary was generated. " +
-    `Review your earlier work in ${JSON.stringify(sessionFile)} before entry ${JSON.stringify(boundaryId)} using read with workspace \"original\" and bounded line ranges, ` +
-    `and the relevant chat history${chat} using chat_read or chat_search, ` +
-    "verify what has already completed, and continue the unfinished task without repeating completed actions.";
+  return "Internal context recovery: your active context was reset; no summary was generated. " +
+    "Recover silently. Do not send a greeting, a recovery announcement, a check-in, or a request to restate an already recorded task. " +
+    `First inspect a small relevant window of chat history${chat} using chat_read or chat_search. ` +
+    "If execution history is needed, read bossmode-guide at the guide path in Assets, then its references/sessions.md, using workspace \"original\". " +
+    "Use the guide's scripts/session-search.mjs through a terminal in workspace \"original\", with your absolute member directory from Assets as --member-dir. " +
+    `Consult only entries before ${JSON.stringify(boundaryId)} in the work log ${JSON.stringify(sessionFile)}. ` +
+    "Start with list/search metadata and short summaries; expand only task-relevant entries with a small --before/--after window. " +
+    "Pass --max-bytes 8192 on every command (8 KiB per call). If output contains nextCursor, use --cursor with the same action and filters only when more information is necessary. " +
+    "Never automatically drain pages or reconstruct oversized tool results. Never read or print the entire session JSONL, and never dump raw tool results. Line ranges alone are not safe: one JSONL line can be huge. " +
+    "Stop recovering once you know the task, completed work, constraints and next action. Verify completion against current files or task state, " +
+    "then continue the unfinished task without repeating completed actions. Speak in chat only for a substantive result, blocker, or necessary clarification.";
 }
 
 export function isRecoveryBoundary(entry: CompactionEntry | undefined): boolean {

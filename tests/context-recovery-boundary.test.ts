@@ -38,6 +38,45 @@ function commitBoundary(manager: SessionManager, result: any) {
 }
 
 describe("append-only context recovery boundary", () => {
+  it.each(["room:test", null])("routes recovery through the existing guide with bounded, on-demand pages (source: %s)", (sourceRef) => {
+    const prompt = recoveryPrompt("/work/session.jsonl", sourceRef, "boundary");
+    expect(prompt).toContain("Recover silently");
+    expect(prompt).toContain(sourceRef ? `for ${JSON.stringify(sourceRef)} using chat_read or chat_search` : "for your current task using chat_read or chat_search");
+    expect(prompt).toContain("read bossmode-guide at the guide path in Assets");
+    expect(prompt).toContain("references/sessions.md");
+    expect(prompt).toContain("scripts/session-search.mjs");
+    expect(prompt).toContain('terminal in workspace "original"');
+    expect(prompt).toContain("absolute member directory from Assets as --member-dir");
+    expect(prompt).toContain('entries before "boundary" in the work log "/work/session.jsonl"');
+    expect(prompt).toContain("list/search metadata and short summaries");
+    expect(prompt).toContain("expand only task-relevant entries");
+    expect(prompt).toContain("--max-bytes 8192 on every command (8 KiB per call)");
+    expect(prompt).toContain("nextCursor");
+    expect(prompt).toContain("--cursor with the same action and filters only when more information is necessary");
+    expect(prompt).toContain("Never automatically drain pages or reconstruct oversized tool results");
+    expect(prompt).toContain("Never read or print the entire session JSONL");
+    expect(prompt).toContain("Stop recovering once");
+  });
+
+  it("passes tool results through without per-result, aggregate or content-block truncation", async () => {
+    const f = await fixture();
+    const text = "💡".repeat(500_000);
+    const message = { role: "toolResult", toolCallId: "old-call", toolName: "read", timestamp: 1,
+      content: [{ type: "text", text }, ...Array.from({ length: 129 }, (_, i) => ({ type: "text", text: `block-${i}` }))],
+      details: { original: true }, isError: false } as const;
+    const convert = vi.fn((messages: unknown[]) => messages);
+    const session = { agent: { convertToLlm: convert } } as any;
+    f.policy.install(session);
+    const messages = Array(50).fill(message);
+    const result = session.agent.convertToLlm(messages);
+    expect(convert).toHaveBeenCalledWith(messages);
+    expect(result).toBe(messages);
+    for (const item of result) expect(item).toBe(message);
+    expect(result[0].content).toHaveLength(130);
+    expect(result[0].content[0].text).toBe(text);
+    expect(result[0].details).toBe(message.details);
+  });
+
   it.each(["threshold", "overflow"] as const)("replaces %s context without changing the session ID/file or old log", async (reason) => {
     const f = await fixture();
     const before = readFileSync(f.file);

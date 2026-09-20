@@ -131,22 +131,23 @@ export function StationPanel({ members, agentStatus, contextUsage, roomId, onMem
   // A+ fusion feed (fish 2026-08-20): each member's raw activity stream, kept
   // per member and merged into turn blocks at render. Same visibility filter
   // as the member Activity tab (isActivityStreamEvent).
-  const loadFeedEvents = useCallback(async (name: string) => {
-    const memberId = memberInfos[name]?.id;
-    if (!memberId) return;
-    try {
-      const result = await getConversationEvents(`room:${roomId}`, memberId, FEED_PAGE_SIZE);
-      setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter((e) => isActivityStreamEvent(e) || e.type === "message_start").slice(-FEED_PAGE_SIZE) }));
-    } catch (err) {
-      console.error("Failed to load agent activity:", err);
-    }
-  }, [roomId, memberInfos]);
-
   useEffect(() => {
     if (!eventWatchId) return;
+    let active = true;
     setFeedLoading(true);
-    void Promise.all(members.map((name) => loadFeedEvents(name))).finally(() => setFeedLoading(false));
-  }, [eventWatchId, members.join("\u0000"), loadFeedEvents]);
+    setFeedEvents({});
+    void Promise.all(subscriptionMembers.map(async ({ name, memberId }) => {
+      if (!memberId) return;
+      try {
+        const result = await getConversationEvents(`room:${eventWatchId}`, memberId, FEED_PAGE_SIZE);
+        if (active) setFeedEvents((prev) => ({ ...prev, [name]: (result.events as AgentEvent[]).filter((e) => isActivityStreamEvent(e) || e.type === "message_start").slice(-FEED_PAGE_SIZE) }));
+      } catch (err) {
+        console.error("Failed to load agent activity:", err);
+      }
+    })).finally(() => { if (active) setFeedLoading(false); });
+    return () => { active = false; };
+    // Configuration saves do not invalidate history; only roster identity does.
+  }, [eventWatchId, subscriptionKey]);
 
   useEffect(() => {
     const token = getToken();

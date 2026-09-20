@@ -30,6 +30,7 @@ interface EventRow {
   ts:number;type:string;payload_json:string;
 }
 const EVENT_SELECT=`SELECT id,member_id,source_ref,member_seq,historical_source_key,historical_owner_key,historical_seq,ts,type,payload_json FROM agent_events`;
+const EVENT_ORDER = "CASE WHEN historical_seq IS NULL THEN 1 ELSE 0 END,historical_source_key,historical_owner_key,historical_seq,member_seq";
 
 export interface AgentEventBroadcast {type:"agent:event";roomId:string;memberId:string;event:unknown}
 export type AgentEventSink=(sourceRef:string,memberId:string,payload:AgentEventBroadcast)=>void;
@@ -104,7 +105,16 @@ export function hasAgentEvent(id:string):boolean{return !!getDatabase().get("SEL
 export function readAgentEvent(id:string,db:Database=getDatabase()):EventFact|null{const row=db.get<EventRow>(`${EVENT_SELECT} WHERE id=?`,id);return row?decode(row):null;}
 export function loadEventsFromDisk(sourceRef:string,memberId:string):AgentHistoryEvent[]{return getDatabase().all<EventRow>(`${EVENT_SELECT} WHERE member_id=? AND source_ref=? ORDER BY CASE WHEN historical_seq IS NULL THEN 1 ELSE 0 END,historical_source_key,historical_owner_key,historical_seq,member_seq`,memberId,sourceRef).map(row=>limitRuntimeErrorEvent(JSON.parse(row.payload_json)));}
 export function loadEventsPaginated(sourceRef:string,memberId:string,limit:number,before?:number):{events:AgentHistoryEvent[];total:number;hasMore:boolean}{
-  const all=loadEventsFromDisk(sourceRef,memberId),end=before===undefined?all.length:Math.max(0,Math.min(before,all.length)),start=Math.max(0,end-limit);return {events:all.slice(start,end),total:all.length,hasMore:start>0};
+  const db = getDatabase();
+  const total = db.get<{ n: number }>("SELECT COUNT(*) n FROM agent_events WHERE member_id=? AND source_ref=?", memberId, sourceRef)!.n;
+  const size = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 50;
+  const end = before === undefined || !Number.isFinite(before) ? total : Math.max(0, Math.min(Math.floor(before), total));
+  const start = Math.max(0, end - size);
+  // Sort/page only identity metadata, then fetch full payloads for that page.
+  const rows = db.all<{ payload_json: string }>(`SELECT payload_json FROM agent_events WHERE id IN (
+    SELECT id FROM agent_events WHERE member_id=? AND source_ref=? ORDER BY ${EVENT_ORDER} LIMIT ? OFFSET ?
+  ) ORDER BY ${EVENT_ORDER}`, memberId, sourceRef, end - start, start);
+  return { events: rows.map(row => limitRuntimeErrorEvent(JSON.parse(row.payload_json))), total, hasMore: start > 0 };
 }
 
 let dispatchScheduled=false;

@@ -303,17 +303,35 @@ export function readConversationListState(
   login: string,
   db: Database = getDatabase(),
 ): ConversationListState {
-  const messages = readMessages(scope, db);
+  const scopeId = storageScopeId(scope);
   const cursor = getUserReadCursor(scope, db);
-  const last = messages.at(-1);
+  // Preserve the legacy cursor window, including imported rows without seq.
+  // Only the cursor position and aggregate cross the SQL boundary, never the
+  // whole history (nor its per-message mention/reply hydration).
+  const start = cursor?.seq != null
+    ? db.get<{ position: number }>(
+      "SELECT position FROM messages WHERE scope_id=? AND seq>? ORDER BY position LIMIT 1",
+      scopeId, cursor.seq,
+    )?.position ?? Number.MAX_SAFE_INTEGER
+    : cursor?.messageId
+      ? (db.get<{ position: number }>("SELECT position FROM messages WHERE scope_id=? AND id=?", scopeId, cursor.messageId)?.position ?? -1) + 1
+      : 0;
+  const counts = db.get<{ unreadCount: number; mentioned: number }>(
+    `SELECT COUNT(*) AS unreadCount, COALESCE(MAX(instr(content,?)>0),0) AS mentioned
+     FROM messages WHERE scope_id=? AND position>=? AND sender NOT IN ('user','system') AND (type IS NULL OR type='')`,
+    login ? `@${login}` : "", scopeId, start,
+  )!;
+  const row = db.get<MessageRow>("SELECT * FROM messages WHERE scope_id=? ORDER BY position DESC LIMIT 1", scopeId);
+  const last = row ? visibleMessage(row) : undefined;
   return {
     lastMessage: last ? {
       sender: last.sender,
-      ...(last.senderMemberId ? { senderMemberId: last.senderMemberId } : {}),
+      ...(last.sender_member_id ? { senderMemberId: last.sender_member_id } : {}),
       text: last.content.replace(/\s+/g, " ").trim().slice(0, 140),
       ts: last.ts,
     } : null,
-    ...countUserUnreadAndMention(messages, cursor?.messageId ?? null, cursor?.seq ?? null, login),
+    unreadCount: counts.unreadCount,
+    mentioned: Boolean(login && counts.mentioned),
   };
 }
 

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { ensureMmScope } from "../src/chat/conversations.js";
+import { updateMember } from "../src/member/identity.js";
 import { createTestServer, jsonRequest, setupTestWorkspace } from "./helpers/test-server.js";
 import { request } from "node:http";
 
@@ -37,6 +38,12 @@ it("manages room membership and settings with stable member IDs", async () => {
     });
     expect(created.status).toBe(200);
     const roomId = JSON.parse(created.body).id as string;
+    updateMember(leader, { title: "Lead", global: { model: "test:model", credentialId: "profile-test", thinkingLevel: "high" } });
+    const roster = await jsonRequest(test.port, "GET", `/api/rooms/${roomId}/members`, { token });
+    expect(JSON.parse(roster.body)).toEqual([expect.objectContaining({
+      id: leader, name: "room-leader", title: "Lead", agentTemplate: "general",
+      model: "test:model", credentialId: "profile-test", thinkingLevel: "high",
+    })]);
 
     const patched = await jsonRequest(test.port, "PATCH", `/api/rooms/${roomId}`, {
       token, body: { name: "Renamed", description: "Canonical room", docsPath: "project/docs" },
@@ -96,7 +103,16 @@ it("reads room, DM and member chat facts through one conversation API", async ()
       expect(downloaded).toMatchObject({ status: 200, body: Buffer.from(`file-${index}`) });
     }
     const chats = JSON.parse((await jsonRequest(test.port, "GET", "/api/chats", { token })).body).chats;
-    expect(chats).toEqual(expect.arrayContaining([expect.objectContaining({ scopeId: mm, kind: "mm" })]));
+    expect(chats).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scopeId: `room:${roomId}`, kind: "room" }),
+      expect.objectContaining({ scopeId: `dm:${one}`, kind: "dm" }),
+    ]));
+    expect(chats.some((chat: { kind: string }) => chat.kind === "mm")).toBe(false);
+    const memberScopes = JSON.parse((await jsonRequest(test.port, "GET", `/api/members/${one}/scopes`, { token })).body).scopes;
+    expect(memberScopes.some((scope: { kind: string }) => scope.kind === "mm")).toBe(false);
+    const read = await jsonRequest(test.port, "POST", `/api/conversations/${encodeURIComponent(`room:${roomId}`)}/read`, { token, body: {} });
+    expect(read.status).toBe(200);
+    expect(JSON.parse(read.body).cursor).toMatchObject({ seq: 1 });
     expect((await jsonRequest(test.port, "GET", `/api/rooms/${roomId}/messages`, { token })).status).toBe(404);
   } finally {
     await new Promise<void>((resolve) => test.server.close(() => resolve()));

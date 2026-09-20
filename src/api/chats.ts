@@ -6,10 +6,8 @@ import {
   getRoomMembers,
   inviteRoomMember,
   isMemberId,
-  listMmScopes,
   listRooms,
   parseConversation,
-  parseMmScopeId,
   removeRoomMember,
   resolveConversation,
   resolveRoomMember,
@@ -22,7 +20,6 @@ import { parseMentions } from "../chat/delivery.js";
 import {
   pageMessages,
   readConversationListState,
-  readMessages,
   searchMessages,
   type Message,
   type MessageInput,
@@ -54,7 +51,7 @@ function connected(): ChatHttpActions {
   return actions;
 }
 
-function chatSummary(sourceRef: string, kind: "room" | "dm" | "mm", title: string) {
+function chatSummary(sourceRef: string, kind: "room" | "dm", title: string) {
   const state = readConversationListState(sourceRef, actions?.readUserLogin() ?? "");
   const status = actions?.scopeStatus?.(sourceRef) ?? "idle";
   return {
@@ -70,8 +67,6 @@ addRoute("GET", "/api/chats", async (_request, response) => {
   const chats = [
       ...listMembers().map((member) => chatSummary(`dm:${member.id}`, "dm" as const, member.name)),
       ...listRooms().map((room) => chatSummary(`room:${room.id}`, "room" as const, room.name)),
-      ...listMmScopes().map((scope) => chatSummary(scope, "mm" as const,
-        parseMmScopeId(scope)!.map(id => getMember(id)?.name ?? id).join(" ↔ "))),
   ].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
   sendJson(response, 200, { chats });
 });
@@ -80,7 +75,7 @@ addRoute("POST", "/api/conversations/:scope/read", async (request, response, par
   const sourceRef = conversationSource(params.scope);
   if (!sourceRef) throw new HttpError(404, "conversation_not_found", "Conversation not found");
   const body = await parseBody(request) as { messageId?: string | null; seq?: number | null };
-  const last = body.messageId === undefined && body.seq === undefined ? readMessages(sourceRef).at(-1) : undefined;
+  const last = body.messageId === undefined && body.seq === undefined ? pageMessages(sourceRef, { limit: 1 }).at(-1) : undefined;
   const cursor = setUserReadCursor(sourceRef, {
     messageId: body.messageId === undefined ? last?.id ?? null : body.messageId,
     seq: body.seq === undefined ? last?.seq ?? null : body.seq,
@@ -250,7 +245,7 @@ function replyTarget(sourceRef: string, raw: unknown): Message["replyTo"] | unde
   if (raw === undefined || raw === null) return undefined;
   const seq = Number((raw as { seq?: unknown }).seq);
   if (!Number.isSafeInteger(seq)) throw new Error("replyTo.seq must be an integer");
-  const message = readMessages(sourceRef).find((candidate) => candidate.seq === seq);
+  const message = pageMessages(sourceRef, { fromSeq: seq - 1, limit: 1 }).find((candidate) => candidate.seq === seq);
   if (!message) throw new Error(`Reply target not found: msg:#${seq}`);
   return { seq, messageId: message.id };
 }
@@ -313,7 +308,15 @@ addConversationRoute("GET", "/api/conversations/:scope/messages/search", async (
 
 addRoute("GET", "/api/rooms/:id/members", async (_request, response, params) => {
   requireRoom(params.id);
-  sendJson(response, 200, getRoomMembers(params.id));
+  sendJson(response, 200, getRoomMembers(params.id).map((identity) => {
+    const member = getMember(identity.id)!;
+    return {
+      ...identity, title: member.title, agentTemplate: member.agentTemplate,
+      model: member.global.model ?? null, credentialId: member.global.credentialId ?? null,
+      thinkingLevel: member.global.thinkingLevel ?? null,
+      skills: member.global.skills ?? [], mcpServers: member.global.mcpServers ?? [],
+    };
+  }));
 });
 addRoute("POST", "/api/rooms/:id/members", async (request, response, params) => {
   const body = await exactRoomWriteBody(request, ["memberId"]);

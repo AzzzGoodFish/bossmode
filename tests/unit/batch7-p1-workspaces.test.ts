@@ -3,7 +3,7 @@
  * workspace-aware file tools (local + mocked ssh), prompt line, assets API.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 let dir: string;
@@ -70,6 +70,36 @@ describe("workspace registry", () => {
 });
 
 describe("file tools (original workspace)", () => {
+  it("can read a requested line beyond 16 MiB", async () => {
+    seedMemberDir();
+    const ft = await import("../../src/agent/tools.js");
+    const path = join(dir, "members", MEMBER, "large.jsonl");
+    writeFileSync(path, `${"x".repeat(17 * 1024 * 1024)}\nafter`);
+    const result = await ft.workspaceReadTool(MEMBER, { path, offset: 2, limit: 1 });
+    expect((result.content[0] as { text: string }).text).toBe("after");
+    expect(result.details.lines).toBe(1);
+  });
+
+  it("uses Pi's oversized-line guidance and 2000-line ceiling with continuation", async () => {
+    seedMemberDir();
+    const ft = await import("../../src/agent/tools.js");
+    const path = join(dir, "members", MEMBER, "long.txt");
+    const text = "界".repeat(30_000);
+    writeFileSync(path, text);
+    const long = await ft.workspaceReadTool(MEMBER, { path, limit: 1 });
+    expect((long.content[0] as { text: string }).text).toContain("Use terminal_exec");
+    expect((long.content[0] as { text: string }).text).toContain("head -c 51200");
+    expect(long.details).toMatchObject({ lines: 0, truncation: { firstLineExceedsLimit: true, totalBytes: 90_000 } });
+    const lines = Array.from({ length: 2500 }, (_, i) => `line-${i}`).join("\n");
+    writeFileSync(path, lines);
+    const many = await ft.workspaceReadTool(MEMBER, { path, limit: 2500 });
+    expect((many.content[0] as { text: string }).text).toContain("Use offset=2001 to continue");
+    expect(many.details).toMatchObject({ lines: 2000, nextOffset: 2001, truncation: { truncatedBy: "lines" } });
+    const rest = await ft.workspaceReadTool(MEMBER, { path, offset: 2001, limit: 2500 });
+    expect((rest.content[0] as { text: string }).text).toBe(lines.split("\n").slice(2000).join("\n"));
+    expect(rest.details.lines).toBe(500);
+  });
+
   it("relative paths resolve against the member dir; write→read→edit round-trip", async () => {
     seedMemberDir();
     const ft = await import("../../src/agent/tools.js");
@@ -146,6 +176,12 @@ describe("file tools (ssh workspace, mocked ssh2)", () => {
       const e = await ft.workspaceEditTool(MEMBER, { path: "conf/app.conf", edits: [{ oldText: "prod", newText: "dev" }] });
       expect((e.content[0] as any).text).toContain("Applied 1 edit");
       expect(remoteFiles.get("/srv/app/conf/app.conf")).toBe("mode=dev\n");
+
+      remoteFiles.set("/srv/app/large.txt", Array.from({ length: 100 }, () => "界".repeat(1000)).join("\n"));
+      const large = await ft.workspaceReadTool(MEMBER, { path: "large.txt" });
+      expect(large.details).toMatchObject({ remote: true, lines: 17, nextOffset: 18, truncation: { truncatedBy: "bytes" } });
+      const continued = await ft.workspaceReadTool(MEMBER, { path: "large.txt", offset: 18, limit: 1 });
+      expect((continued.content[0] as any).text).toContain("界".repeat(1000));
     } finally {
       vi.doUnmock("ssh2");
       vi.resetModules();

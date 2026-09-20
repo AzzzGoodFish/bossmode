@@ -480,21 +480,19 @@ export function readShell(args: {
   if (args.exec) {
     const current = shell.currentExec?.id === args.exec ? shell.currentExec : null;
     const finished = current ? null : shell.execHistory.find((e) => e.id === args.exec) ?? null;
-    if (current) {
-      from = current.lineStart;
-      to = shell.lineCount;
-      status = "running";
-    } else if (finished) {
-      from = finished.lineStart;
-      to = finished.lineEnd ?? shell.lineCount;
-      status = "done";
+    const exec = current ?? finished;
+    if (exec) {
+      // The scrollback ring may already have evicted this exec's first lines.
+      // Use its retained exact output so tool-layer spill snapshots are complete.
+      const lines = exec.output.split("\n");
+      if (lines.at(-1) === "") lines.pop();
       return {
         ok: true,
-        status,
-        exitCode: finished.exitCode,
-        lineStart: from,
-        lineEnd: to,
-        lines: sliceLines(shell, from, to),
+        status: exec.status,
+        exitCode: exec.exitCode,
+        lineStart: exec.lineStart,
+        lineEnd: exec.lineEnd ?? Math.max(exec.lineStart, exec.lineStart + lines.length - 1),
+        lines: lines.map((text, index) => ({ n: exec.lineStart + index, text })),
         truncated: false,
       };
     } else {
@@ -514,7 +512,7 @@ export function readShell(args: {
     lineStart: from,
     lineEnd: end,
     lines: sliceLines(shell, from, end),
-    truncated: end < lastAvailable,
+    truncated: from < shell.firstLine || end < lastAvailable,
   };
 }
 

@@ -141,7 +141,7 @@ export function buildAllProvidersCatalog(preferredProfileId?: string): Record<st
   return providers;
 }
 
-const databaseRuntimeProviders = new WeakMap<ModelRuntime, Set<string>>();
+const databaseRuntimeProviders = new WeakMap<ModelRuntime, Map<string, string>>();
 
 export async function createDatabaseModelRuntime(credentials: CredentialStore, preferredProfileId?: string): Promise<ModelRuntime> {
   const runtime = await ModelRuntime.create({ credentials, modelsPath: null, modelsStore: createDatabaseModelsStore(), allowModelNetwork: false });
@@ -149,16 +149,38 @@ export async function createDatabaseModelRuntime(credentials: CredentialStore, p
   return runtime;
 }
 
-export async function refreshDatabaseModelRuntime(runtime: ModelRuntime, preferredProfileId?: string): Promise<void> {
+export async function refreshDatabaseModelRuntime(
+  runtime: ModelRuntime, preferredProfileId?: string, options: { skipUnchanged?: boolean } = {},
+): Promise<void> {
   const providers = buildAllProvidersCatalog(preferredProfileId);
-  for (const id of databaseRuntimeProviders.get(runtime) ?? []) {
-    if (!(id in providers)) runtime.unregisterProvider(id);
+  const registered = databaseRuntimeProviders.get(runtime) ?? new Map<string, string>();
+  databaseRuntimeProviders.set(runtime, registered);
+  const changed: string[] = [];
+  for (const id of registered.keys()) {
+    if (!(id in providers)) {
+      runtime.unregisterProvider(id);
+      registered.delete(id);
+      changed.push(id);
+    }
   }
   for (const [id, config] of Object.entries(providers)) {
+    const fingerprint = JSON.stringify(config);
+    if (registered.get(id) === fingerprint) continue;
+    // SDK registrations merge, so remove an old registration first to avoid
+    // retaining deleted headers/endpoint overrides. Unchanged providers must
+    // not be re-registered: every registration starts an SDK-wide refresh.
+    if (registered.has(id)) {
+      runtime.unregisterProvider(id);
+      registered.delete(id);
+    }
     runtime.registerProvider(id, config as Parameters<ModelRuntime["registerProvider"]>[1]);
+    registered.set(id, fingerprint);
+    changed.push(id);
   }
-  databaseRuntimeProviders.set(runtime, new Set(Object.keys(providers)));
-  await runtime.refresh({ allowNetwork: false });
+  // Switching models/accounts is not catalog discovery. Authentication still
+  // happens through session.setModel using the new profile-bound snapshot.
+  if (options.skipUnchanged && changed.length === 0) return;
+  await runtime.refresh({ allowNetwork: false, ...(options.skipUnchanged ? { providers: changed } : {}) });
 }
 
 function safeFsSegment(s: string): string {

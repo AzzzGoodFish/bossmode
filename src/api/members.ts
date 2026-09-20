@@ -22,7 +22,6 @@ function publicMember(m: MemberRecord, live = false) {
   const activeScopes = [
     `dm:${m.id}`,
     ...roomStore.listRoomsForMember(m.id).map(room => `room:${room.id}`),
-    ...roomStore.listMmScopesForMember(m.id),
   ];
   const workingScopes = getMemberActiveScopes(m.id);
   return { ...base, status: workingScopes.length ? "working" : "idle",
@@ -178,13 +177,6 @@ addRoute("GET", "/api/members/:id/scopes", async (_req, res, params) => {
     scopeId: `room:${room.id}`, kind: "room", label: room.name,
     status: "idle", lastActiveAt: null,
   });
-  for (const scopeId of roomStore.listMmScopesForMember(m.id)) {
-    const peerId = roomStore.parseMmScopeId(scopeId)?.find(id => id !== m.id);
-    scopes.push({
-      scopeId, kind: "mm", label: `Private chat with ${peerId ? getMember(peerId)?.name ?? peerId : "member"}`,
-      status: "idle", lastActiveAt: null,
-    });
-  }
   sendJson(res, 200, { scopes });
 });
 
