@@ -467,7 +467,7 @@ function AssetsTab({ member, scope, liveStatus }: {
         </div>
       </AssetSection>
 
-      <SystemPromptSection member={member} scope={scope} />
+      <SystemPromptSection member={member} scope={scope} liveStatus={liveStatus} />
     </div>
   );
 }
@@ -617,27 +617,57 @@ function WorkspacesSection({ member, assets, assetsFailed }: {
   );
 }
 
-/** The member's assembled system prompt for the current scope — same compiler
- * as activation, byte-identical (fish 2026-09-02 item 5). Falls back to the
- * member's DM scope when the float is opened globally (chat list). */
-function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: MemberScopeInfo | null }) {
+/** Reads the current SDK session prompt. Polling while the panel is open
+ * prevents instance creation or destruction from leaving stale text visible;
+ * status transitions also trigger an immediate refresh. */
+export function SystemPromptSection({ member, scope, liveStatus }: {
+  member: MemberDetail;
+  scope: MemberScopeInfo | null;
+  liveStatus?: string;
+}) {
   const [doc, setDoc] = useState<MemberSystemPromptDoc | null>(null);
   const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState<boolean | null>(null);
   const effectiveScope = scope?.scopeId ?? `dm:${member.memberId}`;
 
   useEffect(() => {
-    let cancelled = false;
-    setDoc(null); setFailed(false);
-    getMemberSystemPrompt(member.memberId, effectiveScope)
-      .then((d) => { if (!cancelled) setDoc(d); })
-      .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; };
+    setDoc(null);
+    setFailed(false);
   }, [member.memberId, effectiveScope]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let loading = false;
+    const refresh = async () => {
+      if (loading) return;
+      loading = true;
+      try {
+        const next = await getMemberSystemPrompt(member.memberId, effectiveScope);
+        if (!cancelled) {
+          setDoc(next);
+          setFailed(false);
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        loading = false;
+      }
+    };
+    if (liveStatus === "inactive") {
+      setDoc({ available: false, reason: "instance_not_running", scopeId: effectiveScope });
+    }
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [member.memberId, effectiveScope, liveStatus]);
+
+  const available = !failed && doc?.available === true ? doc : null;
   const copy = async () => {
-    if (!doc) return;
-    const ok = await copyText(doc.text);
+    if (!available) return;
+    const ok = await copyText(available.text);
     setCopied(ok);
     window.setTimeout(() => setCopied(null), 1400);
   };
@@ -645,9 +675,9 @@ function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: M
   return (
     <AssetSection
       title="System prompt"
-      info="The exact prompt this member runs with in this scope — assembled live, byte-identical to what activation injects."
-      count={doc ? `${doc.charCount.toLocaleString()} chars` : undefined}
-      action={doc ? (
+      info="The current system prompt reported by this member’s running SDK session."
+      count={available ? `${available.charCount.toLocaleString()} chars` : undefined}
+      action={available ? (
         <button
           type="button"
           onClick={() => void copy()}
@@ -663,14 +693,16 @@ function SystemPromptSection({ member, scope }: { member: MemberDetail; scope: M
         <div className={assetEmptyClass}>Couldn’t load the system prompt for this scope.</div>
       ) : doc === null ? (
         <div className={assetEmptyClass}>Loading…</div>
+      ) : !doc.available ? (
+        <div className={assetEmptyClass}>成员运行后才有内容</div>
       ) : (
         <div className="rounded-lg border border-line-soft bg-inset/50 px-3 py-2 max-h-[340px] overflow-y-auto">
           <div className="whitespace-pre-wrap font-mono text-[11.5px] text-ink-3 leading-relaxed">{doc.text}</div>
         </div>
       )}
-      {doc && (
-        <div className={assetFooterClass} title={`scope ${doc.scopeId} · contract ${doc.contractFingerprint}`}>
-          {doc.scopeId} · {doc.contractFingerprint.slice(0, 8)}
+      {available && (
+        <div className={assetFooterClass} title={`scope ${available.scopeId ?? "global"} · contract ${available.contractFingerprint}`}>
+          {available.scopeId ?? "global"} · {available.contractFingerprint.slice(0, 8)}
         </div>
       )}
     </AssetSection>

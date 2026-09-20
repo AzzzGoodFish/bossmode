@@ -847,14 +847,20 @@ export async function getMemberProfile(id: string): Promise<MemberProfileDoc> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}/profile`);
 }
 
-/** The member's fully-assembled system prompt for a scope (fish 2026-09-02
- * item 5). Byte-identical to the activation-time injection — same compiler. */
-export interface MemberSystemPromptDoc {
-  text: string;
-  charCount: number;
-  scopeId: string;
-  contractFingerprint: string;
-}
+/** Current SDK prompt state. No running instance is a normal empty state. */
+export type MemberSystemPromptDoc =
+  | {
+      available: true;
+      text: string;
+      charCount: number;
+      scopeId: string | null;
+      contractFingerprint: string;
+    }
+  | {
+      available: false;
+      reason: "instance_not_running";
+      scopeId: string | null;
+    };
 
 export async function getMemberSystemPrompt(id: string, scope: string): Promise<MemberSystemPromptDoc> {
   return apiFetch(`/api/members/${encodeURIComponent(id)}/system-prompt?scope=${encodeURIComponent(scope)}`);

@@ -100,8 +100,11 @@ addRoute("GET", "/api/members/:id", async (_req, res, params) => {
   sendJson(res, 200, { member: publicMember(m) });
 });
 
+export type MemberSystemPromptRead =
+  | { available: true; text: string; contractFingerprint: string }
+  | { available: false; reason: "instance_not_running" };
 export interface MemberHttpActions {
-  previewPrompt(memberId: string): { text: string; contractFingerprint: string };
+  readCurrentPrompt(memberId: string): Promise<MemberSystemPromptRead> | MemberSystemPromptRead;
   readStats(memberId: string): unknown;
   readTokenTotal(memberId: string, sourceRef?: string): number;
   readActivity(memberId: string, options: { sourceRef?: string; beforeSeq?: number; limit?: number; types?: string[] }): unknown;
@@ -120,18 +123,22 @@ function connectedMemberActions(): MemberHttpActions {
   return memberHttpActions;
 }
 
-/** Member prompt preview is member-owned and identical across chat sources. */
+/** Current SDK system prompt; a member without a live instance is a normal empty state. */
 addRoute("GET", "/api/members/:id/system-prompt", async (req, res, params) => {
   try {
     const sourceRef = sourceQuery(req);
     const member = authorizedMember(params.id, sourceRef);
-    if (!memberHttpActions) throw new Error("Member HTTP actions are not connected");
-    const preview = memberHttpActions.previewPrompt(member.id);
+    const prompt = await connectedMemberActions().readCurrentPrompt(member.id);
+    if (!prompt.available) {
+      sendJson(res, 200, { available: false, reason: prompt.reason, scopeId: sourceRef ?? null });
+      return;
+    }
     sendJson(res, 200, {
-      text: preview.text,
-      charCount: preview.text.length,
+      available: true,
+      text: prompt.text,
+      charCount: prompt.text.length,
       scopeId: sourceRef ?? null,
-      contractFingerprint: preview.contractFingerprint,
+      contractFingerprint: prompt.contractFingerprint,
     });
   } catch (error) { memberError(error); }
 });

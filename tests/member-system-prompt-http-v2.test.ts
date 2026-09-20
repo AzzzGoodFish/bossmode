@@ -32,12 +32,20 @@ it("maps only system-prompt source validation failures to invalid_scope", async 
 
     const unscoped = await request(`/api/members/${memberId}/system-prompt`);
     expect(unscoped.status, unscoped.body).toBe(200);
-    expect(JSON.parse(unscoped.body)).toMatchObject({ scopeId: null });
+    expect(JSON.parse(unscoped.body)).toEqual({
+      available: false,
+      reason: "instance_not_running",
+      scopeId: null,
+    });
 
     for (const scope of [`dm:${memberId}`, `room:${roomId}`]) {
       const allowed = await request(`/api/members/${memberId}/system-prompt?scope=${encodeURIComponent(scope)}`);
       expect(allowed.status, allowed.body).toBe(200);
-      expect(JSON.parse(allowed.body)).toMatchObject({ scopeId: scope });
+      expect(JSON.parse(allowed.body)).toEqual({
+        available: false,
+        reason: "instance_not_running",
+        scopeId: scope,
+      });
     }
 
     for (const [id, scope] of [
@@ -56,8 +64,17 @@ it("maps only system-prompt source validation failures to invalid_scope", async 
     expect(JSON.parse(missing.body)).toMatchObject({ error: "not_found" });
 
     const { connectMemberHttpActions } = await import("../src/api/members.js");
+    let failRead = false;
+    let currentPrompt = {
+      available: true as const,
+      text: "SDK current text",
+      contractFingerprint: "actual-text-fingerprint",
+    };
     const disconnect = connectMemberHttpActions({
-      previewPrompt: () => { throw new Error("preview exploded"); },
+      readCurrentPrompt: () => {
+        if (failRead) throw new Error("prompt read exploded");
+        return currentPrompt;
+      },
       readStats: () => ({}),
       readTokenTotal: () => 0,
       readActivity: () => [],
@@ -67,9 +84,20 @@ it("maps only system-prompt source validation failures to invalid_scope", async 
       restart: () => undefined,
     });
     try {
-      const failedPreview = await request(`/api/members/${memberId}/system-prompt`);
-      expect(failedPreview.status, failedPreview.body).toBe(500);
-      expect(JSON.parse(failedPreview.body)).toMatchObject({ error: "internal", message: "preview exploded" });
+      const available = await request(`/api/members/${memberId}/system-prompt?scope=dm%3A${memberId}`);
+      expect(available.status, available.body).toBe(200);
+      expect(JSON.parse(available.body)).toEqual({
+        available: true,
+        text: currentPrompt.text,
+        charCount: currentPrompt.text.length,
+        scopeId: `dm:${memberId}`,
+        contractFingerprint: currentPrompt.contractFingerprint,
+      });
+
+      failRead = true;
+      const failedRead = await request(`/api/members/${memberId}/system-prompt`);
+      expect(failedRead.status, failedRead.body).toBe(500);
+      expect(JSON.parse(failedRead.body)).toMatchObject({ error: "internal", message: "prompt read exploded" });
     } finally {
       disconnect();
     }

@@ -47,7 +47,7 @@ import { loadEventsPaginated, memberTokenTotal, pageActivity, readStats, setAgen
 import { abortMember,compactMember,compactMemberById,resetMemberSession,restartMember,configureControls,getAgentContextUsage,refreshAgentContextUsage,getAgentStatus,getMemberActiveTools,getMemberBusyState,applyPendingAfterPromptSettlement,interruptAcceptedInput } from "../agent/controls.js";
 import { setStatusSink,openRuntimeAdmission,memberRuntimeAllowed } from "../agent/instance.js";
 import { broadcastToAgentSubscribers, broadcastToRoom } from "./ws.js";
-import { commitChatMessage,previewMemberPrompt,repairPendingAgentAdmissions,memberRecordToConfig } from "./member-actions.js";
+import { commitChatMessage,readMemberSystemPrompt,repairPendingAgentAdmissions,memberRecordToConfig } from "./member-actions.js";
 // Knowledge activity — surfaces agent doc writes (write/edit tools) into the room chat stream.
 // Connected through the agent tool-activity port; the room timeline stays the single source of
 // truth ("记录自动成为沟通"). Known limit: bash-driven writes are not detected (args are opaque).
@@ -153,10 +153,7 @@ import { createWorkspace, readWorkspaces, removeWorkspace, useWorkspace } from "
 
 export function wireMemberHttp(): () => void {
   return connectMemberHttpActions({
-    previewPrompt: memberId => {
-      const prompt = previewMemberPrompt(memberId);
-      return { text: prompt.fullPrompt, contractFingerprint: prompt.contractFingerprint };
-    },
+    readCurrentPrompt: readMemberSystemPrompt,
     readStats,
     readTokenTotal: memberTokenTotal,
     readActivity: pageActivity,
