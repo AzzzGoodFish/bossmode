@@ -856,7 +856,7 @@ function SettingsTab({ member, setMember, scope, models, liveStatus, onFired }: 
   useEffect(() => {
     if (!scope) return;
     let cancelled = false;
-    getConversationSession(scope.scopeId, member.memberId).then((s) => { if (!cancelled) setContextUsage(s.contextUsage); }).catch(() => {});
+    getConversationSession(scope.scopeId, member.memberId).then((s) => { if (!cancelled) setContextUsage(s.contextUsage ?? undefined); }).catch(() => {});
     return () => { cancelled = true; if (savedTimer.current) clearTimeout(savedTimer.current); };
   }, [dm, roomId, member.memberId, scope, liveStatus]);
 

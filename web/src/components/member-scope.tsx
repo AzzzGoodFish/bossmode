@@ -369,8 +369,8 @@ export function ActiveToolsSection({ roomId, memberRef, status, reloadKey, dmSco
     setError(false);
     try {
       const data = await getConversationTools(dmScope?.scopeId || `room:${roomId}`, dmScope?.memberId || memberRef);
-      setSessionActive(!!data.live?.sessionActive);
-      setTools(Array.isArray(data.live?.tools) ? data.live!.tools : []);
+      setSessionActive(data.sessionActive);
+      setTools(data.tools);
     } catch {
       setError(true);
       setSessionActive(false);

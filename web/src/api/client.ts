@@ -632,6 +632,8 @@ export interface PaginatedEvents {
   events: unknown[];
   total: number;
   hasMore: boolean;
+  scopeId: string;
+  memberId: string;
 }
 
 export async function getConversationEvents(scopeId: string, memberId: string, limit: number, before?: number): Promise<PaginatedEvents> {
@@ -692,7 +694,9 @@ export interface ContextUsageData {
   compacted?: boolean;
 }
 
-export async function getAgentContextUsage(roomId: string, memberId: string): Promise<ContextUsageData> {
+export type ConversationContextUsageInfo = ContextUsageData & { scopeId: string };
+
+export async function getAgentContextUsage(roomId: string, memberId: string): Promise<ConversationContextUsageInfo> {
   return apiFetch(`/api/conversations/${encodeURIComponent(`room:${roomId}`)}/context-usage?memberId=${encodeURIComponent(memberId)}`);
 }
 
@@ -946,11 +950,16 @@ export async function sendDmMessage(
   return res.message;
 }
 
-export interface DmSession {
+export interface ConversationSessionInfo {
+  scopeId: string;
+  memberId: string;
+  memberName: string;
   status: string;
-  contextPct?: number | null;
-  working?: boolean;
+  busy: { busy: boolean; reason?: string };
+  contextUsage: ContextUsageData | null;
 }
+
+export type DmSession = ConversationSessionInfo;
 
 export async function getDmSession(memberId: string): Promise<DmSession> {
   return apiFetch(`/api/conversations/${encodeURIComponent(`dm:${memberId}`)}/session`);
@@ -1018,15 +1027,6 @@ export async function deleteGlobalMember(id: string): Promise<void> {
 }
 
 
-export interface ConversationSessionInfo {
-  scopeId: string;
-  memberId: string;
-  status: string;
-  busy: boolean;
-  contextPct: number | null;
-  contextUsage?: ContextUsageData;
-}
-
 export async function getConversationSession(scopeId: string, memberId: string): Promise<ConversationSessionInfo> {
   return apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/session?memberId=${encodeURIComponent(memberId)}`);
 }
@@ -1050,11 +1050,9 @@ export async function getMemberScopedActivityEvents(
   return apiFetch(`/api/members/${encodeURIComponent(id)}/events?${qs}`);
 }
 
-export interface ConversationToolsInfo {
+export interface ConversationToolsInfo extends MemberActiveToolsResponse {
   scopeId: string;
   memberId: string;
-  live: { sessionActive: boolean; tools: MemberActiveTool[]; message?: string } | null;
-  status: string;
 }
 
 export async function getConversationTools(scopeId: string, memberId: string): Promise<ConversationToolsInfo> {
