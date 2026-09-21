@@ -1,5 +1,4 @@
 import { accessSync, constants } from "node:fs";
-import { chatShortId } from "../../chat/conversations.js";
 import {
   type AgentSession,
   type CompactionEntry,
@@ -18,13 +17,19 @@ type RecoveryHookResult = { cancel?: boolean; compaction?: Awaited<ReturnType<Ag
 
 /** The complete work log remains on disk; only its active context is replaced.
  * Wrapped in a platform_directive element (spec unified-user-prompt v1.6) so
- * recovery is structurally distinguishable from real chat traffic. */
+ * recovery is structurally distinguishable from real chat traffic. The
+ * chat_id attribute is derived locally — runtime must not depend on the chat
+ * layer for it (mm refs keep their canonical form; tools still resolve it). */
+function recoveryChatAttr(sourceRef: string | null): string {
+  if (!sourceRef) return "";
+  if (sourceRef.startsWith("room:")) return ` chat_id="${sourceRef.slice(5)}"`;
+  const dm = /^dm:mem_([A-Za-z0-9-]+)$/.exec(sourceRef);
+  if (dm) return ` chat_id="dm_${dm[1]}"`;
+  return ` chat_id="${sourceRef}"`;
+}
 export function recoveryPrompt(sessionFile: string, sourceRef: string | null, boundaryId: string): string {
   const chat = sourceRef ? ` for ${JSON.stringify(sourceRef)}` : " for your current task";
-  let shortId: string | null = null;
-  try { shortId = sourceRef ? chatShortId(sourceRef) : null; } catch { shortId = null; }
-  const chatAttr = shortId ? ` chat_id="${shortId}"` : "";
-  return `<platform_directive kind="context_recovery" boundary="${boundaryId}"${chatAttr}>\n` +
+  return `<platform_directive kind="context_recovery" boundary="${boundaryId}"${recoveryChatAttr(sourceRef)}>\n` +
     "Internal context recovery: your active context was reset; no summary was generated. " +
     "Recover silently. Do not send a greeting, a recovery announcement, a check-in, or a request to restate an already recorded task. " +
     `First inspect a small relevant window of chat history${chat} using chat_read or chat_search. ` +

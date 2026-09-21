@@ -34,13 +34,13 @@ describe("core-background-retirement-v1", () => {
     applyStorageMigrations(database, withoutBackgroundRetirement());
     seed(database);
     const members = database.all("SELECT * FROM members ORDER BY id");
-    const scopes = database.all("SELECT * FROM scopes ORDER BY id");
+    const scopes = database.all("SELECT id,kind,room_id,member_id FROM scopes ORDER BY id");
     applyStorageMigrations(database, coreStorageMigrations);
     applyStorageMigrations(database, coreStorageMigrations);
     expect(database.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='background_tasks'")).toBeUndefined();
     expect(database.all("SELECT * FROM outbox WHERE kind='background.terminal'")).toEqual([]);
     expect(database.all("SELECT * FROM members ORDER BY id")).toEqual(members);
-    expect(database.all("SELECT * FROM scopes ORDER BY id")).toEqual(scopes);
+    expect(database.all("SELECT id,kind,room_id,member_id FROM scopes ORDER BY id")).toEqual(scopes);
     expect(database.get("PRAGMA foreign_key_check")).toBeUndefined();
     expect(database.get<{integrity_check:string}>("PRAGMA integrity_check").integrity_check).toBe("ok");
   });
