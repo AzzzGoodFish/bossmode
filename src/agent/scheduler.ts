@@ -292,9 +292,6 @@ export function pumpRuntimeInputs(memberId:string):Promise<void>{
   });
 }
 
-const LENGTH_CONTINUATION_PROMPT="⚠ Your previous response was cut off due to output length. Continue from where you stopped and deliver the result — respond with the chat tool.";
-const LENGTH_CONTINUATION_FAILED_WARNING="Member was cut off due to output length again after one automatic continuation. Automatic continuation stopped to avoid a loop; please send a new instruction if you want them to continue.";
-export function isLengthStopReason(reason:unknown):boolean{if(typeof reason!=="string")return false;const value=reason.toLowerCase();return value==="length"||value.includes("max_tokens")||value.includes("max_output");}
 function hasPendingReply(inputs:QueuedInput[]):boolean{
   const first=inputs[0];return !!first.sourceRef&&inputs.some(input=>input.replyExpected)&&schedulerServices().hasPendingReply(getDatabase(),first.memberId,first.sourceRef,runtimeReplySources(inputs));
 }
@@ -303,30 +300,24 @@ function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],tr
   updateDispatchState(instance,"idle",trigger);if(!memberRuntimeAllowed(instance.memberId))return;
   schedulerServices().applyPendingControls(instance,trigger);
   const sourceRef=inputs[0].sourceRef;
-  if(instance.lengthContinuationPending&&!skipWarning){
-    instance.lengthContinuationPending=false;instance.lastMessageEndWasLength=false;
-    if(instance.lengthContinuationAttempted){
-      getDatabase().transaction(db=>schedulerServices().dismissReplies(db,instance.memberId,sourceRef,"length continuation budget exhausted","continuation-exhausted"));
-      if(sourceRef)schedulerServices().postSystemNotice(sourceRef,`Member "${instance.agentName}" ${LENGTH_CONTINUATION_FAILED_WARNING}`);
-    }else{
-      instance.lengthContinuationAttempted=true;const owed=hasPendingReply(inputs);
-      acceptControlInput(sourceRef,instance.memberId,{prompt:owed?LENGTH_CONTINUATION_PROMPT:"Your response was cut off due to output length. Continue the unfinished work, respecting the original reply requirements.",source:"system",trigger:"length_continuation",replySources:runtimeReplySources(inputs)},owed);
-    }
-    return;
-  }
   if(!skipWarning&&!instance.hadErrorInTurn&&hasPendingReply(inputs)){
     getDatabase().transaction(db=>schedulerServices().dismissReplies(db,instance.memberId,sourceRef,"member finished without replying","silent"));
     if(sourceRef)schedulerServices().postSystemNotice(sourceRef,`Member "${instance.agentName}" finished without replying.`);
   }
 }
 async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promise<void>{
-  const payloads=inputs.map(runtimeInputPayload),message=payloads.map(item=>item.prompt).join("\n\n"),trigger=payloads.length===1?payloads[0].trigger:"queued";
+  const payloads=inputs.map(runtimeInputPayload),prompts=payloads.map(item=>item.prompt);
+  // Queued chat deliveries merge into one prompt (spec unified-user-prompt
+  // v1.6): a single input keeps its own form, several inputs are wrapped in a
+  // chat_batch element. Inner elements already carry their own chat identity
+  // and last_read; the wrapper only counts.
+  const message=prompts.length>1?`<chat_batch count="${prompts.length}">\n\n${prompts.join("\n\n")}\n\n</chat_batch>`:prompts[0];
+  const trigger=payloads.length===1?payloads[0].trigger:"queued";
   const sourceRef=inputs[0].sourceRef,token=randomUUID();instance.activeSourceRef=sourceRef;
   updateDispatchState(instance,"promptSubmitted",trigger);instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
-  instance.lastMessageEndWasLength=false;instance.lengthContinuationPending=false;instance.lengthContinuationAttempted=payloads.some(item=>item.trigger==="length_continuation");
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
   try{
-    if(trigger!=="length_continuation")schedulerServices().emitEvent(sourceRef,instance.memberId,{type:"user_prompt",text:message,trigger});
+    schedulerServices().emitEvent(sourceRef,instance.memberId,{type:"user_prompt",text:message,trigger});
     if(instance.profilePromptDirty){const sources=schedulerServices().loadProfileSources(instance.memberId);instance.agentName=sources.agentName;instance.sessionSources.compiled=sources.compiled;instance.handle.refreshPrompt(sources.compiled);instance.profilePromptDirty=false;}
     await instance.handle.prompt(message,{beforeDispatch:event=>{
       if(!schedulerServices().authorizeExecution(instance.memberId,sourceRef))throw new ExecutionAuthorizationRevokedError();
@@ -389,7 +380,6 @@ export function wireInstanceEvents(instance: AgentInstance): void {
     const newStatus = processEvent(sourceRef, memberName, key, event, instance.eventBuffer, memberId, instance.appliedModel);
     if (event.type === "agent_start") {
       instance.turnActive = true;
-      if (instance.lengthContinuationPending) instance.lengthContinuationPending = false;
       if(instance.dispatchState!=="aborting")updateDispatchState(instance, "running", event.type);
     } else if (event.type === "agent_end") {
       // pi session-level retry: willRetry agent_end is not a real turn end — keep
@@ -441,14 +431,6 @@ export function wireInstanceEvents(instance: AgentInstance): void {
         // drained next prompt — stay working publicly
       } else {
         transition(instance, sourceRef, memberName, newStatus, event.type);
-      }
-    }
-
-    if (event.type === "message_end") {
-      instance.lastMessageEndWasLength = isLengthStopReason(event.stopReason);
-      if (instance.lastMessageEndWasLength) {
-        instance.lengthContinuationPending = true;
-        logger.warn("agent", "lengthContinuationPending", { member: memberName, sourceRef, memberId, stopReason: event.stopReason });
       }
     }
 

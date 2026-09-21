@@ -27,7 +27,7 @@ export const PARAM_DESCRIPTIONS = {
   from_seq: "Return messages strictly after this seq (ascending) — reads the unread backlog the activation hint points at",
   limit: "Max messages to return (default 50, max 500)",
   output: "'text' returns inline (default). 'file' writes to a temp markdown file and returns the path — use Read tool to view it",
-  chatRef: "Chat id or name (see chat_list).",
+  chatRef: "Chat short id (rm_…/dm_…, see chat_list) or name.",
   memberRef: "Member name or id (see member_list).",
   listQuery: "Keyword filter.",
   listLimit: "Max entries to return (default 50).",
@@ -94,19 +94,19 @@ export interface DirectToolSpec {
 const directSpec=(name:string,label:string,description:string,parameters:TSchema):DirectToolSpec=>({name,label,description,parameters});
 export const DIRECT_TOOL_SPECS: DirectToolSpec[] = [
   directSpec("chat_send","Chat Send",`Send a message to one chat.
-- to (required): target chat — id or name; your private chat with the user is "dm:<your member id>" (or "user"). Private chats need no prior creation.
+- to (required): target chat — short id (rm_…/dm_…) or name, see chat_list; your private chat with the user is "user". Private chats need no prior creation.
 - message (required): text content.
 - attachments (optional): local file paths, copied into that chat's attachment store.`,parameterSchema("to:s message:s attachments?:as",{to:"chatTo",message:"chatMessage",attachments:"chatAttachments"})),
   directSpec("chat_read","Chat Read",`Read an ordered window of messages from one chat.
 
-- chat (required): chat id or name — see chat_list.
+- chat (required): short id (rm_…/dm_…) or name — see chat_list.
 - Window: latest by default; from_seq / around_seq position it, before / after bound it by time, limit sizes it.
 - output: "file" writes the full window to a temp markdown file instead of returning it inline.
 
 chat_search locates messages; read opens the context — feed a hit's seq to around_seq or from_seq.`,parameterSchema("chat:s from_seq?:n around_seq?:n before?:s after?:s limit?:n output?:s")),
   directSpec("chat_search","Chat Search",`Search one chat's messages by text, sender or time; returns hits (seq, sender, time, snippet), newest first.
 
-- chat (required): chat id or name — see chat_list.
+- chat (required): short id (rm_…/dm_…) or name — see chat_list.
 - query (required): case-insensitive text to find.
 - from / before / after / limit narrow the search.
 

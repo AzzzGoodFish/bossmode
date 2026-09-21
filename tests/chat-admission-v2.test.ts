@@ -36,7 +36,8 @@ describe("chat delivery v2", () => {
       return { ...prepared, id, confirmation };
     });
     expect(result.confirmation).toEqual({ confirmed: true, cursorConfirmed: true });
-    expect(result.admissions[0].input.prompt).toContain("[REPLY EXPECTED]");
+    expect(result.admissions[0].input.prompt).toContain('<chat_message chat_name="Test" chat_id="rm_test" chat_type="channel" sender_id="user" sender_name="user" msg_id="1"');
+    expect(result.admissions[0].input.prompt).not.toContain("REPLY EXPECTED");
     expect(result.admissions[0].input.prompt).toContain("@One hello");
     expect(getMemberCursor("room:rm_test", "mem_one", fixture.db)).toBe(result.message.id);
     expect(confirmChatAdmission(fixture.db, result.admissions[0].chatToken, result.id)).toEqual({ confirmed: false, cursorConfirmed: false });
@@ -79,16 +80,18 @@ describe("chat delivery v2", () => {
     });
     expect(dm.admissions).toHaveLength(1);
     expect(dm.admissions[0].memberId).toBe("mem_one");
-    expect(dm.admissions[0].chatToken.cursor).toBeNull();
-    expect(dm.admissions[0].input.prompt).toContain("private chat with the user");
+    expect(dm.admissions[0].chatToken.cursor?.scopeId).toBe("dm:mem_one");
+    expect(dm.admissions[0].input.prompt).toContain('chat_name="user"');
+    expect(dm.admissions[0].input.prompt).toContain('chat_type="dm"');
 
     const mm = appendMessageWithAdmissions(fixture.db, "mm:mem_one-mem_two", {
       sender: "One", senderMemberId: "mem_one", content: "private member", mentions: [],
     });
     expect(mm.admissions).toHaveLength(1);
     expect(mm.admissions[0].memberId).toBe("mem_two");
-    expect(mm.admissions[0].chatToken.cursor).toBeNull();
-    expect(mm.admissions[0].input.prompt).toContain("private chat with member `One`");
+    expect(mm.admissions[0].chatToken.cursor?.scopeId).toBe("mm:mem_one-mem_two");
+    expect(mm.admissions[0].input.prompt).toContain('chat_name="One"');
+    expect(mm.admissions[0].input.prompt).toContain('sender_id="mem_one"');
     expect(assertMemberScopeAccess("mem_one", "mm:mem_one-mem_two").kind).toBe("mm");
     expect(() => assertMemberScopeAccess("mem_one", "dm:mem_two")).toThrow("own DM");
   });

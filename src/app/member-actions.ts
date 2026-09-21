@@ -5,7 +5,7 @@ import { getDatabase, type Database } from "../data/database.js";
 import { getBossmodeDir, memberDir, membersRoot, memberSkillsDir, memberExtensionsDir } from "../files/layout.js";
 import { syncMemberBirthAssets } from "../member/assets.js";
 import { documentContentMeta, insertInitialDocument } from "../member/assets.js";
-import { ensureDmScope } from "../chat/conversations.js";
+import { chatShortId, ensureDmScope } from "../chat/conversations.js";
 import { getMember, getMemberConfiguration, getRetainedMember, insertMemberIdentity, prepareMemberIdentity, updateMember as persistMember, type MemberRecord, type CreateMemberInput } from "../member/identity.js";
 import { ensureDefaultRegistry, prepareMemberSshCredential, importSshCredential, activeWorkspaceRoot } from "../member/workspaces.js";
 import { builtinMcpAdapterPath, discoverMemberExtensionEntries } from "../member/extensions.js";
@@ -213,9 +213,12 @@ export async function activateDmMember(memberId:string):Promise<void>{
   if(!memberRuntimeAllowed(memberId))return;
   const member=getMember(memberId);if(!member)return;
   const sourceRef=`dm:${memberId}`;
+  const shortId=chatShortId(sourceRef)??sourceRef;
+  const directive=(persona:"empty"|"ready",instruction:string)=>
+    `<platform_directive kind="dm_activation" chat_id="${shortId}" persona="${persona}">\n${instruction}\n</platform_directive>`;
   const prompt=isBlankPersona(readMemberProfile(memberId))
-    ?`You are in a private chat with the user (${sourceRef}). Introduce yourself briefly with chat_send and ask what they want you around for.`
-    :`You are in a private chat with the user (${sourceRef}). Greet briefly with chat_send, or wait for their request.`;
+    ?directive("empty","You are now in a private chat with the user. Introduce yourself briefly with chat_send and ask what they want you around for.")
+    :directive("ready","You are now in a private chat with the user. Greet briefly with chat_send, or wait for their request.");
   const {input}=acceptControlInput(sourceRef,memberId,{prompt,source:"private_instruction",trigger:"dm-activate",replySources:[]},false);
   await waitForInputSettlement(input,pumpRuntimeInputs(memberId));
 }

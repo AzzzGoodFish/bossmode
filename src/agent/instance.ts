@@ -25,9 +25,6 @@ export interface AgentInstance {
   hadErrorInTurn: boolean;
   lastTurnError: string | null;
   pendingErrorNotice: string | null;
-  lastMessageEndWasLength: boolean;
-  lengthContinuationPending: boolean;
-  lengthContinuationAttempted: boolean;
   compacting: boolean;
   turnActive: boolean;
   sessionSources: SessionSources;

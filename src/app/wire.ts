@@ -12,7 +12,7 @@ export function wireMemberProfiles(): () => void {
   const stopViews = onMemberIdentityChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   return () => { stopRuntime(); stopViews(); };
 }
-import { assertMemberScopeAccess,attachmentLocation,chatScopeAssetRoots,connectConversationMembers,ensureDmScope,ensureMmScope,isMmScopeId,listRoomsForMember,parseConversation,parseMmScopeId } from "../chat/conversations.js";
+import { assertMemberScopeAccess,attachmentLocation,chatScopeAssetRoots,chatShortId,connectConversationMembers,ensureDmScope,ensureMmScope,isMmScopeId,listRoomsForMember,parseConversation,parseMmScopeId,resolveChatScope } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef,updateMember } from "../member/identity.js";
 import { activeWorkspaceRoot,getActiveWorkspace,getWorkspace } from "../member/workspaces.js";
 export function wireConversationMembers(): () => void { return connectConversationMembers(readMemberIdentity); }
@@ -169,6 +169,9 @@ function resolveToolChat(memberId:string,current:string|null,value:unknown):stri
   if(!ref){if(!current)throw new Error("This tool call needs a current chat or an explicit target");return current;}
   if(ref==="user"||ref==="dm"||ref===memberId)return `dm:${memberId}`;
   if(ref.startsWith("room:")||ref.startsWith("dm:")||isMmScopeId(ref)){assertMemberScopeAccess(memberId,ref);return ref;}
+  // Short chat ids (spec unified-user-prompt v1.6): rm_*/dm_* resolve through
+  // the scope registry, then the canonical ref continues as usual.
+  if(/^(rm_|dm_)[A-Za-z0-9]+$/.test(ref)){const canonical=resolveChatScope(ref);if(canonical){assertMemberScopeAccess(memberId,canonical);return canonical;}}
   const direct=roomStore.getRoom(ref);
   if(direct&&roomStore.resolveRoomMember(ref,memberId))return `room:${ref}`;
   const named=listRoomsForMember(memberId).filter(room=>room.name.toLowerCase()===ref.toLowerCase());
@@ -251,9 +254,9 @@ async function executeAgentHostTool(input:{tool:string;params:Record<string,unkn
     return {ok:true,chat:target,total:result.total,messages:searchQueryRows(result.messages)};
   }
   if(tool==="chat_list"){
-    const rooms=listRoomsForMember(memberId).map(room=>({kind:"room",id:`room:${room.id}`,name:room.name,description:room.description??""}));
-    const mm=roomStore.listMmScopesForMember(memberId).map(id=>{const peer=parseMmScopeId(id)?.find(value=>value!==memberId),name=peer?(getMember(peer)?.name??peer):"member";return {kind:"mm",id,name:`Private chat with ${name}`,description:""};});
-    const chats=[{kind:"dm",id:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms,...mm];
+    const rooms=listRoomsForMember(memberId).map(room=>({kind:"room",id:room.id,ref:`room:${room.id}`,name:room.name,description:room.description??""}));
+    const mm=roomStore.listMmScopesForMember(memberId).map(id=>{const peer=parseMmScopeId(id)?.find(value=>value!==memberId),name=peer?(getMember(peer)?.name??peer):"member";return {kind:"mm",id:chatShortId(id)??id,ref:id,name:`Private chat with ${name}`,description:""};});
+    const chats=[{kind:"dm",id:chatShortId(`dm:${memberId}`)??`dm:${memberId}`,ref:`dm:${memberId}`,name:"user",description:"Private chat with the user"},...rooms,...mm];
     const query=String(params.query??"").toLowerCase(),filtered=query?chats.filter(chat=>`${chat.id} ${chat.name} ${chat.description}`.toLowerCase().includes(query)):chats;
     const offset=Math.max(0,Number(params.offset)||0),limit=Math.max(1,Math.min(Number(params.limit)||50,500));return {ok:true,chats:filtered.slice(offset,offset+limit),total:filtered.length};
   }

@@ -313,7 +313,13 @@ export function parseConversation(value: string): ConversationIdentity | null {
 }
 
 export function resolveConversation(value: string): ConversationIdentity | null {
-  const ref = parseConversation(value);
+  // Canonical refs first; short chat ids (rm_*/dm_*, spec unified-user-prompt
+  // v1.6) resolve through the scope registry before giving up.
+  let ref = parseConversation(value);
+  if (!ref && /^(rm_|dm_)/.test(value)) {
+    const canonical = resolveChatScope(value);
+    ref = canonical ? parseConversation(canonical) : null;
+  }
   if (!ref) return null;
   if (ref.kind === "room") return getRoom(ref.roomId) ? ref : null;
   if (ref.kind === "dm") return conversationMember(ref.memberId) ? ref : null;
@@ -376,19 +382,20 @@ function scopeRefOfRow(row: ScopeRow): string {
 }
 
 function scopeRowOfRef(scopeRef: string, db: Database): ScopeRow | null {
-  if (scopeRef.startsWith("room:")) return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=? AND kind='room'", scopeRef.slice(5));
-  return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=?", scopeRef);
+  if (scopeRef.startsWith("room:")) return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=? AND kind='room'", scopeRef.slice(5)) ?? null;
+  return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=?", scopeRef) ?? null;
 }
 
 /** Short chat id for a canonical scope ref; persists a minted id for mm scopes. */
-export function chatShortId(scopeRef: string, db: Database = getDatabase()): string | null {
+export function chatShortId(scopeRef: string, db?: Database): string | null {
   if (scopeRef.startsWith("room:")) return scopeRef.slice(5);
   if (scopeRef.startsWith("dm:")) {
     const body = MEMBER_ID_BODY.exec(scopeRef.slice(3))?.[1];
     return body ? `${CHAT_DM_SHORT_PREFIX}${body}` : null;
   }
-  const row = scopeRowOfRef(scopeRef, db);
-  return row ? scopeRowShortId(row, db) : null;
+  const database = db ?? getDatabase();
+  const row = scopeRowOfRef(scopeRef, database);
+  return row ? scopeRowShortId(row, database) : null;
 }
 
 /** Resolve a prompt/tool-facing chat reference to its canonical scope ref.
