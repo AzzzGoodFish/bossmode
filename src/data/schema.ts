@@ -1112,4 +1112,11 @@ WHERE kind='agent-event' AND scope_id IS NOT NULL;
 PRAGMA foreign_key_check;
 `,
 },
+{
+  id: "core-scope-short-id-v1",
+  sql: `
+ALTER TABLE scopes ADD COLUMN short_id TEXT;
+CREATE UNIQUE INDEX scopes_short_id ON scopes(short_id);
+`,
+},
 ]);

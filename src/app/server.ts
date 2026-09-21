@@ -4,6 +4,7 @@ import { ensureDirectory } from "../files/io.js";
 import { getBossmodeDir } from "../files/layout.js";
 import { recoverMemberArchives } from "./member-actions.js";
 import { prepareCoreStorage } from "./upgrade/run.js";
+import { backfillScopeShortIds } from "../chat/conversations.js";
 import { type UpgradeProgress } from "./upgrade/inventory.js";
 import type { BossmodeConfig } from "../config/settings.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -55,6 +56,7 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   await wireApiRoutes();
   seedBuiltinAssets();
   await recoverMemberArchives();
+  backfillScopeShortIds();
   initializeMemberRuntime(new PiSdkRuntime(),loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();
   const unsubscribeProfiles = wireMemberProfiles();

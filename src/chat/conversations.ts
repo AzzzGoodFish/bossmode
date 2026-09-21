@@ -16,7 +16,7 @@ export interface Room {
   description?: string;
   createdAt: number;
 }
-import { newRoomId } from "../kernel/ids.js";
+import { newRoomId, generateShortId } from "../kernel/ids.js";
 import { getDatabase, type Database } from "../data/database.js";
 import { readRoomIdMigrations } from "../data/id-migrations.js";
 import type { AttachmentLocation } from "../files/attachments.js";
@@ -338,7 +338,85 @@ export function isMemberId(id: string): boolean {
   return typeof id === "string" && /^mem_[A-Za-z0-9-]+$/.test(id);
 }
 
-interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null }
+interface ScopeRow { id: string; kind: "room" | "dm" | "mm"; room_id: string | null; member_id: string | null; short_id?: string | null }
+
+// -- Chat short ids (unified prompt addressing, spec unified-user-prompt v1.6) --
+// Canonical scope refs stay unchanged internally (room:rm_x / dm:mem_x /
+// mm:mem_a-mem_b). Short ids are the prompt/tool-facing form: rooms keep their
+// rm_<id> id, a user DM derives dm_<member suffix>, and a member-to-member
+// scope mints a random dm_<suffix> exactly once and persists it.
+
+const CHAT_DM_SHORT_PREFIX = "dm_";
+const CHAT_ROOM_SHORT_PREFIX = "rm_";
+const MEMBER_ID_BODY = /^mem_([A-Za-z0-9]+)$/;
+
+function mintDmShortId(db: Database): string {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = `${CHAT_DM_SHORT_PREFIX}${generateShortId()}`;
+    if (!db.get("SELECT 1 FROM scopes WHERE short_id=?", candidate)) return candidate;
+  }
+  throw new Error("Unable to mint a unique chat short id");
+}
+
+function scopeRowShortId(row: ScopeRow, db: Database): string {
+  if (row.short_id) return row.short_id;
+  let computed: string | null = null;
+  if (row.kind === "room") computed = row.id;
+  else if (row.kind === "dm") {
+    const body = MEMBER_ID_BODY.exec(row.member_id ?? "")?.[1];
+    if (body) computed = `${CHAT_DM_SHORT_PREFIX}${body}`;
+  }
+  const shortId = computed ?? mintDmShortId(db);
+  db.run("UPDATE scopes SET short_id=? WHERE id=?", shortId, row.id);
+  return shortId;
+}
+
+function scopeRefOfRow(row: ScopeRow): string {
+  return row.kind === "room" ? `room:${row.id}` : row.id;
+}
+
+function scopeRowOfRef(scopeRef: string, db: Database): ScopeRow | null {
+  if (scopeRef.startsWith("room:")) return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=? AND kind='room'", scopeRef.slice(5));
+  return db.get<ScopeRow>("SELECT * FROM scopes WHERE id=?", scopeRef);
+}
+
+/** Short chat id for a canonical scope ref; persists a minted id for mm scopes. */
+export function chatShortId(scopeRef: string, db: Database = getDatabase()): string | null {
+  if (scopeRef.startsWith("room:")) return scopeRef.slice(5);
+  if (scopeRef.startsWith("dm:")) {
+    const body = MEMBER_ID_BODY.exec(scopeRef.slice(3))?.[1];
+    return body ? `${CHAT_DM_SHORT_PREFIX}${body}` : null;
+  }
+  const row = scopeRowOfRef(scopeRef, db);
+  return row ? scopeRowShortId(row, db) : null;
+}
+
+/** Resolve a prompt/tool-facing chat reference to its canonical scope ref.
+ * Accepts rm_ and dm_ short ids plus the legacy room:/dm:/mm: forms. */
+export function resolveChatScope(value: string, db: Database = getDatabase()): string | null {
+  const input = value.trim();
+  if (/^(room:|dm:|mm:)/.test(input)) return input;
+  if (input.startsWith(CHAT_ROOM_SHORT_PREFIX)) return `room:${input}`;
+  if (input.startsWith(CHAT_DM_SHORT_PREFIX)) {
+    const row = db.get<ScopeRow>("SELECT * FROM scopes WHERE short_id=?", input);
+    if (row) return scopeRefOfRow(row);
+    const body = input.slice(CHAT_DM_SHORT_PREFIX.length);
+    if (body && db.get("SELECT 1 FROM members WHERE id=?", `mem_${body}`)) return `dm:mem_${body}`;
+    return null;
+  }
+  return null;
+}
+
+/** Startup backfill: every persisted scope gets its short id. Idempotent by
+ * construction — minted ids persist, deterministic ids recompute to the same
+ * value, and an interrupted run simply fills the remainder next start. */
+export function backfillScopeShortIds(db: Database = getDatabase()): number {
+  return db.transaction(tx => {
+    const rows = tx.all<ScopeRow & { short_id: string | null }>("SELECT * FROM scopes WHERE short_id IS NULL");
+    for (const row of rows) scopeRowShortId(row, tx);
+    return rows.length;
+  });
+}
 
 interface RoomRow {
   name: string; created_at: number; docs_path: string | null; description: string | null;
@@ -363,7 +441,10 @@ function ensureConversationScope(id: string, kind: ScopeRow["kind"], roomId: str
     if (previous.kind !== kind || previous.room_id !== roomId || previous.member_id !== memberId) throw new Error(`Scope ownership cannot change: ${id}`);
     return;
   }
-  db.run("INSERT INTO scopes(id,kind,room_id,member_id) VALUES (?,?,?,?)", id, kind, roomId, memberId);
+  db.transaction(tx => {
+    const shortId = scopeRowShortId({ id, kind, room_id: roomId, member_id: memberId, short_id: null }, tx);
+    tx.run("INSERT INTO scopes(id,kind,room_id,member_id,short_id) VALUES (?,?,?,?,?)", id, kind, roomId, memberId, shortId);
+  });
 }
 
 export function ensureDmScope(memberId: string, db: Database = getDatabase()): string {
