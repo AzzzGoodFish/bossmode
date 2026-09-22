@@ -4,6 +4,12 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.28.2] — 2026-09-22
+
+### Restored
+- Automatic context compaction is handled by the Pi SDK again, including its normal summary, session boundary, retry, and compaction lifecycle events. Manual Compact remains available.
+
+
 ## [0.28.1] — 2026-09-22
 
 ### Fixed

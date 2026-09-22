@@ -8,24 +8,7 @@ function textFromMessage(msg: any): string {
     .map((c: any) => typeof c === "string" ? c : c.text || "")
     .join("");
 }
-export function mapPiAgentEvent(raw: any, options: { automaticRecovery?: boolean } = {}): AgentStreamEvent | null {
-  if (options.automaticRecovery && (raw?.reason === "threshold" || raw?.reason === "overflow")) {
-    if (raw.type === "compaction_start") return { type: "context_recovery_start", reason: raw.reason };
-    if (raw.type === "compaction_end") {
-      const tokensBefore = Number(raw.result?.tokensBefore);
-      const estimatedTokensAfter = Number(raw.result?.estimatedTokensAfter);
-      return {
-        type: "context_recovery_end", reason: raw.reason,
-        aborted: !!raw.aborted, willRetry: !!raw.willRetry,
-        ...(typeof raw.errorMessage === "string" && raw.errorMessage ? {
-          errorMessage: raw.errorMessage.replace(/compact-and-retry/g, "context recovery and retry").replace(/Auto-compaction failed/g, "Context recovery failed"),
-        } : {}),
-        ...(Number.isFinite(tokensBefore) ? { tokensBefore } : {}),
-        ...(Number.isFinite(estimatedTokensAfter) ? { estimatedTokensAfter } : {}),
-        ...(typeof raw.result?.summary === "string" ? { recoveryPrompt: raw.result.summary } : {}),
-      };
-    }
-  }
+export function mapPiAgentEvent(raw: any): AgentStreamEvent | null {
   switch (raw?.type) {
     case "agent_start": return { type: "agent_start" };
     case "agent_end": return { type: "agent_end", willRetry: !!raw.willRetry };
@@ -76,11 +59,11 @@ export function mapPiAgentEvent(raw: any, options: { automaticRecovery?: boolean
       return null;
   }
 }
-export function mapContextUsage(raw: any, modelLabel = "unknown", contextReset = false): ContextUsage | null {
+export function mapContextUsage(raw: any, modelLabel = "unknown"): ContextUsage | null {
   if (!raw) return null;
   const compacted = raw.tokens === null || raw.totalTokens === null || raw.total === null;
   const total = compacted ? 0 : (raw.tokens ?? raw.totalTokens ?? raw.total ?? 0);
   const max = raw.contextWindow ?? raw.rawMaxTokens ?? raw.maxTokens ?? 0;
   const pct = raw.percent ?? raw.percentage ?? (max > 0 ? (total / max) * 100 : 0);
-  return { totalTokens: total, rawMaxTokens: max, percentage: pct, model: raw.model?.id || raw.model || modelLabel, ...(compacted ? contextReset ? { contextReset: true } : { compacted: true } : {}) };
+  return { totalTokens: total, rawMaxTokens: max, percentage: pct, model: raw.model?.id || raw.model || modelLabel, ...(compacted ? { compacted: true } : {}) };
 }

@@ -86,8 +86,6 @@ export type AgentStreamEvent =
   | { type: "tool_start"; toolName: string; toolCallId: string; args: unknown }
   | { type: "tool_update"; toolName: string; toolCallId: string; partialResult: unknown }
   | { type: "tool_end"; toolName: string; toolCallId: string; result: unknown; isError: boolean }
-  | { type: "context_recovery_start"; reason: "threshold" | "overflow" }
-  | { type: "context_recovery_end"; reason: "threshold" | "overflow"; aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; estimatedTokensAfter?: number; recoveryPrompt?: string }
   | { type: "compaction_start"; reason?: "manual" | "threshold" | "overflow" | string }
   | { type: "compaction_end"; reason?: "manual" | "threshold" | "overflow" | string; aborted: boolean; willRetry: boolean; errorMessage?: string; tokensBefore?: number; result?: unknown }
 ;
@@ -104,6 +102,4 @@ export interface ContextUsage {
   percentage: number;
   model: string;
   compacted?: boolean;
-  /** Active context was reset without a summary; usage awaits a new response. */
-  contextReset?: boolean;
 }

@@ -14,12 +14,12 @@ import { availableThinkingLevels, findModelOptionForBinding } from "./thinking-l
 
 import { ToggleSwitch } from "./ToggleSwitch";
 import { Markdown } from "./Markdown";
-import { diffStatForTool, formatEventTime, isActivityStreamEvent, isContextBoundaryEvent, summarizeAgentEvent, toolDisplay, truncateText, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, formatEventTime, isActivityStreamEvent, summarizeAgentEvent, toolDisplay, truncateText, type AgentEvent } from "./agent-event-utils";
 import type { AgentStatusMap } from "../hooks/useRoom";
 import { StaffBadge, statusFromAgent } from "./StaffBadge";
 import { ModelPicker, modelProfileLabel } from "./ModelPicker";
 import { useDialog } from "./dialogs";
-import { ActivityTab, ThinkingTrace, ToolCard, ReplyCard, UserPromptCard, ContextBoundaryCard, MemberDisc } from "./ActivityTab";
+import { ActivityTab, ThinkingTrace, ToolCard, ReplyCard, UserPromptCard, CompactionCard, MemberDisc } from "./ActivityTab";
 
 interface StationPanelProps {
   members: string[];
@@ -687,8 +687,6 @@ function currentActivityLine(events: AgentEvent[], status: string, stream?: Live
       return { kind: "done", text: toolName };
     }
     if (e.type === "compaction_start") return { kind: "running", text: "Compacting", liveSince: typeof e.ts === "number" ? e.ts : undefined };
-    if (e.type === "context_recovery_start") return { kind: "running", text: "Resetting context", liveSince: typeof e.ts === "number" ? e.ts : undefined };
-    if (e.type === "context_recovery_end") return { kind: e.errorMessage ? "error" : "done", text: summarizeAgentEvent(e).label };
     if (e.type === "message_end" && e.text) return { kind: "reply", text: "Replied" };
     if (e.type === "message_end" && e.thinking) {
       const next = events.slice(i + 1).find((x) => typeof x.ts === "number");
@@ -765,7 +763,7 @@ function RiverEventCard({ item }: { item: Extract<RiverItem, { kind: "event" }> 
   if (event.type === "tool_start" || event.type === "tool_end") {
     return <ToolCard event={event} toolEnd={toolEnd} diff={diffStatForTool(event)} time={time} query="" member={member} compact />;
   }
-  if (isContextBoundaryEvent(event)) return <ContextBoundaryCard event={event} time={time} member={member} />;
+  if (event.type === "compaction_start" || event.type === "compaction_end") return <CompactionCard event={event} time={time} member={member} />;
   if (event.type === "message_end" && (event.thinking || event.text)) {
     return (
       <>
@@ -833,7 +831,7 @@ function RosterAvatar({ name, status, usage, onOpen }: {
           <span className="text-ink-3">
             · {typeof usage.totalTokens === "number" ? formatTokens(usage.totalTokens) : "?"} / {typeof usage.rawMaxTokens === "number" ? formatTokens(usage.rawMaxTokens) : "?"}
           </span>
-          {usage.contextReset ? <span className="text-ink-4">· context reset</span> : usage.compacted && <span className="text-ink-4">· compacted</span>}
+          {usage.compacted && <span className="text-ink-4">· compacted</span>}
         </div>,
         document.body,
       )}

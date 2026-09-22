@@ -3,14 +3,13 @@
  *
  * Covers: chat_message envelope snapshots for all three chat kinds (with
  * quote/attachment/last_read), the dm_activation
- * and context_recovery platform directives, isPlatformInjection detection,
+ * and platform directives, isPlatformInjection detection,
  * and the absence of the retired REPLY EXPECTED / length-continuation paths.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
 import { renderChatInput, type ChatContextSnapshot } from "../src/chat/context.js";
 import { isPlatformInjection } from "../src/agent/injection.js";
-import { recoveryPrompt } from "../src/agent/runtime/context-recovery.js";
 import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
@@ -105,14 +104,6 @@ describe("chat_message envelope (spec v1.6)", () => {
 });
 
 describe("platform directives (spec v1.6)", () => {
-  it("context recovery prompt is a single directive element with boundary and chat", () => {
-    const prompt = recoveryPrompt("/work/s.jsonl", "room:rm_fixture", "0f73e15c");
-    expect(prompt.startsWith('<platform_directive kind="context_recovery" boundary="0f73e15c" chat_id="rm_fixture">')).toBe(true);
-    expect(prompt.endsWith("</platform_directive>")).toBe(true);
-    expect(prompt).toContain("Internal context recovery:");
-    expect(isPlatformInjection(prompt)).toBe(true);
-  });
-
   it("dm activation directive shape", () => {
     const prompt = `<platform_directive kind="dm_activation" chat_id="dm_ey1utklman" persona="empty">\nYou are now in a private chat with the user. Introduce yourself briefly with chat_send and ask what they want you around for.\n</platform_directive>`;
     expect(isPlatformInjection(prompt)).toBe(true);

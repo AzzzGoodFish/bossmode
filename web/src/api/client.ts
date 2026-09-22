@@ -692,7 +692,6 @@ export interface ContextUsageData {
   percentage?: number;
   model?: string;
   compacted?: boolean;
-  contextReset?: boolean;
 }
 
 export type ConversationContextUsageInfo = ContextUsageData & { scopeId: string };

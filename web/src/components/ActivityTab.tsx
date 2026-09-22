@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronRight, MessageSquareText, Search, User } from "lucide-react";import { getMemberActivityEvents, getMemberScopedActivityEvents, getToken } from "../api/client";
-import { diffStatForTool, eventSearchText, formatContextBoundaryPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isActivityStreamEvent, isContextBoundaryEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
+import { diffStatForTool, eventSearchText, formatCompactionPreview, formatEventTime, formatToolArgsFull, getSanitizedArgs, isActivityStreamEvent, isCompactionEvent, isReplyEvent, isToolEvent, summarizeAgentEvent, toolDisplay, toolTarget, type AgentEvent } from "./agent-event-utils";
 import { Markdown } from "./Markdown";
 
 const PAGE_SIZE = 120;
@@ -130,7 +130,7 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope }: {
   const filteredEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
     return events.filter((event) => {
-      if (filter === "tools" && !isToolEvent(event) && !isContextBoundaryEvent(event)) return false;
+      if (filter === "tools" && !isToolEvent(event) && !isCompactionEvent(event)) return false;
       if (filter === "replies" && !isReplyEvent(event)) return false;
       if (q && !eventSearchText(event).includes(q)) return false;
       return isAllStreamEvent(event);
@@ -139,7 +139,7 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope }: {
 
   const counts = useMemo(() => ({
     all: events.filter(isAllStreamEvent).length,
-    tools: events.filter((event) => isToolEvent(event) || isContextBoundaryEvent(event)).length,
+    tools: events.filter((event) => isToolEvent(event) || isCompactionEvent(event)).length,
     replies: events.filter(isReplyEvent).length,
   }), [events]);
 
@@ -386,8 +386,8 @@ function EventRow({ event, toolEnd, elapsedSec, query }: { event: AgentEvent; to
   if (event.type === "tool_start") {
     return <ToolCard event={event} toolEnd={toolEnd} diff={diff} time={time} query={query} />;
   }
-  if (isContextBoundaryEvent(event)) {
-    return <ContextBoundaryCard event={event} time={time} query={query} />;
+  if (event.type === "compaction_start" || event.type === "compaction_end") {
+    return <CompactionCard event={event} time={time} query={query} />;
   }
   if (event.type === "message_end" && (event.thinking || event.text)) {
     // Both cards render when a message carries thinking and text (thinking-enabled
@@ -432,11 +432,11 @@ export function ReplyCard({ text, time, query = "", member, clamp }: { text: str
   );
 }
 
-/** Context-boundary card shared by Activity and the workstation river. */
-export function ContextBoundaryCard({ event, time, query = "", member }: { event: AgentEvent; time: string; query?: string; member?: string }) {
+/** Compaction card — extracted from EventRow for river reuse (member tag). */
+export function CompactionCard({ event, time, query = "", member }: { event: AgentEvent; time: string; query?: string; member?: string }) {
   const summary = summarizeAgentEvent(event);
   const [open, setOpen] = useState(false);
-  const tone = event.type === "compaction_start" || event.type === "context_recovery_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
+  const tone = event.type === "compaction_start" ? "text-accent-ink" : event.errorMessage ? "text-blocked" : "text-onair";
   return (
     <div className="rounded-[10px] border border-line-soft bg-surface-1 px-3 py-[8px]">
       <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full text-left cursor-pointer">
@@ -448,7 +448,7 @@ export function ContextBoundaryCard({ event, time, query = "", member }: { event
           <span className="font-mono text-[10px] leading-none text-ink-4 shrink-0 whitespace-nowrap">{time}</span>
         </div>
       </button>
-      {open && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatContextBoundaryPreview(event)}</pre>}
+      {open && <pre className="mt-2 bg-inset rounded-[7px] px-[9px] py-[7px] text-[10.5px] text-ink-4 max-h-[110px] overflow-y-auto whitespace-pre-wrap break-words">{formatCompactionPreview(event)}</pre>}
     </div>
   );
 }
