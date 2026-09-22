@@ -1,4 +1,5 @@
 import type { Database } from "../data/database.js";
+import { getUserDisplayName } from "../config/settings.js";
 import { getAttachmentPath, type AttachmentLocation } from "../files/attachments.js";
 import { attachmentLocation, chatShortId, conversationMember, getRoom, parseConversation, type ConversationIdentity } from "./conversations.js";
 import { getMemberCursor, type MemberCursorConfirmation } from "./cursors.js";
@@ -143,12 +144,21 @@ function excerpt(value: string, max = 50): string {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }
 
+function displaySenderName(sender: string): string {
+  if (sender !== "user") return sender;
+  // `user` is the durable human-sender sentinel. Use the configured login
+  // name in member-facing prompts, but preserve the sentinel in unconfigured
+  // storage/test contexts where no display identity exists yet.
+  const display = getUserDisplayName();
+  return display === "User" ? sender : display;
+}
+
 function replyQuote(snapshot: ChatContextSnapshot): string {
   const reference = snapshot.trigger.replyTo;
   if (!reference) return "";
   const target = snapshot.replyTarget;
   if (!target) return `<quote msg_id="${reference.seq ?? ""}" unavailable="true"/>`;
-  return `<quote msg_id="${target.seq ?? reference.seq}" sender_name="${xmlAttr(target.sender)}">${xmlEscape(excerpt(target.content))}</quote>`;
+  return `<quote msg_id="${target.seq ?? reference.seq}" sender_name="${xmlAttr(displaySenderName(target.sender))}">${xmlEscape(excerpt(target.content))}</quote>`;
 }
 
 function attachmentLines(snapshot: ChatContextSnapshot): string[] {
@@ -172,7 +182,7 @@ export function renderChatInput(snapshot: ChatContextSnapshot): PreparedAgentInp
     `chat_id="${xmlAttr(snapshot.chatShortId ?? snapshot.sourceRef)}"`,
     `chat_type="${snapshot.kind === "room" ? "channel" : "dm"}"`,
     `sender_id="${xmlAttr(message.senderMemberId ?? "user")}"`,
-    `sender_name="${xmlAttr(message.sender)}"`,
+    `sender_name="${xmlAttr(displaySenderName(message.sender))}"`,
     ...(message.seq === undefined ? [] : [`msg_id="${message.seq}"`]),
     `at="${timestamp(message.ts)}"`,
     ...(snapshot.lastRead === null ? [] : [`last_read="${snapshot.lastRead}"`]),

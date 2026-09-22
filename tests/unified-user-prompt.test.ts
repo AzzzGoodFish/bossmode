@@ -11,6 +11,7 @@ import { coreFixture } from "./helpers/core-fixture.js";
 import { renderChatInput, type ChatContextSnapshot } from "../src/chat/context.js";
 import { isPlatformInjection } from "../src/agent/injection.js";
 import { recoveryPrompt } from "../src/agent/runtime/context-recovery.js";
+import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 
 const fixtures: ReturnType<typeof coreFixture>[] = [];
 afterEach(() => { for (const fixture of fixtures.splice(0)) fixture.close(); });
@@ -41,6 +42,18 @@ describe("chat_message envelope (spec v1.6)", () => {
       "</chat_message>");
     expect(prompt).not.toContain("REPLY EXPECTED");
     expect(prompt).not.toContain("Earlier in this room");
+  });
+
+  it("maps the user sender sentinel to the configured display name", () => {
+    const fixture = coreFixture(); fixtures.push(fixture);
+    writeConfig({ ...getDefaultConfig(), auth: { username: "fish", passwordHash: "fixture" } }, fixture.db);
+    const prompt = renderChatInput(baseSnapshot({
+      trigger: { id: "m9", ts: 1, sender: "user", content: "hi", seq: 9, replyTo: { messageId: "m8", seq: 8 } },
+      replyTarget: { id: "m8", ts: 1, sender: "user", content: "quoted", seq: 8 },
+    })).prompt;
+    expect(prompt).toContain('sender_id="user" sender_name="fish"');
+    expect(prompt).toContain('<quote msg_id="8" sender_name="fish">quoted</quote>');
+    expect(prompt).not.toContain('sender_name="user"');
   });
 
   it("last_read, quote (50 chars) and attachment render as frozen fields", () => {

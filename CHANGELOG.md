@@ -4,6 +4,12 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.28.1] — 2026-09-22
+
+### Fixed
+- Agent-facing chat envelopes now render the configured login name for user messages and quoted user messages while preserving `sender_id="user"` as the internal identity sentinel.
+
+
 ## [0.28.0] — 2026-09-22
 
 ### Changed
