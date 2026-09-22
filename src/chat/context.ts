@@ -164,7 +164,7 @@ function attachmentLines(snapshot: ChatContextSnapshot): string[] {
 /** Pure render: message bytes, identity, reply target, attachment paths,
  * chat short id and last_read pointer were already frozen in the snapshot.
  * One chat_message element per delivered message (spec unified-user-prompt
- * v1.6); queued batches are wrapped by the scheduler as chat_batch. */
+ * v1.7); the queue dispatches one input per turn, so no batch wrapper. */
 export function renderChatInput(snapshot: ChatContextSnapshot): PreparedAgentInput {
   const message = snapshot.trigger;
   const attributes = [

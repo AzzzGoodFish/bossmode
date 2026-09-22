@@ -2,7 +2,7 @@
  * Unified user prompt spec v1.6 regression probes.
  *
  * Covers: chat_message envelope snapshots for all three chat kinds (with
- * quote/attachment/last_read), the chat_batch merge form, the dm_activation
+ * quote/attachment/last_read), the dm_activation
  * and context_recovery platform directives, isPlatformInjection detection,
  * and the absence of the retired REPLY EXPECTED / length-continuation paths.
  */
@@ -108,7 +108,7 @@ describe("platform directives (spec v1.6)", () => {
   it("isPlatformInjection separates synthetic inputs from chat traffic", () => {
     expect(isPlatformInjection("  \n<platform_directive kind=\"context_recovery\" boundary=\"x\"/>\n ")).toBe(true);
     expect(isPlatformInjection("<chat_message chat_id=\"rm_x\">\nhi\n</chat_message>")).toBe(false);
-    expect(isPlatformInjection("<chat_batch count=\"2\">\n\n<chat_message>a</chat_message>\n\n<chat_message>b</chat_message>\n\n</chat_batch>")).toBe(false);
+    expect(isPlatformInjection("<chat_message>a</chat_message>\n\n<chat_message>b</chat_message>")).toBe(false);
     expect(isPlatformInjection("Plain user text")).toBe(false);
     expect(isPlatformInjection("<platform_directive>a</platform_directive>\n<platform_directive>b</platform_directive>")).toBe(false);
     expect(isPlatformInjection("<platform_directive kind=\"x\">outer <platform_directive>nested</platform_directive></platform_directive>")).toBe(false);

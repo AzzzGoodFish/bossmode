@@ -3,7 +3,7 @@
  *
  * A user-role input is a platform injection when its entire text is one
  * well-formed <platform_directive> element (surrounding whitespace allowed).
- * Real chat traffic — <chat_message> and <chat_batch> wrappers — never counts,
+ * Real chat traffic — <chat_message> elements — never counts,
  * mirroring Grok Bot's isNotificationOnlyUserMessage discipline: the platform
  * can reliably tell synthetic inputs from human/member messages without
  * trusting prose conventions.

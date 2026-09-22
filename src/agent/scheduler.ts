@@ -306,13 +306,7 @@ function finalizePromptSettlement(instance:AgentInstance,inputs:QueuedInput[],tr
   }
 }
 async function runInputBatch(instance:AgentInstance,inputs:QueuedInput[]):Promise<void>{
-  const payloads=inputs.map(runtimeInputPayload),prompts=payloads.map(item=>item.prompt);
-  // Queued chat deliveries merge into one prompt (spec unified-user-prompt
-  // v1.6): a single input keeps its own form, several inputs are wrapped in a
-  // chat_batch element. Inner elements already carry their own chat identity
-  // and last_read; the wrapper only counts.
-  const message=prompts.length>1?`<chat_batch count="${prompts.length}">\n\n${prompts.join("\n\n")}\n\n</chat_batch>`:prompts[0];
-  const trigger=payloads.length===1?payloads[0].trigger:"queued";
+  const payloads=inputs.map(runtimeInputPayload),message=payloads.map(item=>item.prompt).join("\n\n"),trigger=payloads.length===1?payloads[0].trigger:"queued";
   const sourceRef=inputs[0].sourceRef,token=randomUUID();instance.activeSourceRef=sourceRef;
   updateDispatchState(instance,"promptSubmitted",trigger);instance.promptInFlight=true;instance.hadErrorInTurn=false;instance.lastTurnError=null;instance.pendingErrorNotice=null;
   let dispatched=false,outcome:"completed"|"failed"|"cancelled"="failed",failure:unknown;
