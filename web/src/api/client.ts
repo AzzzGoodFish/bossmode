@@ -409,10 +409,10 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-export async function apiFetchBlob(path: string): Promise<Blob> {
+export async function apiFetchBlob(path: string, options: {signal?: AbortSignal} = {}): Promise<Blob> {
   const headers: Record<string, string> = {};
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  const res = await fetch(`${BASE_URL}${path}`, { headers, signal: options.signal });
   if (res.status === 401) {
     clearToken();
     onUnauthorized?.();
@@ -981,6 +981,7 @@ export async function getDmSession(memberId: string): Promise<DmSession> {
 }
 
 export interface ChatEntry {
+  pinnedAt?: number;
   scopeId: string;
   kind: "dm" | "room" | "mm";
   title: string;

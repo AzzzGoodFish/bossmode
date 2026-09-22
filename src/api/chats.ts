@@ -1,3 +1,4 @@
+import {chatPinnedAt,setChatPinned} from "../chat/preferences.js";
 import {
   attachmentLocation,
   createRoom,
@@ -54,8 +55,10 @@ function connected(): ChatHttpActions {
 function chatSummary(sourceRef: string, kind: "room" | "dm", title: string) {
   const state = readConversationListState(sourceRef, actions?.readUserLogin() ?? "");
   const status = actions?.scopeStatus?.(sourceRef) ?? "idle";
+  const pinnedAt=chatPinnedAt(sourceRef);
   return {
     scopeId: sourceRef,
+    ...(pinnedAt!==null?{pinnedAt}:{}),
     kind,
     title,
     ...state,
@@ -67,7 +70,7 @@ addRoute("GET", "/api/chats", async (_request, response) => {
   const chats = [
       ...listMembers().map((member) => chatSummary(`dm:${member.id}`, "dm" as const, member.name)),
       ...listRooms().map((room) => chatSummary(`room:${room.id}`, "room" as const, room.name)),
-  ].sort((a, b) => (b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
+  ].sort((a, b) => (b.pinnedAt??0)-(a.pinnedAt??0)||(b.lastMessage?.ts ?? 0) - (a.lastMessage?.ts ?? 0));
   sendJson(response, 200, { chats });
 });
 
@@ -331,4 +334,12 @@ addRoute("DELETE", "/api/rooms/:id/members/:memberId", async (_request, response
   const result = removeRoomMember(params.id, params.memberId);
   if (!result.ok) return sendJson(response, 404, { error: result.error });
   sendJson(response, 200, roomResponse(requireRoom(params.id)));
+});
+
+addRoute("PUT","/api/conversations/:scope/pin",async(request,response,params)=>{
+ const ref=resolveConversation(params.scope);if(!ref||ref.kind==='mm')throw new HttpError(404,"not_found","Chat not found");
+ const body=await parseBody(request);
+ if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>key!=='pinned')||typeof (body as {pinned?:unknown}).pinned!=='boolean')throw new HttpError(400,"invalid_request","pinned must be a boolean");
+ const pinned=(body as {pinned:boolean}).pinned,pinnedAt=setChatPinned(ref.scopeId,pinned);
+ sendJson(response,200,{scopeId:ref.scopeId,pinned,pinnedAt});
 });

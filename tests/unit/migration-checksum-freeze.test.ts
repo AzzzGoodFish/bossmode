@@ -46,6 +46,7 @@ const FROZEN: Record<string, string> = {
   "core-agent-queue-v2": "033658c102b3b8bd354ad837c39bc5428bc20b64be79fe9fbe314b5a9066fc42",
   "core-scope-short-id-v1": "2e5f8d0fe3e9f04aba0d7cfd486e1269f58f0b36057b7e43f4adf9410d7c0c3c",
   "core-member-avatar-v1": "0dfb9d37b0a6d7f883eef7b1ccb6a020db8e197c21a33caeb33d5ebe70f96226",
+  "core-chat-pins-v1": "16d8218209826b59e4cf647f368300b8d028688ed181c07f1f62efa64d11db4a",
 };
 
 describe("migration checksum freeze", () => {

@@ -1,3 +1,4 @@
+import {onChatPreferencesChanged} from "../chat/preferences.js";
 import {onMemberDeleted} from "../member/deletion.js";
 import {onRoomDeleted} from "../chat/room-deletion.js";
 import {deleteRoomCompletely} from "./chat-deletion-actions.js";
@@ -14,8 +15,8 @@ export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberIdentityChanged(member => notifyMemberProfileChanged(member));
   const stopViews = onMemberIdentityChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
   const stopAppearance = onMemberAppearanceChanged(member => broadcastMemberProfileChanged({memberId:member.id,name:member.name,title:member.title??null,avatarShape:member.avatarShape??null,avatarColor:member.avatarColor??null}));
-  const stopMemberDeleted=onMemberDeleted(broadcastDirectoryChanged),stopRoomDeleted=onRoomDeleted(broadcastDirectoryChanged);
-  return () => { stopRuntime(); stopViews(); stopAppearance(); stopMemberDeleted();stopRoomDeleted(); };
+  const stopMemberDeleted=onMemberDeleted(broadcastDirectoryChanged),stopRoomDeleted=onRoomDeleted(broadcastDirectoryChanged),stopPreferences=onChatPreferencesChanged(broadcastDirectoryChanged);
+  return () => { stopRuntime(); stopViews(); stopAppearance(); stopMemberDeleted();stopRoomDeleted();stopPreferences(); };
 }
 import { assertMemberScopeAccess,attachmentLocation,chatScopeAssetRoots,chatShortId,connectConversationMembers,ensureDmScope,ensureMmScope,isMmScopeId,listRoomsForMember,parseConversation,parseMmScopeId,resolveChatScope } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef,updateMember } from "../member/identity.js";

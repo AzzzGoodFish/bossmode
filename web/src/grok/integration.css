@@ -11,3 +11,5 @@
 .gr-account-avatar{border-width:2px;transition:border-color .15s ease}.gr-account-avatar[data-connection=online]{border-color:#188b4e}.gr-account-avatar[data-connection=connecting]{border-color:#b68113}.gr-account-avatar[data-connection=offline]{border-color:#c21d2e}:root[data-theme=cursor-dark] .gr-account-avatar[data-connection=online]{border-color:#50bf82}:root[data-theme=cursor-dark] .gr-account-avatar[data-connection=connecting]{border-color:#e0b244}:root[data-theme=cursor-dark] .gr-account-avatar[data-connection=offline]{border-color:#ff6173}
 
 .gr-footer-entry{position:relative}.gr-account-state{position:absolute;bottom:calc(100% + 5px);left:8px;visibility:hidden;opacity:0;pointer-events:none;padding:5px 8px;border:.5px solid var(--sand-border-default);border-radius:6px;background:var(--sand-bg-elevated);color:var(--sand-text-secondary);font-size:11px;font-weight:400;box-shadow:var(--cursor-box-shadow-sm)}.gr-footer-entry:hover .gr-account-state,.gr-footer-entry:focus-visible .gr-account-state{visibility:visible;opacity:1}
+
+.ax-more{display:flex;margin:14px auto}.ax-file-row:disabled{opacity:.7}.ax-file-row:disabled:hover{background:none}

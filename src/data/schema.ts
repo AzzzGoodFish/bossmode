@@ -1126,4 +1126,15 @@ ALTER TABLE members ADD COLUMN avatar_shape TEXT CHECK(avatar_shape IS NULL OR a
 ALTER TABLE members ADD COLUMN avatar_color TEXT CHECK(avatar_color IS NULL OR avatar_color IN ('black','brown','red','orange','yellow','green','cyan','blue','violet','magenta','gray'));
 `,
 },
+{
+  id: "core-chat-pins-v1",
+  sql: `
+CREATE TABLE chat_pins (
+  scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
+  actor_key TEXT NOT NULL,
+  pinned_at INTEGER NOT NULL CHECK(pinned_at >= 0),
+  PRIMARY KEY(scope_id,actor_key)
+);
+`,
+},
 ]);
