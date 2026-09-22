@@ -1,0 +1,33 @@
+/* Main-area pair reader, following fish's two Grok screenshots; narrow layouts are adaptations. */
+.gr-chat[data-private-view]>:not(#pcView){display:none!important}
+.pc-view{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden;background:var(--sand-bg-base)}
+.pc-header{justify-content:flex-start;gap:6px}
+.pc-title{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}
+.pc-identity{display:flex;align-items:center;gap:5px;min-width:0}
+.pc-identity strong{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc-arrows{flex:none;color:var(--sand-text-tertiary,var(--sand-text-secondary))}
+.pc-arrows .gr-icon{width:14px;height:14px}
+.pc-transcript{padding-top:6px}
+.pc-stamp{margin:38px 0 30px;font-size:11px}
+.pc-message{display:grid;grid-template-columns:22px minmax(0,1fr);column-gap:8px;row-gap:4px;margin:0 0 18px;position:relative;outline-offset:4px}
+.pc-author{grid-column:2;font-size:12px;line-height:18px;color:var(--sand-text-accent);overflow-wrap:anywhere}
+.pc-message-avatar{grid-column:1;grid-row:2;align-self:end;display:block;padding-bottom:2px}
+.pc-message>.gr-bubble{grid-column:2;grid-row:2;justify-self:start;max-width:min(96%,820px)}
+.pc-message-text>:last-child{margin-bottom:0}
+.pc-message:hover .gr-msg-actions,.pc-message:focus-within .gr-msg-actions{opacity:1;visibility:visible}
+.pc-footer{display:flex;align-items:center;justify-content:center;gap:12px;flex:none;min-height:58px;padding:12px 14px max(12px,env(safe-area-inset-bottom));font-size:12px;color:var(--sand-text-secondary)}
+.pc-footer>span{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.pc-footer .gr-icon{width:14px;height:14px}
+.pc-footer .gr-button{font-size:12px;color:var(--sand-text-primary);border-radius:999px;padding:4px 10px;min-height:26px}
+.pc-notices{padding:3px 0 12px}
+.pc-notice{display:flex;align-items:center;justify-content:center;gap:4px;margin:20px 0;color:var(--sand-text-secondary);font-size:12px}
+.pc-notice>span{white-space:nowrap}
+.pc-partner{display:inline-flex;align-items:center;gap:5px;max-width:65%;min-width:0;padding:3px 6px;border-radius:999px;color:var(--sand-text-primary)}
+.pc-partner>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pc-partner:hover,.pc-partner:focus-visible{background:var(--sand-fill-secondary)}
+.pc-empty{display:grid;justify-items:center;gap:14px;padding:28px 12px;font-size:12px;color:var(--sand-text-secondary)}
+#pcPrev .gr-icon{transform:rotate(180deg)}
+::highlight(pc-match){background:var(--sand-fill-secondary-hover);color:inherit}
+::highlight(pc-current){background:var(--sand-text-accent);color:var(--sand-bg-base)}
+@media(max-width:620px){.pc-title{gap:5px;flex:1}.pc-identity{flex:0 1 auto}.pc-identity strong{font-size:13px}.pc-transcript{padding:8px 12px 18px}.pc-stamp{margin:24px 0}.pc-message{column-gap:7px}.pc-message>.gr-bubble{max-width:100%}.pc-footer{gap:8px}.pc-footer .gr-button{min-height:32px}#pcFindInput{font-size:16px}}
+@media(hover:none){.pc-message .gr-msg-actions{position:static;float:right;margin:2px -5px -4px 8px;opacity:1;visibility:visible;box-shadow:none;border:0;background:transparent}.pc-message .gr-msg-actions .gr-iconbtn{width:28px;height:28px}}

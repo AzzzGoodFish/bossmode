@@ -1,0 +1,27 @@
+/* File browser shares the existing in-layout activity pane and reader. */
+.gr-app[data-pane="assets"]{grid-template-columns:var(--gr-sidebar) minmax(0,1fr) 320px}
+.gr-app[data-pane="assets"][data-assets-wide]{grid-template-columns:var(--gr-sidebar) minmax(0,1fr)}
+.gr-app[data-pane="assets"][data-assets-wide] #grChat{display:none}
+#grHeader [data-action="ax-open"][aria-expanded="true"]{background:var(--sand-fill-ghost-selected)}
+.ax-toolbar{flex:none;min-width:0;padding:10px 14px 0;max-height:45%;overflow:auto;scrollbar-width:thin}
+.ax-workspace-row{display:flex;align-items:center;gap:8px;min-width:0}
+.ax-workspace{flex:1;min-width:0;max-width:none;min-height:34px;text-align:left;padding:6px 9px;font-size:13px}
+.ax-workspace>span:first-child{flex:1}.ax-workspace-meta{font-size:11px;color:var(--sand-text-secondary);flex:none}
+.ax-root{margin:8px 3px 2px;font-size:11px;line-height:18px;color:var(--sand-text-secondary);font-family:var(--cursor-font-family-mono);white-space:nowrap;overflow:auto;scrollbar-width:thin}
+.ax-path{display:flex;align-items:center;gap:5px;min-width:0;min-height:42px;overflow:auto;white-space:nowrap;scrollbar-width:thin;font-size:12px}
+.ax-path>button,.ax-path>span{flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;padding:5px 3px;border-radius:var(--cursor-radius-base)}.ax-path>button{color:var(--sand-text-secondary)}.ax-path>button:hover{background:var(--sand-fill-ghost-hover);color:var(--sand-text-primary)}.ax-path>.gr-icon{width:10px;height:10px;color:var(--sand-text-tertiary)}
+.ax-list{flex:1;min-height:0;overflow:auto;padding:2px 8px 18px;overscroll-behavior:contain;overflow-anchor:none;scrollbar-width:thin;scrollbar-color:var(--sand-border-weak) transparent}
+.ax-list:focus-visible{outline-offset:-3px}
+.ax-files{padding:0;margin:0;list-style:none}
+.ax-file-row{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:8px 8px;border-radius:var(--cursor-radius-base);text-align:left;font-size:13px;line-height:20px}
+.ax-file-row:hover,.ax-file-row:focus-visible{background:var(--sand-fill-ghost-hover)}.ax-file-row:focus-visible{outline-offset:-2px}
+.ax-file-row>.gr-icon{color:var(--sand-text-secondary)}.ax-file-row>.gr-icon:last-child{width:11px;height:11px;color:var(--sand-text-tertiary)}.ax-file-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ax-file-row small{flex:none;font-size:11px;color:var(--sand-text-secondary);font-variant-numeric:tabular-nums}
+.ax-empty{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:54px 18px;font-size:13px;line-height:21px;color:var(--sand-text-secondary);overflow-wrap:anywhere}
+.ax-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px 12px;flex:none;border-top:.5px solid var(--sand-border-weak);padding:10px 16px;font-size:11px;line-height:17px;color:var(--sand-text-secondary)}
+.ax-notice{display:flex;align-items:center;gap:8px;padding:10px 14px;flex:none;max-height:110px;overflow:auto;font-size:12px;line-height:19px;color:var(--sand-text-danger);background:var(--sand-bg-subtle)}.ax-notice>span{flex:1;min-width:0;overflow-wrap:anywhere}.ax-notice .gr-button{color:var(--sand-text-primary)}
+.ax-menu-row{white-space:normal;overflow-wrap:anywhere}.ax-menu-row small{display:block;font-size:11px;line-height:17px;color:var(--sand-text-secondary)}
+@media(max-width:1100px){.gr-app[data-pane="assets"]{grid-template-columns:var(--gr-sidebar) minmax(0,1fr) 300px}}
+@media(max-width:1000px){.gr-app[data-pane="assets"],.gr-app[data-pane="assets"][data-assets-wide]{grid-template-columns:var(--gr-sidebar) minmax(0,1fr)}.gr-app[data-pane="assets"] #grChat{display:none}.ax-header [data-action="ax-wide"]{display:none}}
+@media(max-width:620px){.gr-app[data-pane="assets"],.gr-app[data-pane="assets"][data-assets-wide]{display:flex}.ax-pane{width:100%;flex:1}.ax-header{height:50px}.ax-header .gw-member{max-width:55%;min-height:40px}.ax-header .gr-iconbtn{width:44px;height:44px}.ax-toolbar{padding:6px 12px 0}.ax-workspace{min-height:44px}.ax-workspace-row>.gr-iconbtn{width:44px;height:44px}.ax-path{min-height:44px}.ax-path>button{min-height:40px;display:inline-flex;align-items:center}.ax-file-row{min-height:44px;padding:10px 8px;font-size:14px}.ax-footer{padding:9px 14px}.ax-menu-row{min-height:44px}#grHeader [data-action="ax-open"]{width:36px;height:36px}}
+@media(pointer:coarse){#grHeader [data-action="ax-open"]{width:44px;height:44px}.ax-empty .gr-button,.ax-notice .gr-button{min-height:44px}}
+@media(max-height:520px){.ax-header{height:44px}.ax-toolbar{padding-top:2px}.ax-empty{padding:22px 12px}.ax-footer{padding:5px 12px}.ax-path{min-height:36px}.ax-notice{max-height:74px}}

@@ -1,0 +1,6 @@
+.gh-paged{overflow-anchor:none}
+.gh-edge{display:flex;align-items:center;justify-content:center;gap:10px;min-height:32px;margin:0 0 10px;color:var(--sand-text-secondary);font-size:12px}
+.gh-edge button,.gh-locate button{flex:none;padding:3px 5px;border-radius:6px;color:var(--sand-text-secondary)}
+.gh-edge button:hover,.gh-locate button:hover{background:var(--sand-fill-secondary);color:var(--sand-text-primary)}
+.gh-locate{display:flex;gap:8px;align-items:center;justify-content:center;padding:5px 2px 8px;color:var(--sand-text-secondary);font-size:12px;min-height:30px}
+.gh-locate span{min-width:0}.gh-paged .gc-author:first-of-type{margin-top:0}
