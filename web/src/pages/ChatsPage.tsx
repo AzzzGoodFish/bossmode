@@ -9,11 +9,13 @@ import { useMemberProfileRevision, useCurrentMemberName } from "../hooks/useMemb
 import { useEffect, useMemo, useState } from "react";
 import { Hash } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
+import { MobileTopBar } from "../components/MobileTopBar";
 import { getChats, type ChatEntry } from "../api/client";
 
-export function ChatsPage({ onOpenDm, onOpenRoom }: {
+export function ChatsPage({ onOpenDm, onOpenRoom, onOpenMobileSidebar }: {
   onOpenDm: (memberId: string) => void;
   onOpenRoom: (roomId: string) => void;
+  onOpenMobileSidebar?: () => void;
 }) {
   const profileRevision = useMemberProfileRevision();
   const [chats, setChats] = useState<ChatEntry[] | null>(null);
@@ -37,6 +39,7 @@ export function ChatsPage({ onOpenDm, onOpenRoom }: {
 
   return (
     <div className="flex-1 overflow-y-auto bg-surface-1">
+      <MobileTopBar title="Chats" onOpenSidebar={onOpenMobileSidebar ?? (() => {})} />
       <div className="w-full px-6 md:px-10 pt-7 pb-16">
         <div className="mb-5">
           <h1 className="text-[19px] font-bold tracking-tight text-ink-1">Chats</h1>

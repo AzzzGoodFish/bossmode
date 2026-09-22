@@ -74,7 +74,7 @@ export function ActivityTab({ roomId, agentName, memberId, dmScope }: {
     const token = getToken();
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`);
     const watchRoomId = dmScope ? `dm:${dmScope.memberId}` : roomId;
     const watchMemberId = dmScope?.memberId || memberId;
     ws.onopen = () => ws.send(JSON.stringify({ type: "subscribe:agent", roomId: watchRoomId, agent: historyMemberRef, memberId: watchMemberId }));

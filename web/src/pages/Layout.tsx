@@ -14,6 +14,7 @@ import { OnboardingTour } from "../components/OnboardingTour";
 import { clearOnboardingDone, isOnboardingDone } from "../onboarding/storage";
 import { DmPage } from "./DmPage";
 import { ChatsPage } from "./ChatsPage";
+import "../styles/grok-ui.css";
 
 import { Main } from "./Main";
 import { MemberFloatProvider } from "../components/member-float";
@@ -260,18 +261,23 @@ export function Layout({ onLogout, username }: LayoutProps) {
 
   return (
     <MemberFloatProvider onFired={() => handleNavigate({ type: "chats" })} liveStatuses={liveStatuses}>
-    <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-1p-ignore>
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex">{sidebarEl}</div>
+    <div className="fixed inset-x-0 top-0 h-[100dvh] bg-surface-0 text-ink-1 flex" data-grok-app data-1p-ignore>
+      <header className="grok-topbar shrink-0">
+        <div className="grok-topbar-brand"><strong>Bossmode</strong><span>团队聊天</span></div>
+        <div className="grok-topbar-state" aria-live="polite"><i className={connected ? "is-connected" : reconnecting ? "is-reconnecting" : "is-offline"} />{connected ? "已连接" : reconnecting ? "正在重连" : "未连接"}</div>
+      </header>
+      <div className="grok-app-body flex flex-1 min-h-0">
+        {/* Desktop sidebar */}
+        <div className="hidden md:flex">{sidebarEl}</div>
 
-      {/* Mobile sidebar drawer */}
-      {isMobile && (
-        <MobileDrawer open={mobileSidebarOpen} side="left" onClose={() => setMobileSidebarOpen(false)} width="w-72">
-          {sidebarEl}
-        </MobileDrawer>
-      )}
+        {/* Mobile sidebar drawer */}
+        {isMobile && (
+          <MobileDrawer open={mobileSidebarOpen} side="left" onClose={() => setMobileSidebarOpen(false)} width="w-72">
+            {sidebarEl}
+          </MobileDrawer>
+        )}
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className="grok-content flex-1 flex flex-col min-w-0 min-h-0">
         {/* Room view */}
         {activePage?.type === "room" && activePage.id !== "__new__" && (
           <Main
@@ -312,12 +318,14 @@ export function Layout({ onLogout, username }: LayoutProps) {
           <ChatsPage
             onOpenDm={(memberId) => handleNavigate({ type: "dm", memberId })}
             onOpenRoom={(roomId) => handleNavigate({ type: "room", id: roomId })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
         {activePage?.type === "dm" && (
           <DmPage
             memberId={activePage.memberId}
             onBack={() => handleNavigate({ type: "chats" })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
         {/* Settings */}
@@ -335,6 +343,7 @@ export function Layout({ onLogout, username }: LayoutProps) {
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           />
         )}
+      </div>
       </div>
 
       <OnboardingTour

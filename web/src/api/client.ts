@@ -35,6 +35,14 @@ export function setOnUnauthorized(cb: () => void): void {
   onUnauthorized = cb;
 }
 
+/** Keep HTTP status available to distinguish bad credentials from service failures. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -50,12 +58,12 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   if (res.status === 401) {
     clearToken();
     onUnauthorized?.();
-    throw new Error("Unauthorized");
+    throw new ApiError("Unauthorized", 401);
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    throw new ApiError(body.error || `HTTP ${res.status}`, res.status);
   }
 
   return res.json();

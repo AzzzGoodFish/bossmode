@@ -14,6 +14,7 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import { StaffBadge, statusFromAgent } from "../components/StaffBadge";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { MobileTopBar } from "../components/MobileTopBar";
 import { ModelPicker, type ModelPickerValue } from "../components/ModelPicker";
 import { DateSeparator, isGroupedWithPrev, shouldShowDateSeparator, MessageArtifactChips } from "../components/ChatArea";
 import { useDialog } from "../components/dialogs";
@@ -30,9 +31,10 @@ import { getUsername } from "../api/client";
 const PAGE_SIZE = 50;
 const toolBtn = "w-7 h-7 flex items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors cursor-pointer";
 
-export function DmPage({ memberId, onBack }: {
+export function DmPage({ memberId, onBack, onOpenMobileSidebar }: {
   memberId: string;
   onBack: () => void;
+  onOpenMobileSidebar?: () => void;
 }) {
   const memberFloat = useMemberFloat();
   const [member, setMember] = useState<MemberDetail | null>(null);
@@ -213,6 +215,7 @@ export function DmPage({ memberId, onBack }: {
     <div className="flex-1 flex min-h-0 bg-surface-1">
       {/* conversation column */}
       <div className="flex-1 flex flex-col min-w-0">
+        <MobileTopBar title={member.name} onOpenSidebar={onOpenMobileSidebar ?? (() => {})} />
         {/* header — room chat header language; member identity area opens the
             member page (member-page merge v1: one member, one home) */}
         <div className="h-12 border-b border-line flex items-center gap-3 px-4 shrink-0 bg-surface-1">

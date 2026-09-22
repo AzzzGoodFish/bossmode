@@ -118,7 +118,7 @@ export function Sidebar({
     }`;
 
   const rail = (
-    <nav className="w-[52px] shrink-0 bg-surface-0 border-r border-line-soft flex flex-col items-center py-2.5 gap-1">
+    <nav className="grok-rail w-[52px] shrink-0 bg-surface-0 border-r border-line-soft flex flex-col items-center py-2.5 gap-1">
       <button
         onClick={onToggle}
         title={collapsed ? "Expand panel" : "Collapse panel"}
@@ -181,7 +181,7 @@ export function Sidebar({
   const createBtn = "w-6 h-6 border border-line rounded-md text-ink-3 hover:text-accent-ink hover:border-line-strong flex items-center justify-center cursor-pointer transition-colors";
 
   const panel = (
-    <aside className="w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
+    <aside className="grok-sidebar-panel w-[236px] shrink-0 bg-surface-0 border-r border-line flex flex-col min-h-0">
       <div className="h-12 shrink-0 flex items-center justify-between px-3.5 border-b border-line-soft">
         <h1 className="text-[13px] font-semibold text-ink-1">{panelTitle}</h1>
         {/* Create entry lives in the panel title row for every domain that has one

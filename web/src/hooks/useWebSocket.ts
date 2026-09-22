@@ -38,7 +38,9 @@ export function useWebSocket({ onEvent }: UseWebSocketOptions = {}) {
     if (!token || destroyed.current) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}?token=${token}`;
+    // Keep the path explicit so Vite can proxy the socket during local UI work;
+    // the production server accepts the same upgrade path on its attached WS server.
+    const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
