@@ -1,0 +1,47 @@
+import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { uploadWithProgress } from '../api/upload-client';
+import { apiFetch, type RoomContact, type RoomMessage } from '../api/client';
+import { postMessage } from './api';
+import { getDraft, getDraftGeneration, patchFile, updateDraft, useDraft, type PendingFile } from './drafts';
+import { Icon, IconButton, Menu, MenuItem, bytes, errorText } from './ui';
+import { type ViewFile } from './Files';
+const jobs=new Map<string,symbol>();
+export function Composer({scope,title,contacts,connected,onSent,onFile,onNeedRecipient}:{scope:string;title:string;contacts:RoomContact[];connected:boolean;onSent:(scope:string,message:RoomMessage)=>void;onFile:(files:ViewFile[],index:number)=>void;onNeedRecipient:()=>void}) {
+  const draft=useDraft(scope),ref=useRef<HTMLTextAreaElement>(null),fileInput=useRef<HTMLInputElement>(null),[menu,setMenu]=useState<{x:number;y:number}|null>(null),[mention,setMention]=useState<{start:number;query:string}|null>(null),[mentionIndex,setMentionIndex]=useState(0);
+  useEffect(()=>{const el=ref.current;if(el){el.style.height='auto';el.style.height=`${Math.min(130,Math.max(26,el.scrollHeight))}px`;}},[draft.text,draft.quote,scope]);
+  useEffect(()=>{setMention(null);},[scope]);
+  const add=(files:File[])=>{if(getDraft(scope).busy)return;const valid=files.filter(f=>f.size<=1024*1024*1024);updateDraft(scope,{files:[...getDraft(scope).files,...valid.map(file=>({id:crypto.randomUUID(),file,url:URL.createObjectURL(file),status:'pending' as const,progress:0}))],error:valid.length===files.length?undefined:'超过 1 GB 的文件未添加。'});ref.current?.focus();};
+  useEffect(()=>{const handler=(event:Event)=>add((event as CustomEvent<File[]>).detail);const el=document.getElementById('grChat');el?.addEventListener('grok:files',handler);return()=>el?.removeEventListener('grok:files',handler);},[scope]);
+  const remove=(file:PendingFile)=>{file.controller?.abort();URL.revokeObjectURL(file.url);updateDraft(scope,{files:getDraft(scope).files.filter(f=>f.id!==file.id)});};
+  const cancel=()=>{jobs.delete(scope);for(const f of getDraft(scope).files)f.controller?.abort();updateDraft(scope,{busy:false,error:'上传已取消，文字和附件已保留。',files:getDraft(scope).files.map(f=>f.status==='uploading'?{...f,status:'cancelled'}:f)});};
+  const send=async()=>{
+    const saved=getDraft(scope);if(saved.busy)return;if(!saved.text.trim()&&!saved.files.length)return;if(scope==='new'){onNeedRecipient();return;}if(!connected){updateDraft(scope,{error:'连接不可用，未发送内容已保留。'});return;}
+    const ticket=Symbol(),generation=getDraftGeneration(scope);jobs.set(scope,ticket);updateDraft(scope,{busy:true,posting:false,error:undefined});setMention(null);
+    try {for(const file of saved.files){if(jobs.get(scope)!==ticket||generation!==getDraftGeneration(scope))return;if(file.uploaded)continue;const controller=new AbortController();patchFile(scope,file.id,{status:'uploading',progress:0,controller,error:undefined});try{const uploaded=await uploadWithProgress(scope,file.file,{signal:controller.signal,onProgress:(done,total)=>{if(jobs.get(scope)===ticket&&generation===getDraftGeneration(scope))patchFile(scope,file.id,{progress:Math.round(done/total*100)});}});if(jobs.get(scope)!==ticket||generation!==getDraftGeneration(scope))return;patchFile(scope,file.id,{status:'ready',progress:100,uploaded,controller:undefined});}catch(error){if(jobs.get(scope)!==ticket||generation!==getDraftGeneration(scope))return;patchFile(scope,file.id,{status:'error',error:errorText(error),controller:undefined});if((error as {status?:number}).status===401)await apiFetch('/api/chats');throw error;}}
+      if(jobs.get(scope)!==ticket||generation!==getDraftGeneration(scope))return;
+      const uploaded=getDraft(scope).files.map(f=>f.uploaded!);
+      updateDraft(scope,{posting:true});
+      const message=await postMessage(scope,saved.text,uploaded,saved.quote?.seq?{seq:saved.quote.seq}:undefined);
+      if(jobs.get(scope)!==ticket||generation!==getDraftGeneration(scope))return;
+      for(const f of saved.files)URL.revokeObjectURL(f.url);
+      updateDraft(scope,{text:'',files:[],quote:undefined,error:undefined,busy:false});onSent(scope,message);ref.current?.focus();
+    }catch(error){if(jobs.get(scope)===ticket&&generation===getDraftGeneration(scope))updateDraft(scope,{busy:false,error:`未能确认发送成功：${errorText(error)}。内容已保留，请核对聊天记录后重试。`});}finally{if(jobs.get(scope)===ticket){jobs.delete(scope);if(generation===getDraftGeneration(scope))updateDraft(scope,{busy:false,posting:false});}}
+  };
+  const candidates=mention?contacts.filter(m=>m.name.toLocaleLowerCase().includes(mention.query.toLocaleLowerCase())).slice(0,8):[];
+  const insertMention=(name:string)=>{if(!mention||!ref.current)return;const end=ref.current.selectionStart,text=draft.text.slice(0,mention.start)+'@'+name+' '+draft.text.slice(end),pos=mention.start+name.length+2;updateDraft(scope,{text});setMention(null);requestAnimationFrame(()=>{ref.current?.focus();ref.current?.setSelectionRange(pos,pos);});};
+  const paste=(e:ClipboardEvent<HTMLTextAreaElement>)=>{const files=[...e.clipboardData.files];if(!files.length)return;e.preventDefault();const text=e.clipboardData.getData('text/plain');if(text&&ref.current){const el=ref.current;updateDraft(scope,{text:draft.text.slice(0,el.selectionStart)+text+draft.text.slice(el.selectionEnd)});}add(files);};
+  const textarea=<textarea ref={ref} id="grDraft" rows={1} value={draft.text} readOnly={draft.busy} aria-label="消息草稿" placeholder={draft.quote?'回复…':`给 ${title} 发消息`} onPaste={paste} onChange={e=>{const text=e.target.value;updateDraft(scope,{text});const before=text.slice(0,e.target.selectionStart),match=before.match(/(?:^|\s)@([^\n@]*)$/);setMention(match?{start:before.length-match[1].length-1,query:match[1]}:null);setMentionIndex(0);}} onKeyDown={e=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;if(mention&&candidates.length){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();setMentionIndex(v=>(v+(e.key==='ArrowDown'?1:-1)+candidates.length)%candidates.length);return;}if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();insertMention(candidates[mentionIndex%candidates.length].name);return;}if(e.key==='Escape'){e.preventDefault();setMention(null);return;}}if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}}/>;
+  const plus=<button type="button" className="gr-round gr-compose-plus" aria-label="添加附件" disabled={draft.busy} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setMenu({x:r.left,y:r.top-85});}}><Icon name="add"/></button>;
+  return <div className="gr-compose-wrap">
+    {draft.files.length>0&&<div className="gr-attachments">{draft.files.map((f,i)=><div className="ga-draft-file" data-state={f.status} key={f.id}><button className="ga-draft-open" aria-label={`预览 ${f.file.name}`} onClick={()=>onFile(draft.files.map(f=>({name:f.file.name,blob:f.file,mimeType:f.file.type,size:f.file.size})),i)}>{f.file.type.startsWith('image/')?<img className="ga-thumb" src={f.url} alt=""/>:<span className="ga-file-icon"><Icon name="file"/></span>}<span className="ga-file-copy"><strong>{f.file.name}</strong><small>{f.status==='uploading'?`上传中 ${f.progress}%`:f.status==='error'?'上传失败':f.status==='cancelled'?'已取消':f.status==='ready'?'已上传 · '+bytes(f.file.size):bytes(f.file.size)}</small></span></button><IconButton icon="close" label={`移除附件 ${f.file.name}`} disabled={draft.busy} onClick={()=>remove(f)}/>{f.status==='uploading'&&<div className="ga-progress" role="progressbar" aria-label={`${f.file.name} 上传进度`} aria-valuenow={f.progress} aria-valuemin={0} aria-valuemax={100}><span style={{width:`${f.progress}%`}}/></div>}</div>)}</div>}
+    {draft.error&&<div className="ga-send-error" role="alert"><span>{draft.error}</span><button disabled={draft.busy||!connected} onClick={()=>void send()}>重试</button></div>}
+    <div className={`gr-composer ${draft.quote?'ga-replying':''}`} aria-busy={draft.busy}>
+      {draft.quote&&<div className="ga-quote" aria-label="引用的消息"><span className="ga-quote-lead"><Icon name="arrow-u-up-right"/></span><span className="ga-quote-text">{draft.quote.sender} · {draft.quote.content||'附件消息'}</span><IconButton icon="close" label="移除引用" disabled={draft.busy} onClick={()=>updateDraft(scope,{quote:undefined})}/></div>}
+      {draft.quote?<>{textarea}{plus}</>:<>{plus}{textarea}</>}
+      <button className="gr-round gr-primary" aria-label={draft.posting?'正在发送':draft.busy?'取消上传':'发送消息'} disabled={draft.posting||!draft.busy&&(!connected||(!draft.text.trim()&&!draft.files.length))} onClick={()=>draft.busy?cancel():void send()}><Icon name={draft.busy?'stop':'arrow-up'}/></button>
+    </div>
+    {mention&&candidates.length>0&&<ul className="gc-mentions gr-live-mentions" role="listbox" aria-label="点名成员">{candidates.map((m,i)=><li key={m.id}><button role="option" aria-selected={i===mentionIndex} onClick={()=>insertMention(m.name)}>{m.name}<small>{m.title}</small></button></li>)}</ul>}
+    {menu&&<Menu {...menu} onClose={()=>setMenu(null)}><MenuItem icon="paperclip" onClick={()=>{fileInput.current!.accept='';fileInput.current?.click();setMenu(null);}}>添加文件</MenuItem><MenuItem icon="image" onClick={()=>{fileInput.current!.accept='image/*';fileInput.current?.click();setMenu(null);}}>添加图片</MenuItem></Menu>}
+    <input ref={fileInput} type="file" hidden multiple onChange={e=>{add([...e.target.files??[]]);e.target.value='';}}/>
+  </div>;
+}

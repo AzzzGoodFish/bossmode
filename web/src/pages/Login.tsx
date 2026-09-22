@@ -2,9 +2,11 @@ import { useRef, useState, type FormEvent } from "react";
 import { Eye, EyeOff, Moon, Sun } from "lucide-react";
 import { ApiError, login } from "../api/client";
 import "../styles/login.css";
+import { applyTheme } from "../grok/ui";
 
 interface LoginProps {
   onLogin: (username: string) => void;
+  expired?: boolean;
 }
 
 function loginFailure(error: unknown): { text: string; credentials: boolean } {
@@ -21,7 +23,7 @@ function loginFailure(error: unknown): { text: string; credentials: boolean } {
 }
 
 /** Production authentication with the approved 18786 login layout, not demo outcomes. */
-export function Login({ onLogin }: LoginProps) {
+export function Login({ onLogin, expired }: LoginProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [visible, setVisible] = useState(false);
@@ -56,8 +58,7 @@ export function Login({ onLogin }: LoginProps) {
 
   const toggleTheme = () => {
     const next = !document.documentElement.classList.contains("dark");
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("bossmode_theme", next ? "dark" : "light");
+    applyTheme(next ? "dark" : "light");
     setDark(next);
   };
 
@@ -72,7 +73,7 @@ export function Login({ onLogin }: LoginProps) {
         <div className="bm-login-wrap">
           <header className="bm-login-brand">
             <h1>Bossmode</h1>
-            <p>登录以继续</p>
+            <p>{expired ? "登录已失效。重新登录同一账号可继续，未发送内容已保留。" : "登录以继续"}</p>
           </header>
           <form className="bm-login-form" onSubmit={handleSubmit} aria-label="登录" aria-busy={loading}>
             <div className="bm-login-field">

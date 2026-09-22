@@ -112,16 +112,6 @@ export function createRoom(name: string, memberIds: string[], opts?: {
   return room;
 }
 
-export function deleteRoom(roomId: string): boolean {
-  const removed = getDatabase().transaction(db => {
-    if (!getRoom(roomId, db)) return false;
-    db.run("DELETE FROM scopes WHERE kind='room' AND id=?", roomId);
-    return true;
-  });
-  if (removed) rmSync(roomDir(roomId), { recursive: true, force: true });
-  return removed;
-}
-
 export function updateRoom(roomId: string, patch: {
   name?: string; description?: string | null; promptLeaderMemberId?: string | null; docsPath?: string | null;
 }): Room | null {

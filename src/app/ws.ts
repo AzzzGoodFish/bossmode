@@ -3,7 +3,8 @@ import {logger} from "../kernel/logger.js";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 export type WsServerEvent=
-  |{type:"member:profile";memberId:string;name:string;title:string|null}
+  |{type:"directory:changed"}
+  |{type:"member:profile";memberId:string;name:string;title:string|null;avatarShape?:string|null;avatarColor?:string|null}
   |{type:"room:message";roomId:string;message:unknown}
   |{type:"agent:status";roomId:string;agent:string;memberId:string;status:"inactive"|"idle"|"working"}
   |{type:"agent:event";roomId:string;agent:string;memberId:string;event:unknown}
@@ -84,7 +85,7 @@ export function broadcastToAgentSubscribers(roomId:string,event:WsServerEvent):v
 }
 
 /** Current identity is global, including clients without any scope subscriptions. */
-export function broadcastMemberProfileChanged(profile: { memberId: string; name: string; title: string | null }): void {
+export function broadcastMemberProfileChanged(profile: { memberId: string; name: string; title: string | null; avatarShape?:string|null; avatarColor?:string|null }): void {
   const event: WsServerEvent = { type: "member:profile", ...profile };
   const payload = JSON.stringify(event);
   for (const [, state] of clients) {
@@ -101,4 +102,10 @@ export async function shutdownWebSocket(): Promise<void> {
   clients.clear();
   for (const ws of server.clients) ws.terminate();
   await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+}
+
+/** List invalidation after instance creation/deletion; no private record payload. */
+export function broadcastDirectoryChanged():void {
+ const payload=JSON.stringify({type:'directory:changed'});
+ for(const [,state] of clients)if(state.ws.readyState===1)try{state.ws.send(payload);}catch{clients.delete(state.ws);}
 }

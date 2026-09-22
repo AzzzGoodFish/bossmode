@@ -1,8 +1,9 @@
+import {recoverRoomDeletions} from "./chat-deletion-actions.js";
 import { loadAgentMemberSnapshot } from "./member-actions.js";
 import { readConfig, writeConfig } from "../config/settings.js";
 import { ensureDirectory } from "../files/io.js";
 import { getBossmodeDir } from "../files/layout.js";
-import { recoverMemberArchives } from "./member-actions.js";
+import { recoverMemberArchives, recoverMemberDeletions } from "./member-actions.js";
 import { prepareCoreStorage } from "./upgrade/run.js";
 import { backfillScopeShortIds } from "../chat/conversations.js";
 import { type UpgradeProgress } from "./upgrade/inventory.js";
@@ -56,6 +57,8 @@ async function startApplication(opts: ServerOptions): Promise<void> {
   await wireApiRoutes();
   seedBuiltinAssets();
   await recoverMemberArchives();
+  await recoverMemberDeletions();
+  await recoverRoomDeletions();
   backfillScopeShortIds();
   initializeMemberRuntime(new PiSdkRuntime(),loadAgentMemberSnapshot);
   const unsubscribeConfiguration = wireConfiguration();

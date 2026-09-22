@@ -43,7 +43,7 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((options.headers as Record<string, string>) || {}),
@@ -57,7 +57,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   if (res.status === 401) {
     clearToken();
-    onUnauthorized?.();
+    if (path !== "/api/auth/login") onUnauthorized?.();
     throw new ApiError("Unauthorized", 401);
   }
 
@@ -87,6 +87,8 @@ export async function login(
 // -- Members --
 
 export interface MemberInfo {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   id: string;
   name: string;
   agent: string;
@@ -107,6 +109,8 @@ export interface MemberInfo {
 
 /** Current contact identity returned by the member directory. */
 export interface RoomContact {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   id: string;
   name: string;
   title?: string | null;
@@ -405,7 +409,7 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-async function apiFetchBlob(path: string): Promise<Blob> {
+export async function apiFetchBlob(path: string): Promise<Blob> {
   const headers: Record<string, string> = {};
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
   const res = await fetch(`${BASE_URL}${path}`, { headers });
@@ -836,6 +840,8 @@ export interface MemberGlobalConfig {
 }
 
 export interface MemberDetail {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   memberId: string;
   name: string;
   agentTemplate: string;

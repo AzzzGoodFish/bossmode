@@ -1,11 +1,12 @@
+import { validateAvatarChoice, validateAvatarPatch } from "./avatar.js";
 import { getDatabase, type Database } from "../data/database.js";
 import { newMemberId } from "../kernel/ids.js";
 import { validateArchivePath } from "../files/layout.js";
 export interface MemberGlobalConfig { model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[]; }
-export interface MemberRecord { id:string;name:string;title?:string;agentTemplate:string;global:MemberGlobalConfig;createdAt:number;updatedAt:number; }
+export interface MemberRecord { avatarShape?:string|null;avatarColor?:string|null;id:string;name:string;title?:string;agentTemplate:string;global:MemberGlobalConfig;createdAt:number;updatedAt:number; }
 export interface MemberIdentityProjection { id: string; name: string; }
 export interface CreateMemberInput {
-  name?: string; title?: string; agentTemplate?: string;
+  name?: string; title?: string; agentTemplate?: string; avatarShape?:string|null; avatarColor?:string|null;
   model?: string | null; credentialId?: string | null; thinkingLevel?: string | null;
   skills?: string[]; mcpServers?: string[];
 }
@@ -19,13 +20,13 @@ export class MemberNotFoundError extends Error {
 }
 interface MemberRow {
   id: string; name: string; title: string | null; agent_template: string;
-  global_json: string; created_at: number; updated_at: number;
+  global_json: string; created_at: number; updated_at: number; avatar_shape?:string|null; avatar_color?:string|null;
 }
 function decodeMember(row: MemberRow): MemberRecord {
   const global = JSON.parse(row.global_json);
   if (!global || typeof global !== "object" || Array.isArray(global)) throw new Error(`Invalid member configuration: ${row.id}`);
   return { id: row.id, name: row.name, ...(row.title ? { title: row.title } : {}),
-    agentTemplate: row.agent_template, global, createdAt: row.created_at, updatedAt: row.updated_at };
+    avatarShape:row.avatar_shape??null,avatarColor:row.avatar_color??null,agentTemplate: row.agent_template, global, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function encodeConfig(config:MemberGlobalConfig):string{return JSON.stringify(config);}
 export function normalizeMemberName(name: unknown): string { return String(name ?? "").trim(); }
@@ -85,33 +86,34 @@ export function allocateUniqueMemberName(base = "New Member"): string {
 }
 /** Prepare identity only. The application coordinates assets, settings and the user DM. */
 export function prepareMemberIdentity(input: CreateMemberInput): MemberRecord {
+  validateAvatarPatch(input);
   const name = normalizeMemberName(input.name) || allocateUniqueMemberName();
   validateMemberName(name);
   if (findMemberByName(name)) throw new MemberNameTakenError(name);
   let id = newMemberId();
   for (let attempt = 0; attempt < 10 && getRetainedMember(id); attempt++) id = newMemberId();
   const now = Date.now();
-  return { id, name, ...(input.title?.trim() ? { title: input.title.trim() } : {}), agentTemplate: input.agentTemplate || "general",
+  return { id, name, avatarShape:input.avatarShape||null,avatarColor:input.avatarColor||null,...(input.title?.trim() ? { title: input.title.trim() } : {}), agentTemplate: input.agentTemplate || "general",
     global: { model: input.model ?? null, credentialId: input.credentialId ?? null, thinkingLevel: input.thinkingLevel ?? null,
       skills: input.skills ?? [], mcpServers: input.mcpServers ?? [] }, createdAt: now, updatedAt: now };
 }
 /** Strict SQL insertion of a normalized record. No file creation or cross-domain side effects. */
 export function insertMemberIdentity(record: MemberRecord, db: Database = getDatabase()): void {
-  memberWrite(record.name, () => db.run("INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+  memberWrite(record.name, () => db.run("INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at,avatar_shape,avatar_color) VALUES(?,?,?,?,?,?,?,?,?,?)",
     record.id, record.name, record.name.toLowerCase(), record.title || null, record.agentTemplate,
-    encodeConfig(record.global), record.createdAt, record.updatedAt));
+    encodeConfig(record.global), record.createdAt, record.updatedAt,record.avatarShape??null,record.avatarColor??null));
 }
 export function importArchivedMember(record: MemberRecord, path: string, timestamp: number, db: Database = getDatabase()): void {
   validateArchivePath(path);
   if (!Number.isSafeInteger(timestamp)) throw new Error("invalid_archive_timestamp");
-  db.run(`INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at,archived_at,archive_path)
-    VALUES(?,?,?,?,?,?,?,?,?,?)`, record.id, record.name, record.name.toLowerCase(), record.title || null,
-    record.agentTemplate, encodeConfig(record.global), record.createdAt, record.updatedAt, timestamp, path);
+  db.run(`INSERT INTO members(id,name,name_key,title,agent_template,global_json,created_at,updated_at,archived_at,archive_path,avatar_shape,avatar_color)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, record.id, record.name, record.name.toLowerCase(), record.title || null,
+    record.agentTemplate, encodeConfig(record.global), record.createdAt, record.updatedAt, timestamp, path,record.avatarShape??null,record.avatarColor??null);
 }
 export function storeMemberIdentity(record: MemberRecord, db: Database = getDatabase()): void {
-  memberWrite(record.name, () => db.run("UPDATE members SET name=?,name_key=?,title=?,agent_template=?,global_json=?,created_at=?,updated_at=? WHERE id=? AND archived_at IS NULL",
+  memberWrite(record.name, () => db.run("UPDATE members SET name=?,name_key=?,title=?,agent_template=?,global_json=?,created_at=?,updated_at=?,avatar_shape=?,avatar_color=? WHERE id=? AND archived_at IS NULL",
     record.name, record.name.toLowerCase(), record.title || null, record.agentTemplate,
-    encodeConfig(record.global), record.createdAt, record.updatedAt, record.id));
+    encodeConfig(record.global), record.createdAt, record.updatedAt,record.avatarShape??null,record.avatarColor??null, record.id));
 }
 export function memberArchivePath(id: string, db: Database = getDatabase()): string | null {
   return db.get<{ archive_path: string | null }>("SELECT archive_path FROM members WHERE id=?", id)?.archive_path ?? null;
@@ -123,14 +125,20 @@ export function retireMemberIdentity(id: string, path: string, timestamp: number
 }
 const memberChangeListeners=new Set<(member:MemberRecord)=>void>();
 export function onMemberIdentityChanged(listener:(member:MemberRecord)=>void):()=>void{memberChangeListeners.add(listener);return()=>memberChangeListeners.delete(listener);}
-export function updateMember(id:string,patch:{name?:string;title?:string|null;global?:Partial<MemberGlobalConfig>}):MemberRecord{
+const appearanceListeners=new Set<(member:MemberRecord)=>void>();
+export function onMemberAppearanceChanged(listener:(member:MemberRecord)=>void):()=>void{appearanceListeners.add(listener);return()=>appearanceListeners.delete(listener);}
+export function updateMember(id:string,patch:{avatarShape?:string|null;avatarColor?:string|null;name?:string;title?:string|null;global?:Partial<MemberGlobalConfig>}):MemberRecord{
+  validateAvatarPatch(patch);
   return getDatabase().transaction(db=>{
     const member=requireMember(id,db),name=patch.name===undefined?member.name:normalizeMemberName(patch.name);
     if(patch.name!==undefined){if(typeof patch.name!=="string")throw new Error("invalid_member_name");validateMemberName(name);}
     if(patch.title!==undefined&&patch.title!==null&&typeof patch.title!=="string")throw new Error("invalid_member_title");
     const title=patch.title===undefined?member.title:patch.title?.trim()||undefined,global={...member.global,...patch.global};
-    if(name===member.name&&title===member.title&&encodeConfig(global)===encodeConfig(member.global))return member;
-    const next={...member,name,title,global,updatedAt:Date.now()};storeMemberIdentity(next,db);
+    const avatarShape=patch.avatarShape===undefined?member.avatarShape??null:validateAvatarChoice(patch.avatarShape,"shape"),avatarColor=patch.avatarColor===undefined?member.avatarColor??null:validateAvatarChoice(patch.avatarColor,"color");
+    const appearanceChanged=avatarShape!==(member.avatarShape??null)||avatarColor!==(member.avatarColor??null);
+    if(name===member.name&&title===member.title&&!appearanceChanged&&encodeConfig(global)===encodeConfig(member.global))return member;
+    const next={...member,name,title,global,avatarShape,avatarColor,updatedAt:Date.now()};storeMemberIdentity(next,db);
+    if(appearanceChanged)db.afterCommit(()=>{for(const listener of appearanceListeners)try{listener(next);}catch{}});
     if(name!==member.name||title!==member.title)db.afterCommit(()=>{for(const listener of memberChangeListeners)try{listener(next);}catch{}});
     return next;
   });

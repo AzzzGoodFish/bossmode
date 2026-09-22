@@ -1,7 +1,6 @@
 import {
   attachmentLocation,
   createRoom,
-  deleteRoom,
   getRoom,
   getRoomMembers,
   inviteRoomMember,
@@ -29,6 +28,7 @@ import { getMember, listMembers } from "../member/identity.js";
 import { addRoute, HttpError, parseBody, requestUrl, requestValue, sendJson, type RouteHandler } from "./http.js";
 
 export interface ChatHttpActions {
+  deleteRoom?(roomId:string):Promise<boolean>;
   postMessage(sourceRef: string, input: MessageInput): Promise<Message> | Message;
   resetSession(sourceRef: string, memberId: string): Promise<unknown> | unknown;
   abort(sourceRef: string, memberId: string): Promise<unknown> | unknown;
@@ -205,7 +205,9 @@ addRoute("GET", "/api/rooms/:id", async (_request, response, params) => {
   sendJson(response, 200, roomResponse(requireRoom(params.id)));
 });
 addRoute("DELETE", "/api/rooms/:id", async (_request, response, params) => {
-  requireRoom(params.id); deleteRoom(params.id);
+  const remove=connected().deleteRoom;
+  if(!remove)throw new HttpError(503,"unavailable","Room deletion is not connected");
+  if(!await remove(params.id))throw new HttpError(404,"not_found","Room not found");
   sendJson(response, 200, { ok: true });
 });
 addRoute("PATCH", "/api/rooms/:id", async (request, response, params) => {

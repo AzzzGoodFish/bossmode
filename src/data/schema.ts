@@ -1119,4 +1119,11 @@ ALTER TABLE scopes ADD COLUMN short_id TEXT;
 CREATE UNIQUE INDEX scopes_short_id ON scopes(short_id);
 `,
 },
+{
+  id: "core-member-avatar-v1",
+  sql: `
+ALTER TABLE members ADD COLUMN avatar_shape TEXT CHECK(avatar_shape IS NULL OR avatar_shape IN ('blob','pebble','squircle','tablet','wedge','hex','cloud','teardrop'));
+ALTER TABLE members ADD COLUMN avatar_color TEXT CHECK(avatar_color IS NULL OR avatar_color IN ('black','brown','red','orange','yellow','green','cyan','blue','violet','magenta','gray'));
+`,
+},
 ]);
