@@ -4,6 +4,127 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.28.0] — 2026-09-22
+
+### Changed
+- Every chat delivery to a member uses one unified structured envelope: a single element carrying the chat identity, sender, sequence number, time and optional last-read pointer, with reply quotes (50-char excerpt) and attachments as child elements. Rooms, user DMs and member-to-member chats share the same shape, and private chats now track unread state like rooms.
+- Chats are addressed by short ids: rooms keep `rm_…`, private chats use `dm_…`, and every member-to-member private chat gets a stable short id minted once and persisted. Existing installations backfill short ids automatically during startup, journaled and safely resumable.
+- Chat tools accept the short ids and chat_list lists them, so members can address any chat without composite identifiers.
+- Platform-injected inputs (new-member DM activation, context recovery) render as explicit directive elements, so the platform can structurally distinguish synthetic inputs from real chat traffic.
+
+### Removed
+- The `[REPLY EXPECTED]` banner and the prose unread hint are gone; reply obligations stay platform-internal and unread state is a last-read pointer.
+- Automatic length-continuation injection is removed: a response that hits the output-length limit now ends truncated, and the user can simply ask to continue.
+
+
+## [0.27.0] — 2026-09-21
+
+### Release
+- Promotes the accepted 0.27.0-rc.2 runtime to the stable 0.27.0 release; no additional runtime, dependency or storage-format changes.
+- The backend runs one owner per capability, and a full context no longer asks the model for a summary: the runtime marks a recovery boundary in the same session and the member resumes from its session log and chat records, as described under 0.27.0-rc.1.
+- The workstation model fields, the user chat list without member-private chats, and the silent-recovery prompt with bounded read/terminal outputs ship as described under 0.27.0-rc.2.
+
+
+## [0.27.0-rc.2] — 2026-09-21
+
+### Fixed
+- Workstation member rows show the configured model and thinking level again: the room-members API restores the model/credential fields the 0.27 refactor dropped (the detail panel already had them), and redundant model-registry refreshes and workstation history reloads are removed.
+- The user's chat list no longer lists member-to-member private conversations — they appeared but could not be opened. Chat navigation shows rooms and the user's own DMs only, and member scope listings no longer include mm scopes.
+- Automatic context recovery no longer causes members to post recovery chatter or re-read the whole session JSONL. The recovery prompt mandates silent recovery with bounded, cursor-based session searches, and read/terminal tool outputs are capped (Pi-style line/byte limits) with full-output snapshots, so a single oversized output can no longer blow up the context window.
+
+### Changed
+- Chat and event history reads page through SQL instead of loading full histories.
+
+
+## [0.27.0-rc.1] — 2026-09-20
+
+### Changed
+- The backend is rebuilt around one owner per capability — member, chat, agent, app, API, data and files each own their domain — with retired and duplicated implementations removed. The backend source tree shrinks from 185 files / ~29k lines to 75 files / ~17k lines (about 40% fewer lines). Storage layout, upgrade behavior and the HTTP, WS and tool surfaces are preserved; no user-visible behavior change is intended.
+- Automatic context-limit handling no longer asks the model to write a summary. When the effective context is full (or the provider overflows), the runtime keeps the same session id and JSONL file, marks a boundary so that earlier messages stop entering the request, and injects a fixed recovery prompt that asks the member to re-read its session log and related chat records before continuing unfinished work. In-progress tool/overflow turns keep the SDK's existing continuation, while a completed turn is not restarted without new input. The context window is released as before, manual Compact keeps its original summary behavior, and Activity shows recovery as its own state.
+- The system-prompt view now reads the live runtime prompt (from the SDK while an instance is alive; empty when none exists), replacing the retired static preview.
+
+### Fixed
+- Restructure follow-ups found in review: the retained member identity directory (including archived entries) is preserved; historical room usage is attributed correctly; web consumers read the canonical conversation-panel DTOs; tool descriptions and gate scripts were corrected.
+
+### Upgrade
+- Ordinary startup performs all upgrade work automatically (0.26.x data trees: migrations 22 → 23), journaled and resumable, with no manual steps.
+
+## [0.26.1] — 2026-09-16
+
+### Fixed
+- Member-to-member private chats no longer lock members out of their tools: while a member's current chat is the pair chat (`mm:` scope), the tool dispatcher's scope pre-check accepts the scope instead of denying every call, so chat, profile and gateway tools work normally inside the pair chat.
+- Renaming a member no longer breaks a member whose runtime was created inside a pair chat: the profile refresh handles `mm:` scopes without a null dereference, so the next message batch runs instead of failing with `Cannot read properties of null` in all chats, including rooms and DMs.
+
+## [0.26.0] — 2026-09-16
+
+### Release
+- Promotes the accepted 0.26.0-rc.1 runtime to the stable 0.26.0 release; no additional runtime, dependency or storage-format changes.
+- Members become the unit of session and runtime: one session and one live runtime per member, replies land in the chat that produced them, and member-to-member private chats ship with a read-only view for the user.
+- Short member and room ids (`mem_<id>` / `rm_<id>`) apply to new members and rooms, and existing installations migrate automatically during ordinary startup — journaled, fail-safe, with an interrupted run resuming on the next start.
+- The member prompt (v2), the rebuilt tool family, the `terminal_*` tool names, room descriptions and the pi SDK 0.85.1 upgrade ship as described under 0.26.0-rc.1.
+
+## [0.26.0-rc.1] — 2026-09-16
+
+### Changed
+- Members are the unit of session and runtime: each member keeps one session and one live runtime, replies are delivered to the chat that produced them, and pending work recovers across chats after a restart. Member status and control are member-level (`POST /api/members/:id/{stop,compact,reset,restart}`), and `@all` no longer skips busy members.
+- Earlier scope-based member sessions are archived during ordinary startup (no data loss); new sessions use the per-member layout.
+- The member prompt compiler is rebuilt (v2): a fixed five-chapter structure, a scope-free static fingerprint, and a per-member prompt preview.
+- The member tool family is rebuilt: `chat_send`, `chat_read`, `chat_search` and `chat_list` stay direct; a `bossmode` gateway (`list` / `describe` / `call`) covers the rest (chat info/create/edit, member list/info, profile read/update). Unknown tool names get a pointed hint instead of a silent fallback.
+- Terminal tools are renamed from `shell_*` to `terminal_*` (`terminal_create` / `terminal_exec` / `terminal_read` / `terminal_wait` / `terminal_list` / `terminal_close`); `terminalId` is the first parameter, creation returns `terminalId`, the list key is `terminals`, and `terminal_exec` / `terminal_wait` take `blockSeconds` (defaults 10 s / 30 s).
+- Room descriptions replace room principles: existing principles text becomes each room's initial description, and the retired principles route responds 410.
+- Shared memory roots are retired: `memory/user` and `memory/projects` move into the global `archive/memory/`, and each member's `scopes/` memory is folded into that member's memory.
+- The pi SDK is upgraded from 0.82.1 to 0.85.1; pre-request-window aborts no longer reach the provider, and OAuth credentials refresh 5 minutes before expiry, with no duplicate rotation under concurrency.
+- The bundled guide and references are brought in line with the current tool surface.
+
+### Added
+- Member-to-member private chats, with a read-only view for the user and a system notice in the receiver's DM.
+- Short member and room ids (`mem_<id>` / `rm_<id>`): new members and rooms are created with them, and existing installations migrate automatically during ordinary startup — database records and files, with journaled crash recovery.
+
+### Removed
+- The `wait` tool is fully retired; incoming messages activate members directly.
+
+### Fixed
+- Member private chats activate the receiving member and deliver like any other chat.
+- The short-id migration migrates legacy `room-<id>` file names (including archived files) and keeps folded member memory consistent between files and database references.
+
+### Upgrade
+- One-click and fail-safe: ordinary startup performs all upgrade work automatically, including the short-id migration. An interrupted run resumes on the next start, and a state that cannot be migrated stops startup with an explicit error instead of a partial migration.
+
+## [0.25.0] — 2026-09-13
+
+### Release
+- Promotes the accepted 0.25.0-rc.2 runtime to the stable 0.25.0 release; no additional runtime, dependency or storage-format changes.
+- Retires the Task, Contacts/member-import, Topic, background-task and `!name` interrupt features, plus the chat final-text fallback; retired data is archived or removed as described below while historical messages stay readable.
+- The member prompt uses the four-segment structure (Member, Working Principles, Communication, Environment) with the updated communication rules.
+- Upgrade is one-click and failure-safe: ordinary startup backs up, imports and migrates automatically, and an interrupted upgrade resumes on the next start.
+- Removes the two leftover UI controls flagged in review: the room header's lone "Chat" segmented control and the sidebar's "All chats" entry.
+
+## [0.25.0-rc.2] — 2026-09-13
+
+### Release
+- Supersedes 0.25.0-rc.1 and contains all of its changes and upgrade behavior (see below).
+
+### Changed
+- Removed two leftover UI elements from retired features: the room header's lone "Chat" segmented control (the shell of the old Chat/Tasks switch, with its dead view state) and the sidebar's bottom "All chats" entry (which duplicated the conversation list). Presentation-only; no behavior, storage or data change.
+
+## [0.25.0-rc.1] — 2026-09-11
+
+### Changed
+- The Task feature is retired. On the first ordinary startup, existing task data is exported to `~/.bossmode/archive/task-retirement-<date>/` with a SHA256 manifest, then the task tables are dropped. Historical `task_event` messages remain readable as plain-text cards.
+- The Contacts page, member import, factory agent seeding and live agent-template management are retired; room creation and invitations select existing members by stable ID. The member archive-on-fire flow is unchanged.
+- Chat is the only response channel: a turn that ends without a `chat` call delivers nothing and records a system notice. The `chat` tool accepts only `message` and optional `attachments` (`need_response` and `reply_to` are removed).
+- The Topic feature is retired outright (no archive): topic data and topic session files are deleted in one migration transaction, with room/DM chat untouched. Historical topic cards render as plain text.
+- The member prompt is restructured into four segments — Member, Working Principles, Communication, Environment — with updated communication rules (increment-only replies, mention discipline, report once).
+- Background tasks are retired, including the `background_start`, `background_status`, `background_wait` and `background_cancel` tools. On upgrade, `background_tasks` rows, terminal notifications and member background-task directories are discarded — no archive; in-flight tasks are dropped.
+- The `recall` and `memorize` tools are retired; memory maintenance uses `read`, `write` and `edit` directly.
+- The `!name` urgent interrupt is retired: `!name` is plain text with no activation, interrupt or system notice, and no historical field migration.
+
+### Upgrade
+- One-click: ordinary startup performs all upgrade work automatically — supported legacy data is imported with an automatic backup, then the three retirement migrations run in order (Task export/archive and drop, Topic delete, Background drop and session-file cleanup). No separate migration command is required; an interrupted upgrade resumes on the next start.
+
+### Fixed
+- Upgrading from 0.24.x no longer refuses to start: comment lines accidentally added inside two already-applied migration SQL strings had changed their checksums. The SQL bytes are restored exactly; a frozen-checksum test now guards every applied migration, and the merge gate runs a real old-database upgrade.
+
 ## [0.24.1] — 2026-09-11
 
 ### Fixed
