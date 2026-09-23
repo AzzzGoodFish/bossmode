@@ -12,6 +12,7 @@
 @import "./assets-ui.css";
 @import "./member-actions-ui.css";
 @import "./search-ui.css";
+@import "./mention-compose.css";
 @import "./recovery-ui.css";
 @import "../integration.css";
 @import "./theme.css";
