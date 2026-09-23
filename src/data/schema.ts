@@ -1137,4 +1137,20 @@ CREATE TABLE chat_pins (
 );
 `,
 },
+{
+  id: "core-model-connection-settings-v1",
+  sql: `
+CREATE TABLE model_connection_settings (
+ profile_id TEXT NOT NULL PRIMARY KEY REFERENCES model_profiles(id) ON DELETE CASCADE,
+ connection_json TEXT CHECK(connection_json IS NULL OR (json_valid(connection_json) AND json_type(connection_json)='object')),
+ env_json TEXT CHECK(env_json IS NULL OR (json_valid(env_json) AND json_type(env_json)='object'))
+);
+CREATE TABLE model_prices (
+ profile_id TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL,
+ cost_json TEXT NOT NULL CHECK(json_valid(cost_json) AND json_type(cost_json)='object'),
+ PRIMARY KEY(profile_id,kind,id),
+ FOREIGN KEY(profile_id,kind,id) REFERENCES model_definitions(profile_id,kind,id) ON DELETE CASCADE
+);
+`,
+},
 ]);

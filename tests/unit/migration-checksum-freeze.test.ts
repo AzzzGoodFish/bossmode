@@ -21,6 +21,7 @@ import { coreStorageMigrations } from "../../src/data/schema.js";
  * - Comments about a migration belong OUTSIDE its SQL template string.
  */
 const FROZEN: Record<string, string> = {
+  "core-model-connection-settings-v1": "ea82af8526b1b7dca2ff2c8acf705166d6b644f26a520aa50d512369b1054f45",
   "core-base-v1": "9710ae74e304faad4037de64a8ade6b01200f136b7c8b854bdab8867371b6770",
   "core-members-v1": "3c6765f45c75309648320b6b937a5e4228d5bb2c0aaffa64f1e1f6e788d5c3be",
   "core-settings-v1": "50a532203b4d3b8675af4e8fd4bd8c160ddb332d9467c181c1af0fbf81bc3c7b",

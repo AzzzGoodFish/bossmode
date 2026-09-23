@@ -1,4 +1,5 @@
 import { addRoute, HttpError, parseBody, requestValue, sendJson } from "./http.js";
+import {connectProvider,refreshProviderModels} from '../config/connections.js';
 import { invalidateModelCredentialProfile } from "../agent/controls.js";
 import { cancelOAuthLoginJob, getOAuthLoginJob, startNativeOAuthConnection, submitOAuthLoginJobInput } from "../config/oauth.js";
 import { connectBuiltinProviderApiKey, deleteModelCredentialProfile, discoverModelCredentialModels, getModelCredentialProfile, listAvailableModels, listPublicModelCredentialProfiles, refreshBuiltinCatalog, saveModelCredentialProfile } from "../config/models.js";
@@ -16,7 +17,13 @@ function oauthJob(id: string) {
   return job;
 }
 async function saveProfile(input: any): Promise<unknown> {
-  const profile = saveModelCredentialProfile(input);
+  if(!input||typeof input!=='object'||Array.isArray(input))throw new HttpError(400,'invalid_request','Invalid model profile');
+  const existing=input.id?getModelCredentialProfile(input.id):null;
+  if(input.id&&!existing)throw new HttpError(404,'not_found','Model credential profile not found');
+  const {headersPatch,...fields}=input;
+  let headers=fields.headers??existing?.headers;
+  if(headersPatch!==undefined){if(!headersPatch||typeof headersPatch!=='object'||Array.isArray(headersPatch))throw new HttpError(400,'invalid_request','Invalid header changes');headers=Object.assign(Object.create(null),headers??{});for(const [name,value] of Object.entries(headersPatch)){if(value!==null&&typeof value!=='string')throw new HttpError(400,'invalid_request','Invalid header value');for(const old of Object.keys(headers))if(old.toLowerCase()===name.toLowerCase())delete headers[old];if(value!==null)headers[name]=value;}}
+  const profile = saveModelCredentialProfile({...existing,...fields,headers});
   await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
   return profile;
 }
@@ -33,6 +40,11 @@ addRoute("POST", "/api/model-credential-profiles/connect-api-key", async (reques
     await invalidateModelCredentialProfile(profile.id, profile.providerSlug, "profileUpdated");
     return profile;
   });
+});
+addRoute('POST','/api/model-credential-profiles/connect-provider',async(request,response)=>{
+  const abort=new AbortController();const cancel=()=>abort.abort();response.once('close',cancel);
+  try{await ok(response,async()=>{const profile=await connectProvider(await body(request),AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));await invalidateModelCredentialProfile(profile.id,profile.providerSlug,'profileUpdated');return profile;});}
+  finally{response.off('close',cancel);}
 });
 addRoute("POST", "/api/model-credential-profiles", async (request, response) => {
   await ok(response, async () => saveProfile(await body(request)));
@@ -53,6 +65,11 @@ addRoute("POST", `${oauthPath}/input`, async (request, response, params) => {
 });
 addRoute("POST", `${oauthPath}/cancel`, async (_request, response, params) => {
   sendJson(response, 200, cancelOAuthLoginJob(params.id) || oauthJob(params.id));
+});
+addRoute('POST','/api/model-credential-profiles/:id/refresh-models',async(request,response,params)=>{
+  const abort=new AbortController();const cancel=()=>abort.abort();response.once('close',cancel);
+  try{await ok(response,async()=>{const profile=await refreshProviderModels(params.id,AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));await invalidateModelCredentialProfile(profile.id,profile.providerSlug,'profileUpdated');return profile;});}
+  finally{response.off('close',cancel);}
 });
 addRoute("DELETE", "/api/model-credential-profiles/:id", async (_request, response, params) => {
   const profile = getModelCredentialProfile(params.id);

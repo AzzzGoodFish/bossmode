@@ -3,6 +3,8 @@ import type { RoomMessage } from '../api/client';
 import type { UploadResult } from '../api/upload-client';
 export interface PendingFile {id:string;file:File;url:string;status:'pending'|'uploading'|'ready'|'error'|'cancelled';progress:number;uploaded?:UploadResult;error?:string;controller?:AbortController}
 export interface Draft {text:string;files:PendingFile[];quote?:RoomMessage;error?:string;busy:boolean;posting?:boolean;revision:number}
+// Draft identifiers are not credentials. getRandomValues also works on the LAN HTTP entry.
+export function newDraftFileId():string {return Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');}
 let generation=0;const scopeGenerations=new Map<string,number>();
 export function getDraftGeneration(scope=''){return `${generation}:${scopeGenerations.get(scope)??0}`;}
 export function discardScopeDraft(scope:string){scopeGenerations.set(scope,(scopeGenerations.get(scope)??0)+1);for(const file of store.get(scope)?.files??[]){file.controller?.abort();URL.revokeObjectURL(file.url);}store.delete(scope);listeners.forEach(f=>f());}

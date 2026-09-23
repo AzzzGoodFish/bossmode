@@ -302,6 +302,8 @@ addConversationRoute("POST", "/api/conversations/:scope/messages", async (reques
 addConversationRoute("GET", "/api/conversations/:scope/messages/search", async (request, response, sourceRef) => {
   const url = requestUrl(request);
   sendJson(response, 200, searchMessages(sourceRef, {
+    includeAuthors: url.searchParams.get("includeAuthors") === "true",
+    fromLabelOnly: url.searchParams.get("fromLabelOnly") === "true",
     query: url.searchParams.get("query") || undefined, from: url.searchParams.get("from") || undefined,
     fromMemberId: url.searchParams.get("fromMemberId") || undefined,
     after: url.searchParams.has("after") ? Number(url.searchParams.get("after")) : undefined,

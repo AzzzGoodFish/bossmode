@@ -4,7 +4,7 @@ import { claimOutbox, completeOutbox, enqueueOutbox } from "../data/outbox.js";
 import { logger } from "../kernel/logger.js";
 import type { JsonValue } from "../kernel/json.js";
 import type { RoomMessageAttachment } from "../files/attachments.js";
-import { parseConversation, storageScopeId } from "./conversations.js";
+import { conversationMember, parseConversation, storageScopeId } from "./conversations.js";
 import { getUserReadCursor } from "./cursors.js";
 
 export interface Message {
@@ -46,6 +46,8 @@ export interface MessageQueryOptions {
   limit?: number;
 }
 export interface MessageSearchOptions {
+  includeAuthors?: boolean;
+  fromLabelOnly?: boolean;
   query?: string;
   from?: string;
   fromMemberId?: string;
@@ -62,7 +64,8 @@ export interface MessageSearchHit {
   content: string;
   ts: number;
 }
-export interface MessageSearchResult { total: number; messages: MessageSearchHit[] }
+export interface MessageSearchAuthor { id:string;name:string;kind:'user'|'member'|'system'|'legacy';status:'current'|'left'|'deleted'|'unknown';memberId?:string }
+export interface MessageSearchResult { total: number; messages: MessageSearchHit[]; authors?:MessageSearchAuthor[] }
 export interface ConversationListState {
   lastMessage: { sender: string; senderMemberId?: string; text: string; ts: number } | null;
   unreadCount: number;
@@ -430,10 +433,25 @@ export function pageMessages(scope: string, options: MessagePageOptions = {}, db
     .reverse().map(row => hydrate(db, row));
 }
 
+export function listMessageSearchAuthors(scope:string,db:Database=getDatabase()):MessageSearchAuthor[] {
+  const scopeId=storageScopeId(scope),ref=parseConversation(scope)??parseConversation(`room:${scopeId}`);
+  const roster=new Set(ref?.kind==='room'?db.all<{member_id:string}>("SELECT member_id FROM room_members WHERE room_id=?",scopeId).map(row=>row.member_id):ref?.kind==='dm'?[ref.memberId]:ref?.kind==='mm'?ref.memberIds:[]);
+  const identities=new Map<string,{active:boolean;name?:string}>(),lookup=(id:string)=>{let value=identities.get(id);if(!value){const active=conversationMember(id),display=active??conversationMember(id,true);value={active:!!active,name:display?.name};identities.set(id,value);}return value;};
+  const authors=new Map<string,MessageSearchAuthor>();
+  if(ref?.kind!=='mm')authors.set('user',{id:'user',name:'user',kind:'user',status:'current'});
+  for(const id of roster){const member=lookup(id);if(member.active)authors.set(id,{id,name:member.name!,kind:'member',status:'current',memberId:id});}
+  // Read only the latest display name per stable author in this scope. Never
+  // reconstruct a deleted identity or join a historical author by their name.
+  const rows=db.all<{sender:string;sender_member_id:string|null}>(`SELECT sender,sender_member_id FROM messages WHERE position IN (SELECT MAX(position) FROM messages WHERE scope_id=? AND ${MEMBER_VISIBLE_SQL} GROUP BY sender_member_id,CASE WHEN sender_member_id IS NULL THEN sender ELSE '' END)`,scopeId);
+  for(const row of rows){const id=row.sender_member_id;if(id){const member=lookup(id);authors.set(id,{id,name:member.name??row.sender,kind:'member',memberId:id,status:!member.active?'deleted':roster.has(id)?'current':'left'});}else if(row.sender==='user'){authors.set('user',{id:'user',name:'user',kind:'user',status:'current'});}else{const id=`sender:${encodeURIComponent(row.sender)}`;authors.set(id,{id,name:row.sender==='system'?'系统记录':row.sender,kind:row.sender==='system'?'system':'legacy',status:'unknown'});}}
+  const rank={current:0,left:1,deleted:2,unknown:3};return [...authors.values()].sort((a,b)=>rank[a.status]-rank[b.status]||(a.kind==='user'?-1:b.kind==='user'?1:a.name.localeCompare(b.name,'zh-CN'))||a.id.localeCompare(b.id));
+}
+function searchPreview(content:string,query?:string):string {const text=content.replace(/\s+/g,' ').trim(),at=query?text.toLowerCase().indexOf(query.trim().toLowerCase()):-1;if(at<40||text.length<=200)return replyExcerpt(content);const start=at-40,end=Math.min(text.length,start+198);return `…${text.slice(start,end)}${end<text.length?'…':''}`;}
 export function searchMessages(scope: string, options: MessageSearchOptions = {}, db: Database = getDatabase()): MessageSearchResult {
   const scopeId = storageScopeId(scope);
   const params: unknown[] = [scopeId];
   let where = `scope_id=? AND ${MEMBER_VISIBLE_SQL}`;
+  if(options.fromLabelOnly)where+=" AND sender_member_id IS NULL";
   if (options.query) { where += " AND instr(content_lower,?)>0"; params.push(options.query.toLowerCase()); }
   for (const [column, operator, value] of [
     ["sender", "=", options.from], ["sender_member_id", "=", options.fromMemberId],
@@ -450,6 +468,7 @@ export function searchMessages(scope: string, options: MessageSearchOptions = {}
   );
   return {
     total,
+    ...(options.includeAuthors?{authors:listMessageSearchAuthors(scope,db)}:{}),
     messages: rows.map((row) => {
       const message = hydrate(db, row);
       return {
@@ -457,7 +476,7 @@ export function searchMessages(scope: string, options: MessageSearchOptions = {}
         ...(message.seq !== undefined ? { seq: message.seq } : {}),
         sender: message.sender,
         ...(message.senderMemberId ? { senderMemberId: message.senderMemberId } : {}),
-        content: replyExcerpt(message.content),
+        content: searchPreview(message.content,options.query),
         ts: message.ts,
       };
     }),
