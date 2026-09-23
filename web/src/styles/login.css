@@ -15,11 +15,11 @@
   background: var(--login-base);
 }
 .dark .bm-login {
-  --login-base: #070707;
-  --login-subtle: #111111;
-  --login-text: #fcfcfc;
-  --login-muted: #fcfcfc99;
-  --login-line: #fcfcfc1a;
+  --login-base: #1e1f22;
+  --login-subtle: #282a2e;
+  --login-text: #e5e7eb;
+  --login-muted: #b1b4bb;
+  --login-line: #ffffff24;
   --login-danger: #ff5667;
 }
 .bm-login-theme {
@@ -46,6 +46,7 @@
 .bm-login-brand h1 { margin: 0; font-size: 27px; line-height: 34px; font-weight: 600; letter-spacing: -.6px; }
 .bm-login-brand p { margin: 7px 0 0; color: var(--login-muted); font-size: 13px; line-height: 20px; }
 .bm-login-form { padding: 24px; border-radius: 14px; background: color-mix(in srgb, var(--login-text) 9%, transparent); }
+.dark .bm-login-form { background: var(--login-subtle); }
 .bm-login-field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 20px; }
 .bm-login-field label { color: var(--login-text); font-size: 12px; }
 .bm-login-field input { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--login-line); border-radius: 7px; outline: none; color: var(--login-text); background: var(--login-base); font: inherit; font-size: 14px; line-height: 20px; transition: border-color .15s, box-shadow .15s; }

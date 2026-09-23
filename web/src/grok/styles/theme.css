@@ -1,0 +1,64 @@
+/* Product charcoal palette. Keep the vendored reference theme unchanged.
+ * The theme selector takes precedence over its runtime :root tokens;
+ * cold-login colors are handled separately in login.css.
+ * Only dark colors change; geometry, brand colors and light colors stay put. */
+:root[data-theme="cursor-dark"] {
+  --sand-bg-base: #1e1f22;
+  --sand-bg-subtle: #26272b;
+  --sand-bg-elevated: #303236;
+  --sand-bg-fade-base: #1e1f2200;
+  --sand-bg-fade-subtle: #26272b00;
+  --sand-bg-scrim: #10111480;
+  --sand-bg-scrim-heavy: #101114e5;
+
+  --sand-text-primary: #e5e7eb;
+  --sand-text-secondary: #b1b4bb;
+  --sand-text-tertiary: #9b9fa7;
+  --sand-text-disabled: #767b85;
+  --sand-text-on-primary: #232529;
+  --sand-text-on-color: #eef0f3;
+  --sand-text-neutral: #b1b4bb;
+  --sand-text-shimmer-base: #9b9fa7;
+  --sand-text-shimmer-highlight: #e5e7eb;
+
+  --sand-border-subtle: #ffffff08;
+  --sand-border-weak: #ffffff10;
+  --sand-border-default: #ffffff1a;
+  --sand-border-strong: #ffffff38;
+  --sand-border-focus: #abb4c2;
+  --sand-border-cutout-on-base: #1e1f22;
+  --sand-border-cutout-on-subtle: #26272b;
+  --sand-border-cutout-on-elevated: #303236;
+
+  --sand-fill-primary: #dadde2;
+  --sand-fill-primary-hover: #eef0f3;
+  --sand-fill-secondary: #ffffff08;
+  --sand-fill-secondary-hover: #ffffff10;
+  --sand-fill-secondary-disabled: #ffffff05;
+  --sand-fill-secondary-solid: #282a2e;
+  --sand-fill-secondary-solid-hover: #323439;
+  --sand-fill-ghost-hover: #ffffff0a;
+  --sand-fill-ghost-selected: #ffffff14;
+  --sand-fill-elevated: #36383d;
+  --sand-fill-elevated-hover: #ffffff10;
+  --sand-fill-bubble-agent: #2b2d31;
+  --sand-fill-bubble-user: #42464d;
+  --sand-fill-control-checked: #686f7b;
+  --sand-fill-control-checked-hover: #7a8392;
+  --sand-fill-control-track: #ffffff14;
+
+  --sand-shadow-control: #00000024;
+  --sand-shadow-inline-ambient: #00000024;
+  --sand-shadow-inline-key: #0000001a;
+  --sand-shadow-popover-ambient: #00000040;
+  --sand-shadow-popover-key: #00000030;
+  --sand-shadow-ring: #ffffff05;
+}
+
+:root[data-theme="cursor-dark"] dialog {
+  background: var(--sand-fill-secondary-solid);
+  box-shadow: 0 20px 60px #00000040;
+}
+:root[data-theme="cursor-dark"] .gr-composer {
+  background: var(--sand-fill-secondary-solid);
+}
