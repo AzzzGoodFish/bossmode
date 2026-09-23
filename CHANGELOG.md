@@ -4,6 +4,20 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.29.1] — 2026-09-23
+
+### Changed
+- Dark surfaces use a blue-gray palette instead of near-black, with consistent login, chat, code, menu, and dialog colors. The light theme is unchanged.
+- The composer’s plus button opens one file picker for images and other files; drag-and-drop and paste remain available.
+- Group replies to a current member start with an atomic @ chip. Chosen group mentions use the same chip; Backspace or its remove control deletes the whole chip. Private replies retain their quote without an automatic @. Deleted or departed historical authors remain quotable but are not automatically mapped to a new member with the same name.
+
+### Fixed
+- The account theme menu follows the trigger instead of using a fixed offset, with a back action, selected state, and keyboard navigation.
+- Member names stay on one line in the @ candidate list while longer descriptions wrap. Quote actions are available on touch screens without relying on hover.
+
+### Upgrade
+- No new storage migration or Pi SDK upgrade. This release includes all 0.29.0 functionality.
+
 ## [0.29.0] — 2026-09-23
 
 ### Changed
