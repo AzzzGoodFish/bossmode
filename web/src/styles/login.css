@@ -15,11 +15,11 @@
   background: var(--login-base);
 }
 .dark .bm-login {
-  --login-base: #1e1f22;
-  --login-subtle: #282a2e;
-  --login-text: #e5e7eb;
-  --login-muted: #b1b4bb;
-  --login-line: #ffffff24;
+  --login-base: #282c34;
+  --login-subtle: #333943;
+  --login-text: #e1e6ee;
+  --login-muted: #b9c3d1;
+  --login-line: #d6deeb30;
   --login-danger: #ff5667;
 }
 .bm-login-theme {
