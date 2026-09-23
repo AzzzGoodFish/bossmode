@@ -190,7 +190,7 @@ describe.each(scopes)("ActivityTab stable $name identity", ({ name, scopeId }) =
     expect(Socket.instances).toHaveLength(1);
     const socket = Socket.instances[0];
     socket.onopen!();
-    expect(socket.url).toBe("wss://activity.test?token=test-token");
+    expect(socket.url).toBe("wss://activity.test/ws?token=test-token");
     expect(JSON.parse(socket.send.mock.calls[0][0])).toEqual({
       type: "subscribe:agent", roomId: scopeId, agent: "mem_one", memberId: "mem_one",
     });

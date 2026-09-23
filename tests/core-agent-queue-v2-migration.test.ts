@@ -12,7 +12,7 @@ describe("core-agent-queue-v2 migration", () => {
   it("preserves history, queue terminal states, receipts and historical event identity", () => {
     const root = mkdtempSync(join(tmpdir(), "bossmode-r2-v2-")); roots.push(root);
     const db = openDatabase(join(root, "core.db"));
-    const old = coreStorageMigrations.slice(0, -2);
+    const old = coreStorageMigrations.slice(0, coreStorageMigrations.findIndex(m => m.id === "core-agent-queue-v2"));
     applyStorageMigrations(db, old);
     const checksums = db.all<{id:string;checksum:string}>("SELECT id,checksum FROM storage_schema_versions ORDER BY rowid");
     expect(checksums).toHaveLength(22);
@@ -49,7 +49,7 @@ describe("core-agent-queue-v2 migration", () => {
 
     applyStorageMigrations(db, coreStorageMigrations);
     expect(db.all("SELECT id,checksum FROM storage_schema_versions ORDER BY rowid LIMIT 22")).toEqual(checksums);
-    expect(db.get<{n:number}>("SELECT COUNT(*) n FROM storage_schema_versions")!.n).toBe(24);
+    expect(db.get<{n:number}>("SELECT COUNT(*) n FROM storage_schema_versions")!.n).toBe(coreStorageMigrations.length);
     expect(db.all("SELECT id,member_id,historical_target_actor_key,source_ref,status,outcome,diagnosis FROM queued_inputs ORDER BY id")).toEqual([
       { id: 1, member_id: "mem_one", historical_target_actor_key: "mem_one", source_ref: "room:r1", status: "pending", outcome: null, diagnosis: null },
       { id: 2, member_id: "mem_one", historical_target_actor_key: "mem_one", source_ref: "room:r1", status: "dispatched", outcome: null, diagnosis: null },

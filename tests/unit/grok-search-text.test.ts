@@ -1,0 +1,4 @@
+import {expect,it} from 'vitest';
+import {searchExcerpt} from '../../web/src/grok/search-text.js';
+it('centers a long result around the matching term, not the start of the message',()=>{const result=searchExcerpt('prefix '.repeat(80)+'Needle '+'suffix '.repeat(60),'needle');expect(result.before.startsWith('…')).toBe(true);expect(result.match).toBe('Needle');expect(result.after.endsWith('…')).toBe(true);expect((result.before+result.match+result.after).length).toBeLessThanOrEqual(142);});
+it('normalizes whitespace and preserves literal source characters for text rendering',()=>{expect(searchExcerpt('one\n\n<script>hit</script>   two','hit')).toEqual({before:'one <script>',match:'hit',after:'</script> two'});expect(searchExcerpt(' no\nquery ','')).toEqual({before:'no query',match:'',after:''});});

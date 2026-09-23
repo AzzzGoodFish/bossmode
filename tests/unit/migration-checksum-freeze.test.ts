@@ -21,6 +21,7 @@ import { coreStorageMigrations } from "../../src/data/schema.js";
  * - Comments about a migration belong OUTSIDE its SQL template string.
  */
 const FROZEN: Record<string, string> = {
+  "core-model-connection-settings-v1": "ea82af8526b1b7dca2ff2c8acf705166d6b644f26a520aa50d512369b1054f45",
   "core-base-v1": "9710ae74e304faad4037de64a8ade6b01200f136b7c8b854bdab8867371b6770",
   "core-members-v1": "3c6765f45c75309648320b6b937a5e4228d5bb2c0aaffa64f1e1f6e788d5c3be",
   "core-settings-v1": "50a532203b4d3b8675af4e8fd4bd8c160ddb332d9467c181c1af0fbf81bc3c7b",
@@ -45,6 +46,8 @@ const FROZEN: Record<string, string> = {
   "core-short-ids-v1": "e2070b0617adef8605a330806a9cea4e62c263ecf729385a4dc1c6ceb165bba7",
   "core-agent-queue-v2": "033658c102b3b8bd354ad837c39bc5428bc20b64be79fe9fbe314b5a9066fc42",
   "core-scope-short-id-v1": "2e5f8d0fe3e9f04aba0d7cfd486e1269f58f0b36057b7e43f4adf9410d7c0c3c",
+  "core-member-avatar-v1": "0dfb9d37b0a6d7f883eef7b1ccb6a020db8e197c21a33caeb33d5ebe70f96226",
+  "core-chat-pins-v1": "16d8218209826b59e4cf647f368300b8d028688ed181c07f1f62efa64d11db4a",
 };
 
 describe("migration checksum freeze", () => {

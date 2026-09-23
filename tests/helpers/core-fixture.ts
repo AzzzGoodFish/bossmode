@@ -2,6 +2,8 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } 
 import { dirname, join, resolve } from "node:path";
 import { openDatabase, applyStorageMigrations, bindDatabase, type Database } from "../../src/data/database.js";
 import { connectConversationMembers } from "../../src/chat/conversations.js";
+import {connectChatUserDisplayName} from '../../src/chat/context.js';
+import {getUserDisplayName} from '../../src/config/settings.js';
 import { readMemberIdentity } from "../../src/member/identity.js";
 import { coreStorageMigrations } from "../../src/data/schema.js";
 
@@ -29,7 +31,7 @@ export function coreFixture(existingRoot?: string) {
     try { applyStorageMigrations(next, coreStorageMigrations); bindDatabase(next); return next; }
     catch (error) { next.close(); throw error; }
   }
-  try { db = open(); disconnectMembers = connectConversationMembers(readMemberIdentity); }
+  try { db = open();const stopMembers=connectConversationMembers(readMemberIdentity),stopUser=connectChatUserDisplayName(getUserDisplayName);disconnectMembers=()=>{stopMembers();stopUser();}; }
   catch (error) { db?.close(); rmSync(root, { recursive: true, force: true }); throw error; }
   return {
     root, path,

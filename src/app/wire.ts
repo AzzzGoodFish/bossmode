@@ -1,3 +1,7 @@
+import {onChatPreferencesChanged} from "../chat/preferences.js";
+import {onMemberDeleted} from "../member/deletion.js";
+import {onRoomDeleted} from "../chat/room-deletion.js";
+import {deleteRoomCompletely} from "./chat-deletion-actions.js";
 import { onCatalogChanged } from "../config/catalog.js";
 import {getUserDisplayName} from "../config/settings.js";
 import { refreshAllInstanceModelRegistries } from "../agent/controls.js";
@@ -5,17 +9,20 @@ import { notifyMemberProfileChanged } from "../agent/instance.js";
 export function wireConfiguration(): () => void {
   return onCatalogChanged(async () => { await refreshAllInstanceModelRegistries(); });
 }
-import {onMemberIdentityChanged} from "../member/identity.js";
-import { broadcastMemberProfileChanged } from "./ws.js";
+import {onMemberIdentityChanged,onMemberAppearanceChanged} from "../member/identity.js";
+import { broadcastDirectoryChanged, broadcastMemberProfileChanged } from "./ws.js";
 export function wireMemberProfiles(): () => void {
   const stopRuntime = onMemberIdentityChanged(member => notifyMemberProfileChanged(member));
   const stopViews = onMemberIdentityChanged(member => broadcastMemberProfileChanged({ memberId: member.id, name: member.name, title: member.title ?? null }));
-  return () => { stopRuntime(); stopViews(); };
+  const stopAppearance = onMemberAppearanceChanged(member => broadcastMemberProfileChanged({memberId:member.id,name:member.name,title:member.title??null,avatarShape:member.avatarShape??null,avatarColor:member.avatarColor??null}));
+  const stopMemberDeleted=onMemberDeleted(broadcastDirectoryChanged),stopRoomDeleted=onRoomDeleted(broadcastDirectoryChanged),stopPreferences=onChatPreferencesChanged(broadcastDirectoryChanged);
+  return () => { stopRuntime(); stopViews(); stopAppearance(); stopMemberDeleted();stopRoomDeleted();stopPreferences(); };
 }
 import { assertMemberScopeAccess,attachmentLocation,chatScopeAssetRoots,chatShortId,connectConversationMembers,ensureDmScope,ensureMmScope,isMmScopeId,listRoomsForMember,parseConversation,parseMmScopeId,resolveChatScope } from "../chat/conversations.js";
 import { getMember, listMembers, readMemberIdentity, resolveMemberRef,updateMember } from "../member/identity.js";
 import { activeWorkspaceRoot,getActiveWorkspace,getWorkspace } from "../member/workspaces.js";
-export function wireConversationMembers(): () => void { return connectConversationMembers(readMemberIdentity); }
+import {connectChatUserDisplayName} from '../chat/context.js';
+export function wireConversationMembers(): () => void {const stopMembers=connectConversationMembers(readMemberIdentity),stopUser=connectChatUserDisplayName(getUserDisplayName);return()=>{stopMembers();stopUser();};}
 import {createJiti} from "jiti";
 import {dirname,join} from "node:path";
 import {configureTerminalWorkspaces} from "../agent/terminal.js";
@@ -303,6 +310,7 @@ export function wireChatHttp(): () => void {
     broadcastToRoom(target, { type: "room:message", roomId: target, message: message as any });
   });
   const disconnectHttp = connectChatHttpActions({
+    deleteRoom:deleteRoomCompletely,
     readUserLogin:getUserDisplayName,
     postMessage: commitChatMessage,
     resetSession: (_sourceRef, memberId) => resetMemberSession(memberId),

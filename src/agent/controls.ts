@@ -328,3 +328,22 @@ export async function shutdownAll(): Promise<void> {
   })().finally(() => { shutdownRunning = false; });
   return shutdownSettlement;
 }
+
+/** Close one chat source without deleting/restarting its members or other chats. */
+export function cancelConversationInputs(sourceRef:string):void {
+  const owners=getDatabase().all<{member_id:string}>("SELECT DISTINCT member_id FROM queued_inputs WHERE source_ref=? AND status='pending' AND member_id IS NOT NULL",sourceRef);
+  for(const owner of owners)cancelPendingRuntimeInputs(owner.member_id,"conversation deleted",sourceRef);
+}
+export async function quiesceConversation(sourceRef:string):Promise<void> {
+  // A dispatch can be waiting for SDK construction. Let it publish, then only
+  // interrupt it if the active turn still belongs to the removed source.
+  const owners=getDatabase().all<{member_id:string}>("SELECT DISTINCT member_id FROM queued_inputs WHERE source_ref=? AND member_id IS NOT NULL",sourceRef);
+  await Promise.allSettled(owners.flatMap(owner=>pendingCreationsFor(owner.member_id)));
+  const waits:Promise<void>[]=[];
+  for(const instance of instances.values())if(instance.activeSourceRef===sourceRef&&(instance.promptInFlight||instance.turnActive)){
+    settleMemberShellWaits(instance.memberId);
+    updateDispatchState(instance,"aborting","conversation deleted");
+    instance.handle.abort();waits.push(instance.handle.waitForIdle());
+  }
+  await Promise.all(waits);
+}

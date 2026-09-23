@@ -1,3 +1,8 @@
+import {settleMemberInputPump} from "../agent/scheduler.js";
+import { MemberDeletionService, purgeMemberStoredData, detachDocumentScope } from "../member/deletion.js";
+import { privateScopesForMember, purgeConversationRows, purgeMemberChatReceipts } from "../chat/deletion.js";
+import { purgeMemberAgentData } from "../agent/deletion.js";
+import { validateAvatarPatch } from "../member/avatar.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -178,15 +183,16 @@ export function commitChatMessage(sourceRef: string, input: MessageInput): Messa
 }
 
 
-export interface MemberUpdatePatch{name?:string;title?:string|null;model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[];}
+export interface MemberUpdatePatch{avatarShape?:string|null;avatarColor?:string|null;name?:string;title?:string|null;model?:string|null;credentialId?:string|null;thinkingLevel?:string|null;skills?:string[];mcpServers?:string[];}
 export async function updateMember(memberId:string,patch:MemberUpdatePatch){
+  validateAvatarPatch(patch);
   const before=requireMember(memberId),beforeModel=before.global.model??null;
   if(patch.name!==undefined||patch.title!==undefined)validateProfilePatch({...patch.name!==undefined&&{name:patch.name},...patch.title!==undefined&&{title:patch.title??""}});
   if(patch.model!==undefined&&(patch.model===null||!patch.model.trim()))throw new Error("invalid_model");
   let selectedModel:string|null=null;
   if(patch.model!==undefined||patch.credentialId!==undefined){const current=getMemberConfiguration(memberId),model=patch.model??current.model,credentialId=patch.credentialId===undefined?current.credentialId:patch.credentialId;if(!model||!credentialId)throw new Error("invalid_binding");await switchMemberModel(memberId,{model,credentialId});selectedModel=model;}
   const global:Record<string,unknown>={};for(const key of ["thinkingLevel","skills","mcpServers"] as const)if(patch[key]!==undefined)global[key]=key==="thinkingLevel"?patch[key]??"off":patch[key];
-  const member=persistMember(memberId,{...(patch.name!==undefined&&{name:patch.name}),...(patch.title!==undefined&&{title:patch.title}),...(Object.keys(global).length&&{global})});
+  const member=persistMember(memberId,{...(patch.avatarShape!==undefined&&{avatarShape:patch.avatarShape}),...(patch.avatarColor!==undefined&&{avatarColor:patch.avatarColor}),...(patch.name!==undefined&&{name:patch.name}),...(patch.title!==undefined&&{title:patch.title}),...(Object.keys(global).length&&{global})});
   if(patch.thinkingLevel!==undefined)await switchMemberThinkingLevel(memberId,patch.thinkingLevel??"off");
   if(patch.skills!==undefined||patch.mcpServers!==undefined)await reloadMemberSession(memberId,"member resources changed");
   if(!beforeModel&&selectedModel)void activateDmMember(memberId).catch(error=>logger.error("members","post-config DM activate failed",{memberId,error:String(error)}));
@@ -222,3 +228,20 @@ export async function activateDmMember(memberId:string):Promise<void>{
   const {input}=acceptControlInput(sourceRef,memberId,{prompt,source:"private_instruction",trigger:"dm-activate",replySources:[]},false);
   await waitForInputSettlement(input,pumpRuntimeInputs(memberId));
 }
+
+// Permanent member deletion: the existing archive transition is only a crash-safe
+// quarantine step. Both its catalog entry and directory are removed before success.
+function memberDeletions(): MemberDeletionService {
+ return new MemberDeletionService(getDatabase(),getBossmodeDir(),{
+  archive:async id=>{const result=await memberArchives().archive(id,{confirm:true});await settleMemberInputPump(id);return result;},
+  privateDirectories:(id,db)=>privateScopesForMember(id,db).filter(scope=>scope.startsWith('mm:')).map(scope=>`member-chats/${scope.slice(3)}`),
+  purgeRecords:(id,db)=>{
+   for(const scope of privateScopesForMember(id,db)){detachDocumentScope(scope,db);purgeConversationRows(scope,db);}
+   purgeMemberChatReceipts(id,db);
+   purgeMemberAgentData(id,db);
+   purgeMemberStoredData(id,db);
+  },
+ });
+}
+export async function deleteMemberCompletely(id:string,options:{confirm?:boolean}):Promise<{deleted:string}>{return memberDeletions().delete(id,options);}
+export function recoverMemberDeletions():Promise<void>{return memberDeletions().recoverPending();}

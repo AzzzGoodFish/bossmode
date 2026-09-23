@@ -1,3 +1,4 @@
+import { checkedAssetPath } from "../files/deletion.js";
 import { syncPath } from "../files/io.js";
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -9,20 +10,7 @@ import { type MemberGlobalConfig } from "./identity.js";
 function statIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try { return lstatSync(path); } catch (err: any) { if (err.code === "ENOENT") return null; throw err; }
 }
-/** Caller-selected data root; reject symlinks on path segments instead of following archive metadata. */
-export function checkedAssetPath(root: string, relativePath: string): string {
-  const base = resolve(root);
-  const full = resolve(base, relativePath);
-  const rel = relative(base, full);
-  if (isAbsolute(relativePath) || relativePath.includes("\\") || relativePath.includes("\0") ||
-    rel === ".." || rel.startsWith(`..${sep}`) || relativePath.split("/").includes("..")) throw new Error("invalid_asset_path");
-  let current = base;
-  for (const segment of ["", ...rel.split(sep)]) {
-    if (segment) current = join(current, segment);
-    if (statIfPresent(current)?.isSymbolicLink()) throw new Error("archive_symlink_conflict");
-  }
-  return full;
-}
+export { checkedAssetPath } from "../files/deletion.js";
 
 function syncTree(path: string): void {
   const stat = lstatSync(path);

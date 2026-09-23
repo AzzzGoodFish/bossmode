@@ -1,0 +1,22 @@
+import {it,expect} from 'vitest';
+import {mkdir,writeFile,symlink,readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {setupTestWorkspace,createTestServer,jsonRequest,loginAndGetToken} from '../helpers/test-server.js';
+import {createMember} from '../../src/app/member-actions.js';
+import {memberDir} from '../../src/files/layout.js';
+import {readWorkspaces} from '../../src/member/workspaces.js';
+setupTestWorkspace();
+it('requires login and registered IDs, rejects traversal and writes, returns no-store bytes and safe listing',async()=>{
+ const server=await createTestServer(),member=createMember({name:'Workspace browser fixture'}),root=memberDir(member.id),base=`/api/members/${member.id}/workspaces/original`;
+ const token=await loginAndGetToken(server.port);await mkdir(join(root,'documents'));await writeFile(join(root,'documents','文档.md'),'# 浏览验收\n');await writeFile(join(root,'fixture.txt'),'before');await writeFile(join(root,'key-renamed.txt'),'-----BEGIN PRIVATE KEY-----\nfixture');await symlink('/etc',join(root,'outside'));
+ expect((await jsonRequest(server.port,'GET',base+'/files')).status).toBe(401);expect((await jsonRequest(server.port,'GET',base+'/file?path=fixture.txt')).status).toBe(401);
+ for(const path of ['../','/etc/passwd','documents/../../x'])expect((await jsonRequest(server.port,'GET',base+'/files?path='+encodeURIComponent(path),{token})).status).toBe(400);
+ for(const query of ['host=unregistered','offset=-1','limit=0','limit=501'])expect((await jsonRequest(server.port,'GET',base+'/files?'+query,{token})).status).toBe(400);
+ expect((await jsonRequest(server.port,'GET',base.replace('original','missing')+'/files',{token})).status).toBe(404);
+ expect((await jsonRequest(server.port,'GET',base.replace(member.id,'mem_missing')+'/files',{token})).status).toBe(404);
+ const listing=await jsonRequest(server.port,'GET',base+'/files?path=documents',{token});expect(listing.status,listing.body).toBe(200);expect(listing.headers['cache-control']).toBe('no-store');expect(JSON.parse(listing.body).entries[0]).toMatchObject({path:'documents/文档.md',readable:true});
+ const file=await jsonRequest(server.port,'GET',base+'/file?path='+encodeURIComponent('documents/文档.md'),{token});expect(file.status,file.body).toBe(200);expect(file.body).toBe('# 浏览验收\n');expect(file.headers['content-disposition']).toContain('attachment;');expect(file.headers['content-security-policy']).toContain('sandbox');
+ expect((await jsonRequest(server.port,'GET',base+'/file?path=key-renamed.txt',{token})).status).toBe(403);expect((await jsonRequest(server.port,'GET',base+'/files?path=outside',{token})).status).toBe(403);expect((await jsonRequest(server.port,'GET',base+'/file?path=missing',{token})).status).toBe(404);
+ for(const method of ['POST','PUT','DELETE'])expect((await jsonRequest(server.port,method,base+'/file?path=fixture.txt',{token,body:'changed'})).status).toBe(404);
+ expect(await readFile(join(root,'fixture.txt'),'utf8')).toBe('before');expect(readWorkspaces(member.id).active).toBe('original');
+});

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { getToken } from "../api/client";
 
 export type WsEvent =
+  | { type: "directory:changed" }
   | { type: "member:profile"; memberId: string; name: string; title: string | null }
   | { type: "room:message"; roomId: string; message: any }
   | { type: "agent:status"; roomId: string; agent: string; memberId?: string; status: string; stale?: { mounts?: { since: number; fields: string[] }; contract?: boolean } }
@@ -38,7 +39,9 @@ export function useWebSocket({ onEvent }: UseWebSocketOptions = {}) {
     if (!token || destroyed.current) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}?token=${token}`;
+    // Keep the path explicit so Vite can proxy the socket during local UI work;
+    // the production server accepts the same upgrade path on its attached WS server.
+    const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

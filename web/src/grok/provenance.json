@@ -1,0 +1,51 @@
+{
+  "reference": "Derived attachment UI study; original Grok replica b56918db99624acfd45e8e6e501438e406d5f01647bda6c6265bc721634d8989 preserved; attachment layouts are Bossmode adaptations, not screenshot-proven Grok originals",
+  "files": {
+    "frontend/src/recovered/features/conversation/workspace/pagination.ts": "3a016df45fcd8c69082f671285c00dd0a65829f13ff6fbd450601aa4f4b6129b",
+    "frontend/src/recovered/features/conversation/workspace/sidebar-agent-status.ts": "7c0b0e484d295748c54b8656f7b18031cd8cac092b22a6f5fb119c645f6c8c40",
+    "frontend/src/recovered/features/runtime-theme-token-installer.ts": "23b2d8a02af06da691d5a78e49c0aa5b1486091ffe7555635eacc414691655bf",
+    "frontend/src/recovered/features/onboarding/signed-in/character.tsx": "c67a400a2d3c5e9c0b1e738cdfd4fdf6f937491cee0a66bf9d08058f78866393",
+    "NOTICE.md": "9b92d8c912f934cb43f5ab12cf65dd29596e29366793f497c45962702f5f69b7",
+    "frontend/src/recovered/ui/sand-icon-registry.ts": "14320fe77b58217c63080e113097dd2c4a4c68c09120f9834ccbe4909d15f811",
+    "frontend/src/recovered/features/computer/shell/cursor-icons-16-f_W_ogc-.woff2": "2058c08b796a3f7ec9fdb219e16b21a350910a3e8cc231939600ee7efbf08bcb"
+  },
+  "dependencies": {
+    "prismjs": {
+      "version": "1.30.0",
+      "license": "MIT",
+      "licenseSha256": "2b947f0901a7ffcf08a89957da9783c0e9c6e72cb6ce8e959f501ab5409e4d2b"
+    },
+    "remark-cjk-friendly": {
+      "version": "2.3.1",
+      "license": "MIT",
+      "licenseSha256": "f202c602f804953b80ed3f924096375aa79aac536090b7ca319027faf79ae24f"
+    }
+  },
+  "avatarAdaptation": {
+    "originalPreserved": true,
+    "studySha256": "bea1aaf381d95397ce354b1c25dc9702bf0c6ececdc0361c10a0f319da6ee17c",
+    "changes": "Eye geometry/anchors are corrected to the supplied portrait and tapered shapes; sleeping eyes avoid double squashing. CSS restores flat fills. Body geometry constructors and motion amplitude/period/tilt values are retained."
+  },
+  "themes": {
+    "light": "9e56e8bba144ea6ec97ef4ddf1d3dadbdd9d4741fb173f7431210c2c41ddd569",
+    "dark": "df27d452a59e967cf6edce997871098f22435e168aa0c7ecb76d22c07fa24881",
+    "matchesRecoveredSnapshots": true
+  },
+  "providerIcons": {
+    "dataSha256": "ba73d8dec3a063e1207e71e440fd9b48d3e32933e0b8c8c119aaf1e1ef108792",
+    "licenseSha256": "baac7fef90cf4fb708b8c5ca4afd94f8ae5106ae67e3e6b4533b5b8b3332b436",
+    "source": "pi-web v0.9.1 / LobeHub MIT; Baseten from @lobehub/icons-static-svg 1.95.0",
+    "genericFallback": [
+      "radius"
+    ]
+  },
+  "commonUI": {
+    "scope": "fish #19789; shared local prototype surfaces",
+    "referenceBoundaries": "design/grok-common-ui-20260914.md",
+    "originalBaselineUnchanged": true
+  },
+  "html": {
+    "bytes": 1199506,
+    "sha256": "c0ae0ebc256eb87a83feb90199d626087eb9b9cf0fe84c889c34f707459c4e5c"
+  }
+}

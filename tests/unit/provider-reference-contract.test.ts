@@ -1,0 +1,41 @@
+import {it,expect,vi} from 'vitest';
+import {ModelRuntime} from '@earendil-works/pi-coding-agent';
+import {createHash} from 'node:crypto';
+const environmentHash=()=>createHash('sha256').update(JSON.stringify(Object.entries(process.env).sort())).digest('hex');
+import {setupTestWorkspace,createTestServer,loginAndGetToken,jsonRequest} from '../helpers/test-server.js';
+import {ensurePiCatalogWarm,listBuiltinModelProviders} from '../../src/config/catalog.js';
+import {getModelCredentialProfile,readModelCredential} from '../../src/config/models.js';
+import {getDatabase} from '../../src/data/database.js';
+setupTestWorkspace();
+it('uses SDK-declared providers and native API-key credential shapes without changing process environment',async()=>{
+ await ensurePiCatalogWarm();const server=await createTestServer(),token=await loginAndGetToken(server.port),before=environmentHash();
+ const cases=[
+  {providerSlug:'amazon-bedrock',name:'AWS profile A',connection:{route:'aws-profile',settings:{profile:'test-profile-a'}},env:{AWS_PROFILE:'test-profile-a'}},
+  {providerSlug:'amazon-bedrock',name:'AWS chain',connection:{route:'aws-chain',settings:{}},env:undefined},
+  {providerSlug:'google-vertex',name:'Vertex ADC',connection:{route:'vertex-adc',settings:{project:'test-project',location:'us-central1'}},env:{GOOGLE_CLOUD_PROJECT:'test-project',GOOGLE_CLOUD_LOCATION:'us-central1'}},
+  {providerSlug:'google-vertex',name:'Vertex file',connection:{route:'vertex-file',settings:{project:'test-file-project',location:'global',path:'/tmp/not-read-at-save.json'}},env:{GOOGLE_CLOUD_PROJECT:'test-file-project',GOOGLE_CLOUD_LOCATION:'global',GOOGLE_APPLICATION_CREDENTIALS:'/tmp/not-read-at-save.json'}},
+  {providerSlug:'cloudflare-ai-gateway',name:'Gateway',apiKey:'test-only-not-real',connection:{route:'service',settings:{account:'abc123',gateway:'my-gateway'}},env:{CLOUDFLARE_ACCOUNT_ID:'abc123',CLOUDFLARE_GATEWAY_ID:'my-gateway'}},
+  {providerSlug:'azure-openai-responses',name:'Azure',apiKey:'test-only-not-real',connection:{route:'service',settings:{azureMode:'resource',resource:'test-resource',apiVersion:'v1',mappings:[{model:'gpt-fixture',deployment:'deploy-fixture'}]}},env:{AZURE_OPENAI_RESOURCE_NAME:'test-resource',AZURE_OPENAI_API_VERSION:'v1',AZURE_OPENAI_DEPLOYMENT_NAME_MAP:'gpt-fixture=deploy-fixture'}},
+ ];
+ const catalog=listBuiltinModelProviders();expect(catalog.find(p=>p.providerSlug==='radius')?.authModes).toEqual(['api_key','oauth']);for(const item of cases){expect(catalog.find(p=>p.providerSlug===item.providerSlug)?.authModes).toContain('api_key');const {env,...body}=item;const response=await jsonRequest(server.port,'POST','/api/model-credential-profiles/connect-provider',{token,body});expect(response.status,response.body).toBe(200);const profile=JSON.parse(response.body);expect(profile.apiKey).toBeUndefined();expect(profile.credentialEnv).toBeUndefined();expect(profile.connection).toMatchObject(body.connection);expect(readModelCredential(profile.id,item.providerSlug)).toEqual({type:'api_key',key:item.apiKey,...(env?{env}:{})});}
+ expect(environmentHash()).toBe(before);
+ const bearer=await jsonRequest(server.port,'POST','/api/model-credential-profiles/connect-provider',{token,body:{providerSlug:'amazon-bedrock',apiKey:'test-token-only',connection:{route:'aws-token',settings:{}}}});expect(bearer.status,bearer.body).toBe(200);const id=JSON.parse(bearer.body).id;
+ const switched=await jsonRequest(server.port,'POST','/api/model-credential-profiles/connect-provider',{token,body:{profileId:id,providerSlug:'amazon-bedrock',connection:{route:'aws-profile',settings:{profile:'next-profile'}}}});expect(switched.status,switched.body).toBe(200);expect(getModelCredentialProfile(id)?.apiKey).toBeUndefined();expect(readModelCredential(id,'amazon-bedrock')).toEqual({type:'api_key',key:undefined,env:{AWS_PROFILE:'next-profile'}});
+ const bad=await jsonRequest(server.port,'POST','/api/model-credential-profiles/connect-provider',{token,body:{providerSlug:'google-vertex',connection:{route:'vertex-adc',settings:{project:'a',location:'b',NODE_OPTIONS:'bad'}}}});expect(bad.status).toBe(400);
+});
+it('persists partial model prices without inventing free rates, supports partial edits, masks header values',async()=>{
+ const server=await createTestServer(),token=await loginAndGetToken(server.port);const body={profileKind:'custom_endpoint',name:'Price fixture',providerSlug:'price-fixture',protocol:'openai-completions',baseUrl:'http://127.0.0.1:1',authType:'api_key',apiKey:'key-fixture-only',requestProfile:'standard',enabled:true,isDefault:false,headers:{'X-Private':'header-fixture-only'},models:[{id:'test-model',cost:{input:0,output:1.25},reasoning:true,thinkingLevelMap:{high:'high',xhigh:null},compat:{thinkingFormat:'deepseek'}}]};
+ let response=await jsonRequest(server.port,'POST','/api/model-credential-profiles',{token,body});expect(response.status,response.body).toBe(200);let profile=JSON.parse(response.body);const id=profile.id;expect(profile.models[0].cost).toEqual({input:0,output:1.25});expect(profile.headerNames).toEqual(['X-Private']);expect(profile.headers).toBeUndefined();expect(response.body).not.toContain('header-fixture-only');
+ response=await jsonRequest(server.port,'PUT',`/api/model-credential-profiles/${id}`,{token,body:{name:'Renamed price fixture'}});expect(response.status,response.body).toBe(200);expect(getModelCredentialProfile(id)?.headers).toEqual({'X-Private':'header-fixture-only'});expect(getModelCredentialProfile(id)?.apiKey).toBe('key-fixture-only');
+ response=await jsonRequest(server.port,'PUT',`/api/model-credential-profiles/${id}`,{token,body:{headersPatch:{'X-Private':null,'X-Other':'new-secret-only'}}});expect(response.status,response.body).toBe(200);expect(getModelCredentialProfile(id)?.headers).toEqual({'X-Other':'new-secret-only'});expect(response.body).not.toContain('new-secret-only');
+ for(const price of [-1,'1',null])expect((await jsonRequest(server.port,'PUT',`/api/model-credential-profiles/${id}`,{token,body:{models:[{id:'test-model',cost:{input:price}}]}})).status).toBe(400);
+ response=await jsonRequest(server.port,'GET','/api/model-credential-profiles',{token});profile=JSON.parse(response.body).find((p:{id:string})=>p.id===id);expect(profile.models[0].cost).toEqual({input:0,output:1.25});expect(JSON.parse(getDatabase().get<{cost_json:string}>('SELECT cost_json FROM model_prices WHERE profile_id=?',id)!.cost_json)).toEqual({input:0,output:1.25});
+});
+it('keeps dynamic Radius visible before its catalog exists and refreshes through the credential-bound SDK runtime',async()=>{
+ await ensurePiCatalogWarm();const server=await createTestServer(),token=await loginAndGetToken(server.port);
+ const connected=await jsonRequest(server.port,'POST','/api/model-credential-profiles/connect-provider',{token,body:{providerSlug:'radius',name:'Radius fixture',apiKey:'radius-fixture-only',connection:{route:'key',settings:{}}}});expect(connected.status,connected.body).toBe(200);const profile=JSON.parse(connected.body);expect(profile.models).toEqual([]);expect(profile.protocol).toBe('pi-messages');
+ const originalRefresh=ModelRuntime.prototype.refresh,originalModels=ModelRuntime.prototype.getModels;
+ let requested=false;const refresh=vi.spyOn(ModelRuntime.prototype,'refresh').mockImplementation(function(options){if(options?.allowNetwork){expect(options.providers).toEqual(['radius']);requested=true;return Promise.resolve({aborted:false,errors:new Map()});}return originalRefresh.call(this,options);});
+ const models=vi.spyOn(ModelRuntime.prototype,'getModels').mockImplementation(function(provider){if(provider==='radius'&&requested)return [{id:'radius-fixture',name:'Radius fixture',provider:'radius',api:'pi-messages',baseUrl:'https://example.invalid',reasoning:false,input:['text'],contextWindow:8192,maxTokens:2048,cost:{input:1,output:2,cacheRead:0,cacheWrite:0}}] as any;return originalModels.call(this,provider);});
+ try{const response=await jsonRequest(server.port,'POST',`/api/model-credential-profiles/${profile.id}/refresh-models`,{token});expect(response.status,response.body).toBe(200);expect(JSON.parse(response.body).models[0]).toMatchObject({id:'radius-fixture',contextWindow:8192});expect(requested).toBe(true);}finally{refresh.mockRestore();models.mockRestore();}
+});

@@ -1,0 +1,40 @@
+/* Standalone-looking login inside the same local prototype, not product auth. */
+.gl-screen{inset:0;margin:0;width:100vw;height:100dvh;max-width:100vw;max-height:100dvh;border:0;border-radius:0;padding:0;background:var(--sand-bg-base);overflow:hidden}
+.gl-screen[open]{display:flex;flex-direction:column;animation:none}
+.gl-studybar{display:flex;flex:none;align-items:center;gap:16px;min-height:34px;padding:4px 12px;border-bottom:.5px solid var(--sand-border-weak);background:var(--sand-bg-subtle);font-size:11px;line-height:18px;color:var(--sand-text-secondary)}
+.gl-studybar>button{display:flex;align-items:center;gap:3px;min-height:26px;padding:2px 5px;border-radius:var(--cursor-radius-base);white-space:nowrap}
+.gl-studybar>button:hover{background:var(--sand-fill-ghost-hover);color:var(--sand-text-primary)}
+.gl-studybar>button .gr-icon{width:12px;height:12px}
+.gl-study-note{flex:1;min-width:0}
+.gl-study-actions{display:flex;align-items:center;gap:8px;flex:none}
+.gl-study-actions>label{white-space:nowrap}
+.gl-study-actions>select{font:inherit;min-height:26px;border:.5px solid var(--sand-border-weak);border-radius:var(--cursor-radius-base);padding:2px 6px;background:var(--sand-bg-base);color:var(--sand-text-primary);max-width:170px;color-scheme:light}
+.gl-study-actions>select:focus-visible{outline:2px solid var(--sand-border-focus);outline-offset:2px}
+:root[data-theme="cursor-dark"] .gl-study-actions>select{color-scheme:dark}
+.gl-stage{display:flex;flex:1;min-height:0;overflow:auto;padding:36px 20px;scrollbar-width:thin;scrollbar-color:var(--sand-border-weak) transparent}
+.gl-wrap{width:360px;max-width:100%;flex:none;margin:auto}
+.gl-brand{text-align:center;margin-bottom:28px}
+.gl-brand h1{font-size:27px;line-height:34px;letter-spacing:-.6px;font-weight:600;margin:0}
+.gl-brand h1:focus{outline:none}
+.gl-brand p{font-size:13px;line-height:20px;color:var(--sand-text-secondary);margin:7px 0 0}
+.gl-form{padding:24px}
+.gl-form .gr-field{margin:0 0 20px;gap:6px}
+.gl-form .gr-field>label{padding:0;font-size:12px;color:var(--sand-text-primary)}
+.gl-form .gr-field input{min-height:40px;padding:9px 11px;background:var(--sand-bg-base);font-size:14px;line-height:20px}
+.gl-form input[aria-invalid="true"]{border-color:var(--sand-text-danger)}
+.gl-password-wrap{position:relative;min-width:0}
+.gl-form .gl-password-wrap input{padding-right:54px}
+#glPasswordToggle{position:absolute;right:5px;top:4px;bottom:4px;display:flex;align-items:center;justify-content:center;padding:0;width:36px;border-radius:var(--cursor-radius-base);font-size:12px;color:var(--sand-text-secondary)}
+#glPasswordToggle:hover:not(:disabled){background:var(--sand-fill-ghost-hover);color:var(--sand-text-primary)}
+.gl-submit{width:100%;min-height:40px;font-size:14px;font-weight:500}
+.gl-error{margin:0 0 18px;font-size:12px;line-height:19px;overflow-wrap:anywhere;color:var(--sand-text-danger)}
+.gl-error[data-kind="network"]{color:var(--sand-text-secondary)}
+.gl-error:focus{outline:none}
+.gl-demo-note{font-size:11px;line-height:18px;margin:16px 8px 0;text-align:center;color:var(--sand-text-secondary)}
+.gl-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:620px){.gl-stage{padding:28px 20px}.gl-form{padding:22px}.gl-form .gr-field input{font-size:16px;min-height:44px;line-height:22px}.gl-submit{min-height:44px}#glPasswordToggle{width:44px;right:0;top:0;bottom:0}.gl-brand{margin-bottom:24px}}
+@media(max-width:520px){.gl-studybar{flex-wrap:wrap;gap:2px 8px;padding:4px 8px}.gl-study-note{text-align:right}.gl-study-actions{width:100%;justify-content:flex-end;gap:8px}.gl-study-actions>label{margin-right:auto;padding-left:5px}.gl-study-actions>select{min-height:28px;max-width:190px}.gl-study-actions .gr-iconbtn{width:28px;height:28px}}
+@media(max-width:350px){.gl-stage{padding:24px 14px}.gl-form{padding:20px}.gl-brand h1{font-size:25px}}
+
+.gl-logout-danger{color:var(--sand-text-danger);background:var(--sand-fill-danger-subtle)}
+.gl-logout-danger:hover{background:var(--sand-fill-danger-subtle-hover)}

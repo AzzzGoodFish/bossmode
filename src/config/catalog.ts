@@ -1,11 +1,13 @@
-export interface ModelDefinitionConfig {id:string;name?:string;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;thinkingLevelMap?:Partial<Record<"off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max",string|null>>;compat?:Record<string,unknown>;metadataSource?:"endpoint"|"pi_catalog"|"unknown";}
+export type ModelCost=Partial<Record<'input'|'output'|'cacheRead'|'cacheWrite',number>>;
+export function validateModelCost(value:unknown):ModelCost|undefined {if(value===undefined)return undefined;if(!value||typeof value!=='object'||Array.isArray(value))throw Error('cost must be an object');const cost:ModelCost={};for(const [key,price] of Object.entries(value)){if(!['input','output','cacheRead','cacheWrite'].includes(key)||typeof price!=='number'||!Number.isFinite(price)||price<0)throw Error('Model prices must be finite non-negative numbers');cost[key as keyof ModelCost]=price;}return Object.keys(cost).length?cost:undefined;}
+export interface ModelDefinitionConfig {cost?:ModelCost;id:string;name?:string;contextWindow?:number;maxTokens?:number;reasoning?:boolean;input?:Array<"text"|"image">;thinkingLevelMap?:Partial<Record<"off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max",string|null>>;compat?:Record<string,unknown>;metadataSource?:"endpoint"|"pi_catalog"|"unknown";}
 export interface PublicModelProvider {providerSlug:string;displayName:string;authModes:Array<"api_key"|"oauth">;defaultAuthMode:"api_key"|"oauth";modelCount:number;sampleModels:string[];protocol?:ModelProtocol;logoKey?:string;}
 import { getCatalogRegistrySync, ensureCatalogRegistry, getCatalogRuntimeSync, DatabaseModelsStore } from "./pi-adapt/catalog.js";
 import { logger } from "../kernel/logger.js";
 import { readConfig, writeConfig } from "./settings.js";
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
 import { defined, objectJson, parseObject } from "../kernel/json.js";
-export const MODEL_PROTOCOLS=["openai-completions","openai-responses","openai-codex-responses","anthropic-messages","azure-openai-responses","google-generative-ai","google-gemini-cli","google-vertex","bedrock-converse-stream","mistral-conversations"] as const;
+export const MODEL_PROTOCOLS=["openai-completions","openai-responses","openai-codex-responses","anthropic-messages","azure-openai-responses","google-generative-ai","google-gemini-cli","google-vertex","bedrock-converse-stream","mistral-conversations","pi-messages"] as const;
 export type ModelProtocol=(typeof MODEL_PROTOCOLS)[number];
 const OAUTH_PROVIDERS = ["anthropic", "github-copilot", "google-gemini-cli", "google-antigravity", "openai-codex"] as const;
 const BUILTIN_API_KEY_PROVIDERS = new Set(["anthropic", "openai", "xai", "openrouter", "google", "mistral", "deepseek", "groq", "cerebras", "zai", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "huggingface", "fireworks", "together", "kimi-coding"]);
@@ -206,7 +208,7 @@ function firstBuiltinModel(providerSlug: string): any | undefined {
 
 export function protocolForBuiltinProvider(providerSlug: string): ModelProtocol {
   const api = firstBuiltinModel(providerSlug)?.api;
-  return MODEL_PROTOCOLS.includes(api) ? api : "openai-responses";
+  return MODEL_PROTOCOLS.includes(api) ? api : providerSlug==='radius'?'pi-messages':"openai-responses";
 }
 
 export function baseUrlForBuiltinProvider(providerSlug: string, override?: string): string {
@@ -215,24 +217,29 @@ export function baseUrlForBuiltinProvider(providerSlug: string, override?: strin
 
 export function listBuiltinModelProviders(): PublicModelProvider[] {
   const oauthIds = oauthProviderIds();
+  // Read SDK declarations (pi-web's provider-listing rule), not an OAuth-only/key allowlist.
+  const runtime=getCatalogRuntimeSync();
+  const declared=runtime?.getProviders();
+  const keyIds=declared?new Set(declared.filter(provider=>!!provider.auth.apiKey?.login).map(provider=>provider.id)):BUILTIN_API_KEY_PROVIDERS;
   const byProvider = new Map<string, any[]>();
   for (const model of loadPiCatalogModelsSync()) {
     if (!model?.provider) continue;
-    if (!BUILTIN_API_KEY_PROVIDERS.has(model.provider) && !oauthIds.has(model.provider)) continue;
+    if (!keyIds.has(model.provider) && !oauthIds.has(model.provider)) continue;
     const list = byProvider.get(model.provider) || [];
     list.push(model);
     byProvider.set(model.provider, list);
   }
 
+  for(const provider of declared??[])if((provider.auth.apiKey?.login||provider.auth.oauth)&&!byProvider.has(provider.id))byProvider.set(provider.id,[]);
   return Array.from(byProvider.entries())
     .map(([providerSlug, models]) => {
       const authModes: Array<"api_key" | "oauth"> = [];
-      if (BUILTIN_API_KEY_PROVIDERS.has(providerSlug)) authModes.push("api_key");
+      if (keyIds.has(providerSlug)) authModes.push("api_key");
       if (oauthIds.has(providerSlug)) authModes.push("oauth");
       const protocol = MODEL_PROTOCOLS.includes(models[0]?.api) ? models[0].api as ModelProtocol : undefined;
       return {
         providerSlug,
-        displayName: displayNameForProvider(providerSlug),
+        displayName: declared?.find(provider=>provider.id===providerSlug)?.name??displayNameForProvider(providerSlug),
         authModes,
         defaultAuthMode: (authModes.includes("api_key") ? "api_key" : "oauth") as "api_key" | "oauth",
         modelCount: models.length,
@@ -241,7 +248,7 @@ export function listBuiltinModelProviders(): PublicModelProvider[] {
         logoKey: providerSlug,
       };
     })
-    .filter((p) => p.authModes.length > 0 && p.modelCount > 0)
+    .filter((p) => p.authModes.length > 0)
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 

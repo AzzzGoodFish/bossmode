@@ -1119,4 +1119,38 @@ ALTER TABLE scopes ADD COLUMN short_id TEXT;
 CREATE UNIQUE INDEX scopes_short_id ON scopes(short_id);
 `,
 },
+{
+  id: "core-member-avatar-v1",
+  sql: `
+ALTER TABLE members ADD COLUMN avatar_shape TEXT CHECK(avatar_shape IS NULL OR avatar_shape IN ('blob','pebble','squircle','tablet','wedge','hex','cloud','teardrop'));
+ALTER TABLE members ADD COLUMN avatar_color TEXT CHECK(avatar_color IS NULL OR avatar_color IN ('black','brown','red','orange','yellow','green','cyan','blue','violet','magenta','gray'));
+`,
+},
+{
+  id: "core-chat-pins-v1",
+  sql: `
+CREATE TABLE chat_pins (
+  scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
+  actor_key TEXT NOT NULL,
+  pinned_at INTEGER NOT NULL CHECK(pinned_at >= 0),
+  PRIMARY KEY(scope_id,actor_key)
+);
+`,
+},
+{
+  id: "core-model-connection-settings-v1",
+  sql: `
+CREATE TABLE model_connection_settings (
+ profile_id TEXT NOT NULL PRIMARY KEY REFERENCES model_profiles(id) ON DELETE CASCADE,
+ connection_json TEXT CHECK(connection_json IS NULL OR (json_valid(connection_json) AND json_type(connection_json)='object')),
+ env_json TEXT CHECK(env_json IS NULL OR (json_valid(env_json) AND json_type(env_json)='object'))
+);
+CREATE TABLE model_prices (
+ profile_id TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL,
+ cost_json TEXT NOT NULL CHECK(json_valid(cost_json) AND json_type(cost_json)='object'),
+ PRIMARY KEY(profile_id,kind,id),
+ FOREIGN KEY(profile_id,kind,id) REFERENCES model_definitions(profile_id,kind,id) ON DELETE CASCADE
+);
+`,
+},
 ]);

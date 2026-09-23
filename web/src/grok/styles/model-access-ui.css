@@ -1,0 +1,136 @@
+/* Reuse the original settings cards, rows and tokens; keep local flow layout here. */
+.ma-content{min-width:0;font-size:14px}.ma-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin:0 8px 28px;padding-right:12px;min-width:0}.gr-settings-scroll .ma-heading h1{margin:0;min-width:0;overflow-wrap:anywhere}.ma-heading>.gr-button{flex:none}.ma-heading .gr-icon{width:14px;height:14px}.ma-list{margin:0 0 28px}.ma-row{width:100%;text-align:left;font-weight:400}.ma-row:hover{background:var(--sand-fill-ghost-hover)}.ma-row>span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ma-row>.gr-icon{width:14px;height:14px;color:var(--sand-text-secondary)}.ma-back{display:flex;align-items:center;gap:5px;padding:5px 8px;margin:-8px 0 18px;color:var(--sand-text-secondary);font-size:12px;border-radius:var(--cursor-radius-base)}.ma-back:hover{background:var(--sand-fill-ghost-hover)}.ma-back>.gr-icon{width:12px;height:12px}.ma-facts{margin:0 0 16px}.ma-facts dt{flex:none}.ma-facts dd{margin:0;overflow-wrap:anywhere;text-align:right;min-width:0;color:var(--sand-text-secondary)}.ma-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:16px 8px}.ma-models{margin-top:28px}.ma-model-name{overflow-wrap:anywhere}.ma-note,.ma-empty{color:var(--sand-text-secondary);font-size:12px;line-height:18px;margin:20px 8px;overflow-wrap:anywhere}.ma-remove{margin:28px 8px 0}.ma-danger{color:var(--sand-text-danger)}.ma-entry-row>label{flex:none;min-width:70px}.ma-control{width:65%;min-width:0;min-height:28px;padding:3px 7px;background:var(--sand-fill-secondary);border:.5px solid var(--sand-border-weak);border-radius:var(--cursor-radius-base);font-size:13px;line-height:20px}.ma-control[readonly]{color:var(--sand-text-secondary);cursor:default}.ma-error{color:var(--sand-text-danger);font-size:12px;line-height:18px;margin:12px 8px;overflow-wrap:anywhere}.ma-error:empty{display:none}.ma-auth{margin:24px 8px}.ma-auth>p{font-size:14px}.ma-auth .ma-actions{margin:14px 0}.ma-guard{margin:24px 0 8px;padding:14px 16px;font-size:13px;line-height:21px;overflow-wrap:anywhere}.ma-guard p{margin:0}.ma-guard .ma-actions{margin:14px 0 0}.ma-content [tabindex="-1"]:focus-visible{outline:none}
+@media(max-width:620px){.ma-heading{margin:0 6px 22px;gap:10px;padding-right:0}.ma-heading>.gr-button{font-size:12px;padding:5px 8px}.ma-entry-row>label{min-width:58px}.ma-control{font-size:16px;min-height:32px;width:65%}.ma-actions>.gr-button,.ma-remove>.gr-button{min-height:36px;font-size:13px}.ma-back{min-height:34px;margin-top:-10px}.ma-heading h1{max-width:100%}}
+
+/* Full-row hit areas and hover, with unchanged label and divider insets. */
+.ma-list{--ma-list-inset:12px}
+.ma-list>.gr-setting-row{position:relative;width:calc(100% + 2 * var(--ma-list-inset));margin-inline:calc(-1 * var(--ma-list-inset));padding-inline:calc(var(--ma-list-inset) + 2px);border-bottom:0;outline-offset:-3px}
+.ma-list>.gr-setting-row:not(:last-child)::after{content:"";position:absolute;left:var(--ma-list-inset);right:var(--ma-list-inset);bottom:0;border-bottom:.5px solid var(--sand-border-default);pointer-events:none}
+.ma-list>.gr-setting-row:first-child{border-top-left-radius:inherit;border-top-right-radius:inherit}
+.ma-list>.gr-setting-row:last-child{border-bottom-left-radius:inherit;border-bottom-right-radius:inherit}
+.ma-add-row{text-align:left;font-weight:400;justify-content:flex-start;gap:10px}
+.ma-add-row>.gr-icon{width:18px;height:18px}
+.ma-add-row:hover{background:var(--sand-fill-ghost-hover)}
+.ma-content[data-screen="list"] .ma-list{margin-bottom:0}
+@media(max-width:350px){.ma-list{--ma-list-inset:10px}}
+
+
+/* One task dialog above settings. */
+.ma-add-body{padding:26px}
+.ma-add-dialog .ma-list{margin-bottom:0}
+.ma-add-dialog [tabindex="-1"]:focus{outline:none}
+.ma-add-dialog .ma-note{margin-bottom:0}
+@media(max-width:620px){.ma-add-body{padding:24px 20px}}
+
+/* Searchable provider choice; custom endpoint stays separate from filtering. */
+.ma-add-dialog[open]{display:flex;flex-direction:column;max-height:min(640px,calc(100dvh - 64px));overflow:hidden}
+.ma-add-body{display:flex;flex-direction:column;min-height:0;width:100%}
+.ma-add-body>h1{flex:none}
+.ma-provider-search{margin:0 0 12px}
+#maAddFixed{flex:none;margin-bottom:12px}
+.ma-provider-scroll{min-height:0;height:312px;flex:0 1 312px;overflow:auto;overscroll-behavior:contain;background:transparent;border-radius:var(--cursor-radius-xl);scrollbar-width:thin;scrollbar-color:var(--sand-border-weak) transparent}
+.ma-add-dialog .ma-note{flex:none;margin:12px 0 0;font-size:12px;line-height:18px}
+.ma-provider-empty{padding:20px 14px}
+@media(max-width:620px){.ma-provider-search{height:36px}.ma-provider-search input{font-size:16px}}
+
+/* Small standalone brand marks; no extra badges or row-size changes. */
+.ma-row{gap:10px}
+.ma-row>.ma-provider-icon{display:block;width:18px;height:18px;flex:0 0 18px;color:var(--sand-text-primary)}
+html[data-theme="cursor-dark"] .ma-provider-icon:is([data-brand="fireworks"],[data-brand="qwen"]){filter:brightness(1.6)}
+
+/* The next screen shares the same shell, rows, fields and buttons. */
+.ma-add-header{display:flex;align-items:center;gap:8px;flex:none;margin:0 24px 24px 0;min-height:28px}
+.ma-add-header h1{margin:0;min-width:0;overflow-wrap:anywhere;line-height:24px}
+.ma-add-header .gr-iconbtn{margin-left:-6px}
+#maAddPicker{display:flex;flex-direction:column;min-height:0}
+#maAddFlow{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+#maAddFlow .ma-entry-row{gap:10px}
+#maAddFlow .ma-entry-row>label{min-width:64px;font-size:13px}
+.ma-secret{display:flex;align-items:center;gap:5px;width:65%;min-width:0}
+.ma-secret>.ma-control{width:0;flex:1}
+.ma-secret>button{flex:none;font-size:12px;color:var(--sand-text-secondary);padding:5px 2px;border-radius:var(--cursor-radius-base)}
+.ma-secret>button:hover{color:var(--sand-text-primary);background:var(--sand-fill-ghost-hover)}
+.ma-add-actions{display:flex;justify-content:flex-end;margin-top:20px}
+.ma-add-actions>.gr-button{font-size:14px}
+#maAddGuard{flex:none;margin-top:16px;margin-bottom:0;padding:14px 16px;max-height:45dvh;overflow:auto}
+#maAddGuard:empty{display:none}
+#maAddFlow .ma-note{margin:12px 2px 0}
+#maAddFlow .ma-error{margin:12px 2px 0}
+#maAddFlow [aria-invalid="true"]{border-color:var(--sand-text-danger)}
+@media(max-width:620px){.ma-secret>button{min-height:36px;padding-inline:4px}.ma-add-actions>.gr-button{min-height:36px}.ma-add-header{margin-bottom:20px}}
+
+/* Shared credential, service, browser, device and host-identity details. */
+#maAddFlow .ma-entry-row>label{flex:0 1 31%;min-width:64px;overflow-wrap:anywhere}
+#maAddFlow .ma-control{flex:none}
+#maAddFlow select.ma-control{appearance:auto;color:var(--sand-text-primary)}
+#maAddFlow .ma-secret>.ma-control{flex:1}
+.ma-flow-details{margin-top:18px;font-size:13px;line-height:20px}
+.ma-flow-details>summary{width:fit-content;cursor:pointer;color:var(--sand-text-secondary);border-radius:var(--cursor-radius-base);padding:3px 2px}
+.ma-flow-details>summary:hover{color:var(--sand-text-primary)}
+.ma-flow-details[open]>summary{margin-bottom:10px}
+.ma-flow-details .gr-settings-card{margin-top:6px}
+.ma-map-section{margin-top:10px}
+.ma-map-section>.gr-button{margin-top:10px;font-size:12px}
+.ma-map-row{display:flex;align-items:center;gap:5px;margin-top:8px;min-width:0}
+#maAddFlow .ma-map-row>.ma-control{flex:1;width:0}
+.ma-map-row>span{color:var(--sand-text-secondary)}
+.ma-map-row>.gr-iconbtn{width:24px;height:28px}
+.ma-command{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:0 2px}
+.ma-command>code{flex:1;min-width:0;overflow-wrap:anywhere;font:12px/20px var(--cursor-font-family-mono);color:var(--sand-text-secondary)}
+.ma-command>.gr-button{flex:none;font-size:12px}
+.ma-site-row>span:last-child,.ma-method-fact>span:last-child{color:var(--sand-text-secondary);text-align:right;overflow-wrap:anywhere}
+.ma-site-row>span:first-child,.ma-method-fact>span:first-child,.ma-device-row>span:first-child{flex:none}
+.ma-device-row>div{display:flex;gap:10px;align-items:center;min-width:0}
+.ma-device-row code{font:18px/26px var(--cursor-font-family-mono);letter-spacing:.5px;white-space:nowrap;user-select:text}
+.ma-device-row .gr-button{font-size:12px;padding-inline:8px}
+.ma-auth-status{margin:16px 2px 0;font-size:13px;line-height:20px;color:var(--sand-text-secondary);overflow-wrap:anywhere}
+.ma-auth-status.ma-error{color:var(--sand-text-danger)}
+.ma-auth-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:16px;font-size:13px}
+#maCopyStatus:empty{display:none}
+#maManualForm>label{display:block;font-size:12px;color:var(--sand-text-secondary);margin:0 2px 6px}
+#maManualForm>.ma-control{display:block;width:100%;height:62px;resize:vertical;font-size:13px;line-height:20px}
+#maManualForm .ma-auth-actions{margin-top:10px}
+.ma-demo-controls{font-size:12px;margin-top:12px}
+.ma-demo-actions{display:flex;flex-wrap:wrap;gap:6px}
+.ma-demo-actions>.gr-button{font-size:12px}
+.ma-copy-helper{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+@media(max-width:620px){
+ .ma-flow-details>summary{padding-block:7px;min-height:34px}
+ .ma-auth-actions>.gr-button,.ma-demo-actions>.gr-button,.ma-device-row .gr-button,.ma-command>.gr-button{min-height:36px}
+ #maManualForm>.ma-control{font-size:16px}
+ .ma-device-row{gap:5px;font-size:12px}.ma-device-row>div{gap:6px}.ma-device-row code{font-size:16px;letter-spacing:0}
+ .ma-map-row>.gr-iconbtn{height:36px}
+}
+
+/* Custom endpoint uses the same form rows; only paired model fields need local layout. */
+.ma-add-dialog[data-step="endpoint"]{max-height:min(760px,calc(100dvh - 64px))}
+.ma-ep-auto{display:flex;align-items:center;gap:9px;margin:12px 2px 0;font-size:12px;color:var(--sand-text-secondary)}
+.ma-ep-auto>.gr-button{font-size:12px}
+.ma-ep-section{margin-top:20px}
+.ma-ep-section h2,.ma-ep-section h3{font-size:13px;font-weight:400;line-height:20px;color:var(--sand-text-secondary);margin:0 2px 8px}
+.ma-ep-section h3>span{font-size:12px;margin-left:5px}
+.ma-ep-numbers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 2px}
+.ma-ep-numbers label,.ma-ep-prices label{display:block;font-size:13px;line-height:20px;margin-bottom:6px}
+#maAddFlow .ma-ep-numbers .ma-control,#maAddFlow .ma-ep-prices .ma-control{width:100%}
+.ma-ep-prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-top:12px;padding-bottom:12px}
+#maAddFlow .ma-ep-map>label{flex:0 0 52px;min-width:52px}
+.ma-ep-map-control{display:flex;gap:6px;width:65%;min-width:0}
+#maAddFlow .ma-ep-map-control .ma-control{width:100%;min-width:0;flex:1}
+#maAddFlow .ma-ep-map-control:has(input) select.ma-control{flex:0 0 48%;min-width:88px}
+.ma-ep-header{margin-bottom:8px}
+.ma-ep-section>.gr-button{font-size:12px;margin-top:6px}
+#maEndpointForm select:disabled{opacity:.5}
+@media(max-width:620px){
+ .ma-ep-numbers{grid-template-columns:minmax(0,1fr);gap:0;padding:0 2px}
+ .ma-ep-numbers>div{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:50px}
+ .ma-ep-numbers>div+div{border-top:.5px solid var(--sand-border-default)}
+ .ma-ep-numbers label{margin:0}
+ #maAddFlow .ma-ep-numbers .ma-control{width:65%}
+ .ma-ep-section>.gr-button{min-height:36px}
+}
+
+@media(max-width:620px){
+ #maAddFlow .ma-entry-row:has(#maEpApi),#maAddFlow .ma-entry-row:has(#maEpFormat){flex-direction:column;align-items:stretch;gap:6px;padding-block:10px}
+ #maAddFlow label:is([for="maEpApi"],[for="maEpFormat"]){flex:none}
+ #maAddFlow :is(#maEpApi,#maEpFormat){width:100%}
+}

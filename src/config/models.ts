@@ -1,4 +1,6 @@
 import { getDatabase, sqliteBoolean, type Database } from "../data/database.js";
+import {normalizeConnection,validateCredentialEnv,cloudCredentialConfigured,type ProviderConnection} from './connection-config.js';
+import {validateModelCost} from './catalog.js';
 import { modelsForBuiltinProvider, validateThinkingLevelMap, modelSdkMetadata, oauthProviderIds, MODEL_PROTOCOLS, loadPiCatalogModelsSync, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider, applyPiCatalogFallback, positiveNumber, explicitBoolean, type CatalogRefreshSource, type ModelDefinitionConfig, type ModelProtocol, refreshPiCatalogFromNetwork, getCatalogStatus, isCatalogRefreshDue, getCatalogAutoRefreshIntervalDays, piCatalogFallbackMetadata, ensurePiCatalogWarm, loadPiCatalogModels } from "./catalog.js";
 import { randomUUID } from "node:crypto";
 import { logger } from "../kernel/logger.js";
@@ -7,9 +9,9 @@ export type {ModelDefinitionConfig,ModelProtocol} from "./catalog.js";
 export type ModelAuthType="api_key"|"oauth"|"none"|"ambient";
 export type ModelCredentialProfileKind="builtin_provider"|"custom_endpoint"|"trusted_adapter";
 export type ModelRequestProfile="standard"|"openai_codex_subscription";
-export interface ModelCredentialProfile {id:string;profileKind?:ModelCredentialProfileKind;name:string;providerSlug:string;protocol:ModelProtocol;baseUrl?:string;authType:ModelAuthType;apiKey?:string;oauthProviderId?:string;oauthCredentials?:Record<string,unknown>;requestProfile:ModelRequestProfile;authHeader?:boolean;headers?:Record<string,string>;enabled:boolean;isDefault:boolean;models:ModelDefinitionConfig[];modelCustomizations?:{disabled?:string[];contextWindowOverride?:Record<string,number>;addedModels?:ModelDefinitionConfig[]};createdAt:number;updatedAt:number;}
+export interface ModelCredentialProfile {connection?:ProviderConnection;credentialEnv?:Record<string,string>;id:string;profileKind?:ModelCredentialProfileKind;name:string;providerSlug:string;protocol:ModelProtocol;baseUrl?:string;authType:ModelAuthType;apiKey?:string;oauthProviderId?:string;oauthCredentials?:Record<string,unknown>;requestProfile:ModelRequestProfile;authHeader?:boolean;headers?:Record<string,string>;enabled:boolean;isDefault:boolean;models:ModelDefinitionConfig[];modelCustomizations?:{disabled?:string[];contextWindowOverride?:Record<string,number>;addedModels?:ModelDefinitionConfig[]};createdAt:number;updatedAt:number;}
 export type ModelCredentialProfileInput=Omit<ModelCredentialProfile,"id"|"createdAt"|"updatedAt">;
-export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfile,"apiKey"|"oauthCredentials"> {hasSecret:boolean;modelRefs:string[];catalogModels?:ModelDefinitionConfig[];addedModels?:ModelDefinitionConfig[];}
+export interface PublicModelCredentialProfile extends Omit<ModelCredentialProfile,"apiKey"|"oauthCredentials"|"credentialEnv"> {headerNames?:string[];hasSecret:boolean;modelRefs:string[];catalogModels?:ModelDefinitionConfig[];addedModels?:ModelDefinitionConfig[];}
 export interface ConnectApiKeyRequest {providerSlug:string;apiKey:string;name?:string;baseUrlOverride?:string;requestProfile?:ModelRequestProfile;isDefault?:boolean;}
 export interface OAuthDeviceCodeInfo {userCode:string;verificationUri:string;expiresInSeconds?:number;intervalSeconds?:number;}
 export interface OAuthSelectPrompt {message:string;options:Array<{id:string;label:string}>;}
@@ -24,7 +26,7 @@ type ModelCredentialStore = { profiles: ModelCredentialProfile[]; migrations: st
 export type OAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown };
 export type OAuthLoginCallbacks = {
   onAuth: (info: { url: string; instructions?: string }) => void;
-  onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
+  onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean; secret?: boolean }) => Promise<string>;
   onProgress?: (message: string) => void;
   onManualCodeInput?: () => Promise<string>;
   onDeviceCode: (deviceCode: OAuthDeviceCodeInfo) => void;
@@ -39,7 +41,7 @@ function writeStore(profiles: ModelCredentialProfile[], migrations?: string[]): 
   replaceCredentialStore({ profiles, migrations: migrations ?? readCredentialStore().migrations }, getDatabase());
 }
 export function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCredentialProfile {
-  const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, headers: _headers, ...rest } = profile;
+  const { apiKey: _apiKey, oauthCredentials: _oauthCredentials, headers: _headers, credentialEnv: _env, ...rest } = profile;
   const catalogModels = isBuiltinProviderProfile(profile)
     ? applyBuiltinMetadataOverrides(modelsForBuiltinProvider(profile.providerSlug, profile.baseUrl), profile.modelCustomizations)
     : undefined;
@@ -47,6 +49,7 @@ export function sanitizeProfile(profile: ModelCredentialProfile): PublicModelCre
   return {
     ...rest,
     hasSecret: !!profile.apiKey || !!profile.oauthCredentials,
+    ...(Object.keys(profile.headers??{}).length?{headerNames:Object.keys(profile.headers!)}:{}),
     modelRefs: profile.models.map((m) => `${profile.providerSlug}/${m.id}`),
     ...(catalogModels ? { catalogModels } : {}),
     ...(addedModels && addedModels.length > 0 ? { addedModels } : {}),
@@ -82,9 +85,11 @@ function validateModel(model: ModelDefinitionConfig): ModelDefinitionConfig {
   const thinkingLevelMap = validateThinkingLevelMap(model.thinkingLevelMap);
   const input = model.input?.length ? model.input : undefined;
   const { input: _input, thinkingLevelMap: _map, ...rest } = model;
+  const cost=validateModelCost(model.cost);
   return {
     ...rest,
     id: model.id.trim(),
+    cost,
     name: model.name?.trim() || undefined,
     ...(input ? { input } : {}),
     ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
@@ -175,7 +180,7 @@ export function validateOAuthProvider(providerId: string | undefined): string {
 
 export function hasCompleteOAuthCredentials(value: unknown): value is OAuthCredentials {
   const c = value as Partial<OAuthCredentials> | undefined;
-  return !!c && typeof c.access === "string" && c.access.length > 0 && typeof c.refresh === "string" && c.refresh.length > 0 && typeof c.expires === "number";
+  return !!c && typeof c.access === "string" && c.access.length > 0 && typeof c.refresh === "string" && typeof c.expires === "number" && Number.isFinite(c.expires);
 }
 
 
@@ -206,6 +211,9 @@ function validateUniqueModels(models: ModelDefinitionConfig[]): void {
 
 export function validateInput(input: ModelCredentialProfileInput, existing?: ModelCredentialProfile, options: { allowIncompleteOAuth?: boolean } = {}): ModelCredentialProfileInput & { models: ModelDefinitionConfig[]; profileKind: ModelCredentialProfileKind } {
   if (!input.name?.trim()) throw new Error("name is required");
+  if(input.connection)input={...input,connection:normalizeConnection(input.providerSlug,input.connection)};
+  input={...input,credentialEnv:validateCredentialEnv(input.providerSlug,input.credentialEnv)};
+  if(input.headers!==undefined){if(!input.headers||typeof input.headers!=='object'||Array.isArray(input.headers))throw Error('headers must be an object');const names=new Set<string>();for(const [name,value] of Object.entries(input.headers)){if(!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)||names.has(name.toLowerCase())||typeof value!=='string'||/[\r\n\0]/.test(value))throw Error('Invalid or duplicate request header');names.add(name.toLowerCase());}}
   validateSlug(input.providerSlug || "");
   if (!AUTH_TYPES.includes(input.authType)) throw new Error("Unsupported auth type");
   const profileKind = inferProfileKind(input, existing);
@@ -217,15 +225,17 @@ export function validateInput(input: ModelCredentialProfileInput, existing?: Mod
     if (!builtin) throw new Error(`Unsupported built-in provider: ${input.providerSlug}`);
     if (input.authType !== "api_key" && input.authType !== "oauth") throw new Error("Built-in providers support api_key or oauth auth only");
     if (!builtin.authModes.includes(input.authType as "api_key" | "oauth")) throw new Error(`Provider ${input.providerSlug} does not support ${input.authType}`);
-    if (input.authType === "api_key" && !input.apiKey && !existing?.apiKey) throw new Error("apiKey is required");
+    if (input.authType === "api_key" && !input.apiKey && !existing?.apiKey&&!cloudCredentialConfigured(input.providerSlug,input.connection,input.credentialEnv)) throw new Error("apiKey is required");
     if (input.authType === "oauth") {
       validateOAuthProvider(input.oauthProviderId || input.providerSlug);
       const credentials = input.oauthCredentials ?? existing?.oauthCredentials;
       if (!options.allowIncompleteOAuth && !hasCompleteOAuthCredentials(credentials)) throw new Error("OAuth credential is incomplete; complete login before saving");
     }
-    const baseUrlOverride = input.authType === "api_key" ? normalizeOptionalBaseUrl(input.baseUrl) : undefined;
+    const baseUrlOverride = input.authType === "api_key" && input.baseUrl !== baseUrlForBuiltinProvider(input.providerSlug) ? normalizeOptionalBaseUrl(input.baseUrl) : undefined;
     const catalogModels = modelsForBuiltinProvider(input.providerSlug, baseUrlOverride);
-    if (catalogModels.length === 0) throw new Error(`No built-in models found for provider: ${input.providerSlug}`);
+    // SDK providers such as Radius start with an empty, authenticated dynamic catalog.
+    // Do not hide the provider or reject saving its credential before discovery.
+    if(catalogModels.length===0){const models=(input.models??existing?.models??[]).map(validateModel);validateUniqueModels(models);return {...input,profileKind,name:input.name.trim(),providerSlug:input.providerSlug.trim(),protocol:protocolForBuiltinProvider(input.providerSlug),baseUrl:baseUrlForBuiltinProvider(input.providerSlug,baseUrlOverride),requestProfile,models};}
     const modelCustomizations = input.modelCustomizations !== undefined
       ? sanitizeModelCustomizations(input.modelCustomizations, catalogModels)
       : input.models
@@ -281,7 +291,7 @@ function resolveApiKeyForSave(valid: ModelCredentialProfileInput, existing?: Mod
   return next ? next : existing?.apiKey;
 }
 
-export function saveModelCredentialProfile(input: ModelCredentialProfileInput & { id?: string }): PublicModelCredentialProfile {
+export function saveModelCredentialProfile(input: ModelCredentialProfileInput & { id?: string },options:{replaceApiKey?:boolean}={}): PublicModelCredentialProfile {
   return getDatabase().transaction(() => {
     const profiles = loadModelCredentialProfiles();
     const existing = input.id ? profiles.find((p) => p.id === input.id) : undefined;
@@ -292,7 +302,7 @@ export function saveModelCredentialProfile(input: ModelCredentialProfileInput & 
     const ts = now();
     const {apiKey:_apiKey,oauthCredentials:_oauth,headers,enabled,isDefault,...fields}=valid;
     const profile:ModelCredentialProfile={...fields,id:input.id||randomUUID().slice(0,8),
-      apiKey:valid.authType==="api_key"?resolveApiKeyForSave(valid,existing):undefined,
+      apiKey:valid.authType==="api_key"?(options.replaceApiKey?valid.apiKey?.trim()||undefined:resolveApiKeyForSave(valid,existing)):undefined,
       oauthCredentials:valid.authType==="oauth"?(valid.oauthCredentials??existing?.oauthCredentials):undefined,
       headers:headers??existing?.headers,enabled:enabled??existing?.enabled??true,isDefault:isDefault??existing?.isDefault??false,
       createdAt:existing?.createdAt??ts,updatedAt:ts};
@@ -677,6 +687,7 @@ export function readCredentialStore(db: Database = getDatabase()): CredentialImp
     return { profiles: db.all<any>("SELECT * FROM model_profiles ORDER BY position").map(r => {
       const secret = db.get<any>("SELECT * FROM model_secrets WHERE profile_id=?", r.id);
       const headers = Object.fromEntries(db.all<any>("SELECT name,value FROM model_headers WHERE profile_id=?", r.id).map(h => [h.name,h.value]));
+      const connection=db.get<{connection_json:string|null;env_json:string|null}>('SELECT connection_json,env_json FROM model_connection_settings WHERE profile_id=?',r.id);
       const custom = db.all<any>("SELECT * FROM model_customizations WHERE profile_id=?", r.id);
       const addedModels = readProfileModels(r.id, "added", db);
       const disabled = custom.filter(c => c.disabled).map(c => c.model_id);
@@ -686,7 +697,9 @@ export function readCredentialStore(db: Database = getDatabase()): CredentialImp
         requestProfile: r.request_profile, enabled: !!r.enabled, isDefault: !!r.is_default, createdAt: r.created_at, updatedAt: r.updated_at,
         ...defined({ profileKind: r.profile_kind, baseUrl: r.base_url, oauthProviderId: r.oauth_provider_id,
           authHeader: r.auth_header === null ? undefined : !!r.auth_header, apiKey: secret?.api_key,
-          oauthCredentials: secret?.oauth_json ? parseObject(secret.oauth_json) : undefined }),
+          oauthCredentials: secret?.oauth_json ? parseObject(secret.oauth_json) : undefined,
+          connection:connection?.connection_json?JSON.parse(connection.connection_json):undefined,
+          credentialEnv:connection?.env_json?JSON.parse(connection.env_json):undefined }),
         ...(Object.keys(headers).length ? { headers } : {}), models: readProfileModels(r.id,"model", db),
         ...(custom.length || addedModels.length ? { modelCustomizations: { disabled, contextWindowOverride, addedModels } } : {}),
       } as ModelCredentialProfile;
@@ -694,8 +707,8 @@ export function readCredentialStore(db: Database = getDatabase()): CredentialImp
   }
 
 function readProfileModels(profileId: string, kind: string, db: Database = getDatabase()): ModelDefinitionConfig[] {
-    return db.all<any>("SELECT * FROM model_definitions WHERE profile_id=? AND kind=? ORDER BY position", profileId, kind).map(r => ({
-      id: r.id, ...defined({ name:r.name, contextWindow:r.context_window, maxTokens:r.max_tokens,
+    return db.all<any>("SELECT m.*, p.cost_json FROM model_definitions m LEFT JOIN model_prices p USING(profile_id,kind,id) WHERE m.profile_id=? AND m.kind=? ORDER BY m.position", profileId, kind).map(r => ({
+      id: r.id, ...defined({ cost:r.cost_json?parseObject(r.cost_json):undefined,name:r.name, contextWindow:r.context_window, maxTokens:r.max_tokens,
         reasoning:r.reasoning === null ? undefined : !!r.reasoning, metadataSource:r.metadata_source,
         input:r.input_text === null ? undefined : [...(r.input_text ? ["text"] : []), ...(r.input_image ? ["image"] : [])],
         thinkingLevelMap:r.thinking_json ? parseObject(r.thinking_json) : undefined, compat:r.compat_json ? parseObject(r.compat_json) : undefined }),
@@ -703,9 +716,11 @@ function readProfileModels(profileId: string, kind: string, db: Database = getDa
   }
 
 function writeProfileModels(profileId: string, kind: string, models: ModelDefinitionConfig[], db: Database = getDatabase()): void {
-    models.forEach((m, i) => db.run("INSERT INTO model_definitions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", profileId,kind,m.id,i,
+    models.forEach((m, i) => {db.run("INSERT INTO model_definitions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", profileId,kind,m.id,i,
       m.name ?? null,m.contextWindow ?? null,m.maxTokens ?? null,sqliteBoolean(m.reasoning),sqliteBoolean(m.input?.includes("text")),sqliteBoolean(m.input?.includes("image")),
-      optionalJson(m.thinkingLevelMap),optionalJson(m.compat),m.metadataSource ?? null));
+      optionalJson(m.thinkingLevelMap),optionalJson(m.compat),m.metadataSource ?? null);
+      if(m.cost)db.run('INSERT INTO model_prices VALUES (?,?,?,?)',profileId,kind,m.id,JSON.stringify(validateModelCost(m.cost)));
+    });
   }
 
 export function importModelProfile(p: ModelCredentialProfile, position?: number, db: Database = getDatabase()): void {
@@ -720,6 +735,7 @@ export function importModelProfile(p: ModelCredentialProfile, position?: number,
         p.id,ordinal,p.profileKind ?? null,p.name,p.providerSlug,p.protocol,p.baseUrl ?? null,p.authType,p.oauthProviderId ?? null,p.requestProfile,
         sqliteBoolean(p.authHeader),Number(p.enabled),Number(p.isDefault),p.createdAt,p.updatedAt,nextCredentialRevision(db));
       tx.run("INSERT OR REPLACE INTO model_secrets VALUES (?,?,?)",p.id,p.apiKey ?? null,optionalJson(p.oauthCredentials));
+      if(p.connection||p.credentialEnv)tx.run('INSERT OR REPLACE INTO model_connection_settings VALUES (?,?,?)',p.id,optionalJson(p.connection),optionalJson(p.credentialEnv));else tx.run('DELETE FROM model_connection_settings WHERE profile_id=?',p.id);
       tx.run("DELETE FROM model_headers WHERE profile_id=?",p.id);
       for (const [name,value] of Object.entries(p.headers ?? {})) tx.run("INSERT INTO model_headers VALUES (?,?,?)",p.id,name,value);
       tx.run("DELETE FROM model_definitions WHERE profile_id=?",p.id);
@@ -835,7 +851,7 @@ export function assertModelAvailable(modelRef: string, context: string): void {
 export type ModelCredential = { type: "api_key"; key?: string; env?: Record<string, string> } | ({ type: "oauth" } & OAuthCredentials);
 
 function credentialValue(profile: ModelCredentialProfile): ModelCredential | undefined {
-  if (profile.authType === "api_key") return { type: "api_key", key: profile.apiKey };
+  if (profile.authType === "api_key") return { type: "api_key", key: profile.apiKey, ...(profile.credentialEnv?{env:profile.credentialEnv}:{}) };
   if (profile.authType === "oauth") {
     if (!hasCompleteOAuthCredentials(profile.oauthCredentials)) throw new Error(`OAuth credential is incomplete for provider ${profile.providerSlug}`);
     return { type: "oauth", ...profile.oauthCredentials };

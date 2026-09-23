@@ -4,6 +4,25 @@ All notable changes to Bossmode are documented here.
 
 ---
 
+## [0.29.0] — 2026-09-23
+
+### Changed
+- Rebuilt the chat interface, including mobile navigation, member and group profiles, activity records, attachments, document previews, search, model settings, and token usage. Drafts, quotes, attachments, and reading positions survive re-authentication without being resent automatically.
+- Model connections use the Pi SDK's authentication capabilities and native credentials. The editor supports cloud-service settings, multiple custom models, thinking-level mappings, optional pricing, and write-only request headers; saving configuration does not claim a verified connection.
+- Member deletion now permanently clears member-owned directories, private/runtime sessions, workspace registrations, and token usage. Messages in other groups and external workspace files remain; deleting a group does not delete its members.
+
+### Added
+- Persistent chat pins and member avatars, stored in SQLite.
+- Read-only browsing and downloading from registered local and SSH workspaces, with boundary checks, private-key protection, and SSH host-key verification.
+- Search author groups distinguish current members from members who left or were deleted, without merging reused names or restoring deleted identities. Author, date, and usage filters share the same menu behavior.
+
+### Fixed
+- Attachments work over a LAN HTTP entry, read receipts stop at the last displayed message, and hidden chat panes do not prematurely mark messages read.
+- Search excerpts retain distant matches, and menus, disclosure state, workspace paths, and reading positions stay consistent when navigating.
+
+### Upgrade
+- Ordinary startup applies the additional SQLite schemas automatically. This release retains the 0.28.1 sender-name fix and the 0.28.2 automatic-compaction behavior; Pi remains at 0.85.1.
+
 ## [0.28.2] — 2026-09-22
 
 ### Restored

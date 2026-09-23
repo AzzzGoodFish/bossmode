@@ -35,7 +35,15 @@ export function setOnUnauthorized(cb: () => void): void {
   onUnauthorized = cb;
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+/** Keep HTTP status available to distinguish bad credentials from service failures. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((options.headers as Record<string, string>) || {}),
@@ -49,13 +57,13 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   if (res.status === 401) {
     clearToken();
-    onUnauthorized?.();
-    throw new Error("Unauthorized");
+    if (path !== "/api/auth/login") onUnauthorized?.();
+    throw new ApiError("Unauthorized", 401);
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    throw new ApiError(body.message || body.error || `HTTP ${res.status}`, res.status);
   }
 
   return res.json();
@@ -79,6 +87,8 @@ export async function login(
 // -- Members --
 
 export interface MemberInfo {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   id: string;
   name: string;
   agent: string;
@@ -99,6 +109,8 @@ export interface MemberInfo {
 
 /** Current contact identity returned by the member directory. */
 export interface RoomContact {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   id: string;
   name: string;
   title?: string | null;
@@ -146,7 +158,8 @@ export type ModelProtocol =
   | "google-gemini-cli"
   | "google-vertex"
   | "bedrock-converse-stream"
-  | "mistral-conversations";
+  | "mistral-conversations"
+  | "pi-messages";
 
 export type ModelAuthType = "api_key" | "oauth" | "none" | "ambient";
 export type ModelCredentialProfileKind = "builtin_provider" | "custom_endpoint" | "trusted_adapter";
@@ -155,6 +168,7 @@ export type ModelRequestProfile = "standard" | "openai_codex_subscription";
 export type ModelMetadataSource = "endpoint" | "pi_catalog" | "unknown";
 
 export interface ModelDefinitionConfig {
+  cost?: Partial<Record<'input'|'output'|'cacheRead'|'cacheWrite',number>>;
   id: string;
   name?: string;
   contextWindow?: number;
@@ -176,7 +190,12 @@ export interface ModelCredentialModelCustomizations {
   addedModels?: ModelDefinitionConfig[];
 }
 
+export type ConnectionRoute='key'|'service'|'aws-token'|'aws-profile'|'aws-chain'|'vertex-key'|'vertex-adc'|'vertex-file';
+export interface ConnectionSettings {account?:string;gateway?:string;azureMode?:'url'|'resource';baseUrl?:string;resource?:string;apiVersion?:string;mappings?:Array<{model:string;deployment:string}>;profile?:string;project?:string;location?:string;path?:string;}
+export interface ProviderConnection {route:ConnectionRoute;settings:ConnectionSettings;}
 export interface PublicModelCredentialProfile {
+  connection?: ProviderConnection;
+  headerNames?: string[];
   id: string;
   profileKind?: ModelCredentialProfileKind;
   name: string;
@@ -201,6 +220,7 @@ export interface PublicModelCredentialProfile {
 }
 
 export interface ModelCredentialProfileInput extends Omit<PublicModelCredentialProfile, "id" | "createdAt" | "updatedAt" | "hasSecret" | "modelRefs"> {
+  headersPatch?: Record<string,string|null>;
   apiKey?: string;
   oauthCredentials?: Record<string, unknown>;
 }
@@ -284,6 +304,10 @@ export async function connectModelProviderApiKey(data: ConnectApiKeyRequest): Pr
   return apiFetch("/api/model-credential-profiles/connect-api-key", { method: "POST", body: JSON.stringify(data) });
 }
 
+export async function connectProvider(data:{providerSlug:string;profileId?:string;name?:string;apiKey?:string;connection:ProviderConnection}):Promise<PublicModelCredentialProfile>{return apiFetch('/api/model-credential-profiles/connect-provider',{method:'POST',body:JSON.stringify(data)});}
+
+export function refreshProviderModels(id:string):Promise<PublicModelCredentialProfile>{return apiFetch(`/api/model-credential-profiles/${encodeURIComponent(id)}/refresh-models`,{method:'POST'});}
+
 export async function createModelCredentialProfile(data: ModelCredentialProfileInput): Promise<PublicModelCredentialProfile> {
   return apiFetch("/api/model-credential-profiles", { method: "POST", body: JSON.stringify(data) });
 }
@@ -339,6 +363,10 @@ export interface ModelDiscoveryResult {
 }
 
 export interface OAuthLoginJob {
+  inputSecret?: boolean;
+  inputRequested?: boolean;
+  allowEmpty?: boolean;
+  inputPlaceholder?: string;
   id: string;
   status: OAuthLoginJobStatus;
   providerId: string;
@@ -397,10 +425,10 @@ export interface KnowledgeTreeNode {
   children?: KnowledgeTreeNode[];
 }
 
-async function apiFetchBlob(path: string): Promise<Blob> {
+export async function apiFetchBlob(path: string, options: {signal?: AbortSignal} = {}): Promise<Blob> {
   const headers: Record<string, string> = {};
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  const res = await fetch(`${BASE_URL}${path}`, { headers, signal: options.signal });
   if (res.status === 401) {
     clearToken();
     onUnauthorized?.();
@@ -408,7 +436,7 @@ async function apiFetchBlob(path: string): Promise<Blob> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    throw new Error(body.message || body.error || `HTTP ${res.status}`);
   }
   return res.blob();
 }
@@ -460,7 +488,7 @@ export async function getRooms(): Promise<Room[]> {
 export async function createRoom(
   name: string,
   memberIds: string[],
-  leaderMemberId: string,
+  leaderMemberId?: string,
 ): Promise<Room> {
   return apiFetch("/api/rooms", {
     method: "POST",
@@ -582,7 +610,9 @@ export interface MessageSearchHit {
   content: string;
   ts: number;
 }
+export interface MessageSearchAuthor {id:string;name:string;kind:'user'|'member'|'system'|'legacy';status:'current'|'left'|'deleted'|'unknown';memberId?:string}
 export interface MessageSearchResult {
+  authors?:MessageSearchAuthor[];
   total: number;
   messages: MessageSearchHit[];
 }
@@ -827,6 +857,8 @@ export interface MemberGlobalConfig {
 }
 
 export interface MemberDetail {
+  avatarShape?: string | null;
+  avatarColor?: string | null;
   memberId: string;
   name: string;
   agentTemplate: string;
@@ -966,6 +998,7 @@ export async function getDmSession(memberId: string): Promise<DmSession> {
 }
 
 export interface ChatEntry {
+  pinnedAt?: number;
   scopeId: string;
   kind: "dm" | "room" | "mm";
   title: string;
@@ -1066,8 +1099,8 @@ export async function patchGlobalMember(id: string, patch: Record<string, unknow
   });
 }
 
-export async function postConversationRead(scopeId: string): Promise<void> {
-  await apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/read`, { method: "POST" });
+export async function postConversationRead(scopeId: string,cursor?:{messageId:string;seq?:number}): Promise<void> {
+  await apiFetch(`/api/conversations/${encodeURIComponent(scopeId)}/read`, { method: "POST",...(cursor?{body:JSON.stringify(cursor)}:{}) });
 }
 
 // -- 0.20: room membership management (memberId form) --

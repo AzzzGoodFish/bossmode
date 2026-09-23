@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -8,10 +8,12 @@
     <link rel="alternate icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
-      // Restore theme from localStorage (default: dark)
-      if (localStorage.getItem("bossmode_theme") === "light") {
-        document.documentElement.classList.remove("dark");
-      }
+      // Match the migrated UI before first paint; a fresh session starts light.
+      try {
+        const dark = localStorage.getItem("bossmode_theme") === "dark";
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.dataset.theme = dark ? "cursor-dark" : "cursor-light";
+      } catch {}
     </script>
   </head>
   <body>

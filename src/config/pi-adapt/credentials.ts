@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import {azureCredentialEnv,type ProviderConnection} from '../connection-config.js';
 import { join } from "node:path";
 import { ensureCatalogRegistryRuntime } from "./catalog.js";
 import { type OAuthCredentials, type OAuthLoginCallbacks, type OAuthLoginAdapter, hasCompleteOAuthCredentials, readModelCredential, modifyModelCredential, DUMMY_API_KEY, normalizeRuntimeBaseUrl, shouldUseSdkBuiltinCatalog, loadModelCredentialProfiles, sanitizeProfile, resolveCredentialProfileForModel } from "../models.js";
@@ -33,14 +34,28 @@ export class PiAiOAuthLoginAdapter implements OAuthLoginAdapter {
           if (callbacks.onManualCodeInput) return callbacks.onManualCodeInput();
           return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder });
         }
-        return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder });
+        return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder, allowEmpty: prompt.type==='text', secret:prompt.type==='secret' });
       },
     };
-    const credential = await runtime.login(providerId, "oauth", interaction);
+    const credential = await provider.auth.oauth.login({...interaction,signal:callbacks.signal??new AbortController().signal});
     if (credential.type !== "oauth" || !hasCompleteOAuthCredentials(credential)) throw new Error(`OAuth provider ${providerId} did not return complete credentials`);
     const { type: _type, ...credentials } = credential;
     return credentials as OAuthCredentials;
   }
+}
+
+// Like pi-web's API-key adapter: use the SDK login method, then persist the
+// returned credential ourselves. ModelRuntime.login would refresh the remote catalog.
+export async function loginProviderApiKey(providerId:string,apiKey:string|undefined,connection:ProviderConnection,signal:AbortSignal):Promise<{apiKey?:string;env?:Record<string,string>}> {
+ const runtime=await ensureCatalogRegistryRuntime(),login=runtime.getProvider(providerId)?.auth.apiKey?.login;
+ if(!login)throw Error(`Provider ${providerId} does not support API key login`);
+ const s=connection.settings,route=connection.route;
+ const choice:Record<string,string>={'aws-token':'bearer-token','aws-profile':'aws-profile','aws-chain':'credential-chain','vertex-key':'api-key','vertex-adc':'adc','vertex-file':'service-account'};
+ const text=providerId==='cloudflare-ai-gateway'?[s.account!,s.gateway!]:providerId==='cloudflare-workers-ai'?[s.account!]:route==='aws-profile'?[s.profile!]:route==='aws-chain'?['']:route==='vertex-adc'?[s.project!,s.location!]:route==='vertex-file'?[s.project!,s.location!,s.path!]:[];
+ let index=0,secretRead=false;
+ const credential=await login({signal,notify:()=>{},prompt:async prompt=>{signal.throwIfAborted();if(prompt.type==='select'){const selected=choice[route];if(selected&&prompt.options.some(option=>option.id===selected))return selected;throw Error('供应商需要其他认证方式，请重新选择。');}if(prompt.type==='secret'&&!secretRead&&apiKey?.trim()){secretRead=true;return apiKey.trim();}if(prompt.type==='text'&&index<text.length)return text[index++];throw Error('供应商需要额外认证参数，当前表单无法完成此接入。');}});
+ signal.throwIfAborted();if(credential.type!=='api_key'||index!==text.length)throw Error('供应商未返回预期的凭证配置。');
+ return {apiKey:credential.key,env:providerId==='azure-openai-responses'?{...credential.env,...azureCredentialEnv(connection)}:credential.env};
 }
 
 export function getBossmodePiRuntimeRoot(): string {
@@ -90,7 +105,8 @@ function piProviderConfig(profile: ModelCredentialProfile): Record<string, unkno
       input: m.input ?? ["text"],
       ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
       ...(m.compat ? { compat: m.compat } : {}),
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      // Pi requires numeric SDK costs. Omitted prices remain unknown in our DB/API.
+      cost: { input: m.cost?.input??0, output: m.cost?.output??0, cacheRead: m.cost?.cacheRead??0, cacheWrite: m.cost?.cacheWrite??0 },
     })),
   };
 }

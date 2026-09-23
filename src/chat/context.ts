@@ -1,5 +1,4 @@
 import type { Database } from "../data/database.js";
-import { getUserDisplayName } from "../config/settings.js";
 import { getAttachmentPath, type AttachmentLocation } from "../files/attachments.js";
 import { attachmentLocation, chatShortId, conversationMember, getRoom, parseConversation, type ConversationIdentity } from "./conversations.js";
 import { getMemberCursor, type MemberCursorConfirmation } from "./cursors.js";
@@ -144,12 +143,15 @@ function excerpt(value: string, max = 50): string {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }
 
+let userDisplayIdentity:{read:()=>string}|undefined;
+/** Application-owned display identity; chat rendering never reads configuration. */
+export function connectChatUserDisplayName(read:()=>string):()=>void {const connection={read};userDisplayIdentity=connection;return()=>{if(userDisplayIdentity===connection)userDisplayIdentity=undefined;};}
 function displaySenderName(sender: string): string {
   if (sender !== "user") return sender;
   // `user` is the durable human-sender sentinel. Use the configured login
   // name in member-facing prompts, but preserve the sentinel in unconfigured
   // storage/test contexts where no display identity exists yet.
-  const display = getUserDisplayName();
+  const display = userDisplayIdentity?.read()??"User";
   return display === "User" ? sender : display;
 }
 
@@ -171,8 +173,8 @@ function attachmentLines(snapshot: ChatContextSnapshot): string[] {
   });
 }
 
-/** Pure render: message bytes, identity, reply target, attachment paths,
- * chat short id and last_read pointer were already frozen in the snapshot.
+/** Message bytes, identity, reply target, attachment paths, chat short id and
+ * last_read were frozen in the snapshot; the app supplies the user display name.
  * One chat_message element per delivered message (spec unified-user-prompt
  * v1.7); the queue dispatches one input per turn, so no batch wrapper. */
 export function renderChatInput(snapshot: ChatContextSnapshot): PreparedAgentInput {

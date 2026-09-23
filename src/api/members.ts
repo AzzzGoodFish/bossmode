@@ -1,4 +1,4 @@
-import { archiveMember, createMember, updateMember } from "../app/member-actions.js";
+import { deleteMemberCompletely, createMember, updateMember } from "../app/member-actions.js";
 import { readMemberProfile, InvalidProfileError } from "../member/profile.js";
 /**
  * 0.20 Members / Contacts / DM REST surface (WS-A).
@@ -17,7 +17,7 @@ import * as roomStore from "../chat/conversations.js";
 
 function publicMember(m: MemberRecord, live = false) {
   const base = { memberId: m.id, id: m.id, name: m.name, title: m.title ?? null, agentTemplate: m.agentTemplate,
-    global: m.global, createdAt: m.createdAt, updatedAt: m.updatedAt };
+    avatarShape:m.avatarShape??null,avatarColor:m.avatarColor??null,global: m.global, createdAt: m.createdAt, updatedAt: m.updatedAt };
   if (!live) return base;
   const activeScopes = [
     `dm:${m.id}`,
@@ -46,6 +46,7 @@ function errCode(err: unknown): { status: number; error: string; message: string
   const msg = String((err as any)?.message || err);
   if (msg === "confirm_required") return { status: 400, error: "confirm_required", message: "confirm: true required" };
   if (msg === "reserved_member_name") return { status: 400, error: msg, message: "all, user and system are reserved for group mentions, the human user and system messages." };
+  if (msg === "invalid_member_avatar") return {status:400,error:msg,message:"Unknown avatar shape or color"};
   if (msg === "invalid_member_name") return { status: 400, error: "invalid_member_name", message: msg };
   if (msg === "invalid_model") return { status: 400, error: msg, message: "model must be a non-empty model reference; omit the field to leave it unchanged" };
   if (msg === "invalid_binding") return { status: 400, error: msg, message: "A complete model + credentialId pair is required (model cannot be paired with an empty credential)." };
@@ -73,7 +74,7 @@ addRoute("GET", "/api/members/identities", async (_req, res) => {
 addRoute("POST", "/api/members", async (req, res) => {
   try {
     const body = (await parseBody(req)) as {
-      name?: string;
+      name?: string; avatarShape?:string|null; avatarColor?:string|null;
       model?: string | null;
       credentialId?: string | null;
       thinkingLevel?: string | null;
@@ -82,7 +83,7 @@ addRoute("POST", "/api/members", async (req, res) => {
     };
     // Batch-1 one-click create: name optional → "New Member" (+ suffix).
     const member = createMember({
-      name: body.name,
+      name: body.name,avatarShape:body.avatarShape,avatarColor:body.avatarColor,
       model: body.model,
       credentialId: body.credentialId,
       thinkingLevel: body.thinkingLevel,
@@ -146,7 +147,7 @@ addRoute("PATCH", "/api/members/:id", async (request, response, params) => {
   let switchRequested = false;
   try {
     const body = await parseBody(request) as {
-      name?: string; title?: string | null; model?: string | null; credentialId?: string | null;
+      avatarShape?:string|null; avatarColor?:string|null; name?: string; title?: string | null; model?: string | null; credentialId?: string | null;
       thinkingLevel?: string | null; skills?: string[]; mcpServers?: string[];
     };
     switchRequested = body.model !== undefined || body.credentialId !== undefined;
@@ -162,8 +163,7 @@ addRoute("PATCH", "/api/members/:id", async (request, response, params) => {
 addRoute("DELETE", "/api/members/:id", async (req, res, params) => {
   try {
     const body = (await parseBody(req)) as { confirm?: boolean };
-    const m = requireMember(params.id);
-    const result = await archiveMember(m.id, { confirm: !!body.confirm });
+    const result = await deleteMemberCompletely(params.id, { confirm: !!body.confirm });
     sendJson(res, 200, result);
   } catch (error) { memberError(error); }
 });

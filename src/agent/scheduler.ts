@@ -445,3 +445,8 @@ export function wireInstanceEvents(instance: AgentInstance): void {
   });
   instance.unsubscribe = unsubscribe;
 }
+
+/** Destructive member cleanup must outlive the final dispatcher settlement. */
+export async function settleMemberInputPump(memberId:string):Promise<void>{
+ for(;;){const pump=inputPumps.get(memberId);if(!pump)return;await Promise.allSettled([pump]);}
+}

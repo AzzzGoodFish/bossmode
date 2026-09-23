@@ -1,18 +1,22 @@
 import { useState, useEffect } from "react";
 import { getToken, clearToken, setOnUnauthorized } from "./api/client";
 import { Login } from "./pages/Login";
-import { Layout } from "./pages/Layout";
+import { GrokApp } from "./grok/GrokApp";
+import { clearDrafts, pauseUploads } from "./grok/drafts";
 import { DialogProvider } from "./components/dialogs";
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
 
+  const [expired, setExpired] = useState(false);
   useEffect(() => {
-    setOnUnauthorized(() => setIsAuthenticated(false));
+    setOnUnauthorized(() => { pauseUploads(); setExpired(true); setIsAuthenticated(false); });
   }, []);
   const [username, setUsername] = useState(localStorage.getItem("bossmode_username") || "user");
 
   const handleLogin = (name: string) => {
+    if (name !== username) clearDrafts();
+    setExpired(false);
     setUsername(name);
     localStorage.setItem("bossmode_username", name);
     setIsAuthenticated(true);
@@ -27,14 +31,14 @@ export function App() {
   if (!isAuthenticated) {
     return (
       <DialogProvider>
-        <Login onLogin={handleLogin} />
+        <Login onLogin={handleLogin} expired={expired} />
       </DialogProvider>
     );
   }
 
   return (
     <DialogProvider>
-      <Layout onLogout={handleLogout} username={username} />
+      <GrokApp onLogout={handleLogout} username={username} />
     </DialogProvider>
   );
 }

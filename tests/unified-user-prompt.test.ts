@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { coreFixture } from "./helpers/core-fixture.js";
-import { renderChatInput, type ChatContextSnapshot } from "../src/chat/context.js";
+import { connectChatUserDisplayName, renderChatInput, type ChatContextSnapshot } from "../src/chat/context.js";
 import { isPlatformInjection } from "../src/agent/injection.js";
 import { getDefaultConfig, writeConfig } from "../src/config/settings.js";
 
@@ -53,6 +53,14 @@ describe("chat_message envelope (spec v1.6)", () => {
     expect(prompt).toContain('sender_id="user" sender_name="fish"');
     expect(prompt).toContain('<quote msg_id="8" sender_name="fish">quoted</quote>');
     expect(prompt).not.toContain('sender_name="user"');
+  });
+
+  it("keeps the live app display identity when an older connection is disposed", () => {
+    const old=connectChatUserDisplayName(()=>"old name"),current=connectChatUserDisplayName(()=>"new name");
+    const snapshot=baseSnapshot({trigger:{id:"m10",ts:1,sender:"user",content:"hi",seq:10}});
+    try{old();expect(renderChatInput(snapshot).prompt).toContain('sender_id="user" sender_name="new name"');}
+    finally{current();}
+    expect(renderChatInput(snapshot).prompt).toContain('sender_id="user" sender_name="user"');
   });
 
   it("last_read, quote (50 chars) and attachment render as frozen fields", () => {

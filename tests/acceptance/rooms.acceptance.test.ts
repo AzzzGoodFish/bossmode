@@ -167,8 +167,8 @@ it("invites only actual contact IDs and rejects deleted contacts without creatin
   expect(invited.status, invited.body).toBe(200);
   expect(JSON.parse(invited.body).memberIds).toEqual([id]);
   expect((await request("POST", `/api/rooms/${room.id}/members`, { memberId: id })).status).toBe(409);
-  // Deletion archives the contact and detaches its room memberships. The API
-  // requires explicit confirmation, not force or removal from the current room.
+  // Deletion removes the contact's owned data and detaches its room memberships.
+  // It still requires explicit confirmation, not removal from only this room.
   const unconfirmed = await request("DELETE", `/api/members/${id}`);
   expect(unconfirmed.status, unconfirmed.body).toBe(400);
   expect(JSON.parse(unconfirmed.body)).toEqual({ error: "confirm_required", message: "confirm: true required" });
@@ -177,7 +177,7 @@ it("invites only actual contact IDs and rejects deleted contacts without creatin
   expect(JSON.parse(retained.body).memberIds).toEqual([id]);
   const deleted = await request("DELETE", `/api/members/${id}`, { confirm: true });
   expect(deleted.status, deleted.body).toBe(200);
-  expect(JSON.parse(deleted.body).archived).toMatch(new RegExp(`^backups/fired-${id}-`));
+  expect(JSON.parse(deleted.body)).toEqual({ deleted: id });
   const detached = await request("GET", `/api/rooms/${room.id}`);
   expect(detached.status, detached.body).toBe(200);
   expect(JSON.parse(detached.body).memberIds).toEqual([]);

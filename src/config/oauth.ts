@@ -1,5 +1,5 @@
 import { type ModelCredentialProfileInput, type OAuthDeviceCodeInfo, type OAuthSelectPrompt, type OAuthLoginAdapter, validateOAuthProvider, loadModelCredentialProfiles, getModelCredentialProfile, nextBuiltinProfileName, now, saveModelCredentialProfile, validateInput, credentialRevision } from "./models.js";
-export interface OAuthLoginJobPublic {id:string;status:"starting"|"awaiting_input"|"awaiting_device"|"completed"|"failed"|"cancelled";providerId:string;authUrl?:string;userCode?:string;deviceCode?:OAuthDeviceCodeInfo;selectPrompt?:OAuthSelectPrompt;prompt:string;error?:string;profileId?:string;createdAt:number;updatedAt:number;}
+export interface OAuthLoginJobPublic {inputSecret?:boolean;inputRequested?:boolean;allowEmpty?:boolean;inputPlaceholder?:string;id:string;status:"starting"|"awaiting_input"|"awaiting_device"|"completed"|"failed"|"cancelled";providerId:string;authUrl?:string;userCode?:string;deviceCode?:OAuthDeviceCodeInfo;selectPrompt?:OAuthSelectPrompt;prompt:string;error?:string;profileId?:string;createdAt:number;updatedAt:number;}
 export interface StartOAuthConnectionRequest {providerId:string;profileId?:string;name?:string;requestProfile?:"standard";}
 import { PiAiOAuthLoginAdapter } from "./pi-adapt/credentials.js";
 import { modelsForBuiltinProvider, protocolForBuiltinProvider, baseUrlForBuiltinProvider, getBuiltinProvider } from "./catalog.js";
@@ -20,6 +20,10 @@ let oauthLoginAdapter: OAuthLoginAdapter | null = null;
 function sanitizeOAuthJob(job: OAuthLoginJob): OAuthLoginJobPublic {
   return {
     id: job.id,
+    inputRequested:!!job.inputWaiter,
+    inputSecret:job.inputSecret,
+    allowEmpty:job.allowEmpty,
+    inputPlaceholder:job.inputPlaceholder,
     status: job.status,
     providerId: job.providerId,
     authUrl: job.authUrl,
@@ -96,8 +100,8 @@ function transition(job: OAuthLoginJob, state: Partial<OAuthLoginJobPublic>, rea
   if (ready) job.resolveReady();
 }
 
-function ask(job: OAuthLoginJob, prompt: string, selectPrompt?: OAuthLoginJobPublic["selectPrompt"]): Promise<string> {
-  transition(job, { status: "awaiting_input", selectPrompt, prompt });
+function ask(job: OAuthLoginJob, prompt: string, selectPrompt?: OAuthLoginJobPublic["selectPrompt"],allowEmpty=false,inputPlaceholder?:string,inputSecret=false): Promise<string> {
+  transition(job, { status: "awaiting_input", selectPrompt, prompt,allowEmpty,inputPlaceholder,inputSecret });
   return waitForOAuthInput(job);
 }
 
@@ -112,7 +116,7 @@ function startOAuthLogin(job: OAuthLoginJob): void {
         prompt: info.instructions || "Complete login in the opened provider page, then paste the returned code if requested.",
       });
     },
-    onPrompt: prompt => ask(job, prompt.message),
+    onPrompt: prompt => ask(job, prompt.message,undefined,prompt.allowEmpty??false,prompt.placeholder,prompt.secret??false),
     onManualCodeInput: () => ask(job, "Paste the authorization code or full redirect URL."),
     onDeviceCode: deviceCode => transition(job, {
       status: "awaiting_device", selectPrompt: undefined, deviceCode, userCode: deviceCode.userCode,
@@ -241,7 +245,7 @@ export async function submitOAuthLoginJobInput(id: string, input: { code?: strin
   if (job.status === "cancelled") throw new Error("OAuth login job was cancelled");
   if (job.status === "completed") return sanitizeOAuthJob(job);
   if (job.status === "failed") throw new Error(job.error || "OAuth login job failed");
-  if (input.code === undefined || (!job.prompt.includes("blank") && !input.code.trim())) throw new Error("OAuth input is required");
+  if (input.code === undefined || (!job.allowEmpty && !input.code.trim())) throw new Error("OAuth input is required");
   validateOAuthSubmitInput(job, input.code);
   const waiter = job.inputWaiter;
   if (!waiter) throw new Error("OAuth login job is not waiting for input");
