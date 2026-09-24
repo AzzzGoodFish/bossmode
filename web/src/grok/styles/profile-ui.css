@@ -3,4 +3,10 @@
 @media(max-width:620px){.gp-field-value{font-size:16px;line-height:24px;min-height:44px}.gp-field-heading .gr-iconbtn{width:30px;height:30px}.gp-field-heading{min-height:30px}.gp-persona-text{height:174px}}
 
 /* Same field frame, with an interactive value only for model configuration. */
-.gp-model-config{margin-top:16px}.gp-config-select{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;white-space:nowrap}.gp-config-select>span{min-width:0;overflow:hidden;text-overflow:ellipsis}.gp-config-select>.gr-icon{width:12px;height:12px;color:var(--sand-text-secondary)}.gp-config-select:hover{background:var(--sand-fill-ghost-hover)}.gp-model-menu-note{padding:8px;font-size:11px;line-height:17px;color:var(--sand-text-secondary);white-space:normal}.gp-config-error{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--sand-text-danger);padding:6px 0}.gp-config-error>span{flex:1;min-width:0}.gp-config-error .gr-button{flex:none;color:var(--sand-text-primary)}
+.gp-model-config{margin-top:16px}
+/* Model identity must remain readable within the menu at narrow widths. */
+.gr-popover[aria-label="选择模型"] .gr-menu-item{align-items:flex-start;white-space:normal}
+.gr-popover[aria-label="选择模型"] .gr-menu-copy{white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+.gr-popover[aria-label="选择模型"] .gp-model-choice-name,.gr-popover[aria-label="选择模型"] .gp-model-choice-source{display:block}
+.gr-popover[aria-label="选择模型"] .gp-model-choice-source{margin-top:2px;color:var(--sand-text-secondary)}
+.gp-config-select{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;white-space:nowrap}.gp-config-select>span{min-width:0;overflow:hidden;text-overflow:ellipsis}.gp-config-select>.gr-icon{width:12px;height:12px;color:var(--sand-text-secondary)}.gp-config-select:hover{background:var(--sand-fill-ghost-hover)}.gp-model-menu-note{padding:8px;font-size:11px;line-height:17px;color:var(--sand-text-secondary);white-space:normal}.gp-config-error{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--sand-text-danger);padding:6px 0}.gp-config-error>span{flex:1;min-width:0}.gp-config-error .gr-button{flex:none;color:var(--sand-text-primary)}

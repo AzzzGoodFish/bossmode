@@ -51,6 +51,7 @@ html[data-theme="cursor-dark"] .ma-provider-icon:is([data-brand="fireworks"],[da
 .ma-secret>button{flex:none;font-size:12px;color:var(--sand-text-secondary);padding:5px 2px;border-radius:var(--cursor-radius-base)}
 .ma-secret>button:hover{color:var(--sand-text-primary);background:var(--sand-fill-ghost-hover)}
 .ma-add-actions{display:flex;justify-content:flex-end;margin-top:20px}
+.ma-add-fixed{flex:none;margin-top:12px;padding:12px 0 env(safe-area-inset-bottom);border-top:.5px solid var(--sand-border-weak);background:var(--sand-bg-base)}
 .ma-add-actions>.gr-button{font-size:14px}
 #maAddGuard{flex:none;margin-top:16px;margin-bottom:0;padding:14px 16px;max-height:45dvh;overflow:auto}
 #maAddGuard:empty{display:none}
