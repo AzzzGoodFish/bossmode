@@ -1,16 +1,11 @@
-/* Atomic addressed-to chips sit before the native textarea, so typing,
- * selection, IME, browser file paste and the existing draft input stay native. */
-.gr-compose-entry{display:flex;align-items:center;align-content:center;flex-wrap:wrap;flex:1;gap:4px;min-width:0;padding:0 2px}
-.gr-compose-entry textarea{flex:1 1 170px;min-width:84px;width:auto}
-.gr-mention-token{display:inline-flex;align-items:center;gap:5px;min-height:25px;max-width:min(230px,100%);padding:2px 7px 2px 9px;border:1px solid var(--sand-border-accent-subtle);border-radius:999px;background:var(--sand-fill-accent-subtle);color:var(--sand-text-accent);font-size:12px;line-height:18px;white-space:nowrap;flex:none}
-.gr-mention-token span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.gr-mention-token .gr-icon{width:10px;height:10px;opacity:.72}
-.gr-mention-token:hover:not(:disabled){background:var(--sand-fill-accent-subtle-hover)}
-.gr-mention-token:focus-visible{outline:2px solid var(--sand-border-focus);outline-offset:2px}
-.gr-mention-token:disabled{opacity:.55}
+/* Mentions are framed words in the editable sentence, never a separate
+ * button row. Native text, selection, IME and wrapping remain in one flow. */
+.gr-compose-entry{flex:1;min-width:0;padding:0 2px}
+.gr-compose-entry #grDraft{display:block;min-width:0;min-height:26px;max-height:130px;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;padding:3px 0 2px;font-size:14px;line-height:21px;outline:none}
+.gr-compose-entry #grDraft:empty::before{content:attr(data-placeholder);color:var(--sand-text-disabled);pointer-events:none}
+.gr-mention-inline{display:inline-block;max-width:min(230px,100%);overflow:hidden;text-overflow:ellipsis;vertical-align:baseline;padding:0 3px;margin:0 1px;border:1px solid var(--sand-border-accent-subtle);border-radius:4px;background:var(--sand-fill-accent-subtle);color:var(--sand-text-accent);white-space:nowrap;cursor:text}
 .gr-composer.ga-replying .gr-compose-entry{grid-column:1/-1;grid-row:2;width:100%;padding:0}
-.gr-composer.ga-replying .gr-compose-entry textarea{grid-column:auto;grid-row:auto;width:auto;min-width:84px}
-@media(max-width:620px){.gr-compose-entry textarea{flex-basis:130px;min-width:90px}.gr-mention-token{min-height:27px;font-size:12px}}
+@media(max-width:620px){.gr-compose-entry #grDraft{min-height:27px;font-size:16px;line-height:23px}.gr-mention-inline{padding:0 2px}}
 /* Keep the chosen member's name intact; only the longer title may wrap. */
 .gr-live-mentions .gc-mention-option{align-items:flex-start}
 .gr-live-mentions .gc-mention-name{flex:0 1 auto;max-width:50%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

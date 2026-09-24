@@ -13,6 +13,7 @@
     "@mdxeditor/editor": "^3.55.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "lucide-react": "^0.577.0",
+    "mermaid": "11.17.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

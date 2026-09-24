@@ -3,6 +3,7 @@
 @import "./common-ui.css";
 @import "./history-ui.css";
 @import "./document-ui.css";
+@import "./mermaid-ui.css";
 @import "./profile-ui.css";
 @import "./room-ui.css";
 @import "./model-access-ui.css";

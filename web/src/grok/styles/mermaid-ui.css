@@ -1,0 +1,14 @@
+/* Readable diagram first; the original source remains a one-click fallback. */
+.gc-mermaid{max-width:100%;min-width:0;margin:12px 0}
+.gc-mermaid-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:29px;padding:0 2px;color:var(--gc-mermaid-muted,var(--sand-text-secondary));font-size:11px}
+.gc-mermaid-actions{display:flex;align-items:center;gap:2px;flex:none}
+.gc-mermaid-actions button{min-height:26px;padding:4px 7px;border-radius:6px;color:var(--gc-mermaid-muted,var(--sand-text-secondary));font-size:11px;white-space:nowrap}
+.gc-mermaid-actions button:hover:not(:disabled),.gc-mermaid-actions button[aria-pressed="true"]{background:var(--gc-mermaid-selected,var(--sand-fill-ghost-selected));color:var(--gc-mermaid-text,var(--sand-text-primary))}
+.gc-mermaid-actions button:disabled{opacity:.5}
+.gc-mermaid-note{margin:5px 4px 7px;color:var(--gc-mermaid-muted,var(--sand-text-secondary));font-size:11px;line-height:17px}
+.gr-user .gc-mermaid{--gc-mermaid-muted:color-mix(in srgb,var(--sand-text-on-color) 75%,transparent);--gc-mermaid-text:var(--sand-text-on-color);--gc-mermaid-selected:color-mix(in srgb,var(--sand-text-on-color) 15%,transparent)}
+.gc-mermaid .gc-code-figure{margin:5px 0 0}
+.gc-mermaid-canvas{max-width:100%;max-height:420px;overflow:auto;overscroll-behavior:contain;margin-top:5px;padding:16px;border:.5px solid var(--sand-border-default);border-radius:10px;background:var(--sand-bg-base);scrollbar-width:thin;scrollbar-color:var(--sand-border-weak) transparent}
+.gc-mermaid-canvas img{display:block;max-width:none;height:auto;margin:0 auto}
+.gc-mermaid-canvas:focus-visible{outline:2px solid var(--sand-border-focus);outline-offset:2px}
+@media(max-width:620px){.gc-mermaid-bar{align-items:flex-start}.gc-mermaid-actions button{min-height:32px}.gc-mermaid-canvas{max-height:55dvh;padding:10px}}

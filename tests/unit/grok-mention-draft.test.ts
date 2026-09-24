@@ -1,11 +1,11 @@
 import {describe,expect,it} from 'vitest';
-import {mentionContent,quoteMention,withManualMention,withQuoteMention} from '../../web/src/grok/mention-draft.js';
+import {mentionContent,mentionQueryAtCaret,quoteMention,withManualMention,withQuoteMention} from '../../web/src/grok/mention-draft.js';
 import {parseMentions} from '../../src/chat/delivery.js';
 const current=[{id:'mem_current',name:'阿岚'},{id:'mem_new',name:'同名'}];
 describe('atomic mention drafts',()=>{
  it('quotes a current member by stable ID and uses the current name, not the message label',()=>{
   expect(quoteMention({sender:'旧显示名',senderMemberId:'mem_current'},'fish',current,true)).toEqual({id:'mem_current',label:'阿岚',origin:'quote'});
-  expect(mentionContent(' 你好', [{id:'mem_current',label:'旧显示名',origin:'quote'}],'fish',current,true).content).toBe('@阿岚  你好');
+  expect(mentionContent(' 你好', [{id:'mem_current',label:'旧显示名',origin:'quote'}],'fish',current,true).content).toBe('@阿岚 你好');
  });
  it('does not turn a deleted/left member into the same-name current member',()=>{
   expect(quoteMention({sender:'同名',senderMemberId:'mem_deleted'},'fish',current,true)).toBeUndefined();
@@ -34,6 +34,23 @@ describe('atomic mention drafts',()=>{
   const recipients=mentionContent('回复', [{id:'mem_current',label:'旧显示名',origin:'quote'}],'fish',current,true);
   expect(parseMentions(recipients.content,current)).toEqual({labels:['阿岚'],memberIds:['mem_current']});
   expect(parseMentions(mentionContent('回复',[{id:'user',label:'fish',origin:'quote'}],'fish',current,true).content,current)).toEqual({labels:[],memberIds:[]});
+ });
+ it('only offers candidates while the caret is in the active @ expression',()=>{
+  const names=['New Member','all'];
+  expect(mentionQueryAtCaret('请 @New',6,names)).toEqual({start:2,end:6,query:'New'});
+  expect(mentionQueryAtCaret('请 @New 后续正文',3,names)).toEqual({start:2,end:3,query:''});
+  expect(mentionQueryAtCaret('请 @New 后续正文',11,names)).toBeNull();
+  expect(mentionQueryAtCaret('会保留这些，@ 也已改成正文',18,names)).toBeNull();
+  expect(mentionQueryAtCaret('请 @xyz，继续',9,names)).toBeNull();
+ });
+ it('serializes a mention-only message without inventing body text',()=>{
+  expect(mentionContent('',[{id:'mem_current',label:'旧名',origin:'manual',at:0}],'fish',current,true).content).toBe('@阿岚');
+  expect(mentionContent('',[{id:'all',label:'all',origin:'manual'}],'fish',[],true).content).toBe('@all');
+ });
+ it('places an atomic mention within the sentence and still routes by the current ID',()=>{
+  const message=mentionContent('请 帮忙',[{id:'mem_current',label:'旧显示名',origin:'manual',at:2}],'fish',current,true);
+  expect(message.content).toBe('请 @阿岚 帮忙');
+  expect(parseMentions(message.content,current)).toEqual({labels:['阿岚'],memberIds:['mem_current']});
  });
  it('prefixes selected recipients once and never sends an unavailable identity',()=>{
   const selected=[{id:'mem_current',label:'阿岚',origin:'manual' as const},{id:'all',label:'all',origin:'manual' as const}];

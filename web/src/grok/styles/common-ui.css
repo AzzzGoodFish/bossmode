@@ -41,6 +41,10 @@
 .gc-table-scroll table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}
 .gc-table-scroll td,.gc-table-scroll th{padding:7px 10px;border-bottom:.5px solid var(--sand-border-strong);white-space:nowrap}
 .gc-table-scroll th{font-weight:600}
+/* A single newline in a sent message is an intentional line break, even
+   without two trailing spaces or a blank Markdown paragraph. */
+.gr-bubble p,.gr-bubble li{white-space:pre-wrap}
+.gr-user .gr-bubble li::marker{color:inherit}
 .gr-bubble ul{margin:0 0 12px;padding-left:20px}
 .gr-bubble a{color:var(--sand-text-accent);text-decoration:underline;text-underline-offset:2px}
 .gr-user .gr-bubble a{color:inherit}
