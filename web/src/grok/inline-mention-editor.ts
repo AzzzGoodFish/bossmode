@@ -1,5 +1,9 @@
 import type {DraftMention} from './mention-draft';
 
+function mentionElement(doc:Document,mention:DraftMention,label:string):HTMLSpanElement {
+ const span=doc.createElement('span'),text=doc.createElement('span');span.className='gr-mention-inline';span.contentEditable='false';span.dataset.mentionId=mention.id;span.dataset.mentionOrigin=mention.origin;span.title=`@${label} · 按退格整段删除`;text.className='gr-mention-text';text.textContent=`@${label}`;span.append(text);return span;
+}
+
 /** The editor keeps native text nodes. Mentions are inline non-editable text,
  * not buttons outside the text flow. The model stores their plain-text offset. */
 export function readInlineDraft(root:Node):{text:string;mentions:DraftMention[];units:(string|HTMLElement)[]} {
@@ -28,7 +32,7 @@ export function writeInlineDraft(root:HTMLElement,text:string,mentions:readonly 
  for(const mention of mentions.map((value,index)=>({value,index})).sort((a,b)=>(a.value.at??0)-(b.value.at??0)||a.index-b.index)){
   const at=Math.max(cursor,Math.min(text.length,mention.value.at??0));
   if(at>cursor)fragment.append(doc.createTextNode(text.slice(cursor,at)));
-  const span=doc.createElement('span');span.className='gr-mention-inline';span.contentEditable='false';span.dataset.mentionId=mention.value.id;span.dataset.mentionOrigin=mention.value.origin;span.title='按退格可整段删除';span.textContent=`@${labelFor(mention.value)}`;fragment.append(span);cursor=at;
+  fragment.append(mentionElement(doc,mention.value,labelFor(mention.value)));cursor=at;
  }
  if(cursor<text.length)fragment.append(doc.createTextNode(text.slice(cursor)));
  root.replaceChildren(fragment);
@@ -60,7 +64,7 @@ export function insertPlainText(root:HTMLElement,value:string){
 }
 export function replacePlainRangeWithMention(root:HTMLElement,start:number,end:number,mention:DraftMention,label:string){
  const from=pointAt(root,start),to=pointAt(root,end),range=root.ownerDocument.createRange();range.setStart(from.node,from.offset);range.setEnd(to.node,to.offset);
- const span=root.ownerDocument.createElement('span');span.className='gr-mention-inline';span.contentEditable='false';span.dataset.mentionId=mention.id;span.dataset.mentionOrigin=mention.origin;span.title='按退格可整段删除';span.textContent=`@${label}`;
+ const span=mentionElement(root.ownerDocument,mention,label);
  root.focus();const selection=root.ownerDocument.getSelection();selection?.removeAllRanges();selection?.addRange(range);
  // A native editing transaction lets Ctrl+Z restore the typed @query. Never
  // pass user HTML: serialize only the DOM node built from textContent above.
